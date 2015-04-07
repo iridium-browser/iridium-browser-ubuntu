@@ -100,7 +100,16 @@
 
         'conditions': [
           # Compute the architecture that we're building on.
-          ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="android"', {
+          # This logic needs to be kept in sync with Chrome's common.gypi or
+          # subtle build errors will result when integrating into Chrome.
+          # Generally, a desync will result in NaCl libraries will be a
+          # different bittage than Chrome.  The kicker is that builds that
+          # explicitly specify target_arch will not notice this desync, (this
+          # logic is overridden) but builds that do not specify target_arch will
+          # break.  This can cause confusion because only some trybots break.
+          ['OS=="win" or OS=="ios"', {
+            'host_arch%': 'ia32',
+          }, {
             # This handles the Linux platforms we generally deal with. Anything
             # else gets passed through, which probably won't work very well;
             # such hosts should pass an explicit target_arch to gyp.
@@ -113,9 +122,6 @@
             #    succeeds.
             'host_arch%':
                 '<!(echo "<!pymod_do_main(detect_nacl_host_arch)" | sed -e "s/arm.*/ia32/")',
-
-          }, {  # OS!="linux"
-            'host_arch%': 'ia32',
           }],
         ]
       },
@@ -182,11 +188,9 @@
       ['win_target=="x64"', {
         'target_arch': 'x64',
         'defines!': [
-          'NACL_TARGET_SUBARCH=32',
           'NACL_BUILD_SUBARCH=32',
         ],
         'defines': [
-          'NACL_TARGET_SUBARCH=64',
           'NACL_BUILD_SUBARCH=64',
         ],
         'configurations': {
@@ -200,16 +204,12 @@
       # TODO(gregoryd): split target and build subarchs
       ['target_arch=="ia32"', {
         'defines': [
-          'NACL_TARGET_SUBARCH=32',
-          'NACL_TARGET_ARCH=x86',
           'NACL_BUILD_SUBARCH=32',
           'NACL_BUILD_ARCH=x86',
         ],
       }],
       ['target_arch=="x64"', {
         'defines': [
-          'NACL_TARGET_SUBARCH=64',
-          'NACL_TARGET_ARCH=x86',
           'NACL_BUILD_SUBARCH=64',
           'NACL_BUILD_ARCH=x86',
         ],
@@ -218,16 +218,12 @@
         'defines': [
           'NACL_BUILD_ARCH=arm',
           'NACL_BUILD_SUBARCH=32',
-          'NACL_TARGET_ARCH=arm',
-          'NACL_TARGET_SUBARCH=32',
         ],
       }],
       ['target_arch=="mipsel"', {
         'defines': [
           'NACL_BUILD_ARCH=mips',
           'NACL_BUILD_SUBARCH=32',
-          'NACL_TARGET_ARCH=mips',
-          'NACL_TARGET_SUBARCH=32',
         ],
       }],
       ['linux2==1', {
@@ -693,8 +689,8 @@
           }],
         ],
         'defines': [
-          '_WIN32_WINNT=0x0602',
-          'WINVER=0x0602',
+          '_WIN32_WINNT=0x0603',
+          'WINVER=0x0603',
           # WIN32 is used by ppapi
           'WIN32',
           'NOMINMAX',

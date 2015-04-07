@@ -17,7 +17,6 @@
 #include "chrome/browser/extensions/api/messaging/message_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/common/extensions/api/i18n/default_locale_handler.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -25,6 +24,7 @@
 #include "extensions/common/api/messaging/message.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/file_util.h"
+#include "extensions/common/manifest_handlers/default_locale_handler.h"
 #include "extensions/common/message_bundle.h"
 
 using content::BrowserThread;
@@ -196,22 +196,23 @@ void ChromeExtensionMessageFilter::OpenChannelToNativeAppOnUIThread(
 }
 
 void ChromeExtensionMessageFilter::OnOpenChannelToTab(
-    int routing_id, int tab_id, const std::string& extension_id,
-    const std::string& channel_name, int* port_id) {
+    int routing_id, const ExtensionMsg_TabTargetConnectionInfo& info,
+    const std::string& extension_id, const std::string& channel_name,
+    int* port_id) {
   int port2_id;
   extensions::MessageService::AllocatePortIdPair(port_id, &port2_id);
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&ChromeExtensionMessageFilter::OpenChannelToTabOnUIThread,
-                 this, render_process_id_, routing_id, port2_id, tab_id,
+                 this, render_process_id_, routing_id, port2_id, info,
                  extension_id, channel_name));
 }
 
 void ChromeExtensionMessageFilter::OpenChannelToTabOnUIThread(
     int source_process_id, int source_routing_id,
     int receiver_port_id,
-    int tab_id,
+    const ExtensionMsg_TabTargetConnectionInfo& info,
     const std::string& extension_id,
     const std::string& channel_name) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -220,7 +221,8 @@ void ChromeExtensionMessageFilter::OpenChannelToTabOnUIThread(
         ->OpenChannelToTab(source_process_id,
                            source_routing_id,
                            receiver_port_id,
-                           tab_id,
+                           info.tab_id,
+                           info.frame_id,
                            extension_id,
                            channel_name);
   }

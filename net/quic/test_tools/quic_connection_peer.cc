@@ -154,6 +154,11 @@ void QuicConnectionPeer::SetPeerAddress(QuicConnection* connection,
 }
 
 // static
+bool QuicConnectionPeer::IsSilentCloseEnabled(QuicConnection* connection) {
+  return connection->silent_close_enabled_;
+}
+
+// static
 void QuicConnectionPeer::SwapCrypters(QuicConnection* connection,
                                       QuicFramer* framer) {
   QuicFramerPeer::SwapCrypters(framer, &connection->framer_);
@@ -252,6 +257,11 @@ QuicPacketHeader* QuicConnectionPeer::GetLastHeader(
 void QuicConnectionPeer::SetSequenceNumberOfLastSentPacket(
     QuicConnection* connection, QuicPacketSequenceNumber number) {
   connection->sequence_number_of_last_sent_packet_ = number;
+}
+
+// static
+QuicConnectionStats* QuicConnectionPeer::GetStats(QuicConnection* connection) {
+  return &connection->stats_;
 }
 
 }  // namespace test

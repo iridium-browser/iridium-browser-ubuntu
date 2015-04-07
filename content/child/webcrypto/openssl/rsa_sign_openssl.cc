@@ -5,7 +5,6 @@
 #include "base/numerics/safe_math.h"
 #include "content/child/webcrypto/crypto_data.h"
 #include "content/child/webcrypto/openssl/key_openssl.h"
-#include "content/child/webcrypto/openssl/rsa_key_openssl.h"
 #include "content/child/webcrypto/openssl/rsa_sign_openssl.h"
 #include "content/child/webcrypto/openssl/util_openssl.h"
 #include "content/child/webcrypto/status.h"
@@ -140,14 +139,9 @@ Status RsaVerify(const blink::WebCryptoKey& key,
   if (!EVP_DigestVerifyUpdate(ctx.get(), data.bytes(), data.byte_length()))
     return Status::OperationError();
 
-  // Note that the return value can be:
-  //   1 --> Success
-  //   0 --> Verification failed
-  //  <0 --> Operation error
-  int rv = EVP_DigestVerifyFinal(
-      ctx.get(), signature.bytes(), signature.byte_length());
-  *signature_match = rv == 1;
-  return rv >= 0 ? Status::Success() : Status::OperationError();
+  *signature_match = 1 == EVP_DigestVerifyFinal(ctx.get(), signature.bytes(),
+                                                signature.byte_length());
+  return Status::Success();
 }
 
 }  // namespace webcrypto

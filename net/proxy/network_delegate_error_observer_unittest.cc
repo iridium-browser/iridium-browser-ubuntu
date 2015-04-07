@@ -9,14 +9,14 @@
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/threading/thread.h"
 #include "net/base/net_errors.h"
-#include "net/base/network_delegate.h"
+#include "net/base/network_delegate_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
 
 namespace {
 
-class TestNetworkDelegate : public net::NetworkDelegate {
+class TestNetworkDelegate : public net::NetworkDelegateImpl {
  public:
   TestNetworkDelegate() : got_pac_error_(false) {}
   ~TestNetworkDelegate() override {}
@@ -76,10 +76,6 @@ class TestNetworkDelegate : public net::NetworkDelegate {
   }
   bool OnCanThrottleRequest(const URLRequest& request) const override {
     return false;
-  }
-  int OnBeforeSocketStreamConnect(SocketStream* stream,
-                                  const CompletionCallback& callback) override {
-    return OK;
   }
 
   bool got_pac_error_;

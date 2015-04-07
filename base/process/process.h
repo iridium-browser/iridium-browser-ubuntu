@@ -9,6 +9,7 @@
 #include "base/basictypes.h"
 #include "base/move.h"
 #include "base/process/process_handle.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
@@ -48,6 +49,12 @@ class BASE_EXPORT Process {
   // Returns an object for the current process.
   static Process Current();
 
+  // Creates an object from a |handle| owned by someone else.
+  // Don't use this for new code. It is only intended to ease the migration to
+  // a strict ownership model.
+  // TODO(rvargas) crbug.com/417532: Remove this code.
+  static Process DeprecatedGetProcessFromHandle(ProcessHandle handle);
+
   // Returns true if processes can be backgrounded.
   static bool CanBackgroundProcesses();
 
@@ -74,6 +81,13 @@ class BASE_EXPORT Process {
   // be the exit code of the process.
   // NOTE: On POSIX |result_code| is ignored.
   void Terminate(int result_code);
+
+  // Waits for the process to exit. Returns true on success.
+  // On POSIX, if the process has been signaled then |exit_code| is set to -1.
+  bool WaitForExit(int* exit_code);
+
+  // Same as WaitForExit() but only waits for up to |timeout|.
+  bool WaitForExitWithTimeout(TimeDelta timeout, int* exit_code);
 
   // A process is backgrounded when it's priority is lower than normal.
   // Return true if this process is backgrounded, false otherwise.

@@ -11,6 +11,7 @@
 #include "base/i18n/break_iterator.h"
 #include "base/i18n/char_iterator.h"
 #include "base/lazy_instance.h"
+#include "base/profiler/scoped_tracker.h"
 #include "third_party/harfbuzz-ng/src/hb.h"
 #include "third_party/icu/source/common/unicode/ubidi.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -23,6 +24,9 @@
 #if defined(OS_WIN)
 #include "ui/gfx/font_fallback_win.h"
 #endif
+
+using gfx::internal::RangeF;
+using gfx::internal::RoundRangeF;
 
 namespace gfx {
 
@@ -460,6 +464,11 @@ void GetClusterAtImpl(size_t pos,
 
 namespace internal {
 
+Range RoundRangeF(const RangeF& range_f) {
+  return Range(std::floor(range_f.first + 0.5f),
+               std::floor(range_f.second + 0.5f));
+}
+
 TextRunHarfBuzz::TextRunHarfBuzz()
     : width(0.0f),
       preceding_run_widths(0.0f),
@@ -521,21 +530,19 @@ size_t TextRunHarfBuzz::CountMissingGlyphs() const {
   return missing;
 }
 
-Range TextRunHarfBuzz::GetGraphemeBounds(
+RangeF TextRunHarfBuzz::GetGraphemeBounds(
     base::i18n::BreakIterator* grapheme_iterator,
     size_t text_index) {
   DCHECK_LT(text_index, range.end());
-  // TODO(msw): Support floating point grapheme bounds.
-  const int preceding_run_widths_int = SkScalarRoundToInt(preceding_run_widths);
   if (glyph_count == 0)
-    return Range(preceding_run_widths_int, preceding_run_widths_int + width);
+    return RangeF(preceding_run_widths, preceding_run_widths + width);
 
   Range chars;
   Range glyphs;
   GetClusterAt(text_index, &chars, &glyphs);
-  const int cluster_begin_x = SkScalarRoundToInt(positions[glyphs.start()].x());
-  const int cluster_end_x = glyphs.end() < glyph_count ?
-      SkScalarRoundToInt(positions[glyphs.end()].x()) : width;
+  const float cluster_begin_x = positions[glyphs.start()].x();
+  const float cluster_end_x = glyphs.end() < glyph_count ?
+      positions[glyphs.end()].x() : SkFloatToScalar(width);
 
   // A cluster consists of a number of code points and corresponds to a number
   // of glyphs that should be drawn together. A cluster can contain multiple
@@ -562,13 +569,13 @@ Range TextRunHarfBuzz::GetGraphemeBounds(
           cluster_width * before / static_cast<float>(total));
       const int grapheme_end_x = cluster_begin_x + static_cast<int>(0.5f +
           cluster_width * (before + 1) / static_cast<float>(total));
-      return Range(preceding_run_widths_int + grapheme_begin_x,
-                   preceding_run_widths_int + grapheme_end_x);
+      return RangeF(preceding_run_widths + grapheme_begin_x,
+                    preceding_run_widths + grapheme_end_x);
     }
   }
 
-  return Range(preceding_run_widths_int + cluster_begin_x,
-               preceding_run_widths_int + cluster_end_x);
+  return RangeF(preceding_run_widths + cluster_begin_x,
+                preceding_run_widths + cluster_end_x);
 }
 
 }  // namespace internal
@@ -580,6 +587,10 @@ RenderTextHarfBuzz::RenderTextHarfBuzz()
 }
 
 RenderTextHarfBuzz::~RenderTextHarfBuzz() {}
+
+scoped_ptr<RenderText> RenderTextHarfBuzz::CreateInstanceOfSameType() const {
+  return scoped_ptr<RenderTextHarfBuzz>(new RenderTextHarfBuzz);
+}
 
 Size RenderTextHarfBuzz::GetStringSize() {
   const SizeF size_f = GetStringSizeF();
@@ -595,7 +606,7 @@ SelectionModel RenderTextHarfBuzz::FindCursorPosition(const Point& point) {
   EnsureLayout();
 
   int x = ToTextPoint(point).x();
-  int offset = 0;
+  float offset = 0;
   size_t run_index = GetRunContainingXCoord(x, &offset);
   if (run_index >= runs_.size())
     return EdgeSelectionModel((x < 0) ? CURSOR_LEFT : CURSOR_RIGHT);
@@ -645,8 +656,15 @@ Range RenderTextHarfBuzz::GetGlyphBounds(size_t index) {
     return Range(GetStringSize().width());
   const size_t layout_index = TextIndexToLayoutIndex(index);
   internal::TextRunHarfBuzz* run = runs_[run_index];
-  Range bounds = run->GetGraphemeBounds(grapheme_iterator_.get(), layout_index);
-  return run->is_rtl ? Range(bounds.end(), bounds.start()) : bounds;
+  RangeF bounds =
+      run->GetGraphemeBounds(grapheme_iterator_.get(), layout_index);
+  // If cursor is enabled, extend the last glyph up to the rightmost cursor
+  // position since clients expect them to be contiguous.
+  if (cursor_enabled() && run_index == runs_.size() - 1 &&
+      index == (run->is_rtl ? run->range.start() : run->range.end() - 1))
+    bounds.second = std::ceil(bounds.second);
+  return RoundRangeF(run->is_rtl ?
+      RangeF(bounds.second, bounds.first) : bounds);
 }
 
 int RenderTextHarfBuzz::GetLayoutTextBaseline() {
@@ -777,12 +795,12 @@ std::vector<Rect> RenderTextHarfBuzz::GetSubstringBounds(const Range& range) {
     if (!intersection.IsValid())
       continue;
     DCHECK(!intersection.is_reversed());
-    const Range leftmost_character_x = run->GetGraphemeBounds(
+    const Range leftmost_character_x = RoundRangeF(run->GetGraphemeBounds(
         grapheme_iterator_.get(),
-        run->is_rtl ? intersection.end() - 1 : intersection.start());
-    const Range rightmost_character_x = run->GetGraphemeBounds(
+        run->is_rtl ? intersection.end() - 1 : intersection.start()));
+    const Range rightmost_character_x = RoundRangeF(run->GetGraphemeBounds(
         grapheme_iterator_.get(),
-        run->is_rtl ? intersection.start() : intersection.end() - 1);
+        run->is_rtl ? intersection.start() : intersection.end() - 1));
     Range range_x(leftmost_character_x.start(), rightmost_character_x.end());
     DCHECK(!range_x.is_reversed());
     if (range_x.is_empty())
@@ -835,20 +853,49 @@ void RenderTextHarfBuzz::ResetLayout() {
 }
 
 void RenderTextHarfBuzz::EnsureLayout() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "431326 RenderTextHarfBuzz::EnsureLayout"));
+
   if (needs_layout_) {
     runs_.clear();
     grapheme_iterator_.reset();
 
     if (!GetLayoutText().empty()) {
+      // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is
+      // fixed.
+      tracked_objects::ScopedTracker tracking_profile1(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "431326 RenderTextHarfBuzz::EnsureLayout1"));
+
       grapheme_iterator_.reset(new base::i18n::BreakIterator(GetLayoutText(),
           base::i18n::BreakIterator::BREAK_CHARACTER));
       if (!grapheme_iterator_->Init())
         grapheme_iterator_.reset();
 
+      // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is
+      // fixed.
+      tracked_objects::ScopedTracker tracking_profile11(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "431326 RenderTextHarfBuzz::EnsureLayout11"));
+
       ItemizeText();
+
+      // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is
+      // fixed.
+      tracked_objects::ScopedTracker tracking_profile12(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "431326 RenderTextHarfBuzz::EnsureLayout12"));
 
       for (size_t i = 0; i < runs_.size(); ++i)
         ShapeRun(runs_[i]);
+
+      // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is
+      // fixed.
+      tracked_objects::ScopedTracker tracking_profile13(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "431326 RenderTextHarfBuzz::EnsureLayout13"));
 
       // Precalculate run width information.
       float preceding_run_widths = 0.0f;
@@ -859,12 +906,23 @@ void RenderTextHarfBuzz::EnsureLayout() {
       }
     }
 
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is
+    // fixed.
+    tracked_objects::ScopedTracker tracking_profile14(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "431326 RenderTextHarfBuzz::EnsureLayout14"));
+
     needs_layout_ = false;
     std::vector<internal::Line> empty_lines;
     set_lines(&empty_lines);
   }
 
   if (lines().empty()) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+    tracked_objects::ScopedTracker tracking_profile2(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "431326 RenderTextHarfBuzz::EnsureLayout2"));
+
     std::vector<internal::Line> lines;
     lines.push_back(internal::Line());
     lines[0].baseline = font_list().GetBaseline();
@@ -872,6 +930,11 @@ void RenderTextHarfBuzz::EnsureLayout() {
 
     int current_x = 0;
     SkPaint paint;
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+    tracked_objects::ScopedTracker tracking_profile3(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "431326 RenderTextHarfBuzz::EnsureLayout3"));
 
     for (size_t i = 0; i < runs_.size(); ++i) {
       const internal::TextRunHarfBuzz& run = *runs_[visual_to_logical_[i]];
@@ -883,6 +946,7 @@ void RenderTextHarfBuzz::EnsureLayout() {
 
       paint.setTypeface(run.skia_face.get());
       paint.setTextSize(SkIntToScalar(run.font_size));
+      paint.setAntiAlias(run.render_params.antialiasing);
       SkPaint::FontMetrics metrics;
       paint.getFontMetrics(&metrics);
 
@@ -904,7 +968,6 @@ void RenderTextHarfBuzz::DrawVisualText(Canvas* canvas) {
   ApplyTextShadows(&renderer);
   ApplyCompositionAndSelectionStyles();
 
-  int current_x = 0;
   const Vector2d line_offset = GetLineOffset(0);
   for (size_t i = 0; i < runs_.size(); ++i) {
     const internal::TextRunHarfBuzz& run = *runs_[visual_to_logical_[i]];
@@ -913,11 +976,12 @@ void RenderTextHarfBuzz::DrawVisualText(Canvas* canvas) {
     renderer.SetFontRenderParams(run.render_params,
                                  background_is_transparent());
 
-    Vector2d origin = line_offset + Vector2d(current_x, lines()[0].baseline);
+    Vector2d origin = line_offset + Vector2d(0, lines()[0].baseline);
     scoped_ptr<SkPoint[]> positions(new SkPoint[run.glyph_count]);
     for (size_t j = 0; j < run.glyph_count; ++j) {
       positions[j] = run.positions[j];
-      positions[j].offset(SkIntToScalar(origin.x()), SkIntToScalar(origin.y()));
+      positions[j].offset(SkIntToScalar(origin.x()) + run.preceding_run_widths,
+                          SkIntToScalar(origin.y()));
     }
 
     for (BreakList<SkColor>::const_iterator it =
@@ -939,13 +1003,11 @@ void RenderTextHarfBuzz::DrawVisualText(Canvas* canvas) {
                            colored_glyphs.length());
       int start_x = SkScalarRoundToInt(positions[colored_glyphs.start()].x());
       int end_x = SkScalarRoundToInt((colored_glyphs.end() == run.glyph_count) ?
-          (run.width + SkIntToScalar(origin.x())) :
+          (run.width + run.preceding_run_widths + SkIntToScalar(origin.x())) :
           positions[colored_glyphs.end()].x());
       renderer.DrawDecorations(start_x, origin.y(), end_x - start_x,
                                run.underline, run.strike, run.diagonal_strike);
     }
-
-    current_x += run.width;
   }
 
   renderer.EndDiagonalStrike();
@@ -965,12 +1027,13 @@ size_t RenderTextHarfBuzz::GetRunContainingCaret(
   return runs_.size();
 }
 
-size_t RenderTextHarfBuzz::GetRunContainingXCoord(int x, int* offset) const {
+size_t RenderTextHarfBuzz::GetRunContainingXCoord(float x,
+                                                  float* offset) const {
   DCHECK(!needs_layout_);
   if (x < 0)
     return runs_.size();
   // Find the text run containing the argument point (assumed already offset).
-  int current_x = 0;
+  float current_x = 0;
   for (size_t i = 0; i < runs_.size(); ++i) {
     size_t run = visual_to_logical_[i];
     current_x += runs_[run]->width;
@@ -1132,7 +1195,7 @@ void RenderTextHarfBuzz::ShapeRun(internal::TextRunHarfBuzz* run) {
 #endif
 
   // Try shaping with the fallback fonts.
-  for (auto family : fallback_families) {
+  for (const auto& family : fallback_families) {
     if (family == primary_family)
       continue;
 #if defined(OS_WIN)
@@ -1161,6 +1224,11 @@ void RenderTextHarfBuzz::ShapeRun(internal::TextRunHarfBuzz* run) {
 bool RenderTextHarfBuzz::ShapeRunWithFont(internal::TextRunHarfBuzz* run,
                                           const std::string& font_family,
                                           const FontRenderParams& params) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile0(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "431326 RenderTextHarfBuzz::ShapeRunWithFont0"));
+
   const base::string16& text = GetLayoutText();
   skia::RefPtr<SkTypeface> skia_face =
       internal::CreateSkiaTypeface(font_family, run->font_style);
@@ -1169,24 +1237,69 @@ bool RenderTextHarfBuzz::ShapeRunWithFont(internal::TextRunHarfBuzz* run,
   run->skia_face = skia_face;
   run->family = font_family;
   run->render_params = params;
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile01(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "431326 RenderTextHarfBuzz::ShapeRunWithFont01"));
+
   hb_font_t* harfbuzz_font = CreateHarfBuzzFont(
       run->skia_face.get(), SkIntToScalar(run->font_size), run->render_params,
       background_is_transparent());
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "431326 RenderTextHarfBuzz::ShapeRunWithFont1"));
 
   // Create a HarfBuzz buffer and add the string to be shaped. The HarfBuzz
   // buffer holds our text, run information to be used by the shaping engine,
   // and the resulting glyph data.
   hb_buffer_t* buffer = hb_buffer_create();
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1q(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "431326 RenderTextHarfBuzz::ShapeRunWithFont11"));
+
   hb_buffer_add_utf16(buffer, reinterpret_cast<const uint16*>(text.c_str()),
                       text.length(), run->range.start(), run->range.length());
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile12(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "431326 RenderTextHarfBuzz::ShapeRunWithFont12"));
+
   hb_buffer_set_script(buffer, ICUScriptToHBScript(run->script));
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile13(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "431326 RenderTextHarfBuzz::ShapeRunWithFont13"));
+
   hb_buffer_set_direction(buffer,
       run->is_rtl ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile14(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "431326 RenderTextHarfBuzz::ShapeRunWithFont14"));
+
   // TODO(ckocagil): Should we determine the actual language?
   hb_buffer_set_language(buffer, hb_language_get_default());
 
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile15(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "431326 RenderTextHarfBuzz::ShapeRunWithFont15"));
+
   // Shape the text.
   hb_shape(harfbuzz_font, buffer, NULL, 0);
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "431326 RenderTextHarfBuzz::ShapeRunWithFont2"));
 
   // Populate the run fields with the resulting glyph data in the buffer.
   unsigned int glyph_count = 0;
@@ -1198,6 +1311,12 @@ bool RenderTextHarfBuzz::ShapeRunWithFont(internal::TextRunHarfBuzz* run,
   run->glyph_to_char.resize(run->glyph_count);
   run->positions.reset(new SkPoint[run->glyph_count]);
   run->width = 0.0f;
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "431326 RenderTextHarfBuzz::ShapeRunWithFont3"));
+
   for (size_t i = 0; i < run->glyph_count; ++i) {
     DCHECK_LE(infos[i].codepoint, std::numeric_limits<uint16>::max());
     run->glyphs[i] = static_cast<uint16>(infos[i].codepoint);

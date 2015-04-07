@@ -62,6 +62,13 @@
             "title": "Show rulers",
             "settingName": "showMetricsRulers",
             "settingType": "checkbox"
+        },
+        {
+            "type": "ui-setting",
+            "section": "Elements",
+            "title": "Highlight DOM updates",
+            "settingName": "highlightDOMUpdates",
+            "settingType": "checkbox"
         }
     ],
     "dependencies": [
@@ -72,11 +79,13 @@
         "Spectrum.js",
         "ElementsBreadcrumbs.js",
         "ElementsSidebarPane.js",
+        "ElementsTreeElement.js",
         "ElementsTreeOutline.js",
         "EventListenersSidebarPane.js",
         "MetricsSidebarPane.js",
         "PlatformFontsSidebarPane.js",
         "PropertiesSidebarPane.js",
+        "StylesSectionModel.js",
         "StylesSidebarPane.js",
         "ElementsPanel.js",
         "AnimationsSidebarPane.js"

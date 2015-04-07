@@ -5,43 +5,26 @@
 #include "config.h"
 #include "core/paint/TablePainter.h"
 
+#include "core/paint/BoxClipper.h"
 #include "core/paint/BoxPainter.h"
-#include "core/paint/DrawingRecorder.h"
-#include "core/rendering/GraphicsContextAnnotator.h"
+#include "core/paint/GraphicsContextAnnotator.h"
+#include "core/paint/ObjectPainter.h"
+#include "core/paint/RenderDrawingRecorder.h"
 #include "core/rendering/PaintInfo.h"
-#include "core/rendering/RenderBoxClipper.h"
 #include "core/rendering/RenderTable.h"
 #include "core/rendering/RenderTableSection.h"
 #include "core/rendering/style/CollapsedBorderValue.h"
 
 namespace blink {
 
-void TablePainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
-{
-    ANNOTATE_GRAPHICS_CONTEXT(paintInfo, &m_renderTable);
-
-    LayoutPoint adjustedPaintOffset = paintOffset + m_renderTable.location();
-
-    if (!m_renderTable.isDocumentElement()) {
-        LayoutRect overflowBox = m_renderTable.visualOverflowRect();
-        m_renderTable.flipForWritingMode(overflowBox);
-        overflowBox.moveBy(adjustedPaintOffset);
-        if (!overflowBox.intersects(paintInfo.rect))
-            return;
-    }
-
-    RenderBoxClipper boxClipper(m_renderTable, paintInfo, adjustedPaintOffset, ForceContentsClip);
-    paintObject(paintInfo, adjustedPaintOffset);
-}
-
-void TablePainter::paintObject(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void TablePainter::paintObject(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     PaintPhase paintPhase = paintInfo.phase;
     if ((paintPhase == PaintPhaseBlockBackground || paintPhase == PaintPhaseChildBlockBackground) && m_renderTable.hasBoxDecorationBackground() && m_renderTable.style()->visibility() == VISIBLE)
         paintBoxDecorationBackground(paintInfo, paintOffset);
 
     if (paintPhase == PaintPhaseMask) {
-        m_renderTable.paintMask(paintInfo, paintOffset);
+        paintMask(paintInfo, paintOffset);
         return;
     }
 
@@ -84,10 +67,10 @@ void TablePainter::paintObject(PaintInfo& paintInfo, const LayoutPoint& paintOff
 
     // Paint outline.
     if ((paintPhase == PaintPhaseOutline || paintPhase == PaintPhaseSelfOutline) && m_renderTable.style()->hasOutline() && m_renderTable.style()->visibility() == VISIBLE)
-        m_renderTable.paintOutline(paintInfo, LayoutRect(paintOffset, m_renderTable.size()));
+        ObjectPainter(m_renderTable).paintOutline(paintInfo, LayoutRect(paintOffset, m_renderTable.size()));
 }
 
-void TablePainter::paintBoxDecorationBackground(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void TablePainter::paintBoxDecorationBackground(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     if (!paintInfo.shouldPaintWithinRoot(&m_renderTable))
         return;
@@ -97,15 +80,16 @@ void TablePainter::paintBoxDecorationBackground(PaintInfo& paintInfo, const Layo
     BoxPainter(m_renderTable).paintBoxDecorationBackgroundWithRect(paintInfo, paintOffset, rect);
 }
 
-void TablePainter::paintMask(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void TablePainter::paintMask(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     if (m_renderTable.style()->visibility() != VISIBLE || paintInfo.phase != PaintPhaseMask)
         return;
 
     LayoutRect rect(paintOffset, m_renderTable.size());
     m_renderTable.subtractCaptionRect(rect);
-    DrawingRecorder recorder(paintInfo.context, &m_renderTable, paintInfo.phase, pixelSnappedIntRect(rect));
-    BoxPainter(m_renderTable).paintMaskImages(paintInfo, rect);
+    RenderDrawingRecorder recorder(paintInfo.context, m_renderTable, paintInfo.phase, pixelSnappedIntRect(rect));
+    if (!recorder.canUseCachedDrawing())
+        BoxPainter(m_renderTable).paintMaskImages(paintInfo, rect);
 }
 
 } // namespace blink

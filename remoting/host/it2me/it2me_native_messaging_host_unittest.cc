@@ -75,6 +75,7 @@ class MockIt2MeHost : public It2MeHost {
                 const std::string& directory_bot_jid)
       : It2MeHost(context.Pass(),
                   policy_watcher.Pass(),
+                  nullptr,
                   observer,
                   xmpp_server_config,
                   directory_bot_jid) {}
@@ -461,7 +462,7 @@ void It2MeNativeMessagingHostTest::StopHost() {
   base::RunLoop().RunUntilIdle();
 
   // Trigger a test shutdown via ExitTest().
-  host_task_runner_ = NULL;
+  host_task_runner_ = nullptr;
 }
 
 void It2MeNativeMessagingHostTest::ExitTest() {

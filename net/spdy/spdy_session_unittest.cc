@@ -181,8 +181,7 @@ class SpdySessionTest : public PlatformTest,
 INSTANTIATE_TEST_CASE_P(
     NextProto,
     SpdySessionTest,
-    testing::Values(kProtoDeprecatedSPDY2,
-                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4));
+    testing::Values(kProtoSPDY31, kProtoSPDY4_14, kProtoSPDY4_15));
 
 // Try to create a SPDY session that will fail during
 // initialization. Nothing should blow up.
@@ -1236,7 +1235,7 @@ TEST_P(SpdySessionTest, DeleteExpiredPushStreams) {
   if (session->flow_control_state_ ==
       SpdySession::FLOW_CONTROL_STREAM_AND_SESSION) {
     // Unclaimed push body consumed bytes from the session window.
-    EXPECT_EQ(kSpdySessionInitialWindowSize - kUploadDataSize,
+    EXPECT_EQ(SpdySession::GetInitialWindowSize(GetParam()) - kUploadDataSize,
               session->session_recv_window_size_);
     EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
   }
@@ -1255,7 +1254,7 @@ TEST_P(SpdySessionTest, DeleteExpiredPushStreams) {
   if (session->flow_control_state_ ==
       SpdySession::FLOW_CONTROL_STREAM_AND_SESSION) {
     // Verify that the session window reclaimed the evicted stream body.
-    EXPECT_EQ(kSpdySessionInitialWindowSize,
+    EXPECT_EQ(SpdySession::GetInitialWindowSize(GetParam()),
               session->session_recv_window_size_);
     EXPECT_EQ(kUploadDataSize, session->session_unacked_recv_window_bytes_);
   }
@@ -1554,9 +1553,11 @@ TEST_P(SpdySessionTest, SendInitialDataOnNewSession) {
   scoped_ptr<SpdyFrame> initial_window_update(
       spdy_util_.ConstructSpdyWindowUpdate(
           kSessionFlowControlStreamId,
-          kDefaultInitialRecvWindowSize - kSpdySessionInitialWindowSize));
+          kDefaultInitialRecvWindowSize -
+              SpdySession::GetInitialWindowSize(GetParam())));
   std::vector<MockWrite> writes;
-  if (GetParam() == kProtoSPDY4) {
+  if ((GetParam() >= kProtoSPDY4MinimumVersion) &&
+     (GetParam() <= kProtoSPDY4MaximumVersion)) {
     writes.push_back(
         MockWrite(ASYNC,
                   kHttp2ConnectionHeaderPrefix,
@@ -1797,10 +1798,6 @@ TEST_P(SpdySessionTest, SynCompressionHistograms) {
   data.RunFor(1);
   // Regression test of compression performance under the request fixture.
   switch (spdy_util_.spdy_version()) {
-    case SPDY2:
-      histogram_tester.ExpectBucketCount(
-          "Net.SpdySynStreamCompressionPercentage", 0, 1);
-      break;
     case SPDY3:
       histogram_tester.ExpectBucketCount(
           "Net.SpdySynStreamCompressionPercentage", 30, 1);
@@ -3083,22 +3080,12 @@ TEST_P(SpdySessionTest, ProtocolNegotiation) {
 
   EXPECT_EQ(spdy_util_.spdy_version(),
             session->buffered_spdy_framer_->protocol_version());
-  if (GetParam() == kProtoDeprecatedSPDY2) {
-    EXPECT_EQ(SpdySession::FLOW_CONTROL_NONE, session->flow_control_state());
-    EXPECT_EQ(0, session->session_send_window_size_);
-    EXPECT_EQ(0, session->session_recv_window_size_);
-  } else if (GetParam() == kProtoSPDY3) {
-    EXPECT_EQ(SpdySession::FLOW_CONTROL_STREAM, session->flow_control_state());
-    EXPECT_EQ(0, session->session_send_window_size_);
-    EXPECT_EQ(0, session->session_recv_window_size_);
-  } else {
-    EXPECT_EQ(SpdySession::FLOW_CONTROL_STREAM_AND_SESSION,
-              session->flow_control_state());
-    EXPECT_EQ(kSpdySessionInitialWindowSize,
-              session->session_send_window_size_);
-    EXPECT_EQ(kSpdySessionInitialWindowSize,
-              session->session_recv_window_size_);
-  }
+  EXPECT_EQ(SpdySession::FLOW_CONTROL_STREAM_AND_SESSION,
+            session->flow_control_state());
+  EXPECT_EQ(SpdySession::GetInitialWindowSize(GetParam()),
+            session->session_send_window_size_);
+  EXPECT_EQ(SpdySession::GetInitialWindowSize(GetParam()),
+            session->session_recv_window_size_);
   EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
 }
 
@@ -3454,9 +3441,6 @@ TEST_P(SpdySessionTest, CreateStreamOnStreamReset) {
 // The tests below are only for SPDY/3 and above.
 
 TEST_P(SpdySessionTest, UpdateStreamsSendWindowSize) {
-  if (GetParam() < kProtoSPDY3)
-    return;
-
   // Set SETTINGS_INITIAL_WINDOW_SIZE to a small number so that WINDOW_UPDATE
   // gets sent.
   SettingsMap new_settings;
@@ -3527,16 +3511,16 @@ TEST_P(SpdySessionTest, AdjustRecvWindowSize) {
 
   session_deps_.host_resolver->set_synchronous_mode(true);
 
+  const int32 initial_window_size =
+      SpdySession::GetInitialWindowSize(GetParam());
   const int32 delta_window_size = 100;
 
   MockConnect connect_data(SYNCHRONOUS, OK);
   MockRead reads[] = {
     MockRead(ASYNC, 0, 1)  // EOF
   };
-  scoped_ptr<SpdyFrame> window_update(
-      spdy_util_.ConstructSpdyWindowUpdate(
-          kSessionFlowControlStreamId,
-          kSpdySessionInitialWindowSize + delta_window_size));
+  scoped_ptr<SpdyFrame> window_update(spdy_util_.ConstructSpdyWindowUpdate(
+      kSessionFlowControlStreamId, initial_window_size + delta_window_size));
   MockWrite writes[] = {
     CreateMockWrite(*window_update, 0),
   };
@@ -3551,18 +3535,17 @@ TEST_P(SpdySessionTest, AdjustRecvWindowSize) {
   EXPECT_EQ(SpdySession::FLOW_CONTROL_STREAM_AND_SESSION,
             session->flow_control_state());
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_recv_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_recv_window_size_);
   EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
 
   session->IncreaseRecvWindowSize(delta_window_size);
-  EXPECT_EQ(kSpdySessionInitialWindowSize + delta_window_size,
+  EXPECT_EQ(initial_window_size + delta_window_size,
             session->session_recv_window_size_);
   EXPECT_EQ(delta_window_size, session->session_unacked_recv_window_bytes_);
 
   // Should trigger sending a WINDOW_UPDATE frame.
-  session->IncreaseRecvWindowSize(kSpdySessionInitialWindowSize);
-  EXPECT_EQ(kSpdySessionInitialWindowSize + delta_window_size +
-            kSpdySessionInitialWindowSize,
+  session->IncreaseRecvWindowSize(initial_window_size);
+  EXPECT_EQ(initial_window_size + delta_window_size + initial_window_size,
             session->session_recv_window_size_);
   EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
 
@@ -3570,9 +3553,8 @@ TEST_P(SpdySessionTest, AdjustRecvWindowSize) {
 
   // DecreaseRecvWindowSize() expects |in_io_loop_| to be true.
   session->in_io_loop_ = true;
-  session->DecreaseRecvWindowSize(
-      kSpdySessionInitialWindowSize + delta_window_size +
-      kSpdySessionInitialWindowSize);
+  session->DecreaseRecvWindowSize(initial_window_size + delta_window_size +
+                                  initial_window_size);
   session->in_io_loop_ = false;
   EXPECT_EQ(0, session->session_recv_window_size_);
   EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
@@ -3601,16 +3583,18 @@ TEST_P(SpdySessionTest, AdjustSendWindowSize) {
   EXPECT_EQ(SpdySession::FLOW_CONTROL_STREAM_AND_SESSION,
             session->flow_control_state());
 
+  const int32 initial_window_size =
+      SpdySession::GetInitialWindowSize(GetParam());
   const int32 delta_window_size = 100;
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_send_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_send_window_size_);
 
   session->IncreaseSendWindowSize(delta_window_size);
-  EXPECT_EQ(kSpdySessionInitialWindowSize + delta_window_size,
+  EXPECT_EQ(initial_window_size + delta_window_size,
             session->session_send_window_size_);
 
   session->DecreaseSendWindowSize(delta_window_size);
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_send_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_send_window_size_);
 }
 
 // Incoming data for an inactive stream should not cause the session
@@ -3638,12 +3622,14 @@ TEST_P(SpdySessionTest, SessionFlowControlInactiveStream) {
   EXPECT_EQ(SpdySession::FLOW_CONTROL_STREAM_AND_SESSION,
             session->flow_control_state());
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_recv_window_size_);
+  EXPECT_EQ(SpdySession::GetInitialWindowSize(GetParam()),
+            session->session_recv_window_size_);
   EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
 
   data.RunFor(1);
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_recv_window_size_);
+  EXPECT_EQ(SpdySession::GetInitialWindowSize(GetParam()),
+            session->session_recv_window_size_);
   EXPECT_EQ(kUploadDataSize, session->session_unacked_recv_window_bytes_);
 
   data.RunFor(1);
@@ -3728,7 +3714,9 @@ TEST_P(SpdySessionTest, SessionFlowControlNoReceiveLeaks) {
             stream->SendRequestHeaders(headers.Pass(), MORE_DATA_TO_SEND));
   EXPECT_TRUE(stream->HasUrlFromHeaders());
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_recv_window_size_);
+  const int32 initial_window_size =
+      SpdySession::GetInitialWindowSize(GetParam());
+  EXPECT_EQ(initial_window_size, session->session_recv_window_size_);
   EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
 
   data.RunFor(4);
@@ -3736,7 +3724,7 @@ TEST_P(SpdySessionTest, SessionFlowControlNoReceiveLeaks) {
   EXPECT_TRUE(data.at_write_eof());
   EXPECT_TRUE(data.at_read_eof());
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_recv_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_recv_window_size_);
   EXPECT_EQ(msg_data_size, session->session_unacked_recv_window_bytes_);
 
   stream->Close();
@@ -3744,7 +3732,7 @@ TEST_P(SpdySessionTest, SessionFlowControlNoReceiveLeaks) {
 
   EXPECT_EQ(OK, delegate.WaitForClose());
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_recv_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_recv_window_size_);
   EXPECT_EQ(msg_data_size, session->session_unacked_recv_window_bytes_);
 }
 
@@ -3803,25 +3791,27 @@ TEST_P(SpdySessionTest, SessionFlowControlNoSendLeaks) {
             stream->SendRequestHeaders(headers.Pass(), MORE_DATA_TO_SEND));
   EXPECT_TRUE(stream->HasUrlFromHeaders());
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_send_window_size_);
+  const int32 initial_window_size =
+      SpdySession::GetInitialWindowSize(GetParam());
+  EXPECT_EQ(initial_window_size, session->session_send_window_size_);
 
   data.RunFor(1);
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_send_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_send_window_size_);
 
   data.RunFor(1);
 
   EXPECT_TRUE(data.at_write_eof());
   EXPECT_TRUE(data.at_read_eof());
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize - msg_data_size,
+  EXPECT_EQ(initial_window_size - msg_data_size,
             session->session_send_window_size_);
 
   // Closing the stream should increase the session's send window.
   stream->Close();
   EXPECT_EQ(NULL, stream.get());
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_send_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_send_window_size_);
 
   EXPECT_EQ(OK, delegate.WaitForClose());
 }
@@ -3892,42 +3882,44 @@ TEST_P(SpdySessionTest, SessionFlowControlEndToEnd) {
             stream->SendRequestHeaders(headers.Pass(), MORE_DATA_TO_SEND));
   EXPECT_TRUE(stream->HasUrlFromHeaders());
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_send_window_size_);
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_recv_window_size_);
+  const int32 initial_window_size =
+      SpdySession::GetInitialWindowSize(GetParam());
+  EXPECT_EQ(initial_window_size, session->session_send_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_recv_window_size_);
   EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
 
   data.RunFor(1);
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_send_window_size_);
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_recv_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_send_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_recv_window_size_);
   EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
 
   data.RunFor(1);
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize - msg_data_size,
+  EXPECT_EQ(initial_window_size - msg_data_size,
             session->session_send_window_size_);
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_recv_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_recv_window_size_);
   EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
 
   data.RunFor(1);
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize - msg_data_size,
+  EXPECT_EQ(initial_window_size - msg_data_size,
             session->session_send_window_size_);
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_recv_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_recv_window_size_);
   EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
 
   data.RunFor(1);
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize - msg_data_size,
+  EXPECT_EQ(initial_window_size - msg_data_size,
             session->session_send_window_size_);
-  EXPECT_EQ(kSpdySessionInitialWindowSize - msg_data_size,
+  EXPECT_EQ(initial_window_size - msg_data_size,
             session->session_recv_window_size_);
   EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
 
   data.RunFor(1);
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_send_window_size_);
-  EXPECT_EQ(kSpdySessionInitialWindowSize - msg_data_size,
+  EXPECT_EQ(initial_window_size, session->session_send_window_size_);
+  EXPECT_EQ(initial_window_size - msg_data_size,
             session->session_recv_window_size_);
   EXPECT_EQ(0, session->session_unacked_recv_window_bytes_);
 
@@ -3938,8 +3930,8 @@ TEST_P(SpdySessionTest, SessionFlowControlEndToEnd) {
 
   // Draining the delegate's read queue should increase the session's
   // receive window.
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_send_window_size_);
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_recv_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_send_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_recv_window_size_);
   EXPECT_EQ(msg_data_size, session->session_unacked_recv_window_bytes_);
 
   stream->Close();
@@ -3947,8 +3939,8 @@ TEST_P(SpdySessionTest, SessionFlowControlEndToEnd) {
 
   EXPECT_EQ(OK, delegate.WaitForClose());
 
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_send_window_size_);
-  EXPECT_EQ(kSpdySessionInitialWindowSize, session->session_recv_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_send_window_size_);
+  EXPECT_EQ(initial_window_size, session->session_recv_window_size_);
   EXPECT_EQ(msg_data_size, session->session_unacked_recv_window_bytes_);
 }
 
@@ -5019,6 +5011,10 @@ TEST(MapRstStreamStatusToProtocolError, MapsValues) {
            MapRstStreamStatusToProtocolError(RST_STREAM_FRAME_SIZE_ERROR));
   CHECK_EQ(STATUS_CODE_ENHANCE_YOUR_CALM,
            MapRstStreamStatusToProtocolError(RST_STREAM_ENHANCE_YOUR_CALM));
+  CHECK_EQ(STATUS_CODE_INADEQUATE_SECURITY,
+           MapRstStreamStatusToProtocolError(RST_STREAM_INADEQUATE_SECURITY));
+  CHECK_EQ(STATUS_CODE_HTTP_1_1_REQUIRED,
+           MapRstStreamStatusToProtocolError(RST_STREAM_HTTP_1_1_REQUIRED));
 }
 
 TEST(MapNetErrorToGoAwayStatus, MapsValue) {

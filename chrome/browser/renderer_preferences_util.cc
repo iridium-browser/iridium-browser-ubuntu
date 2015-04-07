@@ -18,7 +18,7 @@
 #endif
 
 #if !defined(OS_ANDROID)
-#include "chrome/browser/ui/zoom/zoom_controller.h"
+#include "components/ui/zoom/zoom_controller.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS)
@@ -29,6 +29,11 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "ui/views/linux_ui/linux_ui.h"
+#endif
+
+#if defined(OS_WIN)
+#include "base/win/win_util.h"
+#include "ui/gfx/platform_font_win.h"
 #endif
 
 namespace renderer_preferences_util {
@@ -44,8 +49,8 @@ void UpdateFromSystemSettings(content::RendererPreferences* prefs,
 
   double default_zoom_level = -1;
 #if !defined(OS_ANDROID)
-  ZoomController* zoom_controller =
-      ZoomController::FromWebContents(web_contents);
+  ui_zoom::ZoomController* zoom_controller =
+      ui_zoom::ZoomController::FromWebContents(web_contents);
   if (zoom_controller)
     default_zoom_level = zoom_controller->GetDefaultZoomLevel();
 #endif
@@ -107,6 +112,31 @@ void UpdateFromSystemSettings(content::RendererPreferences* prefs,
 #if !defined(OS_MACOSX)
   prefs->plugin_fullscreen_allowed =
       pref_service->GetBoolean(prefs::kFullscreenAllowed);
+#endif
+
+#if defined(OS_WIN)
+  NONCLIENTMETRICS_XP metrics = {0};
+  base::win::GetNonClientMetrics(&metrics);
+
+  prefs->caption_font_family_name = metrics.lfCaptionFont.lfFaceName;
+  prefs->caption_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfCaptionFont);
+
+  prefs->small_caption_font_family_name = metrics.lfSmCaptionFont.lfFaceName;
+  prefs->small_caption_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfSmCaptionFont);
+
+  prefs->menu_font_family_name = metrics.lfMenuFont.lfFaceName;
+  prefs->menu_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfMenuFont);
+
+  prefs->status_font_family_name = metrics.lfStatusFont.lfFaceName;
+  prefs->status_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfStatusFont);
+
+  prefs->message_font_family_name = metrics.lfMessageFont.lfFaceName;
+  prefs->message_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfMessageFont);
 #endif
 }
 

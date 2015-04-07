@@ -264,7 +264,7 @@ const char kHandleUserActivityMethod[] = "HandleUserActivity";
 const char kHandleVideoActivityMethod[] = "HandleVideoActivity";
 const char kSetIsProjectingMethod[] = "SetIsProjecting";
 const char kSetPolicyMethod[] = "SetPolicy";
-const char kSetPowerSource[] = "SetPowerSource";
+const char kSetPowerSourceMethod[] = "SetPowerSource";
 const char kRegisterSuspendDelayMethod[] = "RegisterSuspendDelay";
 const char kUnregisterSuspendDelayMethod[] = "UnregisterSuspendDelay";
 const char kHandleSuspendReadinessMethod[] = "HandleSuspendReadiness";
@@ -299,9 +299,6 @@ enum RequestRestartReason {
   REQUEST_RESTART_FOR_USER = 0,
   REQUEST_RESTART_FOR_UPDATE = 1,
 };
-// Special ID passed via kSetPowerSource to indicate that the battery should
-// provide power.
-const char kBatteryPowerSource[] = "_BATTERY";
 }  // namespace power_manager
 
 namespace chromeos {
@@ -336,6 +333,8 @@ const char kFlimflamIPConfigInterface[] = "org.chromium.flimflam.IPConfig";
 const char kFlimflamDeviceInterface[] = "org.chromium.flimflam.Device";
 const char kFlimflamProfileInterface[] = "org.chromium.flimflam.Profile";
 const char kFlimflamNetworkInterface[] = "org.chromium.flimflam.Network";
+const char kFlimflamThirdPartyVpnInterface[] =
+    "org.chromium.flimflam.ThirdPartyVpn";
 
 // Flimflam function names.
 const char kGetPropertiesFunction[] = "GetProperties";
@@ -368,6 +367,7 @@ const char kFindMatchingServiceFunction[] = "FindMatchingService";
 // Flimflam Service property names.
 const char kSecurityProperty[] = "Security";
 const char kPriorityProperty[] = "Priority";
+const char kPriorityWithinTechnologyProperty[] = "PriorityWithinTechnology";
 const char kPassphraseProperty[] = "Passphrase";
 const char kIdentityProperty[] = "Identity";
 const char kAuthorityPathProperty[] = "AuthorityPath";
@@ -484,8 +484,11 @@ const char kRoamThresholdProperty[] = "RoamThreshold";
 const char kDBusObjectProperty[] = "DBus.Object";
 const char kDBusServiceProperty[] = "DBus.Service";
 const char kBgscanSignalThresholdProperty[] = "BgscanSignalThreshold";
+const char kWakeToScanFrequencyProperty[] = "WakeToScanFrequency";
 // The name of the network interface, ie. wlan0, eth0, etc.
 const char kInterfaceProperty[] = "Interface";
+const char kSelectedServiceProperty[] = "SelectedService";
+const char kIPConfigsProperty[] = "IPConfigs";
 
 // Flimflam Cellular Device property names.
 const char kCarrierProperty[] = "Cellular.Carrier";
@@ -506,7 +509,6 @@ const char kPRLVersionProperty[] = "Cellular.PRLVersion";
 const char kSelectedNetworkProperty[] = "Cellular.SelectedNetwork";
 const char kSupportNetworkScanProperty[] = "Cellular.SupportNetworkScan";
 const char kFoundNetworksProperty[] = "Cellular.FoundNetworks";
-const char kIPConfigsProperty[] = "IPConfigs";
 
 // Flimflam state options.
 const char kStateIdle[] = "idle";
@@ -801,6 +803,13 @@ const char kVerifyAndEncryptCredentialsFunction[] =
 const char kVerifyAndEncryptDataFunction[] = "VerifyAndEncryptData";
 const char kVerifyDestinationFunction[] = "VerifyDestination";
 
+// ThirdPartyVpn functions.
+const char kSetParametersFunction[] = "SetParameters";
+const char kSendPacketFunction[] = "SendPacket";
+const char kUpdateConnectionStateFunction[] = "UpdateConnectionState";
+const char kOnPacketReceivedFunction[] = "OnPacketReceived";
+const char kOnPlatformMessageFunction[] = "OnPlatformMessage";
+
 // Device property names.
 const char kEapAuthenticationCompletedProperty[] = "EapAuthenticationCompleted";
 const char kEapAuthenticatorDetectedProperty[] = "EapAuthenticatorDetected";
@@ -834,12 +843,13 @@ const char kLinkMonitorTechnologiesProperty[] =
     "LinkMonitorTechnologies";
 const char kNoAutoConnectTechnologiesProperty[] = "NoAutoConnectTechnologies";
 const char kPortalCheckIntervalProperty[] = "PortalCheckInterval";
+const char kProhibitedTechnologiesProperty[] = "ProhibitedTechnologies";
 const char kServiceCompleteListProperty[] = "ServiceCompleteList";
 const char kShortDNSTimeoutTechnologiesProperty[] =
     "ShortDNSTimeoutTechnologies";
 const char kUninitializedTechnologiesProperty[] = "UninitializedTechnologies";
 const char kWakeOnLanEnabledProperty[] = "WakeOnLanEnabled";
-const char kWakeOnWiFiEnabledProperty[] = "WakeOnWiFiEnabled";
+const char kWakeOnWiFiFeaturesEnabledProperty[] = "WakeOnWiFiFeaturesEnabled";
 
 // Service property names.
 const char kActivationTypeProperty[] = "Cellular.ActivationType";
@@ -933,10 +943,11 @@ const char kTDLSNonexistentState[] = "Nonexistent";
 const char kTDLSUnknownState[] = "Unknown";
 
 // Wake on WiFi features.
-const char kWakeOnWiFiEnabledPacket[] = "packet";
-const char kWakeOnWiFiEnabledSSID[] = "ssid";
-const char kWakeOnWiFiEnabledPacketSSID[] = "packet_and_ssid";
-const char kWakeOnWiFiEnabledNone[] = "none";
+const char kWakeOnWiFiFeaturesEnabledPacket[] = "packet";
+const char kWakeOnWiFiFeaturesEnabledSSID[] = "ssid";
+const char kWakeOnWiFiFeaturesEnabledPacketSSID[] = "packet_and_ssid";
+const char kWakeOnWiFiFeaturesEnabledNone[] = "none";
+const char kWakeOnWiFiFeaturesEnabledNotSupported[] = "not_supported";
 
 // Cellular service carriers.
 const char kCarrierGenericUMTS[] = "Generic UMTS";
@@ -971,6 +982,21 @@ const char kGeoSignalToNoiseRatioProperty[] = "signalToNoiseRatio";
 // Common property names for geolocation objects.
 const char kGeoAgeProperty[] = "age";
 const char kGeoSignalStrengthProperty[] = "signalStrength";
+// ThirdPartyVpn parameters, properties and constants.
+const char kAddressParameterThirdPartyVpn[] = "address";
+const char kBroadcastAddressParameterThirdPartyVpn[] = "broadcast_address";
+const char kGatewayParameterThirdPartyVpn[] = "gateway";
+const char kBypassTunnelForIpParameterThirdPartyVpn[] = "bypass_tunnel_for_ip";
+const char kSubnetPrefixParameterThirdPartyVpn[] = "subnet_prefix";
+const char kMtuParameterThirdPartyVpn[] = "mtu";
+const char kDomainSearchParameterThirdPartyVpn[] = "domain_search";
+const char kDnsServersParameterThirdPartyVpn[] = "dns_servers";
+const char kObjectPathSuffixProperty[] = "ObjectPathSuffix";
+const char kExtensionNameProperty[] = "ExtensionName";
+const char kConfigurationNameProperty[] = "ConfigurationName";
+const char kObjectPathBase[] = "/thirdpartyvpn/";
+const char kNonIPDelimiter = ':';
+const char kIPDelimiter = ' ';
 }  // namespace shill
 
 namespace cromo {
@@ -1042,6 +1068,26 @@ enum DeviceStatus {
   kDeviceStatusConnected
 };
 }  // namespace wimax_manager
+
+namespace bluetooth_plugin {
+// Service identifiers for the plugin interface added to the /org/bluez object.
+const char kBluetoothPluginServiceName[] = "org.bluez";
+const char kBluetoothPluginInterface[] = "org.chromium.Bluetooth";
+
+// Bluetooth plugin properties.
+const char kSupportsLEServices[] = "SupportsLEServices";
+const char kSupportsConnInfo[] = "SupportsConnInfo";
+}  // namespace bluetooth_plugin
+
+namespace bluetooth_plugin_device {
+// Service identifiers for the plugin interface added to Bluetooth Device
+// objects.
+const char kBluetoothPluginServiceName[] = "org.bluez";
+const char kBluetoothPluginInterface[] = "org.chromium.BluetoothDevice";
+
+// Bluetooth Device plugin methods.
+const char kGetConnInfo[] = "GetConnInfo";
+}  // namespace bluetooth_plugin_device
 
 namespace bluetooth_adapter {
 // Bluetooth Adapter service identifiers.
@@ -1131,8 +1177,10 @@ const char kConnectProfile[] = "ConnectProfile";
 const char kDisconnectProfile[] = "DisconnectProfile";
 const char kPair[] = "Pair";
 const char kCancelPairing[] = "CancelPairing";
-const char kStartConnectionMonitor[] = "StartConnectionMonitor";
-const char kStopConnectionMonitor[] = "StopConnectionMonitor";
+// TODO(tengs): Remove deprecated constants after they are removed in the Chrome
+// codebase. (See crbug.com/430665).
+const char kStartConnectionMonitor[] = "StartConnectionMonitor";  // DEPRECATED
+const char kStopConnectionMonitor[] = "StopConnectionMonitor";    // DEPRECATED
 
 // Bluetooth Device properties.
 const char kAddressProperty[] = "Address";
@@ -1150,9 +1198,11 @@ const char kAdapterProperty[] = "Adapter";
 const char kLegacyPairingProperty[] = "LegacyPairing";
 const char kModaliasProperty[] = "Modalias";
 const char kRSSIProperty[] = "RSSI";
-const char kConnectionRSSI[] = "ConnectionRSSI";
-const char kConnectionTXPower[] = "ConnectionTXPower";
-const char kConnectionTXPowerMax[] = "ConnectionTXPowerMax";
+// TODO(tengs): Remove deprecated constants after they are removed in the Chrome
+// codebase. (See crbug.com/430665).
+const char kConnectionRSSI[] = "ConnectionRSSI";             // DEPRECATED
+const char kConnectionTXPower[] = "ConnectionTXPower";       // DEPRECATED
+const char kConnectionTXPowerMax[] = "ConnectionTXPowerMax"; // DEPRECATED
 
 // Bluetooth Device errors.
 const char kErrorNotReady[] = "org.bluez.Error.NotReady";
@@ -1717,6 +1767,22 @@ const char kTestICMP[] = "TestICMP";
 const char kTestICMPWithOptions[] = "TestICMPWithOptions";
 const char kLogKernelTaskStates[] = "LogKernelTaskStates";
 const char kUploadCrashes[] = "UploadCrashes";
+const char kRemoveRootfsVerification[] = "RemoveRootfsVerification";
+const char kEnableBootFromUsb[] = "EnableBootFromUsb";
+const char kConfigureSshServer[] = "ConfigureSshServer";
+const char kSetUserPassword[] = "SetUserPassword";
+const char kEnableChromeDevFeatures[] = "EnableChromeDevFeatures";
+const char kQueryDevFeatures[] = "QueryDevFeatures";
+
+// Values.
+enum DevFeatureFlag {
+  DEV_FEATURES_DISABLED = 1 << 0,
+  DEV_FEATURE_ROOTFS_VERIFICATION_REMOVED = 1 << 1,
+  DEV_FEATURE_BOOT_FROM_USB_ENABLED = 1 << 2,
+  DEV_FEATURE_SSH_SERVER_CONFIGURED = 1 << 3,
+  DEV_FEATURE_DEV_MODE_ROOT_PASSWORD_SET = 1 << 4,
+  DEV_FEATURE_SYSTEM_ROOT_PASSWORD_SET = 1 << 5,
+};
 }  // namespace debugd
 
 namespace permission_broker {
@@ -1726,7 +1792,6 @@ const char kPermissionBrokerServiceName[] = "org.chromium.PermissionBroker";
 
 // Methods
 const char kRequestPathAccess[] = "RequestPathAccess";
-const char kRequestUsbAccess[] = "RequestUsbAccess";
 }  // namespace permission_broker
 
 namespace system_clock {
@@ -1852,14 +1917,45 @@ namespace apmanager {
 const char kServiceName[] = "org.chromium.apmanager";
 const char kManagerInterface[] = "org.chromium.apmanager.Manager";
 const char kManagerPath[] = "/manager";
+const char kManagerError[] = "org.chromium.apmanager.Manager.Error";
 const char kServiceInterface[] = "org.chromium.apmanager.Service";
+const char kServiceError[] = "org.chromium.apmanager.Service.Error";
 const char kConfigInterface[] = "org.chromium.apmanager.Config";
+const char kConfigError[] = "org.chromium.apmanager.Config.Error";
 const char kClientInterface[] = "org.chromium.apmanager.Client";
 const char kDeviceInterface[] = "org.chromium.apmanager.Device";
 
 // Manager Methods.
 const char kCreateServiceMethod[] = "CreateService";
 const char kRemoveServiceMethod[] = "RemoveService";
+
+// Config Properties.
+const char kConfigSSIDProperty[] = "Ssid";
+const char kConfigInterfaceNameProperty[] = "InterfaceName";
+const char kConfigSecurityModeProperty[] = "SecurityMode";
+const char kConfigPassphraseProperty[] = "Passphrase";
+const char kConfigHwModeProperty[] = "HwMode";
+const char kConfigOperationModeProperty[] = "OperationMode";
+const char kConfigChannelProperty[] = "Channel";
+const char kConfigHiddenNetworkProperty[] = "HiddenNetwork";
+const char kConfigBridgeInterfaceProperty[] = "BridgeInterface";
+const char kConfigServerAddressIndexProperty[] = "ServerAddressIndex";
+
+// Security modes.
+const char kSecurityModeNone[] = "none";
+const char kSecurityModeRSN[] = "rsn";
+
+// Hardware modes.
+const char kHwMode80211a[] = "802.11a";
+const char kHwMode80211b[] = "802.11b";
+const char kHwMode80211g[] = "802.11g";
+const char kHwMode80211n[] = "802.11n";
+const char kHwMode80211ac[] = "802.11ac";
+
+// Operation modes.
+const char kOperationModeServer[] = "server";
+const char kOperationModeBridge[] = "bridge";
+
 }  // namespace apmanager
 
 #endif  // DBUS_SERVICE_CONSTANTS_H_

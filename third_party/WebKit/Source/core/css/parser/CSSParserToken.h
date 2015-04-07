@@ -13,6 +13,7 @@ namespace blink {
 enum CSSParserTokenType {
     IdentToken = 0,
     FunctionToken,
+    AtKeywordToken,
     HashToken,
     UrlToken,
     BadUrlToken,
@@ -20,6 +21,12 @@ enum CSSParserTokenType {
     NumberToken,
     PercentageToken,
     DimensionToken,
+    IncludeMatchToken,
+    DashMatchToken,
+    PrefixMatchToken,
+    SuffixMatchToken,
+    SubstringMatchToken,
+    ColumnToken,
     UnicodeRangeToken,
     WhitespaceToken,
     ColonToken,
@@ -82,6 +89,8 @@ public:
     UChar32 unicodeRangeStart() const { ASSERT(m_type == UnicodeRangeToken); return m_unicodeRangeStart; }
     UChar32 unicodeRangeEnd() const { ASSERT(m_type == UnicodeRangeToken); return m_unicodeRangeEnd; }
 
+    CSSPropertyID parseAsCSSPropertyID() const;
+
 private:
     CSSParserTokenType m_type;
     String m_value;
@@ -98,8 +107,6 @@ private:
     BlockType m_blockType;
 };
 
-typedef Vector<CSSParserToken>::iterator CSSParserTokenIterator;
-
 } // namespace
 
-#endif // MediaQueryToken_h
+#endif // CSSSParserToken_h

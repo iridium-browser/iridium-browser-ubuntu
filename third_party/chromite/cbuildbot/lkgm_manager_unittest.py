@@ -7,6 +7,7 @@
 
 from __future__ import print_function
 
+import contextlib
 import mox
 import os
 import random
@@ -30,7 +31,6 @@ from chromite.lib import osutils
 import mock
 
 
-# pylint: disable=E1120,W0212,R0904
 FAKE_VERSION_STRING = '1.2.4-rc3'
 FAKE_VERSION_STRING_NEXT = '1.2.4-rc4'
 CHROME_BRANCH = '13'
@@ -44,6 +44,11 @@ CHROME_BRANCH=13
 
 FAKE_WHITELISTED_REMOTES = ('cros', 'chromium')
 FAKE_NON_WHITELISTED_REMOTE = 'hottubtimemachine'
+
+
+# pylint: disable=protected-access
+# TODO: Re-enable when converted from mox to mock.
+# pylint: disable=no-value-for-parameter
 
 
 class LKGMCandidateInfoTest(cros_test_lib.TestCase):
@@ -77,6 +82,18 @@ class LKGMCandidateInfoTest(cros_test_lib.TestCase):
     self.assertTrue(info4 > info3)
 
 
+@contextlib.contextmanager
+def TemporaryManifest():
+  with tempfile.NamedTemporaryFile() as f:
+    # Create fake but empty manifest file.
+    new_doc = minidom.getDOMImplementation().createDocument(
+        None, 'manifest', None)
+    print(new_doc.toxml())
+    new_doc.writexml(f)
+    f.flush()
+    yield f
+
+
 class LKGMManagerTest(cros_test_lib.MoxTempDirTestCase):
   """Tests for the BuildSpecs manager."""
 
@@ -106,7 +123,7 @@ class LKGMManagerTest(cros_test_lib.MoxTempDirTestCase):
       new_element.setAttribute('remote', default_remote)
       m_element.appendChild(new_element)
     remotes_to_use = list(FAKE_WHITELISTED_REMOTES) * (
-          num_external / len(FAKE_WHITELISTED_REMOTES))
+        num_external / len(FAKE_WHITELISTED_REMOTES))
 
     internal_remotes = [FAKE_NON_WHITELISTED_REMOTE] * num_internal
     remotes_to_use.extend(internal_remotes)
@@ -154,10 +171,10 @@ class LKGMManagerTest(cros_test_lib.MoxTempDirTestCase):
     osutils.SafeMakedirs(self.tmpmandir)
 
     repo = repository.RepoRepository(
-      self.source_repo, self.tmpdir, self.branch, depth=1)
+        self.source_repo, self.tmpdir, self.branch, depth=1)
     self.manager = lkgm_manager.LKGMManager(
-      repo, self.manifest_repo, self.build_name, constants.PFQ_TYPE, 'branch',
-      force=False, branch=self.branch, dry_run=True)
+        repo, self.manifest_repo, self.build_name, constants.PFQ_TYPE, 'branch',
+        force=False, branch=self.branch, dry_run=True)
     self.manager.manifest_dir = self.tmpmandir
     self.manager.lkgm_path = os.path.join(self.tmpmandir,
                                           self.manager.LKGM_PATH)
@@ -294,7 +311,6 @@ class LKGMManagerTest(cros_test_lib.MoxTempDirTestCase):
                              'InitializeManifestVariables')
     self.mox.StubOutWithMock(lkgm_manager.LKGMManager, 'CheckoutSourceCode')
     self.mox.StubOutWithMock(lkgm_manager.LKGMManager, 'PushSpecChanges')
-    self.mox.StubOutWithMock(lkgm_manager.LKGMManager, 'SetInFlight')
 
     my_info = lkgm_manager._LKGMCandidateInfo('1.2.3')
     most_recent_candidate = lkgm_manager._LKGMCandidateInfo('1.2.3-rc12')
@@ -305,8 +321,6 @@ class LKGMManagerTest(cros_test_lib.MoxTempDirTestCase):
     lkgm_manager.LKGMManager.GetCurrentVersionInfo().AndReturn(my_info)
     lkgm_manager.LKGMManager.InitializeManifestVariables(my_info)
 
-    lkgm_manager.LKGMManager.SetInFlight(most_recent_candidate.VersionString(),
-                                         dashboard_url=None)
     repository.RepoRepository.Sync(
         self._GetPathToManifest(most_recent_candidate))
 
@@ -326,7 +340,6 @@ class LKGMManagerTest(cros_test_lib.MoxTempDirTestCase):
                              'InitializeManifestVariables')
     self.mox.StubOutWithMock(lkgm_manager.LKGMManager, 'CheckoutSourceCode')
     self.mox.StubOutWithMock(lkgm_manager.LKGMManager, 'PushSpecChanges')
-    self.mox.StubOutWithMock(lkgm_manager.LKGMManager, 'SetInFlight')
 
     my_info = lkgm_manager._LKGMCandidateInfo('1.2.4')
     most_recent_candidate = lkgm_manager._LKGMCandidateInfo('1.2.4-rc12',
@@ -337,8 +350,6 @@ class LKGMManagerTest(cros_test_lib.MoxTempDirTestCase):
     lkgm_manager.LKGMManager.GetCurrentVersionInfo().AndReturn(my_info)
     lkgm_manager.LKGMManager.InitializeManifestVariables(my_info)
 
-    lkgm_manager.LKGMManager.SetInFlight(most_recent_candidate.VersionString(),
-                                         dashboard_url=None)
     repository.RepoRepository.Sync(
         self._GetPathToManifest(most_recent_candidate))
 
@@ -359,9 +370,10 @@ class LKGMManagerTest(cros_test_lib.MoxTempDirTestCase):
 
     my_info = lkgm_manager._LKGMCandidateInfo('1.2.4')
     lkgm_manager.LKGMManager.CheckoutSourceCode()
-    lkgm_manager.LKGMManager.RefreshManifestCheckout()
-    lkgm_manager.LKGMManager.GetCurrentVersionInfo().AndReturn(my_info)
-    lkgm_manager.LKGMManager.InitializeManifestVariables(my_info)
+    for _ in range(2):
+      lkgm_manager.LKGMManager.RefreshManifestCheckout()
+      lkgm_manager.LKGMManager.GetCurrentVersionInfo().AndReturn(my_info)
+      lkgm_manager.LKGMManager.InitializeManifestVariables(my_info)
 
     self.mox.ReplayAll()
     self.manager.SLEEP_TIMEOUT = 0.2
@@ -424,11 +436,12 @@ class LKGMManagerTest(cros_test_lib.MoxTempDirTestCase):
 
     fake_revision = '1234567890'
     fake_project_handler = self.mox.CreateMock(git.Manifest)
-    project = { 'name': 'fake/repo',
-                'path': 'fake/path',
-                'revision': fake_revision,
-              }
-    fake_project_handler.checkouts_by_path = { project['path']: project }
+    project = {
+        'name': 'fake/repo',
+        'path': 'fake/path',
+        'revision': fake_revision,
+    }
+    fake_project_handler.checkouts_by_path = {project['path']: project}
     fake_result = self.mox.CreateMock(cros_build_lib.CommandResult)
     fake_result.output = fake_git_log
 
@@ -451,14 +464,7 @@ class LKGMManagerTest(cros_test_lib.MoxTempDirTestCase):
 
   def testAddChromeVersionToManifest(self):
     """Tests whether we can write the chrome version to the manifest file."""
-    with tempfile.NamedTemporaryFile() as f:
-      # Create fake but empty manifest file.
-      new_doc = minidom.getDOMImplementation().createDocument(
-          None, 'manifest', None)
-      print(new_doc.toxml())
-      new_doc.writexml(f)
-      f.flush()
-
+    with TemporaryManifest() as f:
       chrome_version = '35.0.1863.0'
       # Write the chrome element to manifest.
       self.manager._AddChromeVersionToManifest(f.name, chrome_version)
@@ -471,6 +477,33 @@ class LKGMManagerTest(cros_test_lib.MoxTempDirTestCase):
           elements[0].getAttribute(lkgm_manager.CHROME_VERSION_ATTR),
           chrome_version)
 
+  def testAddLKGMToManifest(self, present=True):
+    """Tests whether we can write the LKGM version to the manifest file."""
+    with TemporaryManifest() as f:
+      # Set up LGKM symlink.
+      if present:
+        lkgm_version = '6377.0.0-rc1'
+        os.makedirs(os.path.dirname(self.manager.lkgm_path))
+        os.symlink('../foo/%s.xml' % lkgm_version, self.manager.lkgm_path)
+
+      # Write the chrome element to manifest.
+      self.manager._AddLKGMToManifest(f.name)
+
+      # Read the manifest file.
+      new_doc = minidom.parse(f.name)
+      elements = new_doc.getElementsByTagName(lkgm_manager.LKGM_ELEMENT)
+      if present:
+        self.assertEqual(len(elements), 1)
+        self.assertEqual(
+            elements[0].getAttribute(lkgm_manager.LKGM_VERSION_ATTR),
+            lkgm_version)
+      else:
+        self.assertEqual(len(elements), 0)
+
+  def testAddLKGMToManifestWithMissingFile(self):
+    """Tests writing the LKGM version when LKGM.xml is missing."""
+    self.testAddLKGMToManifest(present=False)
+
   def testAddPatchesToManifest(self):
     """Tests whether we can add a fake patch to an empty manifest file.
 
@@ -478,14 +511,7 @@ class LKGMManagerTest(cros_test_lib.MoxTempDirTestCase):
     runs the AddPatchesToManifest with one mocked out GerritPatch and ensures
     the newly generated manifest has the correct patch information afterwards.
     """
-    with tempfile.NamedTemporaryFile() as f:
-      # Create fake but empty manifest file.
-      new_doc = minidom.getDOMImplementation().createDocument(
-          None, 'manifest', None)
-      print(new_doc.toxml())
-      new_doc.writexml(f)
-      f.flush()
-
+    with TemporaryManifest() as f:
       gerrit_patch = mock.MagicMock()
       gerrit_patch.remote = 'cros-internal'
       gerrit_patch.gerrit_number = '12345'

@@ -75,7 +75,7 @@ public:
     virtual void disconnectClient() override { }
 };
 
-PassRefPtrWillBeRawPtr<PopupMenu> EmptyChromeClient::createPopupMenu(LocalFrame&, PopupMenuClient*) const
+PassRefPtrWillBeRawPtr<PopupMenu> EmptyChromeClient::createPopupMenu(LocalFrame&, PopupMenuClient*)
 {
     return adoptRefWillBeNoop(new EmptyPopupMenu());
 }
@@ -121,7 +121,7 @@ PassRefPtr<DocumentLoader> EmptyFrameLoaderClient::createDocumentLoader(LocalFra
     return DocumentLoader::create(frame, request, substituteData);
 }
 
-PassRefPtrWillBeRawPtr<LocalFrame> EmptyFrameLoaderClient::createFrame(const KURL&, const AtomicString&, HTMLFrameOwnerElement*)
+PassRefPtrWillBeRawPtr<LocalFrame> EmptyFrameLoaderClient::createFrame(const KURL&, const AtomicString&, HTMLFrameOwnerElement*, ContentSecurityPolicyDisposition)
 {
     return nullptr;
 }

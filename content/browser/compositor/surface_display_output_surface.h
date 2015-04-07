@@ -41,12 +41,13 @@ class SurfaceDisplayOutputSurface : public cc::OutputSurface,
   // cc::OutputSurface implementation.
   void SwapBuffers(cc::CompositorFrame* frame) override;
   bool BindToClient(cc::OutputSurfaceClient* client) override;
+  void ForceReclaimResources() override;
 
   // cc::SurfaceFactoryClient implementation.
   void ReturnResources(const cc::ReturnedResourceArray& resources) override;
 
  private:
-  void SwapBuffersComplete();
+  void SwapBuffersComplete(bool drawn);
 
   OnscreenDisplayClient* display_client_;
   cc::SurfaceManager* surface_manager_;

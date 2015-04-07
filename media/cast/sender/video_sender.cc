@@ -15,6 +15,11 @@
 #include "media/cast/net/cast_transport_config.h"
 #include "media/cast/sender/external_video_encoder.h"
 #include "media/cast/sender/video_encoder_impl.h"
+#include "media/cast/sender/video_frame_factory.h"
+
+#if defined(OS_MACOSX)
+#include "media/cast/sender/h264_vt_encoder.h"
+#endif
 
 namespace media {
 namespace cast {
@@ -69,6 +74,18 @@ VideoSender::VideoSender(
       weak_factory_(this) {
   cast_initialization_status_ = STATUS_VIDEO_UNINITIALIZED;
 
+#if defined(OS_MACOSX)
+  // On Apple platforms, use the hardware H.264 encoder if possible. It is the
+  // only reasonable option for iOS.
+  if (!video_config.use_external_encoder &&
+      video_config.codec == CODEC_VIDEO_H264) {
+    video_encoder_.reset(new H264VideoToolboxEncoder(
+        cast_environment, video_config,
+        base::Bind(&VideoSender::OnEncoderInitialized,
+                   weak_factory_.GetWeakPtr(), initialization_cb)));
+  }
+#endif  // defined(OS_MACOSX)
+#if !defined(OS_IOS)
   if (video_config.use_external_encoder) {
     video_encoder_.reset(new ExternalVideoEncoder(
         cast_environment,
@@ -77,11 +94,12 @@ VideoSender::VideoSender(
                    weak_factory_.GetWeakPtr(), initialization_cb),
         create_vea_cb,
         create_video_encode_mem_cb));
-  } else {
+  } else if (!video_encoder_) {
     // Software encoder is initialized immediately.
     video_encoder_.reset(new VideoEncoderImpl(cast_environment, video_config));
     cast_initialization_status_ = STATUS_VIDEO_INITIALIZED;
   }
+#endif  // !defined(OS_IOS)
 
   if (cast_initialization_status_ == STATUS_VIDEO_INITIALIZED) {
     cast_environment->PostTask(
@@ -92,7 +110,7 @@ VideoSender::VideoSender(
 
   media::cast::CastTransportRtpConfig transport_config;
   transport_config.ssrc = video_config.ssrc;
-  transport_config.feedback_ssrc = video_config.incoming_feedback_ssrc;
+  transport_config.feedback_ssrc = video_config.receiver_ssrc;
   transport_config.rtp_payload_type = video_config.rtp_payload_type;
   transport_config.aes_key = video_config.aes_key;
   transport_config.aes_iv_mask = video_config.aes_iv_mask;
@@ -191,6 +209,12 @@ void VideoSender::InsertRawVideoFrame(
   } else {
     VLOG(1) << "Encoder rejected a frame.  Skipping...";
   }
+}
+
+scoped_ptr<VideoFrameFactory> VideoSender::CreateVideoFrameFactory() {
+  DCHECK(cast_initialization_status_ == STATUS_VIDEO_INITIALIZED);
+  DCHECK(video_encoder_.get()) << "Invalid state";
+  return video_encoder_->CreateVideoFrameFactory();
 }
 
 int VideoSender::GetNumberOfFramesInEncoder() const {

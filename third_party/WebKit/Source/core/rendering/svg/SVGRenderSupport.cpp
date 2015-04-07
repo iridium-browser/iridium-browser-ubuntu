@@ -25,8 +25,6 @@
 #include "config.h"
 #include "core/rendering/svg/SVGRenderSupport.h"
 
-#include "core/frame/FrameView.h"
-#include "core/frame/LocalFrame.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderGeometryMap.h"
 #include "core/rendering/RenderLayer.h"
@@ -46,6 +44,13 @@
 
 namespace blink {
 
+static inline LayoutRect enclosingIntRectIfNotEmpty(const FloatRect& rect)
+{
+    if (rect.isEmpty())
+        return LayoutRect();
+    return enclosingIntRect(rect);
+}
+
 LayoutRect SVGRenderSupport::clippedOverflowRectForPaintInvalidation(const RenderObject* object, const RenderLayerModelObject* paintInvalidationContainer, const PaintInvalidationState* paintInvalidationState)
 {
     // Return early for any cases where we don't actually paint
@@ -61,10 +66,8 @@ LayoutRect SVGRenderSupport::clippedOverflowRectForPaintInvalidation(const Rende
         // Compute accumulated SVG transform and apply to local paint rect.
         AffineTransform transform = paintInvalidationState->svgTransform() * object->localToParentTransform();
         paintInvalidationRect = transform.mapRect(paintInvalidationRect);
-        // FIXME: These are quirks carried forward from RenderSVGRoot::computeFloatRectForPaintInvalidation.
-        LayoutRect rect;
-        if (!paintInvalidationRect.isEmpty())
-            rect = enclosingIntRect(paintInvalidationRect);
+        // FIXME: These are quirks carried forward from the old paint invalidation infrastructure.
+        LayoutRect rect = enclosingIntRectIfNotEmpty(paintInvalidationRect);
         // Offset by SVG root paint offset and apply clipping as needed.
         rect.move(paintInvalidationState->paintOffset());
         if (paintInvalidationState->isClipped())
@@ -72,15 +75,32 @@ LayoutRect SVGRenderSupport::clippedOverflowRectForPaintInvalidation(const Rende
         return rect;
     }
 
-    object->computeFloatRectForPaintInvalidation(paintInvalidationContainer, paintInvalidationRect, paintInvalidationState);
-    return enclosingLayoutRect(paintInvalidationRect);
+    LayoutRect rect;
+    const RenderSVGRoot& svgRoot = mapRectToSVGRootForPaintInvalidation(object, paintInvalidationRect, rect);
+    svgRoot.mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, paintInvalidationState);
+    return rect;
 }
 
-void SVGRenderSupport::computeFloatRectForPaintInvalidation(const RenderObject* object, const RenderLayerModelObject* paintInvalidationContainer, FloatRect& paintInvalidationRect, const PaintInvalidationState* paintInvalidationState)
+const RenderSVGRoot& SVGRenderSupport::mapRectToSVGRootForPaintInvalidation(const RenderObject* object, const FloatRect& localPaintInvalidationRect, LayoutRect& rect)
 {
-    // Translate to coords in our parent renderer, and then call computeFloatRectForPaintInvalidation() on our parent.
-    paintInvalidationRect = object->localToParentTransform().mapRect(paintInvalidationRect);
-    object->parent()->computeFloatRectForPaintInvalidation(paintInvalidationContainer, paintInvalidationRect, paintInvalidationState);
+    ASSERT(object && object->isSVG() && !object->isSVGRoot());
+
+    FloatRect paintInvalidationRect = localPaintInvalidationRect;
+    // FIXME: Building the transform to the SVG root border box and then doing
+    // mapRect() with that would be slightly more efficient, but requires some
+    // additions to AffineTransform (preMultiply, preTranslate) to avoid
+    // excessive copying and to get a similar fast-path for translations.
+    const RenderObject* parent = object;
+    do {
+        paintInvalidationRect = parent->localToParentTransform().mapRect(paintInvalidationRect);
+        parent = parent->parent();
+    } while (!parent->isSVGRoot());
+
+    const RenderSVGRoot& svgRoot = toRenderSVGRoot(*parent);
+
+    paintInvalidationRect = svgRoot.localToBorderBoxTransform().mapRect(paintInvalidationRect);
+    rect = enclosingIntRectIfNotEmpty(paintInvalidationRect);
+    return svgRoot;
 }
 
 void SVGRenderSupport::mapLocalToContainer(const RenderObject* object, const RenderLayerModelObject* paintInvalidationContainer, TransformState& transformState, bool* wasFixed, const PaintInvalidationState* paintInvalidationState)
@@ -165,11 +185,6 @@ void SVGRenderSupport::computeContainerBoundingBoxes(const RenderObject* contain
     }
 
     paintInvalidationBoundingBox = strokeBoundingBox;
-}
-
-bool SVGRenderSupport::paintInfoIntersectsPaintInvalidationRect(const FloatRect& localPaintInvalidationRect, const AffineTransform& localTransform, const PaintInfo& paintInfo)
-{
-    return localTransform.mapRect(localPaintInvalidationRect).intersects(paintInfo.rect);
 }
 
 const RenderSVGRoot* SVGRenderSupport::findTreeRootObject(const RenderObject* start)
@@ -275,11 +290,6 @@ bool SVGRenderSupport::isOverflowHidden(const RenderObject* object)
     return object->style()->overflowX() == OHIDDEN || object->style()->overflowX() == OSCROLL;
 }
 
-bool SVGRenderSupport::isRenderingClipPathAsMaskImage(const RenderObject& object)
-{
-    return object.frame() && object.frame()->view() && object.frame()->view()->paintBehavior() & PaintBehaviorRenderingClipPathAsMask;
-}
-
 void SVGRenderSupport::intersectPaintInvalidationRectWithResources(const RenderObject* renderer, FloatRect& paintInvalidationRect)
 {
     ASSERT(renderer);
@@ -352,7 +362,7 @@ void SVGRenderSupport::applyStrokeStyleToContext(GraphicsContext* context, const
     context->setLineJoin(svgStyle.joinStyle());
     context->setMiterLimit(svgStyle.strokeMiterLimit());
 
-    RefPtr<SVGLengthList> dashes = svgStyle.strokeDashArray();
+    RefPtrWillBeRawPtr<SVGLengthList> dashes = svgStyle.strokeDashArray();
     if (dashes->isEmpty())
         return;
 
@@ -381,7 +391,7 @@ void SVGRenderSupport::applyStrokeStyleToStrokeData(StrokeData* strokeData, cons
     strokeData->setLineJoin(svgStyle.joinStyle());
     strokeData->setMiterLimit(svgStyle.strokeMiterLimit());
 
-    RefPtr<SVGLengthList> dashes = svgStyle.strokeDashArray();
+    RefPtrWillBeRawPtr<SVGLengthList> dashes = svgStyle.strokeDashArray();
     if (dashes->isEmpty())
         return;
 
@@ -393,12 +403,13 @@ void SVGRenderSupport::applyStrokeStyleToStrokeData(StrokeData* strokeData, cons
     strokeData->setLineDash(dashArray, svgStyle.strokeDashOffset()->value(lengthContext));
 }
 
-bool SVGRenderSupport::updateGraphicsContext(GraphicsContextStateSaver& stateSaver, RenderStyle* style, RenderObject& renderer, RenderSVGResourceMode resourceMode, const AffineTransform* additionalPaintServerTransform)
+bool SVGRenderSupport::updateGraphicsContext(const PaintInfo& paintInfo, GraphicsContextStateSaver& stateSaver, RenderStyle* style, RenderObject& renderer, RenderSVGResourceMode resourceMode, const AffineTransform* additionalPaintServerTransform)
 {
     ASSERT(style);
+    ASSERT(paintInfo.context == stateSaver.context());
 
-    GraphicsContext* context = stateSaver.context();
-    if (isRenderingClipPathAsMaskImage(renderer)) {
+    GraphicsContext* context = paintInfo.context;
+    if (paintInfo.isRenderingClipPathAsMaskImage()) {
         if (resourceMode == ApplyToStrokeMode)
             return false;
         context->setAlphaAsFloat(1);
@@ -432,6 +443,29 @@ bool SVGRenderSupport::isRenderableTextNode(const RenderObject* object)
     ASSERT(object->isText());
     // <br> is marked as text, but is not handled by the SVG rendering code-path.
     return object->isSVGInlineText() && !toRenderSVGInlineText(object)->hasEmptyText();
+}
+
+bool SVGRenderSupport::willIsolateBlendingDescendantsForStyle(const RenderStyle* style)
+{
+    ASSERT(style);
+    const SVGRenderStyle& svgStyle = style->svgStyle();
+
+    return style->hasIsolation() || style->opacity() < 1 || style->hasBlendMode()
+        || svgStyle.hasFilter() || svgStyle.hasMasker() || svgStyle.hasClipper();
+}
+
+bool SVGRenderSupport::willIsolateBlendingDescendantsForObject(const RenderObject* object)
+{
+    if (object->isSVGHiddenContainer())
+        return false;
+    if (!object->isSVGRoot() && !object->isSVGContainer())
+        return false;
+    return willIsolateBlendingDescendantsForStyle(object->style());
+}
+
+bool SVGRenderSupport::isIsolationRequired(const RenderObject* object)
+{
+    return willIsolateBlendingDescendantsForObject(object) && object->hasNonIsolatedBlendingDescendants();
 }
 
 }

@@ -81,22 +81,22 @@ TEST_F(DataReductionProxyParamsTest, NoDevOrigin) {
 }
 
 TEST_F(DataReductionProxyParamsTest, Flags) {
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kDataReductionProxy,
       TestDataReductionProxyParams::FlagOrigin());
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kDataReductionProxyFallback,
       TestDataReductionProxyParams::FlagFallbackOrigin());
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kDataReductionSSLProxy,
       TestDataReductionProxyParams::FlagSSLOrigin());
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kDataReductionProxyAlt,
       TestDataReductionProxyParams::FlagAltOrigin());
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kDataReductionProxyAltFallback,
       TestDataReductionProxyParams::FlagAltFallbackOrigin());
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kDataReductionProxyProbeURL,
       TestDataReductionProxyParams::FlagProbeURL());
   TestDataReductionProxyParams params(
@@ -1191,6 +1191,13 @@ TEST_F(DataReductionProxyParamsTest, AreProxiesBypassedRetryDelay) {
                                            &min_retry_delay);
   EXPECT_TRUE(was_bypassed);
   EXPECT_EQ(delay, min_retry_delay);
+}
+
+TEST_F(DataReductionProxyParamsTest, AndroidOnePromoFieldTrial) {
+  EXPECT_TRUE(DataReductionProxyParams::IsIncludedInAndroidOnePromoFieldTrial(
+      "google/sprout/sprout:4.4.4/KPW53/1379542:user/release-keys"));
+  EXPECT_FALSE(DataReductionProxyParams::IsIncludedInAndroidOnePromoFieldTrial(
+      "google/hammerhead/hammerhead:5.0/LRX210/1570415:user/release-keys"));
 }
 
 }  // namespace data_reduction_proxy

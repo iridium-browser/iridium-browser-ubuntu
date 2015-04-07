@@ -10,7 +10,7 @@ class ToughScrollingCasesPage(page_module.Page):
   def __init__(self, url, page_set):
     super(ToughScrollingCasesPage, self).__init__(url=url, page_set=page_set)
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'ScrollAction', is_smooth=True)
     action_runner.ScrollPage()
@@ -26,7 +26,7 @@ class ToughFastScrollingCasesPage(page_module.Page):
       labels=['fastscrolling'])
     self.speed_in_pixels_per_second = speed_in_pixels_per_second
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'ScrollAction', is_smooth=True)
     action_runner.ScrollPage(
@@ -56,7 +56,7 @@ class ToughScrollingCasesPageSet(page_set_module.PageSet):
     ]
 
     for url in urls_list:
-      self.AddPage(ToughScrollingCasesPage(url, self))
+      self.AddUserStory(ToughScrollingCasesPage(url, self))
 
     fast_scrolling_page_name_list = [
       'text',
@@ -69,7 +69,7 @@ class ToughScrollingCasesPageSet(page_set_module.PageSet):
 
     for name in fast_scrolling_page_name_list:
       for speed in fast_scrolling_speed_list:
-        self.AddPage(ToughFastScrollingCasesPage(
+        self.AddUserStory(ToughFastScrollingCasesPage(
           'file://tough_scrolling_cases/' + name + '.html',
           name + '_' + str(speed).zfill(5) + '_pixels_per_second',
           speed,

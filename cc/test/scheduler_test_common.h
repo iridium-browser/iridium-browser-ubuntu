@@ -143,6 +143,8 @@ class TestSchedulerFrameSourcesConstructor
   BeginFrameSource* ConstructPrimaryFrameSource(Scheduler* scheduler) override;
   BeginFrameSource* ConstructBackgroundFrameSource(
       Scheduler* scheduler) override;
+  BeginFrameSource* ConstructUnthrottledFrameSource(
+      Scheduler* scheduler) override;
 
   OrderedSimpleTaskRunner* test_task_runner_;
   TestNowSource* now_src_;
@@ -162,16 +164,19 @@ class TestScheduler : public Scheduler {
       const SchedulerSettings& scheduler_settings,
       int layer_tree_host_id,
       const scoped_refptr<OrderedSimpleTaskRunner>& task_runner,
-      base::PowerMonitor* power_monitor) {
+      base::PowerMonitor* power_monitor,
+      scoped_ptr<BeginFrameSource> external_begin_frame_source) {
     TestSchedulerFrameSourcesConstructor frame_sources_constructor(
         task_runner.get(), now_src.get());
-    return make_scoped_ptr(new TestScheduler(now_src,
-                                             client,
-                                             scheduler_settings,
-                                             layer_tree_host_id,
-                                             task_runner,
-                                             power_monitor,
-                                             &frame_sources_constructor));
+    return make_scoped_ptr(new TestScheduler(
+                                   now_src,
+                                   client,
+                                   scheduler_settings,
+                                   layer_tree_host_id,
+                                   task_runner,
+                                   power_monitor,
+                                   &frame_sources_constructor,
+                                   external_begin_frame_source.Pass()));
   }
 
   // Extra test helper functionality
@@ -179,9 +184,19 @@ class TestScheduler : public Scheduler {
     return begin_retro_frame_args_.empty();
   }
 
+  bool CanStart() const { return state_machine_.CanStartForTesting(); }
+
   BeginFrameSource& frame_source() { return *frame_source_; }
+  bool FrameProductionThrottled() { return throttle_frame_production_; }
 
   ~TestScheduler() override;
+
+  void NotifyReadyToCommitThenActivateIfNeeded() {
+    NotifyReadyToCommit();
+    if (settings_.impl_side_painting) {
+      NotifyReadyToActivate();
+    }
+  }
 
  protected:
   // Overridden from Scheduler.
@@ -195,7 +210,8 @@ class TestScheduler : public Scheduler {
       int layer_tree_host_id,
       const scoped_refptr<OrderedSimpleTaskRunner>& test_task_runner,
       base::PowerMonitor* power_monitor,
-      TestSchedulerFrameSourcesConstructor* frame_sources_constructor);
+      TestSchedulerFrameSourcesConstructor* frame_sources_constructor,
+      scoped_ptr<BeginFrameSource> external_begin_frame_source);
 
   scoped_refptr<TestNowSource> now_src_;
 };

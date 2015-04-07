@@ -26,6 +26,7 @@
 #include "tools/gn/source_dir.h"
 #include "tools/gn/source_file.h"
 #include "tools/gn/standard_out.h"
+#include "tools/gn/switches.h"
 #include "tools/gn/tokenizer.h"
 #include "tools/gn/trace.h"
 #include "tools/gn/value.h"
@@ -58,6 +59,15 @@ extern const char kDotfile_Help[] =
     "      Label of the build config file. This file will be used to set up\n"
     "      the build file execution environment for each toolchain.\n"
     "\n"
+    "  check_targets [optional]\n"
+    "      A list of labels and label patterns that should be checked when\n"
+    "      running \"gn check\" or \"gn gen --check\". If unspecified, all\n"
+    "      targets will be checked. If it is the empty list, no targets will\n"
+    "      be checked.\n"
+    "\n"
+    "      The format of this list is identical to that of \"visibility\"\n"
+    "      so see \"gn help visibility\" for examples.\n"
+    "\n"
     "  root [optional]\n"
     "      Label of the root build target. The GN build will start by loading\n"
     "      the build file containing this target name. This defaults to\n"
@@ -79,28 +89,16 @@ extern const char kDotfile_Help[] =
     "\n"
     "  buildconfig = \"//build/config/BUILDCONFIG.gn\"\n"
     "\n"
+    "  check_targets = [\n"
+    "    \"//doom_melon/*\",  # Check everything in this subtree.\n"
+    "    \"//tools:mind_controlling_ant\",  # Check this specific target.\n"
+    "  ]\n"
+    "\n"
     "  root = \"//:root\"\n"
     "\n"
     "  secondary_source = \"//build/config/temporary_buildfiles/\"\n";
 
 namespace {
-
-// More logging.
-const char kSwitchVerbose[] = "v";
-
-// Set build args.
-const char kSwitchArgs[] = "args";
-
-// Set root dir.
-const char kSwitchRoot[] = "root";
-
-// Set dotfile name.
-const char kSwitchDotfile[] = "dotfile";
-
-// Enable timing.
-const char kTimeSwitch[] = "time";
-
-const char kTracelogSwitch[] = "tracelog";
 
 const base::FilePath::CharType kGnFile[] = FILE_PATH_LITERAL(".gn");
 
@@ -188,20 +186,27 @@ bool CommonSetup::RunPostMessageLoop() {
   }
 
   if (check_public_headers_) {
-    if (!commands::CheckPublicHeaders(&build_settings_,
-                                      builder_->GetAllResolvedTargets(),
-                                      std::vector<const Target*>(),
-                                      false)) {
+    std::vector<const Target*> all_targets = builder_->GetAllResolvedTargets();
+    std::vector<const Target*> to_check;
+    if (check_patterns()) {
+      commands::FilterTargetsByPatterns(all_targets, *check_patterns(),
+                                        &to_check);
+    } else {
+      to_check = all_targets;
+    }
+
+    if (!commands::CheckPublicHeaders(&build_settings_, all_targets,
+                                      to_check, false)) {
       return false;
     }
   }
 
   // Write out tracing and timing if requested.
-  const CommandLine* cmdline = CommandLine::ForCurrentProcess();
-  if (cmdline->HasSwitch(kTimeSwitch))
+  const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
+  if (cmdline->HasSwitch(switches::kTime))
     PrintLongHelp(SummarizeTraces());
-  if (cmdline->HasSwitch(kTracelogSwitch))
-    SaveTraces(cmdline->GetSwitchValuePath(kTracelogSwitch));
+  if (cmdline->HasSwitch(switches::kTracelog))
+    SaveTraces(cmdline->GetSwitchValuePath(switches::kTracelog));
 
   return true;
 }
@@ -226,11 +231,11 @@ Setup::~Setup() {
 }
 
 bool Setup::DoSetup(const std::string& build_dir, bool force_create) {
-  CommandLine* cmdline = CommandLine::ForCurrentProcess();
+  base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
 
-  scheduler_.set_verbose_logging(cmdline->HasSwitch(kSwitchVerbose));
-  if (cmdline->HasSwitch(kTimeSwitch) ||
-      cmdline->HasSwitch(kTracelogSwitch))
+  scheduler_.set_verbose_logging(cmdline->HasSwitch(switches::kVerbose));
+  if (cmdline->HasSwitch(switches::kTime) ||
+      cmdline->HasSwitch(switches::kTracelog))
     EnableTracing();
 
   ScopedTrace setup_trace(TraceItem::TRACE_SETUP, "DoSetup");
@@ -245,6 +250,13 @@ bool Setup::DoSetup(const std::string& build_dir, bool force_create) {
   // Must be after FillSourceDir to resolve.
   if (!FillBuildDir(build_dir, !force_create))
     return false;
+
+  // Check for unused variables in the .gn file.
+  Err err;
+  if (!dotfile_scope_.CheckForUnusedVars(&err)) {
+    err.PrintToStdout();
+    return false;
+  }
 
   if (fill_arguments_) {
     if (!FillArguments(*cmdline))
@@ -270,11 +282,11 @@ SourceFile Setup::GetBuildArgFile() const {
   return SourceFile(build_settings_.build_dir().value() + kBuildArgFileName);
 }
 
-bool Setup::FillArguments(const CommandLine& cmdline) {
+bool Setup::FillArguments(const base::CommandLine& cmdline) {
   // Use the args on the command line if specified, and save them. Do this even
   // if the list is empty (this means clear any defaults).
-  if (cmdline.HasSwitch(kSwitchArgs)) {
-    if (!FillArgsFromCommandLine(cmdline.GetSwitchValueASCII(kSwitchArgs)))
+  if (cmdline.HasSwitch(switches::kArgs)) {
+    if (!FillArgsFromCommandLine(cmdline.GetSwitchValueASCII(switches::kArgs)))
       return false;
     SaveArgsToFile();
     return true;
@@ -385,12 +397,13 @@ bool Setup::SaveArgsToFile() {
   return true;
 }
 
-bool Setup::FillSourceDir(const CommandLine& cmdline) {
+bool Setup::FillSourceDir(const base::CommandLine& cmdline) {
   // Find the .gn file.
   base::FilePath root_path;
 
   // Prefer the command line args to the config file.
-  base::FilePath relative_root_path = cmdline.GetSwitchValuePath(kSwitchRoot);
+  base::FilePath relative_root_path =
+      cmdline.GetSwitchValuePath(switches::kRoot);
   if (!relative_root_path.empty()) {
     root_path = base::MakeAbsoluteFilePath(relative_root_path);
     if (root_path.empty()) {
@@ -403,7 +416,8 @@ bool Setup::FillSourceDir(const CommandLine& cmdline) {
     // When --root is specified, an alternate --dotfile can also be set.
     // --dotfile should be a real file path and not a "//foo" source-relative
     // path.
-    base::FilePath dot_file_path = cmdline.GetSwitchValuePath(kSwitchDotfile);
+    base::FilePath dot_file_path =
+        cmdline.GetSwitchValuePath(switches::kDotfile);
     if (dot_file_path.empty()) {
       dotfile_name_ = root_path.Append(kGnFile);
     } else {
@@ -441,7 +455,7 @@ bool Setup::FillSourceDir(const CommandLine& cmdline) {
 bool Setup::FillBuildDir(const std::string& build_dir, bool require_exists) {
   SourceDir resolved =
       SourceDirForCurrentDirectory(build_settings_.root_path()).
-          ResolveRelativeDir(build_dir);
+    ResolveRelativeDir(build_dir, build_settings_.root_path_utf8());
   if (resolved.is_null()) {
     Err(Location(), "Couldn't resolve build directory.",
         "The build directory supplied (\"" + build_dir + "\") was not valid.").
@@ -528,7 +542,7 @@ bool Setup::RunConfigFile() {
   return true;
 }
 
-bool Setup::FillOtherConfig(const CommandLine& cmdline) {
+bool Setup::FillOtherConfig(const base::CommandLine& cmdline) {
   Err err;
 
   // Secondary source path, read from the config file if present.
@@ -576,6 +590,28 @@ bool Setup::FillOtherConfig(const CommandLine& cmdline) {
   }
   build_settings_.set_build_config_file(
       SourceFile(build_config_value->string_value()));
+
+  // Targets to check.
+  const Value* check_targets_value =
+      dotfile_scope_.GetValue("check_targets", true);
+  if (check_targets_value) {
+    check_patterns_.reset(new std::vector<LabelPattern>);
+
+    // Fill the list of targets to check.
+    if (!check_targets_value->VerifyTypeIs(Value::LIST, &err)) {
+      err.PrintToStdout();
+      return false;
+    }
+    SourceDir current_dir("//");
+    for (const auto& item : check_targets_value->list_value()) {
+      check_patterns_->push_back(
+          LabelPattern::GetPattern(current_dir, item, &err));
+      if (err.has_error()) {
+        err.PrintToStdout();
+        return false;
+      }
+    }
+  }
 
   return true;
 }

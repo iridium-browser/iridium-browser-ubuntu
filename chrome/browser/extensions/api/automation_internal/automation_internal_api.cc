@@ -51,7 +51,7 @@ const char kRendererDestroyed[] = "The tab was closed.";
 const char kNoMainFrame[] = "No main frame.";
 const char kNoDocument[] = "No document.";
 const char kNodeDestroyed[] =
-    "querySelector sent on node which is no longer in the tree.";
+    "domQuerySelector sent on node which is no longer in the tree.";
 
 // Handles sending and receiving IPCs for a single querySelector request. On
 // creation, sends the request IPC, and is destroyed either when the response is
@@ -83,7 +83,7 @@ class QuerySelectorHandler : public content::WebContentsObserver {
     // There may be several requests in flight; check this response matches.
     int message_request_id = 0;
     PickleIterator iter(message);
-    if (!message.ReadInt(&iter, &message_request_id))
+    if (!iter.ReadInt(&message_request_id))
       return false;
 
     if (message_request_id != request_id_)
@@ -375,14 +375,14 @@ AutomationInternalQuerySelectorFunction::Run() {
 
   if (params->args.tree_id == kDesktopTreeID) {
     return RespondNow(
-        Error("querySelector queries may not be used on the desktop."));
+        Error("domQuerySelector queries may not be used on the desktop."));
   }
   AXTreeIDRegistry::FrameID frame_id =
       AXTreeIDRegistry::GetInstance()->GetFrameID(params->args.tree_id);
   content::RenderFrameHost* rfh =
       content::RenderFrameHost::FromID(frame_id.first, frame_id.second);
   if (!rfh)
-    return RespondNow(Error("querySelector query sent on destroyed tree."));
+    return RespondNow(Error("domQuerySelector query sent on destroyed tree."));
 
   content::WebContents* contents =
       content::WebContents::FromRenderFrameHost(rfh);

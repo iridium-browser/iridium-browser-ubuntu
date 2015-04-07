@@ -15,23 +15,27 @@
 <translation id="3622586652998721735">Establecer como combinación predeterminada</translation>
 <translation id="2179565792157161713">Abrir descripción larga en nueva pestaña</translation>
 <translation id="2471847333270902538">Combinación de colores para <ph name="SITE"/>:</translation>
+<translation id="381767806621926835">Haz clic con el botón secundario en cualquier elemento con un atributo &quot;longdesc&quot; o &quot;aria-describedat&quot; para acceder a una descripción larga.</translation>
+<translation id="786423340267544509">Agregar límite a elementos con atributos aria-describedat o longdesc</translation>
 <translation id="690628312087070417">Cuando el cursor de texto avanza a una parte alejada:</translation>
 <translation id="5331422999063554397">Color invertido</translation>
 <translation id="2648340354586434750">Mantén presionado &lt;span class='key'&gt;Opción&lt;/span&gt; para moverte por palabra.</translation>
+<translation id="4769065380738716500">Las imágenes se reemplazaron por su texto &quot;alt&quot;.</translation>
 <translation id="5287723860611749454">&lt;p&gt;Usa las teclas de flecha para desplazarte por el documento. &lt;/p&gt;&lt;p&gt;Haz clic en cualquier lugar para mover el cursor a esa ubicación. &lt;/p&gt; &lt;p&gt;   Presiona &lt;span class='key'&gt;Shift&lt;/span&gt; + las flechas para seleccionar el texto.&lt;/p&gt;</translation>
 <translation id="5558600050691192317">Comandos de teclado</translation>
 <translation id="633394792577263429">Mantén presionado &lt;span class='key'&gt;Control&lt;/span&gt; para moverte por palabra.</translation>
+<translation id="2079545284768500474">Deshacer</translation>
 <translation id="8254860724243898966">Presiona &lt;span class='key'&gt;Alt&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt; (la tecla de Aumentar brillo o F7) para habilitar la navegación por cursor de texto. Vuelve a presionar la misma tecla para inhabilitarla.</translation>
 <translation id="3812541808639806898">Visualizador de texto &quot;Alt&quot; de imágenes</translation>
 <translation id="1287053896835709737">Amarillo sobre negro</translation>
 <translation id="4896660567607030658">Sin comentarios, solo mostrar el cursor</translation>
 <translation id="5631241868147802353">Combinación de colores predeterminada:</translation>
-<translation id="625377550964694810">Todos los elementos HTML con el atributo &quot;longdesc&quot; o &quot;aria-describedat&quot; tendrán un borde grueso y brillante. Si haces clic con el botón derecho, se agregará una opción en el menú contextual para ver la descripción larga.</translation>
 <translation id="5173942593318174089">Resaltar la posición del cursor con una animación</translation>
 <translation id="894241283505723656">Descripciones largas en el menú contextual</translation>
 <translation id="5555153510860501336">El alto contraste está inhabilitado.</translation>
 <translation id="1703735871906654364">Navegación por cursor de texto</translation>
 <translation id="7384431257964758081">El alto contraste está habilitado.</translation>
+<translation id="6550675742724504774">Opciones</translation>
 <translation id="5650358096585648000">Comentarios visuales</translation>
 <translation id="4388820049312272371">Resaltar la posición del cursor con un parpadeo rápido</translation>
 <translation id="4023902424053835668">Explorar el texto o las páginas web con las teclas de flecha</translation>

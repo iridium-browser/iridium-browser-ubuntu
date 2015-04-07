@@ -9,12 +9,14 @@
 #include "base/lazy_instance.h"
 #include "content/child/webmessageportchannel_impl.h"
 #include "content/common/frame_messages.h"
+#include "content/common/frame_replication_state.h"
 #include "content/common/swapped_out_messages.h"
 #include "content/common/view_messages.h"
 #include "content/renderer/child_frame_compositing_helper.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
+#include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebUserGestureIndicator.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -54,7 +56,8 @@ RenderFrameProxy* RenderFrameProxy::CreateProxyToReplaceFrame(
 RenderFrameProxy* RenderFrameProxy::CreateFrameProxy(
     int routing_id,
     int parent_routing_id,
-    int render_view_routing_id) {
+    int render_view_routing_id,
+    const FrameReplicationState& replicated_state) {
   scoped_ptr<RenderFrameProxy> proxy(
       new RenderFrameProxy(routing_id, MSG_ROUTING_NONE));
   RenderViewImpl* render_view = NULL;
@@ -75,6 +78,10 @@ RenderFrameProxy* RenderFrameProxy::CreateFrameProxy(
   }
 
   proxy->Init(web_frame, render_view);
+
+  // Initialize proxy's WebRemoteFrame with the security origin and other
+  // replicated information.
+  proxy->SetReplicatedState(replicated_state);
 
   return proxy.release();
 }
@@ -136,9 +143,20 @@ void RenderFrameProxy::Init(blink::WebRemoteFrame* web_frame,
   CHECK(result.second) << "Inserted a duplicate item.";
 }
 
+bool RenderFrameProxy::IsMainFrameDetachedFromTree() const {
+  return web_frame_->top() == web_frame_ &&
+      render_view_->webview()->mainFrame()->isWebLocalFrame();
+}
+
 void RenderFrameProxy::DidCommitCompositorFrame() {
   if (compositing_helper_.get())
     compositing_helper_->DidCommitCompositorFrame();
+}
+
+void RenderFrameProxy::SetReplicatedState(const FrameReplicationState& state) {
+  DCHECK(web_frame_);
+  web_frame_->setReplicatedOrigin(blink::WebSecurityOrigin::createFromString(
+      blink::WebString::fromUTF8(state.origin.string())));
 }
 
 bool RenderFrameProxy::OnMessageReceived(const IPC::Message& msg) {
@@ -149,24 +167,16 @@ bool RenderFrameProxy::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER_GENERIC(FrameMsg_CompositorFrameSwapped,
                                 OnCompositorFrameSwapped(msg))
     IPC_MESSAGE_HANDLER(FrameMsg_DisownOpener, OnDisownOpener)
+    IPC_MESSAGE_HANDLER(FrameMsg_DidStartLoading, OnDidStartLoading)
+    IPC_MESSAGE_HANDLER(FrameMsg_DidStopLoading, OnDidStopLoading)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
-  // If |handled| is true, |this| may have been deleted.
-  if (handled)
-    return true;
-
-  RenderFrameImpl* render_frame =
-      RenderFrameImpl::FromRoutingID(frame_routing_id_);
-  return render_frame && render_frame->OnMessageReceived(msg);
+  // Note: If |handled| is true, |this| may have been deleted.
+  return handled;
 }
 
 bool RenderFrameProxy::Send(IPC::Message* message) {
-  if (!SwappedOutMessages::CanSendWhileSwappedOut(message)) {
-    delete message;
-    return false;
-  }
-  message->set_routing_id(routing_id_);
   return RenderThread::Get()->Send(message);
 }
 
@@ -186,18 +196,19 @@ void RenderFrameProxy::OnCompositorFrameSwapped(const IPC::Message& message) {
     return;
 
   scoped_ptr<cc::CompositorFrame> frame(new cc::CompositorFrame);
-  param.a.frame.AssignTo(frame.get());
+  get<0>(param).frame.AssignTo(frame.get());
 
   if (!compositing_helper_.get()) {
     compositing_helper_ =
         ChildFrameCompositingHelper::CreateForRenderFrameProxy(this);
     compositing_helper_->EnableCompositing(true);
   }
-  compositing_helper_->OnCompositorFrameSwapped(frame.Pass(),
-                                                param.a.producing_route_id,
-                                                param.a.output_surface_id,
-                                                param.a.producing_host_id,
-                                                param.a.shared_memory_handle);
+  compositing_helper_->OnCompositorFrameSwapped(
+      frame.Pass(),
+      get<0>(param).producing_route_id,
+      get<0>(param).output_surface_id,
+      get<0>(param).producing_host_id,
+      get<0>(param).shared_memory_handle);
 }
 
 void RenderFrameProxy::OnDisownOpener() {
@@ -219,6 +230,20 @@ void RenderFrameProxy::OnDisownOpener() {
 
   if (web_frame_->opener())
     web_frame_->setOpener(NULL);
+}
+
+void RenderFrameProxy::OnDidStartLoading() {
+  if (IsMainFrameDetachedFromTree())
+    return;
+
+  web_frame_->didStartLoading();
+}
+
+void RenderFrameProxy::OnDidStopLoading() {
+  if (IsMainFrameDetachedFromTree())
+    return;
+
+  web_frame_->didStopLoading();
 }
 
 void RenderFrameProxy::frameDetached() {

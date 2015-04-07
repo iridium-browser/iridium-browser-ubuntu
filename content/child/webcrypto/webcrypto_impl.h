@@ -67,7 +67,7 @@ class WebCryptoImpl : public blink::WebCrypto {
                                unsigned int signature_size,
                                const unsigned char* data,
                                unsigned int data_size,
-                              blink::WebCryptoResult result);
+                               blink::WebCryptoResult result);
   virtual void wrapKey(blink::WebCryptoKeyFormat format,
                        const blink::WebCryptoKey& key,
                        const blink::WebCryptoKey& wrapping_key,
@@ -83,6 +83,19 @@ class WebCryptoImpl : public blink::WebCrypto {
       bool extractable,
       blink::WebCryptoKeyUsageMask usages,
       blink::WebCryptoResult result);
+
+  virtual void deriveBits(const blink::WebCryptoAlgorithm& algorithm,
+                          const blink::WebCryptoKey& base_key,
+                          unsigned int length_bits,
+                          blink::WebCryptoResult result);
+
+  virtual void deriveKey(const blink::WebCryptoAlgorithm& algorithm,
+                         const blink::WebCryptoKey& base_key,
+                         const blink::WebCryptoAlgorithm& import_algorithm,
+                         const blink::WebCryptoAlgorithm& key_length_algorithm,
+                         bool extractable,
+                         blink::WebCryptoKeyUsageMask usages,
+                         blink::WebCryptoResult result);
 
   // This method returns a digestor object that can be used to synchronously
   // compute a digest one chunk at a time. Thus, the consume does not need to

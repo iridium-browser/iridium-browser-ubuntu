@@ -5,12 +5,11 @@
 #ifndef UI_OZONE_PLATFORM_DRI_DRI_GPU_PLATFORM_SUPPORT_HOST_H_
 #define UI_OZONE_PLATFORM_DRI_DRI_GPU_PLATFORM_SUPPORT_HOST_H_
 
-#include <queue>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/observer_list.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/ozone/platform/dri/hardware_cursor_delegate.h"
 #include "ui/ozone/public/gpu_platform_support_host.h"
 
 class SkBitmap;
@@ -24,13 +23,10 @@ namespace ui {
 class ChannelObserver;
 
 class DriGpuPlatformSupportHost : public GpuPlatformSupportHost,
-                                  public HardwareCursorDelegate,
                                   public IPC::Sender {
  public:
   DriGpuPlatformSupportHost();
   ~DriGpuPlatformSupportHost() override;
-
-  bool IsConnected() const;
 
   void RegisterHandler(GpuPlatformSupportHost* handler);
   void UnregisterHandler(GpuPlatformSupportHost* handler);
@@ -38,8 +34,13 @@ class DriGpuPlatformSupportHost : public GpuPlatformSupportHost,
   void AddChannelObserver(ChannelObserver* observer);
   void RemoveChannelObserver(ChannelObserver* observer);
 
+  bool IsConnected();
+
   // GpuPlatformSupportHost:
-  void OnChannelEstablished(int host_id, IPC::Sender* sender) override;
+  void OnChannelEstablished(
+      int host_id,
+      scoped_refptr<base::SingleThreadTaskRunner> send_runner,
+      const base::Callback<void(IPC::Message*)>& send_callback) override;
   void OnChannelDestroyed(int host_id) override;
 
   // IPC::Listener:
@@ -48,22 +49,21 @@ class DriGpuPlatformSupportHost : public GpuPlatformSupportHost,
   // IPC::Sender:
   bool Send(IPC::Message* message) override;
 
-  // HardwareCursorDelegate:
+  // Cursor-related methods.
   void SetHardwareCursor(gfx::AcceleratedWidget widget,
                          const std::vector<SkBitmap>& bitmaps,
                          const gfx::Point& location,
-                         int frame_delay_ms) override;
+                         int frame_delay_ms);
   void MoveHardwareCursor(gfx::AcceleratedWidget widget,
-                          const gfx::Point& location) override;
+                          const gfx::Point& location);
 
  private:
   int host_id_;
-  IPC::Sender* sender_;
+
+  scoped_refptr<base::SingleThreadTaskRunner> send_runner_;
+  base::Callback<void(IPC::Message*)> send_callback_;
+
   std::vector<GpuPlatformSupportHost*> handlers_;
-  // If messages are sent before the channel is created, store the messages and
-  // delay sending them until the channel is created. These messages are stored
-  // in |queued_messaged_|.
-  std::queue<IPC::Message*> queued_messages_;
   ObserverList<ChannelObserver> channel_observers_;
 };
 

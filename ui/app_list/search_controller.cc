@@ -28,17 +28,18 @@ namespace app_list {
 SearchController::SearchController(SearchBoxModel* search_box,
                                    AppListModel::SearchResults* results,
                                    History* history)
-  : search_box_(search_box),
-    dispatching_query_(false),
-    mixer_(new Mixer(results)),
-    history_(history) {
+    : search_box_(search_box),
+      dispatching_query_(false),
+      mixer_(new Mixer(results)),
+      history_(history),
+      is_voice_query_(false) {
   mixer_->Init();
 }
 
 SearchController::~SearchController() {
 }
 
-void SearchController::Start() {
+void SearchController::Start(bool is_voice_query) {
   Stop();
 
   base::string16 query;
@@ -48,9 +49,11 @@ void SearchController::Start() {
   for (Providers::iterator it = providers_.begin();
        it != providers_.end();
        ++it) {
-    (*it)->Start(query);
+    (*it)->Start(is_voice_query, query);
   }
   dispatching_query_ = false;
+
+  is_voice_query_ = is_voice_query;
 
   OnResultsChanged();
 
@@ -108,7 +111,7 @@ void SearchController::OnResultsChanged() {
         ->swap(known_results);
   }
 
-  mixer_->MixAndPublish(known_results);
+  mixer_->MixAndPublish(is_voice_query_, known_results);
 }
 
 }  // namespace app_list

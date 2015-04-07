@@ -18,8 +18,8 @@
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/rect_f.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
 #include "url/gurl.h"
 
 namespace ui {
@@ -51,14 +51,13 @@ class ContentViewCoreImpl : public ContentViewCore,
   virtual WebContents* GetWebContents() const override;
   virtual ui::ViewAndroid* GetViewAndroid() const override;
   virtual ui::WindowAndroid* GetWindowAndroid() const override;
-  virtual scoped_refptr<cc::Layer> GetLayer() const override;
+  virtual const scoped_refptr<cc::Layer>& GetLayer() const override;
   virtual void ShowPastePopup(int x, int y) override;
   virtual void GetScaledContentBitmap(
       float scale,
       SkColorType color_type,
       gfx::Rect src_subrect,
-      const base::Callback<void(bool, const SkBitmap&)>& result_callback)
-      override;
+      ReadbackRequestCallback& result_callback) override;
   virtual float GetDpiScale() const override;
   virtual void PauseOrResumeGeolocation(bool should_pause) override;
   virtual void RequestTextSurroundingSelection(
@@ -120,7 +119,8 @@ class ContentViewCoreImpl : public ContentViewCore,
                                jlong time_ms,
                                jfloat x,
                                jfloat y,
-                               jfloat vertical_axis);
+                               jfloat vertical_axis,
+                               jfloat horizontal_axis);
   void ScrollBegin(JNIEnv* env, jobject obj, jlong time_ms,
                    jfloat x, jfloat y, jfloat hintx, jfloat hinty);
   void ScrollEnd(JNIEnv* env, jobject obj, jlong time_ms);
@@ -230,9 +230,9 @@ class ContentViewCoreImpl : public ContentViewCore,
                          InputEventAckState ack_result);
   bool FilterInputEvent(const blink::WebInputEvent& event);
   void OnSelectionChanged(const std::string& text);
-  void OnSelectionEvent(SelectionEventType event,
+  void OnSelectionEvent(ui::SelectionEventType event,
                         const gfx::PointF& anchor_position);
-  scoped_ptr<TouchHandleDrawable> CreatePopupTouchHandleDrawable();
+  scoped_ptr<ui::TouchHandleDrawable> CreatePopupTouchHandleDrawable();
 
   void StartContentIntent(const GURL& content_url);
 
@@ -268,7 +268,8 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   gfx::Size GetPhysicalBackingSize() const;
   gfx::Size GetViewportSizeDip() const;
-  float GetTopControlsLayoutHeightDip() const;
+  bool DoTopControlsShrinkBlinkSize() const;
+  float GetTopControlsHeightDip() const;
 
   void AttachLayer(scoped_refptr<cc::Layer> layer);
   void RemoveLayer(scoped_refptr<cc::Layer> layer);
@@ -277,6 +278,8 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   void SelectBetweenCoordinates(const gfx::PointF& base,
                                 const gfx::PointF& extent);
+
+  void OnShowUnhandledTapUIIfNeeded(int x_dip, int y_dip);
 
  private:
   class ContentViewUserData;
@@ -296,13 +299,13 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   void InitWebContents();
 
-  RenderWidgetHostViewAndroid* GetRenderWidgetHostViewAndroid();
+  RenderWidgetHostViewAndroid* GetRenderWidgetHostViewAndroid() const;
 
   blink::WebGestureEvent MakeGestureEvent(
       blink::WebInputEvent::Type type, int64 time_ms, float x, float y) const;
 
   gfx::Size GetViewportSizePix() const;
-  int GetTopControlsLayoutHeightPix() const;
+  int GetTopControlsHeightPix() const;
 
   void SendGestureEvent(const blink::WebGestureEvent& event);
 

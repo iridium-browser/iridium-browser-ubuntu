@@ -50,25 +50,43 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
   bool CanHandle(const std::string& app_id) const override;
 
   // content::PushMessagingService implementation:
-  void Register(
-      const GURL& origin,
+  GURL GetPushEndpoint() override;
+  void RegisterFromDocument(
+      const GURL& requesting_origin,
       int64 service_worker_registration_id,
       const std::string& sender_id,
       int renderer_id,
       int render_frame_id,
-      bool user_gesture,
+      bool user_visible_only,
       const content::PushMessagingService::RegisterCallback& callback) override;
+  void RegisterFromWorker(
+      const GURL& requesting_origin,
+      int64 service_worker_registration_id,
+      const std::string& sender_id,
+      const content::PushMessagingService::RegisterCallback& callback) override;
+  void Unregister(
+      const GURL& requesting_origin,
+      int64 service_worker_registration_id,
+      const content::PushMessagingService::UnregisterCallback&) override;
   blink::WebPushPermissionStatus GetPermissionStatus(
       const GURL& requesting_origin,
-      int renderer_id,
-      int render_frame_id) override;
+      const GURL& embedding_origin) override;
 
   void SetProfileForTesting(Profile* profile);
 
  private:
+  void IncreasePushRegistrationCount(int add);
+  void DecreasePushRegistrationCount(int subtract);
+
   void DeliverMessageCallback(const PushMessagingApplicationId& application_id,
                               const GCMClient::IncomingMessage& message,
                               content::PushDeliveryStatus status);
+
+  // Developers are required to display a Web Notification in response to an
+  // incoming push message in order to clarify to the user that something has
+  // happened in the background. When they forget to do so, display a default
+  // notification on their behalf.
+  void RequireUserVisibleUX(const PushMessagingApplicationId& application_id);
 
   void RegisterEnd(
       const content::PushMessagingService::RegisterCallback& callback,
@@ -86,9 +104,24 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
       const content::PushMessagingService::RegisterCallback& callback,
       bool allow);
 
+  void Unregister(const PushMessagingApplicationId& application_id,
+                  const content::PushMessagingService::UnregisterCallback&);
+
+  void DidUnregister(const content::PushMessagingService::UnregisterCallback&,
+                     GCMClient::Result result);
+
+  // Helper method that checks if a given origin is allowed to use Push.
+  bool HasPermission(const GURL& origin);
+
+  // Adds this service as an app handler to the GCMDriver if it has not been
+  // added yet.
+  void AddAppHandlerIfNecessary();
+
   GCMProfileService* gcm_profile_service_;  // It owns us.
 
   Profile* profile_;  // It owns our owner.
+
+  int push_registration_count_;
 
   base::WeakPtrFactory<PushMessagingServiceImpl> weak_factory_;
 

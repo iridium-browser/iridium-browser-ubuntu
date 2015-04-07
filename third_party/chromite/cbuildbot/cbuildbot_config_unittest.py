@@ -3,7 +3,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Unittests for config.  Needs to be run inside of chroot for mox."""
+"""Unittests for config."""
 
 from __future__ import print_function
 
@@ -20,8 +20,11 @@ from chromite.lib import cros_test_lib
 from chromite.lib import git
 from chromite.lib import osutils
 
-CHROMIUM_WATCHING_URL = ('http://src.chromium.org/chrome/trunk/tools/build/'
-    'masters/master.chromium.chromiumos/master_chromiumos_cros_cfg.py')
+
+CHROMIUM_WATCHING_URL = (
+    'http://src.chromium.org/chrome/trunk/tools/build/masters/'
+    'master.chromium.chromiumos/master_chromiumos_cros_cfg.py'
+)
 
 
 class ConfigDumpTest(cros_test_lib.TestCase):
@@ -30,7 +33,7 @@ class ConfigDumpTest(cros_test_lib.TestCase):
   def testDump(self):
     """Make sure the json & config are kept in sync"""
     cmd = [os.path.join(constants.CHROMITE_BIN_DIR, 'cbuildbot_view_config'),
-           '-d', '--pretty']
+           '-d', '-s', '--pretty']
     dump_file_path = os.path.join(constants.CHROMITE_DIR, 'cbuildbot',
                                   'config_dump.json')
     new_dump = cros_build_lib.RunCommand(cmd, capture_output=True).output
@@ -38,7 +41,7 @@ class ConfigDumpTest(cros_test_lib.TestCase):
     self.assertTrue(
         new_dump == old_dump, 'config_dump.json does not match the '
         'configs defined in cbuildbot_config.py. Run '
-        'bin/cbuildbot_view_config -d --pretty > cbuildbot/config_dump.json')
+        'bin/cbuildbot_view_config -d -s --pretty > cbuildbot/config_dump.json')
 
 
 class ConfigPickleTest(cros_test_lib.TestCase):
@@ -63,8 +66,23 @@ class ConfigClassTest(cros_test_lib.TestCase):
 
     self.assertRaises(AttributeError, getattr, cfg, 'foobar')
 
+  # pylint: disable=protected-access
+  def testDeleteKey(self):
+    base_config = cbuildbot_config._config(foo='bar')
+    inherited_config = base_config.derive(foo=cbuildbot_config.delete_key())
+    self.assertTrue('foo' in base_config)
+    self.assertFalse('foo' in inherited_config)
 
-class CBuildBotTest(cros_test_lib.MoxTestCase):
+  def testDeleteKeys(self):
+    base_config = cbuildbot_config._config(foo='bar',
+                                           baz='bak')
+    inherited_config_1 = base_config.derive(qzr='flp')
+    inherited_config_2 = inherited_config_1.derive(
+        cbuildbot_config.delete_keys(base_config))
+    self.assertEqual(inherited_config_2, {'qzr': 'flp'})
+
+
+class CBuildBotTest(cros_test_lib.TestCase):
   """General tests of cbuildbot_config with respect to cbuildbot."""
 
   def testConfigsKeysMismatch(self):
@@ -72,8 +90,7 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
 
     This checks for mispelled keys, or keys that are somehow removed.
     """
-    # pylint: disable=W0212
-    expected_keys = set(cbuildbot_config._default.keys())
+    expected_keys = set(cbuildbot_config.default.keys())
     for build_name, config in cbuildbot_config.config.iteritems():
       config_keys = set(config.keys())
 
@@ -100,8 +117,8 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
       useflags = config.get('useflags')
       if not useflags is None:
         self.assertTrue(
-          isinstance(useflags, list),
-          'Config %s: useflags should be a list.' % build_name)
+            isinstance(useflags, list),
+            'Config %s: useflags should be a list.' % build_name)
 
   def testBoards(self):
     """Verify 'boards' is explicitly set for every config."""
@@ -136,8 +153,8 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
 
       self.assertTrue(
           push_overlays in subset,
-          'Config %s: push_overlays should be a subset of overlays.' %
-              build_name)
+          ('Config %s: push_overlays should be a subset of overlays.' %
+           build_name))
 
   def testOverlayMaster(self):
     """Verify that only one master is pushing uprevs for each overlay."""
@@ -149,8 +166,8 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
           and not config['branch']):
         other_master = masters.get(push_overlays)
         err_msg = 'Found two masters for push_overlays=%s: %s and %s'
-        self.assertFalse(other_master,
-            err_msg % (push_overlays, build_name, other_master))
+        self.assertFalse(
+            other_master, err_msg % (push_overlays, build_name, other_master))
         masters[push_overlays] = build_name
 
     if 'both' in masters:
@@ -166,8 +183,9 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
           config['chrome_rev'] == constants.CHROME_REV_LOCAL,
           'Config %s: has unexpected chrome_rev_local value.' % build_name)
       if config['chrome_rev']:
-        self.assertTrue(cbuildbot_config.IsPFQType(config['build_type']),
-          'Config %s: has chrome_rev but is not a PFQ.' % build_name)
+        self.assertTrue(
+            cbuildbot_config.IsPFQType(config['build_type']),
+            'Config %s: has chrome_rev but is not a PFQ.' % build_name)
 
   def testValidVMTestType(self):
     """Verify vm_tests has an expected value"""
@@ -176,16 +194,17 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
         continue
       for test_type in config['vm_tests']:
         self.assertTrue(
-          test_type in constants.VALID_VM_TEST_TYPES,
-          'Config %s: has unexpected vm test type value.' % build_name)
+            test_type in constants.VALID_VM_TEST_TYPES,
+            'Config %s: has unexpected vm test type value.' % build_name)
 
   def testImageTestMustHaveBaseImage(self):
     """Verify image_test build is only enabled with 'base' in images."""
     for build_name, config in cbuildbot_config.config.iteritems():
       if config.get('image_test', False):
-        self.assertTrue('base' in config['images'],
-                        'Build %s runs image_test but does not have base img' %
-                        build_name)
+        self.assertTrue(
+            'base' in config['images'],
+            'Build %s runs image_test but does not have base image' %
+            build_name)
 
   def testBuildType(self):
     """Verifies that all configs use valid build types."""
@@ -264,6 +283,15 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
             'Duplicate board in slaves of %s will cause upload prebuilts'
             ' failures' % build_name)
 
+  def testGetSlavesOnTrybot(self):
+    """Make sure every master has a sane list of slaves"""
+    mock_options = mock.Mock()
+    mock_options.remote_trybot = True
+    for _, config in cbuildbot_config.config.iteritems():
+      if config['master']:
+        configs = cbuildbot_config.GetSlavesForMaster(config, mock_options)
+        self.assertEqual([], configs)
+
   def testFactoryFirmwareValidity(self):
     """Ensures that firmware/factory branches have at least 1 valid name."""
     tracking_branch = git.GetChromiteTrackingBranch()
@@ -288,7 +316,8 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
     for build_name, config in cbuildbot_config.config.iteritems():
       if not config['build_tests']:
         for flag in ('factory_toolkit', 'vm_tests', 'hw_tests'):
-          self.assertFalse(config[flag],
+          self.assertFalse(
+              config[flag],
               'Config %s set %s without build_tests.' % (build_name, flag))
 
   def testAFDOInBackground(self):
@@ -314,17 +343,18 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
         msg = 'Config %s should not build_packages_in_background'
         self.assertFalse(config.build_packages_in_background, msg % build_name)
 
-        self.assertTrue(config.child_configs,
+        self.assertTrue(
+            config.child_configs,
             'Config %s should have child configs' % build_name)
         first_config = config.child_configs[0]
         msg = 'Primary config for %s should not build_packages_in_background'
         self.assertFalse(first_config.build_packages_in_background,
-            msg % build_name)
+                         msg % build_name)
 
         msg = 'Child config %s for %s should build_packages_in_background'
         for child_config in config.child_configs[1:]:
           self.assertTrue(child_config.build_packages_in_background,
-              msg % (child_config.name, build_name))
+                          msg % (child_config.name, build_name))
 
   def testAFDOSameInChildConfigs(self):
     """Verify that 'afdo_use' is the same for all children in a group."""
@@ -334,13 +364,13 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
       if build_name.endswith('-group'):
         prev_value = None
         self.assertTrue(config.child_configs,
-            'Config %s should have child configs' % build_name)
+                        'Config %s should have child configs' % build_name)
         for child_config in config.child_configs:
           if prev_value is None:
             prev_value = child_config.afdo_use
           else:
             self.assertEqual(child_config.afdo_use, prev_value,
-                msg % (child_config.name, build_name))
+                             msg % (child_config.name, build_name))
 
   def testReleaseAFDOConfigs(self):
     """Verify that <board>-release-afdo config have generate and use children.
@@ -355,7 +385,8 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
     use_suffix = '%s-use' % parent_suffix
     for build_name, config in cbuildbot_config.config.iteritems():
       if build_name.endswith(parent_suffix):
-        self.assertEqual(len(config.child_configs), 2,
+        self.assertEqual(
+            len(config.child_configs), 2,
             'Config %s should have 2 child configs' % build_name)
         for child_config in config.child_configs:
           child_name = child_config.name
@@ -386,7 +417,8 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
     """Currently use_chrome_lkgm refers only to internal manifests."""
     for build_name, config in cbuildbot_config.config.iteritems():
       if config['use_chrome_lkgm']:
-        self.assertTrue(config['internal'],
+        self.assertTrue(
+            config['internal'],
             'Chrome lkgm currently only works with an internal manifest: %s' % (
                 build_name,))
 
@@ -438,7 +470,7 @@ class CBuildBotTest(cros_test_lib.MoxTestCase):
   def testNoDuplicateSlavePrebuilts(self):
     """Test that no two same-board paladin slaves upload prebuilts."""
     for cfg in cbuildbot_config.config.values():
-      if (cfg['build_type'] == constants.PALADIN_TYPE and cfg['master']):
+      if cfg['build_type'] == constants.PALADIN_TYPE and cfg['master']:
         slaves = cbuildbot_config.GetSlavesForMaster(cfg)
         prebuilt_slaves = [s for s in slaves if s['prebuilts']]
         # Dictionary from board name to builder name that uploads prebuilt
@@ -649,11 +681,19 @@ class OverrideForTrybotTest(cros_test_lib.TestCase):
     mock_options = mock.Mock()
     old = cbuildbot_config.config['x86-mario-paladin']
     new = cbuildbot_config.OverrideConfigForTrybot(old, mock_options)
-    self.assertEquals(new['vm_tests'], [constants.SIMPLE_AU_TEST_TYPE,
+    self.assertEquals(new['vm_tests'], [constants.SMOKE_SUITE_TEST_TYPE,
+                                        constants.SIMPLE_AU_TEST_TYPE,
                                         constants.CROS_VM_TEST_TYPE])
-    old['vm_tests'] = None
+
+    # Don't override vm tests for arm boards.
+    old = cbuildbot_config.config['daisy-paladin']
     new = cbuildbot_config.OverrideConfigForTrybot(old, mock_options)
-    self.assertIsNone(new['vm_tests'])
+    self.assertEquals(new['vm_tests'], old['vm_tests'])
+
+    # Don't override vm tests for brillo boards.
+    old = cbuildbot_config.config['duck-paladin']
+    new = cbuildbot_config.OverrideConfigForTrybot(old, mock_options)
+    self.assertEquals(new['vm_tests'], old['vm_tests'])
 
 
 if __name__ == '__main__':

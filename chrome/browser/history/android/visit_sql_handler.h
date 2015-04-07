@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_HISTORY_ANDROID_VISIT_SQL_HANDLER_H_
 #define CHROME_BROWSER_HISTORY_ANDROID_VISIT_SQL_HANDLER_H_
 
-#include "chrome/browser/history/android/sql_handler.h"
+#include "components/history/core/android/sql_handler.h"
 
 namespace base {
 class Time;
@@ -13,12 +13,13 @@ class Time;
 
 namespace history {
 
-class HistoryDatabase;
+class URLDatabase;
+class VisitDatabase;
 
 // This class is the SQLHandler for visits table.
 class VisitSQLHandler : public SQLHandler {
  public:
-  explicit VisitSQLHandler(HistoryDatabase* history_db);
+  VisitSQLHandler(URLDatabase* url_db, VisitDatabase* visit_db);
   virtual ~VisitSQLHandler();
 
   // Overriden from SQLHandler.
@@ -40,7 +41,8 @@ class VisitSQLHandler : public SQLHandler {
   // Delete the visits of the given |url_id|.
   bool DeleteVisitsForURL(URLID url_id);
 
-  HistoryDatabase* history_db_;
+  URLDatabase* url_db_;
+  VisitDatabase* visit_db_;
 
   DISALLOW_COPY_AND_ASSIGN(VisitSQLHandler);
 };

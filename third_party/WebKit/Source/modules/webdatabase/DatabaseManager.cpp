@@ -44,11 +44,23 @@
 
 namespace blink {
 
+static DatabaseManager* s_databaseManager;
+
 DatabaseManager& DatabaseManager::manager()
 {
     ASSERT(isMainThread());
-    DEFINE_STATIC_LOCAL(DatabaseManager, dbManager, ());
-    return dbManager;
+    if (!s_databaseManager)
+        s_databaseManager = new DatabaseManager();
+    return *s_databaseManager;
+}
+
+void DatabaseManager::terminateDatabaseThread()
+{
+    ASSERT(isMainThread());
+    if (!s_databaseManager)
+        return;
+    for (const Member<DatabaseContext>& context : s_databaseManager->m_contextMap.values())
+        context->stopDatabases();
 }
 
 DatabaseManager::DatabaseManager()

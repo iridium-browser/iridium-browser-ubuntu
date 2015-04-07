@@ -38,6 +38,7 @@ using blink::WebInputEvent;
 using blink::WebKeyboardEvent;
 using blink::WebMouseEvent;
 using blink::WebMouseWheelEvent;
+using blink::WebTouchEvent;
 
 namespace content {
 namespace {
@@ -187,10 +188,7 @@ void InputRouterImpl::SendGestureEvent(
   if (gesture_event.event.sourceDevice == blink::WebGestureDeviceTouchscreen)
     touch_event_queue_.OnGestureScrollEvent(gesture_event);
 
-  if (!gesture_event_queue_.ShouldForward(gesture_event))
-    return;
-
-  SendGestureEventImmediately(gesture_event);
+  gesture_event_queue_.QueueEvent(gesture_event);
 }
 
 void InputRouterImpl::SendTouchEvent(
@@ -369,8 +367,8 @@ void InputRouterImpl::OfferToHandlers(const WebInputEvent& input_event,
   // cancelable (respect ACK disposition) or not.
   bool ignores_ack = WebInputEventTraits::IgnoresAckDisposition(input_event);
   if (WebInputEvent::isTouchEventType(input_event.type)) {
-    DCHECK_NE(static_cast<int>(ignores_ack),
-              static_cast<const blink::WebTouchEvent&>(input_event).cancelable);
+    const WebTouchEvent& touch = static_cast<const WebTouchEvent&>(input_event);
+    DCHECK_NE(ignores_ack, !!touch.cancelable);
   }
 
   // If we don't care about the ack disposition, send the ack immediately.
@@ -651,9 +649,6 @@ void InputRouterImpl::ProcessWheelAck(InputEventAckState ack_result,
 void InputRouterImpl::ProcessGestureAck(WebInputEvent::Type type,
                                         InputEventAckState ack_result,
                                         const ui::LatencyInfo& latency) {
-  if (!gesture_event_queue_.ExpectingGestureAck())
-    return;
-
   // |gesture_event_queue_| will forward to OnGestureEventAck when appropriate.
   gesture_event_queue_.ProcessGestureAck(ack_result, type, latency);
 }

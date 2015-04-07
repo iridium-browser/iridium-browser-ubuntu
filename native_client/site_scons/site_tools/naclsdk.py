@@ -101,12 +101,6 @@ def _SetEnvForNativeSdk(env, sdk_path):
 
   cc = 'clang' if env.Bit('nacl_clang') else 'gcc'
   cxx = 'clang++' if env.Bit('nacl_clang') else 'g++'
-  # Eventually nacl-clang will default to -no-integrated-as but for now we have
-  # to use the integrated as for compilation because of
-  # https://code.google.com/p/nativeclient/issues/detail?id=3966
-  # However clang's as' support of some of the nacl syntax is incomplete, so for
-  # now use binutils as for our asm files.
-  as_flags = '-no-integrated-as' if env.Bit('nacl_clang') else []
 
   env.Replace(# Replace header and lib paths.
               # where to put nacl extra sdk headers
@@ -148,7 +142,7 @@ def _SetEnvForNativeSdk(env, sdk_path):
                        '-pedantic',
                        '-D__linux__',
                        ],
-              ASFLAGS=as_flags,
+              ASFLAGS=[],
               )
 
   # NaClSdk environment seems to be inherited from the host environment.
@@ -180,10 +174,7 @@ def _SetEnvForPnacl(env, root):
   if env.Bit('nonsfi_nacl'):
     arch += '-nonsfi'
   arch_flag = ' -arch %s' % arch
-  if env.Bit('pnacl_generate_pexe'):
-    ld_arch_flag = ''
-  else:
-    ld_arch_flag = arch_flag
+  ld_arch_flag = '' if env.Bit('pnacl_generate_pexe') else arch_flag
 
   llc_mtriple_flag = ''
   if env.Bit('minsfi'):
@@ -235,7 +226,20 @@ def _SetEnvForPnacl(env, root):
   pnacl_ld_flags = ' ' + ' '.join(env['PNACL_BCLDFLAGS'])
   pnacl_translate_flags = ''
   pnacl_llc_flags = ''
+  sdk_base = os.path.join(root, 'le32-nacl')
 
+  bias_flags = ''
+  # The supported use cases for nonpexe mode (IRT building, nonsfi) use biased
+  # bitcode and native calling conventions, so inject the --target= flags to
+  # get that by default. The one exception to that rule is PNaCl zerocost EH,
+  # so put the flags in BASE_{C,CXX,LINK}FLAGS rather than in the commands
+  # directly, so that the test can override them. In addition to using the
+  # flags, we have to point NACL_SDK_{LIB,INCLUDE} to the toolchain directories
+  # containing the biased bitcode libraries.
+  if not env.Bit('pnacl_generate_pexe') and env['TARGET_FULLARCH'] != 'mips32':
+    bias_flags = ' '.join(env.BiasedBitcodeFlags())
+    archdir = {'x86-32': 'i686', 'x86-64': 'x86_64', 'arm': 'arm'}
+    sdk_base = os.path.join(root, archdir[env['TARGET_FULLARCH']] + '_bc-nacl')
   if env.Bit('nacl_pic'):
     pnacl_cc_flags += ' -fPIC'
     pnacl_cxx_flags += ' -fPIC'
@@ -257,12 +261,12 @@ def _SetEnvForPnacl(env, root):
     pnacl_translate_flags += ' -sfi-zero-based-sandbox'
 
   env.Replace(# Replace header and lib paths.
-              NACL_SDK_INCLUDE=os.path.join(root, 'le32-nacl', 'include'),
-              NACL_SDK_LIB=os.path.join(root, 'le32-nacl', 'lib'),
+              NACL_SDK_INCLUDE=os.path.join(root, sdk_base, 'include'),
+              NACL_SDK_LIB=os.path.join(root, sdk_base, 'lib'),
               # Remove arch-specific flags (if any)
-              BASE_LINKFLAGS='',
-              BASE_CFLAGS='',
-              BASE_CXXFLAGS='',
+              BASE_LINKFLAGS=bias_flags,
+              BASE_CFLAGS=bias_flags,
+              BASE_CXXFLAGS=bias_flags,
               BASE_ASFLAGS='',
               BASE_ASPPFLAGS='',
               # Replace the normal unix tools with the PNaCl ones.
@@ -327,7 +331,7 @@ def PNaClForceNative(env):
 # Get an environment for nacl-gcc when in PNaCl mode.
 def PNaClGetNNaClEnv(env):
   assert(env.Bit('bitcode'))
-  assert(not env.Bit('target_mips32'))
+  assert(not env.Bit('build_mips32'))
 
   # This is kind of a hack. We clone the environment,
   # clear the bitcode bit, and then reload naclsdk.py
@@ -362,13 +366,13 @@ def AddBiasForPNaCl(env, temporarily_allow=True):
                 CXX='NO-NATIVE-CXX-INVOCATION-ALLOWED')
     return
 
-  if env.Bit('target_arm'):
+  if env.Bit('build_arm'):
     bias_flag = '--pnacl-bias=arm'
-  elif env.Bit('target_x86_32'):
+  elif env.Bit('build_x86_32'):
     bias_flag = '--pnacl-bias=x86-32'
-  elif env.Bit('target_x86_64'):
+  elif env.Bit('build_x86_64'):
     bias_flag = '--pnacl-bias=x86-64'
-  elif env.Bit('target_mips32'):
+  elif env.Bit('build_mips32'):
     bias_flag = '--pnacl-bias=mips32'
   else:
     raise Exception("Unknown architecture!")
@@ -679,7 +683,7 @@ def generate(env):
   else:
     _SetEnvForNativeSdk(env, root)
 
-  if (env.Bit('bitcode') or env.Bit('nacl_clang')) and env.Bit('target_x86'):
+  if (env.Bit('bitcode') or env.Bit('nacl_clang')) and env.Bit('build_x86'):
     # Get GDB from the nacl-gcc toolchain even when using PNaCl.
     # TODO(mseaborn): We really want the nacl-gdb binary to be in a
     # separate tarball from the nacl-gcc toolchain, then this step

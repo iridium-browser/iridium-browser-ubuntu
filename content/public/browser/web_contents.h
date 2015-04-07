@@ -23,8 +23,8 @@
 #include "ipc/ipc_sender.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/rect.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/scoped_java_ref.h"
@@ -103,6 +103,10 @@ class WebContents : public PageNavigator,
     // If the opener is suppressed, then the new WebContents doesn't hold a
     // reference to its opener.
     bool opener_suppressed;
+
+    // The routing ids of the RenderView and of the main RenderFrame. Either
+    // both must be provided, or both must be MSG_ROUTING_NONE to have the
+    // WebContents make the assignment.
     int routing_id;
     int main_frame_routing_id;
 
@@ -537,6 +541,9 @@ class WebContents : public PageNavigator,
 
   // Does this have an opener associated with it?
   virtual bool HasOpener() const = 0;
+
+  // Returns the opener if HasOpener() is true, or NULL otherwise.
+  virtual WebContents* GetOpener() const = 0;
 
   typedef base::Callback<void(
       int, /* id */

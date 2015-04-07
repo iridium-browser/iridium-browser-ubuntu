@@ -26,12 +26,9 @@ blink::WebCryptoAlgorithm CreateAesGcmAlgorithm(
   EXPECT_TRUE(SupportsAesGcm());
   return blink::WebCryptoAlgorithm::adoptParamsAndCreate(
       blink::WebCryptoAlgorithmIdAesGcm,
-      new blink::WebCryptoAesGcmParams(vector_as_array(&iv),
-                                       iv.size(),
-                                       true,
+      new blink::WebCryptoAesGcmParams(vector_as_array(&iv), iv.size(), true,
                                        vector_as_array(&additional_data),
-                                       additional_data.size(),
-                                       true,
+                                       additional_data.size(), true,
                                        tag_length_bits));
 }
 
@@ -59,14 +56,14 @@ Status AesGcmEncrypt(const blink::WebCryptoKey& key,
     return status;
 
   if ((tag_length_bits % 8) != 0) {
-    EXPECT_TRUE(false) << "Encrypt should have failed.";
+    ADD_FAILURE() << "Encrypt should have failed.";
     return Status::OperationError();
   }
 
   size_t tag_length_bytes = tag_length_bits / 8;
 
   if (tag_length_bytes > output.size()) {
-    EXPECT_TRUE(false) << "tag length is larger than output";
+    ADD_FAILURE() << "tag length is larger than output";
     return Status::OperationError();
   }
 
@@ -93,8 +90,8 @@ Status AesGcmDecrypt(const blink::WebCryptoKey& key,
   // Join cipher text and authentication tag.
   std::vector<uint8_t> cipher_text_with_tag;
   cipher_text_with_tag.reserve(cipher_text.size() + authentication_tag.size());
-  cipher_text_with_tag.insert(
-      cipher_text_with_tag.end(), cipher_text.begin(), cipher_text.end());
+  cipher_text_with_tag.insert(cipher_text_with_tag.end(), cipher_text.begin(),
+                              cipher_text.end());
   cipher_text_with_tag.insert(cipher_text_with_tag.end(),
                               authentication_tag.begin(),
                               authentication_tag.end());
@@ -112,10 +109,21 @@ TEST(WebCryptoAesGcmTest, GenerateKeyBadLength) {
   blink::WebCryptoKey key;
   for (size_t i = 0; i < arraysize(kKeyLen); ++i) {
     SCOPED_TRACE(i);
-    EXPECT_EQ(Status::ErrorGenerateKeyLength(),
-              GenerateSecretKey(
-                  CreateAesGcmKeyGenAlgorithm(kKeyLen[i]), true, 0, &key));
+    EXPECT_EQ(Status::ErrorGenerateAesKeyLength(),
+              GenerateSecretKey(CreateAesGcmKeyGenAlgorithm(kKeyLen[i]), true,
+                                blink::WebCryptoKeyUsageDecrypt, &key));
   }
+}
+
+TEST(WebCryptoAesGcmTest, GenerateKeyEmptyUsage) {
+  if (!SupportsAesGcm()) {
+    LOG(WARNING) << "AES GCM not supported, skipping tests";
+    return;
+  }
+
+  blink::WebCryptoKey key;
+  EXPECT_EQ(Status::ErrorCreateKeyEmptyUsages(),
+            GenerateSecretKey(CreateAesGcmKeyGenAlgorithm(256), true, 0, &key));
 }
 
 TEST(WebCryptoAesGcmTest, ImportExportJwk) {
@@ -130,14 +138,13 @@ TEST(WebCryptoAesGcmTest, ImportExportJwk) {
 
   // AES-GCM 128
   ImportExportJwkSymmetricKey(
-      128,
-      algorithm,
+      128, algorithm,
       blink::WebCryptoKeyUsageEncrypt | blink::WebCryptoKeyUsageDecrypt,
       "A128GCM");
 
   // AES-GCM 256
-  ImportExportJwkSymmetricKey(
-      256, algorithm, blink::WebCryptoKeyUsageDecrypt, "A256GCM");
+  ImportExportJwkSymmetricKey(256, algorithm, blink::WebCryptoKeyUsageDecrypt,
+                              "A256GCM");
 }
 
 // TODO(eroman):
@@ -173,8 +180,7 @@ TEST(WebCryptoAesGcmTest, SampleSets) {
         GetBytesFromHexString(test, "cipher_text");
 
     blink::WebCryptoKey key = ImportSecretKeyFromRaw(
-        test_key,
-        CreateAlgorithm(blink::WebCryptoAlgorithmIdAesGcm),
+        test_key, CreateAlgorithm(blink::WebCryptoAlgorithmIdAesGcm),
         blink::WebCryptoKeyUsageEncrypt | blink::WebCryptoKeyUsageDecrypt);
 
     // Verify exported raw key is identical to the imported data
@@ -187,63 +193,39 @@ TEST(WebCryptoAesGcmTest, SampleSets) {
     // Test encryption.
     std::vector<uint8_t> cipher_text;
     std::vector<uint8_t> authentication_tag;
-    EXPECT_EQ(Status::Success(),
-              AesGcmEncrypt(key,
-                            test_iv,
-                            test_additional_data,
-                            test_tag_size_bits,
-                            test_plain_text,
-                            &cipher_text,
-                            &authentication_tag));
+    EXPECT_EQ(
+        Status::Success(),
+        AesGcmEncrypt(key, test_iv, test_additional_data, test_tag_size_bits,
+                      test_plain_text, &cipher_text, &authentication_tag));
 
     EXPECT_BYTES_EQ(test_cipher_text, cipher_text);
     EXPECT_BYTES_EQ(test_authentication_tag, authentication_tag);
 
     // Test decryption.
     std::vector<uint8_t> plain_text;
-    EXPECT_EQ(Status::Success(),
-              AesGcmDecrypt(key,
-                            test_iv,
-                            test_additional_data,
-                            test_tag_size_bits,
-                            test_cipher_text,
-                            test_authentication_tag,
-                            &plain_text));
+    EXPECT_EQ(
+        Status::Success(),
+        AesGcmDecrypt(key, test_iv, test_additional_data, test_tag_size_bits,
+                      test_cipher_text, test_authentication_tag, &plain_text));
     EXPECT_BYTES_EQ(test_plain_text, plain_text);
 
     // Decryption should fail if any of the inputs are tampered with.
     EXPECT_EQ(Status::OperationError(),
-              AesGcmDecrypt(key,
-                            Corrupted(test_iv),
-                            test_additional_data,
-                            test_tag_size_bits,
-                            test_cipher_text,
-                            test_authentication_tag,
-                            &plain_text));
+              AesGcmDecrypt(key, Corrupted(test_iv), test_additional_data,
+                            test_tag_size_bits, test_cipher_text,
+                            test_authentication_tag, &plain_text));
     EXPECT_EQ(Status::OperationError(),
-              AesGcmDecrypt(key,
-                            test_iv,
-                            Corrupted(test_additional_data),
-                            test_tag_size_bits,
-                            test_cipher_text,
-                            test_authentication_tag,
-                            &plain_text));
+              AesGcmDecrypt(key, test_iv, Corrupted(test_additional_data),
+                            test_tag_size_bits, test_cipher_text,
+                            test_authentication_tag, &plain_text));
     EXPECT_EQ(Status::OperationError(),
-              AesGcmDecrypt(key,
-                            test_iv,
-                            test_additional_data,
-                            test_tag_size_bits,
-                            Corrupted(test_cipher_text),
-                            test_authentication_tag,
-                            &plain_text));
+              AesGcmDecrypt(key, test_iv, test_additional_data,
+                            test_tag_size_bits, Corrupted(test_cipher_text),
+                            test_authentication_tag, &plain_text));
     EXPECT_EQ(Status::OperationError(),
-              AesGcmDecrypt(key,
-                            test_iv,
-                            test_additional_data,
-                            test_tag_size_bits,
-                            test_cipher_text,
-                            Corrupted(test_authentication_tag),
-                            &plain_text));
+              AesGcmDecrypt(key, test_iv, test_additional_data,
+                            test_tag_size_bits, test_cipher_text,
+                            Corrupted(test_authentication_tag), &plain_text));
 
     // Try different incorrect tag lengths
     uint8_t kAlternateTagLengths[] = {0, 8, 96, 120, 128, 160, 255};
@@ -252,13 +234,9 @@ TEST(WebCryptoAesGcmTest, SampleSets) {
       if (test_tag_size_bits == wrong_tag_size_bits)
         continue;
       EXPECT_NE(Status::Success(),
-                AesGcmDecrypt(key,
-                              test_iv,
-                              test_additional_data,
-                              wrong_tag_size_bits,
-                              test_cipher_text,
-                              test_authentication_tag,
-                              &plain_text));
+                AesGcmDecrypt(key, test_iv, test_additional_data,
+                              wrong_tag_size_bits, test_cipher_text,
+                              test_authentication_tag, &plain_text));
     }
   }
 }

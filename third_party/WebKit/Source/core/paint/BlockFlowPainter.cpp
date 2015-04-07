@@ -8,10 +8,12 @@
 #include "core/rendering/FloatingObjects.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderBlockFlow.h"
+#include "core/rendering/RenderLayer.h"
+#include "platform/graphics/paint/ClipRecorderStack.h"
 
 namespace blink {
 
-void BlockFlowPainter::paintFloats(PaintInfo& paintInfo, const LayoutPoint& paintOffset, bool preservePhase)
+void BlockFlowPainter::paintFloats(const PaintInfo& paintInfo, const LayoutPoint& paintOffset, bool preservePhase)
 {
     if (!m_renderBlockFlow.floatingObjects())
         return;
@@ -27,8 +29,8 @@ void BlockFlowPainter::paintFloats(PaintInfo& paintInfo, const LayoutPoint& pain
             // FIXME: LayoutPoint version of xPositionForFloatIncludingMargin would make this much cleaner.
             LayoutPoint childPoint = m_renderBlockFlow.flipFloatForWritingModeForChild(
                 floatingObject, LayoutPoint(paintOffset.x()
-                + m_renderBlockFlow.xPositionForFloatIncludingMargin(floatingObject) - floatingObject->renderer()->x(), paintOffset.y()
-                + m_renderBlockFlow.yPositionForFloatIncludingMargin(floatingObject) - floatingObject->renderer()->y()));
+                + m_renderBlockFlow.xPositionForFloatIncludingMargin(floatingObject) - floatingObject->renderer()->location().x(), paintOffset.y()
+                + m_renderBlockFlow.yPositionForFloatIncludingMargin(floatingObject) - floatingObject->renderer()->location().y()));
             floatingObject->renderer()->paint(currentPaintInfo, childPoint);
             if (!preservePhase) {
                 currentPaintInfo.phase = PaintPhaseChildBlockBackgrounds;
@@ -40,6 +42,30 @@ void BlockFlowPainter::paintFloats(PaintInfo& paintInfo, const LayoutPoint& pain
                 currentPaintInfo.phase = PaintPhaseOutline;
                 floatingObject->renderer()->paint(currentPaintInfo, childPoint);
             }
+        }
+    }
+}
+
+void BlockFlowPainter::paintSelection(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+{
+    if (m_renderBlockFlow.shouldPaintSelectionGaps() && paintInfo.phase == PaintPhaseForeground) {
+        LayoutUnit lastTop = 0;
+        LayoutUnit lastLeft = m_renderBlockFlow.logicalLeftSelectionOffset(&m_renderBlockFlow, lastTop);
+        LayoutUnit lastRight = m_renderBlockFlow.logicalRightSelectionOffset(&m_renderBlockFlow, lastTop);
+        ClipRecorderStack clipRecorderStack(paintInfo.context);
+
+        LayoutRect gapRectsBounds = m_renderBlockFlow.selectionGaps(&m_renderBlockFlow, paintOffset, LayoutSize(), lastTop, lastLeft, lastRight, &paintInfo);
+        if (!gapRectsBounds.isEmpty()) {
+            RenderLayer* layer = m_renderBlockFlow.enclosingLayer();
+            gapRectsBounds.moveBy(-paintOffset);
+            if (!m_renderBlockFlow.hasLayer()) {
+                LayoutRect localBounds(gapRectsBounds);
+                m_renderBlockFlow.flipForWritingMode(localBounds);
+                gapRectsBounds = m_renderBlockFlow.localToContainerQuad(FloatRect(localBounds), layer->renderer()).enclosingBoundingBox();
+                if (layer->renderer()->hasOverflowClip())
+                    gapRectsBounds.move(layer->renderBox()->scrolledContentOffset());
+            }
+            layer->addBlockSelectionGapsBounds(gapRectsBounds);
         }
     }
 }

@@ -27,7 +27,7 @@ class BitrateControllerImpl::RtcpBandwidthObserverImpl
   virtual ~RtcpBandwidthObserverImpl() {
   }
   // Received RTCP REMB or TMMBR.
-  virtual void OnReceivedEstimatedBitrate(const uint32_t bitrate) OVERRIDE {
+  virtual void OnReceivedEstimatedBitrate(uint32_t bitrate) OVERRIDE {
     owner_->OnReceivedEstimatedBitrate(bitrate);
   }
   // Received RTCP receiver block.
@@ -83,7 +83,8 @@ BitrateController* BitrateController::CreateBitrateController(
   return new BitrateControllerImpl(clock, enforce_min_bitrate);
 }
 
-BitrateControllerImpl::BitrateControllerImpl(Clock* clock, bool enforce_min_bitrate)
+BitrateControllerImpl::BitrateControllerImpl(Clock* clock,
+                                             bool enforce_min_bitrate)
     : clock_(clock),
       last_bitrate_update_ms_(clock_->TimeInMilliseconds()),
       critsect_(CriticalSectionWrapper::CreateCriticalSection()),
@@ -96,7 +97,9 @@ BitrateControllerImpl::BitrateControllerImpl(Clock* clock, bool enforce_min_bitr
       last_rtt_ms_(0),
       last_enforce_min_bitrate_(!enforce_min_bitrate_),
       bitrate_observers_modified_(false),
-      last_reserved_bitrate_bps_(0) {}
+      last_reserved_bitrate_bps_(0),
+      remb_suppressor_(new RembSuppressor(clock)) {
+}
 
 BitrateControllerImpl::~BitrateControllerImpl() {
   BitrateObserverConfList::iterator it = bitrate_observers_.begin();
@@ -126,9 +129,9 @@ BitrateControllerImpl::FindObserverConfigurationPair(const BitrateObserver*
 
 void BitrateControllerImpl::SetBitrateObserver(
     BitrateObserver* observer,
-    const uint32_t start_bitrate,
-    const uint32_t min_bitrate,
-    const uint32_t max_bitrate) {
+    uint32_t start_bitrate,
+    uint32_t min_bitrate,
+    uint32_t max_bitrate) {
   CriticalSectionScoped cs(critsect_);
 
   BitrateObserverConfList::iterator it = FindObserverConfigurationPair(
@@ -217,18 +220,22 @@ void BitrateControllerImpl::SetReservedBitrate(uint32_t reserved_bitrate_bps) {
   MaybeTriggerOnNetworkChanged();
 }
 
-void BitrateControllerImpl::OnReceivedEstimatedBitrate(const uint32_t bitrate) {
+void BitrateControllerImpl::OnReceivedEstimatedBitrate(uint32_t bitrate) {
   CriticalSectionScoped cs(critsect_);
+  if (remb_suppressor_->SuppresNewRemb(bitrate)) {
+    return;
+  }
   bandwidth_estimation_.UpdateReceiverEstimate(bitrate);
   MaybeTriggerOnNetworkChanged();
 }
 
-int32_t BitrateControllerImpl::TimeUntilNextProcess() {
-  enum { kBitrateControllerUpdateIntervalMs = 25 };
+int64_t BitrateControllerImpl::TimeUntilNextProcess() {
+  const int64_t kBitrateControllerUpdateIntervalMs = 25;
   CriticalSectionScoped cs(critsect_);
-  int time_since_update_ms =
+  int64_t time_since_update_ms =
       clock_->TimeInMilliseconds() - last_bitrate_update_ms_;
-  return std::max(0, kBitrateControllerUpdateIntervalMs - time_since_update_ms);
+  return std::max<int64_t>(
+      kBitrateControllerUpdateIntervalMs - time_since_update_ms, 0);
 }
 
 int32_t BitrateControllerImpl::Process() {
@@ -244,10 +251,10 @@ int32_t BitrateControllerImpl::Process() {
 }
 
 void BitrateControllerImpl::OnReceivedRtcpReceiverReport(
-    const uint8_t fraction_loss,
-    const uint32_t rtt,
-    const int number_of_packets,
-    const uint32_t now_ms) {
+    uint8_t fraction_loss,
+    uint32_t rtt,
+    int number_of_packets,
+    int64_t now_ms) {
   CriticalSectionScoped cs(critsect_);
   bandwidth_estimation_.UpdateReceiverBlock(
       fraction_loss, rtt, number_of_packets, now_ms);
@@ -277,9 +284,9 @@ void BitrateControllerImpl::MaybeTriggerOnNetworkChanged() {
   }
 }
 
-void BitrateControllerImpl::OnNetworkChanged(const uint32_t bitrate,
-                                             const uint8_t fraction_loss,
-                                             const uint32_t rtt) {
+void BitrateControllerImpl::OnNetworkChanged(uint32_t bitrate,
+                                             uint8_t fraction_loss,
+                                             uint32_t rtt) {
   // Sanity check.
   if (bitrate_observers_.empty())
     return;
@@ -375,6 +382,16 @@ bool BitrateControllerImpl::AvailableBandwidth(uint32_t* bandwidth) const {
     return true;
   }
   return false;
+}
+
+void BitrateControllerImpl::SetBitrateSent(uint32_t bitrate_sent_bps) {
+  CriticalSectionScoped cs(critsect_);
+  remb_suppressor_->SetBitrateSent(bitrate_sent_bps);
+}
+
+void BitrateControllerImpl::SetCodecMode(webrtc::VideoCodecMode mode) {
+  CriticalSectionScoped cs(critsect_);
+  remb_suppressor_->SetEnabled(mode == kScreensharing);
 }
 
 }  // namespace webrtc

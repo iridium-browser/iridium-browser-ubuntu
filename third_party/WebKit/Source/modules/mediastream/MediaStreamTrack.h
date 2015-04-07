@@ -41,13 +41,12 @@ class MediaStreamComponent;
 class MediaStreamTrackSourcesCallback;
 
 class MediaStreamTrack final
-    : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<MediaStreamTrack>
+    : public RefCountedGarbageCollectedEventTargetWithInlineData<MediaStreamTrack>
     , public ActiveDOMObject
-    , public EventTargetWithInlineData
     , public MediaStreamSource::Observer {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<MediaStreamTrack>);
-    DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(MediaStreamTrack);
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static MediaStreamTrack* create(ExecutionContext*, MediaStreamComponent*);
     virtual ~MediaStreamTrack();

@@ -125,7 +125,7 @@ class PolicyWatcherLinux : public PolicyWatcher {
     return last_modification;
   }
 
-  // Returns NULL if the policy dictionary couldn't be read.
+  // Returns nullptr if the policy dictionary couldn't be read.
   scoped_ptr<base::DictionaryValue> Load() {
     DCHECK(OnPolicyWatcherThread());
     // Enumerate the files and sort them lexicographically.
@@ -186,6 +186,7 @@ class PolicyWatcherLinux : public PolicyWatcher {
     } else {
       // A failure to load policy definitions is probably temporary, so try
       // again soon.
+      SignalTransientPolicyError();
       ScheduleReloadTask(base::TimeDelta::FromSeconds(kSettleIntervalSeconds));
     }
   }

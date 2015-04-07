@@ -40,7 +40,7 @@ class VerifyingRtxReceiver : public NullRtpData
 
   virtual int32_t OnReceivedPayloadData(
       const uint8_t* data,
-      const uint16_t size,
+      const size_t size,
       const webrtc::WebRtcRTPHeader* rtp_header) OVERRIDE {
     if (!sequence_numbers_.empty())
       EXPECT_EQ(kTestSsrc, rtp_header->header.ssrc);
@@ -95,7 +95,7 @@ class RtxLoopBackTransport : public webrtc::Transport {
     packet_loss_ = 0;
   }
 
-  virtual int SendPacket(int channel, const void *data, int len) OVERRIDE {
+  virtual int SendPacket(int channel, const void *data, size_t len) OVERRIDE {
     count_++;
     const unsigned char* ptr = static_cast<const unsigned  char*>(data);
     uint32_t ssrc = (ptr[8] << 24) + (ptr[9] << 16) + (ptr[10] << 8) + ptr[11];
@@ -105,13 +105,13 @@ class RtxLoopBackTransport : public webrtc::Transport {
         sequence_number);
     if (packet_loss_ > 0) {
       if ((count_ % packet_loss_) == 0) {
-        return len;
+        return static_cast<int>(len);
       }
     } else if (count_ >= consecutive_drop_start_ &&
         count_ < consecutive_drop_end_) {
-      return len;
+      return static_cast<int>(len);
     }
-    int packet_length = len;
+    size_t packet_length = len;
     // TODO(pbos): Figure out why this needs to be initialized. Likely this
     // is hiding a bug either in test setup or other code.
     // https://code.google.com/p/webrtc/issues/detail?id=3183
@@ -143,12 +143,14 @@ class RtxLoopBackTransport : public webrtc::Transport {
                                           true)) {
       return -1;
     }
-    return len;
+    return static_cast<int>(len);
   }
 
-  virtual int SendRTCPPacket(int channel, const void *data, int len) OVERRIDE {
+  virtual int SendRTCPPacket(int channel,
+                             const void *data,
+                             size_t len) OVERRIDE {
     if (module_->IncomingRtcpPacket((const uint8_t*)data, len) == 0) {
-      return len;
+      return static_cast<int>(len);
     }
     return -1;
   }
@@ -192,12 +194,12 @@ class RtpRtcpRtxNackTest : public ::testing::Test {
         &rtp_payload_registry_));
 
     rtp_rtcp_module_->SetSSRC(kTestSsrc);
-    EXPECT_EQ(0, rtp_rtcp_module_->SetRTCPStatus(kRtcpCompound));
+    rtp_rtcp_module_->SetRTCPStatus(kRtcpCompound);
     rtp_receiver_->SetNACKStatus(kNackRtcp);
-    EXPECT_EQ(0, rtp_rtcp_module_->SetStorePacketsStatus(true, 600));
+    rtp_rtcp_module_->SetStorePacketsStatus(true, 600);
     EXPECT_EQ(0, rtp_rtcp_module_->SetSendingStatus(true));
-    EXPECT_EQ(0, rtp_rtcp_module_->SetSequenceNumber(kTestSequenceNumber));
-    EXPECT_EQ(0, rtp_rtcp_module_->SetStartTimestamp(111111));
+    rtp_rtcp_module_->SetSequenceNumber(kTestSequenceNumber);
+    rtp_rtcp_module_->SetStartTimestamp(111111);
 
     transport_.SetSendModule(rtp_rtcp_module_, &rtp_payload_registry_,
                              rtp_receiver_.get());
@@ -214,7 +216,7 @@ class RtpRtcpRtxNackTest : public ::testing::Test {
                                                        0,
                                                        video_codec.maxBitrate));
 
-    for (int n = 0; n < payload_data_length; n++) {
+    for (size_t n = 0; n < payload_data_length; n++) {
       payload_data[n] = n % 10;
     }
   }
@@ -292,7 +294,7 @@ class RtpRtcpRtxNackTest : public ::testing::Test {
   RtxLoopBackTransport transport_;
   VerifyingRtxReceiver receiver_;
   uint8_t  payload_data[65000];
-  int payload_data_length;
+  size_t payload_data_length;
   SimulatedClock fake_clock;
 };
 
@@ -302,9 +304,9 @@ TEST_F(RtpRtcpRtxNackTest, LongNackList) {
   uint32_t timestamp = 3000;
   uint16_t nack_list[kNumPacketsToDrop];
   // Disable StorePackets to be able to set a larger packet history.
-  EXPECT_EQ(0, rtp_rtcp_module_->SetStorePacketsStatus(false, 0));
+  rtp_rtcp_module_->SetStorePacketsStatus(false, 0);
   // Enable StorePackets with a packet history of 2000 packets.
-  EXPECT_EQ(0, rtp_rtcp_module_->SetStorePacketsStatus(true, 2000));
+  rtp_rtcp_module_->SetStorePacketsStatus(true, 2000);
   // Drop 900 packets from the second one so that we get a NACK list which is
   // big enough to require 4 RTCP packets to be fully transmitted to the sender.
   transport_.DropConsecutivePackets(2, kNumPacketsToDrop);

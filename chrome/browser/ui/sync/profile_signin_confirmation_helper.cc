@@ -11,21 +11,20 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/native_theme/native_theme.h"
 
 #if defined(ENABLE_EXTENSIONS)
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/sync_helper.h"
-#include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
@@ -204,21 +203,19 @@ bool HasBeenShutdown(Profile* profile) {
 
 bool HasSyncedExtensions(Profile* profile) {
 #if defined(ENABLE_EXTENSIONS)
-  extensions::ExtensionSystem* system =
-      extensions::ExtensionSystem::Get(profile);
-  if (system && system->extension_service()) {
-    const extensions::ExtensionSet* extensions =
-        system->extension_service()->extensions();
-    for (extensions::ExtensionSet::const_iterator iter = extensions->begin();
-         iter != extensions->end(); ++iter) {
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(profile);
+  if (registry) {
+    for (const scoped_refptr<const extensions::Extension>& extension :
+         registry->enabled_extensions()) {
       // The webstore is synced so that it stays put on the new tab
       // page, but since it's installed by default we don't want to
       // consider it when determining if the profile is dirty.
-      if (extensions::sync_helper::IsSyncable(iter->get()) &&
-          (*iter)->id() != extensions::kWebStoreAppId &&
-          (*iter)->id() != extension_misc::kChromeAppId) {
+      if (extensions::sync_helper::IsSyncable(extension.get()) &&
+          extension->id() != extensions::kWebStoreAppId &&
+          extension->id() != extension_misc::kChromeAppId) {
         DVLOG(1) << "ProfileSigninConfirmationHelper: "
-                 << "profile contains a synced extension: " << (*iter)->id();
+                 << "profile contains a synced extension: " << extension->id();
         return true;
       }
     }

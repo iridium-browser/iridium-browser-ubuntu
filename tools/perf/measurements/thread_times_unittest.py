@@ -5,11 +5,11 @@
 from measurements import thread_times
 from measurements import smoothness_unittest
 from metrics import timeline
+from telemetry import decorators
 from telemetry.core import wpr_modes
-from telemetry.unittest import options_for_unittests
-from telemetry.unittest import page_test_test_case
-from telemetry.unittest import test
-
+from telemetry.web_perf.metrics.layout import LayoutMetric
+from telemetry.unittest_util import options_for_unittests
+from telemetry.unittest_util import page_test_test_case
 
 
 class ThreadTimesUnitTest(page_test_test_case.PageTestTestCase):
@@ -17,7 +17,7 @@ class ThreadTimesUnitTest(page_test_test_case.PageTestTestCase):
     self._options = options_for_unittests.GetCopy()
     self._options.browser_options.wpr_mode = wpr_modes.WPR_OFF
 
-  @test.Disabled('android')
+  @decorators.Disabled('android')
   def testBasic(self):
     ps = self.CreatePageSetFromFileInUnittestDataDir('scrollable_page.html')
     measurement = thread_times.ThreadTimes()
@@ -30,9 +30,15 @@ class ThreadTimesUnitTest(page_test_test_case.PageTestTestCase):
       cpu_time = results.FindAllPageSpecificValuesNamed(cpu_time_name)
       self.assertEquals(len(cpu_time), 1)
 
+    for short_name in LayoutMetric.EVENTS.itervalues():
+      self.assertEquals(len(results.FindAllPageSpecificValuesNamed(
+        short_name + '_avg')), 1)
+      self.assertEquals(len(results.FindAllPageSpecificValuesNamed(
+        short_name + '_stddev')), 1)
+
   def testBasicForPageWithNoGesture(self):
     ps = self.CreateEmptyPageSet()
-    ps.AddPage(smoothness_unittest.AnimatedPage(ps))
+    ps.AddUserStory(smoothness_unittest.AnimatedPage(ps))
 
     measurement = thread_times.ThreadTimes()
     timeline_options = self._options
@@ -46,8 +52,7 @@ class ThreadTimesUnitTest(page_test_test_case.PageTestTestCase):
 
   def testWithSilkDetails(self):
     ps = self.CreatePageSetFromFileInUnittestDataDir('scrollable_page.html')
-    measurement = thread_times.ThreadTimes()
-    self._options.report_silk_details = True
+    measurement = thread_times.ThreadTimes(report_silk_details=True)
     results = self.RunMeasurement(measurement, ps, options = self._options)
     self.assertEquals(0, len(results.failures))
 

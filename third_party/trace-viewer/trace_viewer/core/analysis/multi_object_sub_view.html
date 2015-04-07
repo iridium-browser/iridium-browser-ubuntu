@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) 2013 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/core/analysis/analysis_results.html">
+<link rel="import" href="/core/analysis/analysis_sub_view.html">
+<link rel="import" href="/core/analysis/util.html">
+
+<polymer-element name="tv-c-multi-object-sub-view"
+    extends="tracing-analysis-sub-view">
+  <script>
+  'use strict';
+
+  Polymer({
+    created: function() {
+      this.currentSelection_ = undefined;
+    },
+
+    get selection() {
+      return this.currentSelection_;
+    },
+
+    set selection(selection) {
+      this.currentSelection_ = selection;
+      this.textContent = '';
+
+      var results = new tv.c.analysis.AnalysisResults();
+      this.appendChild(results);
+
+      this.analyzeObjectEvents_(results, selection);
+    },
+
+    /**
+     * Extremely simplistic analysis of objects. Mainly exists to provide
+     * click-through to the main object's analysis view.
+     */
+    analyzeObjectEvents_: function(results, objectEvents) {
+      objectEvents = tv.b.asArray(objectEvents).sort(
+          tv.b.Range.compareByMinTimes);
+
+      var table = results.appendTable('analysis-object-sample-table', 2);
+
+      objectEvents.forEach(function(event) {
+        var row = results.appendBodyRow(table);
+        var ts;
+        var objectText;
+        var selectionGenerator;
+        if (event instanceof tv.c.trace_model.ObjectSnapshot) {
+          var objectSnapshot = event;
+          ts = tv.c.analysis.tsRound(objectSnapshot.ts);
+          objectText = objectSnapshot.objectInstance.typeName + ' ' +
+              objectSnapshot.objectInstance.id;
+          selectionGenerator = function() {
+            var selection = new tv.c.Selection();
+            selection.push(objectSnapshot);
+            return selection;
+          };
+        } else {
+          var objectInstance = event;
+
+          var deletionTs = objectInstance.deletionTs == Number.MAX_VALUE ?
+              '' : tv.c.analysis.tsRound(objectInstance.deletionTs);
+          ts = tv.c.analysis.tsRound(objectInstance.creationTs) +
+              '-' + deletionTs;
+
+          objectText = objectInstance.typeName + ' ' +
+              objectInstance.id;
+
+          selectionGenerator = function() {
+            var selection = new tv.c.Selection();
+            selection.push(objectInstance);
+            return selection;
+          };
+        }
+
+        results.appendTableCell(table, row, ts);
+        var linkContainer = results.appendTableCell(table, row, '');
+        linkContainer.appendChild(
+            results.createSelectionChangingLink(
+                objectText,
+                selectionGenerator));
+      });
+    }
+  });
+  </script>
+</polymer>

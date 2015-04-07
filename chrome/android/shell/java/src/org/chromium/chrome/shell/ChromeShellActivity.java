@@ -7,6 +7,7 @@ package org.chromium.chrome.shell;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
+import android.support.v7.app.ActionBarActivity;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -25,15 +26,18 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.browser.DevToolsServer;
 import org.chromium.chrome.browser.FileProviderHelper;
+import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.appmenu.AppMenuHandler;
 import org.chromium.chrome.browser.appmenu.AppMenuPropertiesDelegate;
 import org.chromium.chrome.browser.dom_distiller.DomDistillerTabUtils;
 import org.chromium.chrome.browser.nfc.BeamController;
 import org.chromium.chrome.browser.nfc.BeamProvider;
+import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.printing.PrintingControllerFactory;
 import org.chromium.chrome.browser.printing.TabPrinter;
 import org.chromium.chrome.browser.share.ShareHelper;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
+import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.shell.sync.SyncController;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.content.app.ContentApplication;
@@ -51,7 +55,7 @@ import org.chromium.ui.base.WindowAndroid;
 /**
  * The {@link android.app.Activity} component of a basic test shell to test Chrome features.
  */
-public class ChromeShellActivity extends Activity implements AppMenuPropertiesDelegate {
+public class ChromeShellActivity extends ActionBarActivity implements AppMenuPropertiesDelegate {
     private static final String TAG = "ChromeShellActivity";
 
     /**
@@ -234,16 +238,16 @@ public class ChromeShellActivity extends Activity implements AppMenuPropertiesDe
 
         if (mToolbar != null) mToolbar.hideSuggestions();
 
-        ContentViewCore viewCore = getActiveContentViewCore();
-        if (viewCore != null) viewCore.onHide();
+        Tab activeTab = getActiveTab();
+        if (activeTab != null) activeTab.onActivityStop();
     }
 
     @Override
     protected void onStart() {
         super.onStart();
 
-        ContentViewCore viewCore = getActiveContentViewCore();
-        if (viewCore != null) viewCore.onShow();
+        Tab activeTab = getActiveTab();
+        if (activeTab != null) activeTab.onActivityStart();
 
         if (mSyncController != null) {
             mSyncController.onStart();
@@ -292,6 +296,11 @@ public class ChromeShellActivity extends Activity implements AppMenuPropertiesDe
      */
     public void closeAllTabs() {
         mTabManager.closeAllTabs();
+    }
+
+    @VisibleForTesting
+    public void closeTab() {
+        mTabManager.closeTab();
     }
 
     /**
@@ -354,8 +363,10 @@ public class ChromeShellActivity extends Activity implements AppMenuPropertiesDe
             return true;
         } else if (id == R.id.share_menu_id || id == R.id.direct_share_menu_id) {
             ShareHelper.share(item.getItemId() == R.id.direct_share_menu_id, this,
-                    activeTab.getTitle(), activeTab.getUrl(), null,
-                    Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
+                    activeTab.getTitle(), activeTab.getUrl(), null);
+            return true;
+        } else if (id == R.id.preferences) {
+            PreferencesLauncher.launchSettingsPage(this, null);
             return true;
         } else {
             return super.onOptionsItemSelected(item);
@@ -425,9 +436,9 @@ public class ChromeShellActivity extends Activity implements AppMenuPropertiesDe
         return R.style.OverflowMenuTheme;
     }
 
-    @Override
-    public int getMenuButtonStartPaddingDimenId() {
-        return 0;
+    @VisibleForTesting
+    public TabModelSelector getTabModelSelector() {
+        return mTabManager.getTabModelSelector();
     }
 
     @VisibleForTesting

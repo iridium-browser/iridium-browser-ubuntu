@@ -62,7 +62,6 @@ namespace blink {
 class WebAudioBus;
 class WebBlobRegistry;
 class WebBluetooth;
-class WebContentDecryptionModule;
 class WebClipboard;
 class WebCompositorSupport;
 class WebConvertableToTraceFormat;
@@ -76,7 +75,6 @@ class WebFileSystem;
 class WebFileUtilities;
 class WebFlingAnimator;
 class WebGeofencingProvider;
-class WebGestureCurveTarget;
 class WebGestureCurve;
 class WebGraphicsContext3DProvider;
 class WebIDBFactory;
@@ -86,10 +84,12 @@ class WebMediaStreamCenter;
 class WebMediaStreamCenterClient;
 class WebMessagePortChannel;
 class WebMimeRegistry;
+class WebNavigatorConnectProvider;
 class WebNotificationManager;
 class WebPluginListBuilder;
 class WebPrescientNetworking;
 class WebPublicSuffixList;
+class WebPushProvider;
 class WebRTCPeerConnectionHandler;
 class WebRTCPeerConnectionHandlerClient;
 class WebSandboxSupport;
@@ -276,15 +276,6 @@ public:
     // directly, taking care to unlock it when you are ready to let it become
     // discardable.
     virtual WebDiscardableMemory* allocateAndLockDiscardableMemory(size_t bytes) { return 0; }
-
-    // A wrapper for tcmalloc's HeapProfilerStart();
-    virtual void startHeapProfiling(const WebString& /*prefix*/) { }
-    // A wrapper for tcmalloc's HeapProfilerStop();
-    virtual void stopHeapProfiling() { }
-    // A wrapper for tcmalloc's HeapProfilerDump()
-    virtual void dumpHeapProfiling(const WebString& /*reason*/) { }
-    // A wrapper for tcmalloc's GetHeapProfile()
-    virtual WebString getHeapProfile() { return WebString(); }
 
     static const size_t noDecodedImageByteLimit = static_cast<size_t>(-1);
 
@@ -640,10 +631,21 @@ public:
 
     virtual WebGeofencingProvider* geofencingProvider() { return 0; }
 
+
     // Bluetooth ----------------------------------------------------------
 
     // Returns pointer to client owned WebBluetooth implementation.
     virtual WebBluetooth* bluetooth() { return 0; }
+
+
+    // Push API------------------------------------------------------------
+
+    virtual WebPushProvider* pushProvider() { return 0; }
+
+
+    // navigator.connect --------------------------------------------------
+
+    virtual WebNavigatorConnectProvider* navigatorConnectProvider() { return 0; }
 
 protected:
     virtual ~Platform() { }

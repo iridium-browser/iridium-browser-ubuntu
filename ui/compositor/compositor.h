@@ -21,9 +21,9 @@
 #include "ui/compositor/compositor_export.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/layer_animator_collection.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/size.h"
-#include "ui/gfx/vector2d.h"
 
 class SkBitmap;
 
@@ -37,6 +37,7 @@ class ContextProvider;
 class Layer;
 class LayerTreeDebugState;
 class LayerTreeHost;
+class RendererSettings;
 class SharedBitmapManager;
 class SurfaceIdAllocator;
 }
@@ -73,7 +74,7 @@ class COMPOSITOR_EXPORT ContextFactory {
                                    bool software_fallback) = 0;
 
   // Creates a reflector that copies the content of the |mirrored_compositor|
-  // onto |mirroing_layer|.
+  // onto |mirroring_layer|.
   virtual scoped_refptr<Reflector> CreateReflector(
       Compositor* mirrored_compositor,
       Layer* mirroring_layer) = 0;
@@ -104,6 +105,10 @@ class COMPOSITOR_EXPORT ContextFactory {
 
   // Creates a Surface ID allocator with a new namespace.
   virtual scoped_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator() = 0;
+
+  // Resize the display corresponding to this compositor to a particular size.
+  virtual void ResizeDisplay(ui::Compositor* compositor,
+                             const gfx::Size& size) = 0;
 };
 
 // This class represents a lock on the compositor, that can be used to prevent
@@ -182,8 +187,9 @@ class COMPOSITOR_EXPORT Compositor
   // from changes to layer properties.
   void ScheduleRedrawRect(const gfx::Rect& damage_rect);
 
-  // Finishes all outstanding rendering on the GPU.
-  void FinishAllRendering();
+  // Finishes all outstanding rendering and disables swapping on this surface
+  // until it is resized.
+  void DisableSwapUntilResize();
 
   void SetLatencyInfo(const LatencyInfo& latency_info);
 
@@ -216,11 +222,11 @@ class COMPOSITOR_EXPORT Compositor
   // observer to remove itself when it is done observing.
   void AddObserver(CompositorObserver* observer);
   void RemoveObserver(CompositorObserver* observer);
-  bool HasObserver(CompositorObserver* observer);
+  bool HasObserver(const CompositorObserver* observer) const;
 
   void AddAnimationObserver(CompositorAnimationObserver* observer);
   void RemoveAnimationObserver(CompositorAnimationObserver* observer);
-  bool HasAnimationObserver(CompositorAnimationObserver* observer);
+  bool HasAnimationObserver(const CompositorAnimationObserver* observer) const;
 
   // Creates a compositor lock. Returns NULL if it is not possible to lock at
   // this time (i.e. we're waiting to complete a previous unlock).
@@ -245,13 +251,15 @@ class COMPOSITOR_EXPORT Compositor
   void Layout() override;
   void ApplyViewportDeltas(const gfx::Vector2d& inner_delta,
                            const gfx::Vector2d& outer_delta,
+                           const gfx::Vector2dF& elastic_overscroll_delta,
                            float page_scale,
                            float top_controls_delta) override {}
   void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
                            float page_scale,
                            float top_controls_delta) override {}
-  void RequestNewOutputSurface(bool fallback) override;
-  void DidInitializeOutputSurface() override {}
+  void RequestNewOutputSurface() override;
+  void DidInitializeOutputSurface() override;
+  void DidFailToInitializeOutputSurface() override;
   void WillCommit() override {}
   void DidCommit() override;
   void DidCommitAndDrawFrame() override;
@@ -270,6 +278,7 @@ class COMPOSITOR_EXPORT Compositor
 
   const cc::LayerTreeDebugState& GetLayerTreeDebugState() const;
   void SetLayerTreeDebugState(const cc::LayerTreeDebugState& debug_state);
+  const cc::RendererSettings& GetRendererSettings() const;
 
   LayerAnimatorCollection* layer_animator_collection() {
     return &layer_animator_collection_;
@@ -282,6 +291,11 @@ class COMPOSITOR_EXPORT Compositor
  private:
   friend class base::RefCounted<Compositor>;
   friend class CompositorLock;
+
+  enum {
+   OUTPUT_SURFACE_RETRIES_BEFORE_FALLBACK = 4,
+   MAX_OUTPUT_SURFACE_RETRIES = 5,
+  };
 
   // Called by CompositorLock.
   void UnlockCompositor();
@@ -318,6 +332,8 @@ class COMPOSITOR_EXPORT Compositor
 
   int last_started_frame_;
   int last_ended_frame_;
+
+  int num_failed_recreate_attempts_;
 
   bool disable_schedule_composite_;
 

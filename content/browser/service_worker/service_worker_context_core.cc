@@ -114,43 +114,46 @@ ServiceWorkerContextCore::ServiceWorkerContextCore(
     storage::SpecialStoragePolicy* special_storage_policy,
     ObserverListThreadSafe<ServiceWorkerContextObserver>* observer_list,
     ServiceWorkerContextWrapper* wrapper)
-    : weak_factory_(this),
-      wrapper_(wrapper),
+    : wrapper_(wrapper),
       providers_(new ProcessToProviderMap),
-      storage_(ServiceWorkerStorage::Create(path,
-                                            AsWeakPtr(),
-                                            database_task_manager.Pass(),
-                                            disk_cache_thread,
-                                            quota_manager_proxy,
-                                            special_storage_policy)),
       cache_manager_(ServiceWorkerCacheStorageManager::Create(
           path,
           cache_task_runner.get(),
           make_scoped_refptr(quota_manager_proxy))),
-      embedded_worker_registry_(EmbeddedWorkerRegistry::Create(AsWeakPtr())),
-      job_coordinator_(new ServiceWorkerJobCoordinator(AsWeakPtr())),
       next_handle_id_(0),
       next_registration_handle_id_(0),
-      observer_list_(observer_list) {
+      observer_list_(observer_list),
+      weak_factory_(this) {
+  // These get a WeakPtr from weak_factory_, so must be set after weak_factory_
+  // is initialized.
+  storage_ = ServiceWorkerStorage::Create(path,
+                                          AsWeakPtr(),
+                                          database_task_manager.Pass(),
+                                          disk_cache_thread,
+                                          quota_manager_proxy,
+                                          special_storage_policy);
+  embedded_worker_registry_ = EmbeddedWorkerRegistry::Create(AsWeakPtr());
+  job_coordinator_.reset(new ServiceWorkerJobCoordinator(AsWeakPtr()));
 }
 
 ServiceWorkerContextCore::ServiceWorkerContextCore(
     ServiceWorkerContextCore* old_context,
     ServiceWorkerContextWrapper* wrapper)
-    : weak_factory_(this),
-      wrapper_(wrapper),
+    : wrapper_(wrapper),
       providers_(old_context->providers_.release()),
-      storage_(
-          ServiceWorkerStorage::Create(AsWeakPtr(), old_context->storage())),
       cache_manager_(ServiceWorkerCacheStorageManager::Create(
           old_context->cache_manager())),
-      embedded_worker_registry_(EmbeddedWorkerRegistry::Create(
-          AsWeakPtr(),
-          old_context->embedded_worker_registry())),
-      job_coordinator_(new ServiceWorkerJobCoordinator(AsWeakPtr())),
       next_handle_id_(old_context->next_handle_id_),
       next_registration_handle_id_(old_context->next_registration_handle_id_),
-      observer_list_(old_context->observer_list_) {
+      observer_list_(old_context->observer_list_),
+      weak_factory_(this) {
+  // These get a WeakPtr from weak_factory_, so must be set after weak_factory_
+  // is initialized.
+  storage_ = ServiceWorkerStorage::Create(AsWeakPtr(), old_context->storage());
+  embedded_worker_registry_ = EmbeddedWorkerRegistry::Create(
+      AsWeakPtr(),
+      old_context->embedded_worker_registry());
+  job_coordinator_.reset(new ServiceWorkerJobCoordinator(AsWeakPtr()));
 }
 
 ServiceWorkerContextCore::~ServiceWorkerContextCore() {
@@ -307,11 +310,12 @@ void ServiceWorkerContextCore::RegistrationComplete(
 void ServiceWorkerContextCore::UnregistrationComplete(
     const GURL& pattern,
     const ServiceWorkerContextCore::UnregistrationCallback& callback,
+    int64 registration_id,
     ServiceWorkerStatusCode status) {
   callback.Run(status);
   if (observer_list_.get()) {
     observer_list_->Notify(&ServiceWorkerContextObserver::OnRegistrationDeleted,
-                           pattern);
+                           registration_id, pattern);
   }
 }
 
@@ -399,6 +403,36 @@ void ServiceWorkerContextCore::SetBlobParametersForCache(
 
   cache_manager_->SetBlobParametersForCache(request_context,
                                             blob_storage_context);
+}
+
+scoped_ptr<ServiceWorkerProviderHost>
+ServiceWorkerContextCore::TransferProviderHostOut(
+    int process_id, int provider_id) {
+  ProviderMap* map = GetProviderMapForProcess(process_id);
+  ServiceWorkerProviderHost* transferee = map->Lookup(provider_id);
+  ServiceWorkerProviderHost* replacement =
+      new ServiceWorkerProviderHost(process_id,
+                                    transferee->frame_id(),
+                                    provider_id,
+                                    AsWeakPtr(),
+                                    transferee->dispatcher_host());
+  map->Replace(provider_id, replacement);
+  transferee->PrepareForCrossSiteTransfer();
+  return make_scoped_ptr(transferee);
+}
+
+void ServiceWorkerContextCore::TransferProviderHostIn(
+    int new_process_id, int new_provider_id,
+    scoped_ptr<ServiceWorkerProviderHost> transferee) {
+  ProviderMap* map = GetProviderMapForProcess(new_process_id);
+  ServiceWorkerProviderHost* temp = map->Lookup(new_provider_id);
+  DCHECK(temp->document_url().is_empty());
+  transferee->CompleteCrossSiteTransfer(new_process_id,
+                                        temp->frame_id(),
+                                        new_provider_id,
+                                        temp->dispatcher_host());
+  map->Replace(new_provider_id, transferee.release());
+  delete temp;
 }
 
 void ServiceWorkerContextCore::OnWorkerStarted(ServiceWorkerVersion* version) {

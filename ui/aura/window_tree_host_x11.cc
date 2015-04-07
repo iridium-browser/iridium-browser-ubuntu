@@ -115,12 +115,10 @@ class TouchEventCalibrate : public ui::PlatformEventObserver {
   TouchEventCalibrate() : left_(0), right_(0), top_(0), bottom_(0) {
     if (ui::PlatformEventSource::GetInstance())
       ui::PlatformEventSource::GetInstance()->AddPlatformEventObserver(this);
-#if defined(USE_XI2_MT)
     std::vector<std::string> parts;
-    if (Tokenize(CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+    if (Tokenize(base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
                      switches::kTouchCalibration),
-                 ",",
-                 &parts) >= 4) {
+                 ",", &parts) >= 4) {
       if (!base::StringToInt(parts[0], &left_))
         DLOG(ERROR) << "Incorrect left border calibration value passed.";
       if (!base::StringToInt(parts[1], &right_))
@@ -130,7 +128,6 @@ class TouchEventCalibrate : public ui::PlatformEventObserver {
       if (!base::StringToInt(parts[3], &bottom_))
         DLOG(ERROR) << "Incorrect bottom border calibration value passed.";
     }
-#endif  // defined(USE_XI2_MT)
   }
 
   ~TouchEventCalibrate() override {
@@ -145,7 +142,6 @@ class TouchEventCalibrate : public ui::PlatformEventObserver {
   // which need to be expanded when converting to screen coordinates,
   // so that location on bezels will be outside of screen area.
   void Calibrate(ui::TouchEvent* event, const gfx::Rect& bounds) {
-#if defined(USE_XI2_MT)
     int x = event->x();
     int y = event->y();
 
@@ -197,13 +193,11 @@ class TouchEventCalibrate : public ui::PlatformEventObserver {
       event->set_root_location(gfx::Point(x, y));
     }
     event->set_location(gfx::Point(x, y));
-#endif  // defined(USE_XI2_MT)
   }
 
  private:
   // ui::PlatformEventObserver:
   void WillProcessEvent(const ui::PlatformEvent& event) override {
-#if defined(USE_XI2_MT)
     if (event->type == GenericEvent &&
         (event->xgeneric.evtype == XI_TouchBegin ||
          event->xgeneric.evtype == XI_TouchUpdate ||
@@ -213,7 +207,6 @@ class TouchEventCalibrate : public ui::PlatformEventObserver {
       xievent->event_x = xievent->root_x;
       xievent->event_y = xievent->root_y;
     }
-#endif  // defined(USE_XI2_MT)
   }
 
   void DidProcessEvent(const ui::PlatformEvent& event) override {}
@@ -565,11 +558,16 @@ gfx::Point WindowTreeHostX11::GetLocationOnNativeScreen() const {
 }
 
 void WindowTreeHostX11::SetCapture() {
-  // TODO(oshima): Grab x input.
+  // Do not grab X11 input. Grabbing X11 input is asynchronous and this method
+  // is expected to be synchronous. Grabbing X11 input is unnecessary on
+  // ChromeOS because ChromeOS manages all of the X windows. When running
+  // ChromeOS on the desktop for the sake of debugging:
+  // - Implicit pointer grab as a result of pressing a mouse button
+  // - Releasing capture as a result of losing activation (FocusOut)
+  // is sufficient.
 }
 
 void WindowTreeHostX11::ReleaseCapture() {
-  // TODO(oshima): Release x input.
 }
 
 void WindowTreeHostX11::SetCursorNative(gfx::NativeCursor cursor) {

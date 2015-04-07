@@ -20,7 +20,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/sessions/session_backend.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_service_test_helper.h"
 #include "chrome/browser/ui/browser.h"
@@ -103,7 +102,7 @@ class FakeBackgroundModeManager : public BackgroundModeManager {
  public:
   FakeBackgroundModeManager()
       : BackgroundModeManager(
-            CommandLine::ForCurrentProcess(),
+            *base::CommandLine::ForCurrentProcess(),
             &g_browser_process->profile_manager()->GetProfileInfoCache()),
         background_mode_active_(false) {}
 

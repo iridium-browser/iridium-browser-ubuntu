@@ -7,6 +7,7 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/screens/chrome_user_selection_screen.h"
+#include "chrome/browser/chromeos/login/signin_screen_controller.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
@@ -14,14 +15,14 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/ime/ime_keyboard.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "chromeos/login/user_names.h"
 #include "components/user_manager/user_manager.h"
 #include "grit/components_strings.h"
+#include "ui/base/ime/chromeos/ime_keyboard.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/user_activity/user_activity_detector.h"
 #include "ui/views/widget/widget.h"
-#include "ui/wm/core/user_activity_detector.h"
 
 #if !defined(USE_ATHENA)
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
@@ -34,7 +35,7 @@ namespace chromeos {
 WebUILoginDisplay::~WebUILoginDisplay() {
   if (webui_handler_)
     webui_handler_->ResetSigninScreenHandlerDelegate();
-  wm::UserActivityDetector* activity_detector = wm::UserActivityDetector::Get();
+  ui::UserActivityDetector* activity_detector = ui::UserActivityDetector::Get();
   if (activity_detector->HasObserver(this))
     activity_detector->RemoveObserver(this);
 }
@@ -45,9 +46,7 @@ WebUILoginDisplay::WebUILoginDisplay(LoginDisplay::Delegate* delegate)
     : LoginDisplay(delegate, gfx::Rect()),
       show_guest_(false),
       show_new_user_(false),
-      webui_handler_(NULL),
-      gaia_screen_(new GaiaScreen()),
-      user_selection_screen_(new ChromeUserSelectionScreen()) {
+      webui_handler_(NULL) {
 }
 
 void WebUILoginDisplay::ClearAndEnablePassword() {
@@ -61,13 +60,12 @@ void WebUILoginDisplay::Init(const user_manager::UserList& users,
                              bool show_new_user) {
   // Testing that the delegate has been set.
   DCHECK(delegate_);
-
-  user_selection_screen_->Init(users, show_guest);
+  SignInScreenController::Get()->Init(users, show_guest);
   show_guest_ = show_guest;
   show_users_ = show_users;
   show_new_user_ = show_new_user;
 
-  wm::UserActivityDetector* activity_detector = wm::UserActivityDetector::Get();
+  ui::UserActivityDetector* activity_detector = ui::UserActivityDetector::Get();
   if (!activity_detector->HasObserver(this))
     activity_detector->AddObserver(this);
 }
@@ -76,37 +74,12 @@ void WebUILoginDisplay::Init(const user_manager::UserList& users,
 
 // ---- User selection screen methods
 
-void WebUILoginDisplay::OnBeforeUserRemoved(const std::string& username) {
-  user_selection_screen_->OnBeforeUserRemoved(username);
-}
-
-void WebUILoginDisplay::OnUserRemoved(const std::string& username) {
-  user_selection_screen_->OnUserRemoved(username);
-}
-
-void WebUILoginDisplay::OnUserImageChanged(const user_manager::User& user) {
-  user_selection_screen_->OnUserImageChanged(user);
-}
-
 void WebUILoginDisplay::HandleGetUsers() {
-  user_selection_screen_->HandleGetUsers();
+  SignInScreenController::Get()->SendUserList();
 }
 
 const user_manager::UserList& WebUILoginDisplay::GetUsers() const {
-  return user_selection_screen_->GetUsers();
-}
-
-// User selection screen, screen lock API
-
-void WebUILoginDisplay::SetAuthType(
-    const std::string& username,
-    ScreenlockBridge::LockHandler::AuthType auth_type) {
-  user_selection_screen_->SetAuthType(username, auth_type);
-}
-
-ScreenlockBridge::LockHandler::AuthType WebUILoginDisplay::GetAuthType(
-    const std::string& username) const {
-  return user_selection_screen_->GetAuthType(username);
+  return SignInScreenController::Get()->GetUsers();
 }
 
 // ---- Gaia screen methods
@@ -278,12 +251,14 @@ void WebUILoginDisplay::LoadSigninWallpaper() {
 }
 
 void WebUILoginDisplay::OnSigninScreenReady() {
+  SignInScreenController::Get()->OnSigninScreenReady();
+
   if (delegate_)
     delegate_->OnSigninScreenReady();
 }
 
-void WebUILoginDisplay::RemoveUser(const std::string& username) {
-  user_manager::UserManager::Get()->RemoveUser(username, this);
+void WebUILoginDisplay::RemoveUser(const std::string& user_id) {
+  SignInScreenController::Get()->RemoveUser(user_id);
 }
 
 void WebUILoginDisplay::ResyncUserData() {
@@ -295,6 +270,11 @@ void WebUILoginDisplay::ResyncUserData() {
 void WebUILoginDisplay::ShowEnterpriseEnrollmentScreen() {
   if (delegate_)
     delegate_->OnStartEnterpriseEnrollment();
+}
+
+void WebUILoginDisplay::ShowEnableDebuggingScreen() {
+  if (delegate_)
+    delegate_->OnStartEnableDebuggingScreen();
 }
 
 void WebUILoginDisplay::ShowKioskEnableScreen() {
@@ -315,8 +295,7 @@ void WebUILoginDisplay::ShowWrongHWIDScreen() {
 void WebUILoginDisplay::SetWebUIHandler(
     LoginDisplayWebUIHandler* webui_handler) {
   webui_handler_ = webui_handler;
-  gaia_screen_->SetHandler(webui_handler_);
-  user_selection_screen_->SetHandler(webui_handler_);
+  SignInScreenController::Get()->SetWebUIHandler(webui_handler_);
 }
 
 void WebUILoginDisplay::ShowSigninScreenForCreds(

@@ -203,8 +203,8 @@ class WebRtcSession : public cricket::BaseSession,
                         cricket::SendDataResult* result) OVERRIDE;
   virtual bool ConnectDataChannel(DataChannel* webrtc_data_channel) OVERRIDE;
   virtual void DisconnectDataChannel(DataChannel* webrtc_data_channel) OVERRIDE;
-  virtual void AddSctpDataStream(uint32 sid) OVERRIDE;
-  virtual void RemoveSctpDataStream(uint32 sid) OVERRIDE;
+  virtual void AddSctpDataStream(int sid) OVERRIDE;
+  virtual void RemoveSctpDataStream(int sid) OVERRIDE;
   virtual bool ReadyToSendData() const OVERRIDE;
 
   // Implements DataChannelFactory.
@@ -224,6 +224,11 @@ class WebRtcSession : public cricket::BaseSession,
 
   // For unit test.
   bool waiting_for_identity() const;
+
+  void set_metrics_observer(
+      webrtc::MetricsObserverInterface* metrics_observer) {
+    metrics_observer_ = metrics_observer;
+  }
 
  private:
   // Indicates the type of SessionDescription in a call to SetLocalDescription
@@ -323,6 +328,10 @@ class WebRtcSession : public cricket::BaseSession,
 
   std::string GetSessionErrorMsg();
 
+  // Invoked when OnTransportCompleted is signaled to gather the usage
+  // of IPv4/IPv6 as best connection.
+  void ReportBestConnectionState(cricket::Transport* transport);
+
   rtc::scoped_ptr<cricket::VoiceChannel> voice_channel_;
   rtc::scoped_ptr<cricket::VideoChannel> video_channel_;
   rtc::scoped_ptr<cricket::DataChannel> data_channel_;
@@ -357,6 +366,7 @@ class WebRtcSession : public cricket::BaseSession,
   // Member variables for caching global options.
   cricket::AudioOptions audio_options_;
   cricket::VideoOptions video_options_;
+  MetricsObserverInterface* metrics_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(WebRtcSession);
 };

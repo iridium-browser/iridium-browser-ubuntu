@@ -164,13 +164,13 @@ ChildProcessHost* BrowserChildProcessHostImpl::GetHost() const {
   return child_process_host_.get();
 }
 
-base::ProcessHandle BrowserChildProcessHostImpl::GetHandle() const {
+const base::Process& BrowserChildProcessHostImpl::GetProcess() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(child_process_.get())
       << "Requesting a child process handle before launching.";
   DCHECK(child_process_->GetProcess().IsValid())
       << "Requesting a child process handle before launch has completed OK.";
-  return child_process_->GetProcess().Handle();
+  return child_process_->GetProcess();
 }
 
 void BrowserChildProcessHostImpl::SetName(const base::string16& name) {
@@ -251,11 +251,12 @@ void BrowserChildProcessHostImpl::OnChannelError() {
 void BrowserChildProcessHostImpl::OnBadMessageReceived(
     const IPC::Message& message) {
   HistogramBadMessageTerminated(data_.process_type);
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableKillAfterBadIPC)) {
     return;
   }
-  base::KillProcess(GetHandle(), RESULT_CODE_KILLED_BAD_MESSAGE, false);
+  base::KillProcess(child_process_->GetProcess().Handle(),
+                    RESULT_CODE_KILLED_BAD_MESSAGE, false);
 }
 
 bool BrowserChildProcessHostImpl::CanShutdown() {

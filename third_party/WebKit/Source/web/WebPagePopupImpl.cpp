@@ -43,6 +43,10 @@
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/page/PagePopupClient.h"
+#include "core/rendering/RenderView.h"
+#include "modules/accessibility/AXObject.h"
+#include "modules/accessibility/AXObjectCacheImpl.h"
+#include "platform/EventDispatchForbiddenScope.h"
 #include "platform/LayoutTestSupport.h"
 #include "platform/TraceEvent.h"
 #include "platform/heap/Handle.h"
@@ -101,16 +105,11 @@ private:
 #endif
     }
 
-    virtual void invalidateContentsAndRootView(const IntRect& paintRect) override
+    virtual void invalidateRect(const IntRect& paintRect) override
     {
         if (paintRect.isEmpty())
             return;
         m_popup->widgetClient()->didInvalidateRect(paintRect);
-    }
-
-    virtual void invalidateContentsForSlowScroll(const IntRect& updateRect) override
-    {
-        invalidateContentsAndRootView(updateRect);
     }
 
     virtual void scheduleAnimation() override
@@ -158,7 +157,7 @@ private:
         return m_popup->m_webView->graphicsLayerFactory();
     }
 
-    virtual void attachRootGraphicsLayer(GraphicsLayer* graphicsLayer) override
+    virtual void attachRootGraphicsLayer(GraphicsLayer* graphicsLayer, LocalFrame* localRoot) override
     {
         m_popup->setRootGraphicsLayer(graphicsLayer);
     }
@@ -249,8 +248,8 @@ bool WebPagePopupImpl::initializePage()
     if (AXObjectCache* cache = m_popupClient->ownerElement().document().existingAXObjectCache())
         cache->childrenChanged(&m_popupClient->ownerElement());
 
-    ASSERT(frame->domWindow());
-    DOMWindowPagePopup::install(*frame->domWindow(), m_popupClient);
+    ASSERT(frame->localDOMWindow());
+    DOMWindowPagePopup::install(*frame->localDOMWindow(), m_popupClient);
     ASSERT(m_popupClient->ownerElement().document().existingAXObjectCache() == frame->document()->existingAXObjectCache());
 
     RefPtr<SharedBuffer> data = SharedBuffer::create();
@@ -277,7 +276,7 @@ AXObject* WebPagePopupImpl::rootAXObject()
         return 0;
     AXObjectCache* cache = document->axObjectCache();
     ASSERT(cache);
-    return cache->getOrCreateAXObjectFromRenderView(document->renderView());
+    return toAXObjectCacheImpl(cache)->getOrCreate(document->renderView());
 }
 
 void WebPagePopupImpl::setRootGraphicsLayer(GraphicsLayer* layer)
@@ -417,10 +416,15 @@ void WebPagePopupImpl::close()
 
 void WebPagePopupImpl::closePopup()
 {
+    // This function can be called in EventDispatchForbiddenScope for the main
+    // document, and the following operations dispatch some events.  It's safe
+    // because web authors can't listen the events.
+    EventDispatchForbiddenScope::AllowUserAgentEvents allowEvents;
+
     if (m_page) {
         toLocalFrame(m_page->mainFrame())->loader().stopAllLoaders();
-        ASSERT(m_page->mainFrame()->domWindow());
-        DOMWindowPagePopup::uninstall(*m_page->mainFrame()->domWindow());
+        ASSERT(m_page->deprecatedLocalMainFrame()->localDOMWindow());
+        DOMWindowPagePopup::uninstall(*m_page->deprecatedLocalMainFrame()->localDOMWindow());
     }
     m_closing = true;
 
@@ -437,7 +441,7 @@ void WebPagePopupImpl::closePopup()
 
 LocalDOMWindow* WebPagePopupImpl::window()
 {
-    return m_page->mainFrame()->domWindow();
+    return m_page->deprecatedLocalMainFrame()->localDOMWindow();
 }
 
 void WebPagePopupImpl::compositeAndReadbackAsync(WebCompositeAndReadbackAsyncCallback* callback)

@@ -34,6 +34,7 @@
 
 #include "core/InspectorBackendDispatcher.h"
 #include "core/InspectorFrontend.h"
+#include "core/inspector/AsyncCallTracker.h"
 #include "core/inspector/InjectedScriptHost.h"
 #include "core/inspector/InjectedScriptManager.h"
 #include "core/inspector/InspectorConsoleAgent.h"
@@ -94,21 +95,26 @@ WorkerInspectorController::WorkerInspectorController(WorkerGlobalScope* workerGl
 {
     m_agents.append(WorkerRuntimeAgent::create(m_injectedScriptManager.get(), m_debugServer.get(), workerGlobalScope));
 
-    OwnPtrWillBeRawPtr<InspectorTimelineAgent> timelineAgent = InspectorTimelineAgent::create(0, 0, 0, InspectorTimelineAgent::WorkerInspector, 0);
     OwnPtrWillBeRawPtr<WorkerDebuggerAgent> workerDebuggerAgent = WorkerDebuggerAgent::create(m_debugServer.get(), workerGlobalScope, m_injectedScriptManager.get());
     m_workerDebuggerAgent = workerDebuggerAgent.get();
     m_agents.append(workerDebuggerAgent.release());
+    m_asyncCallTracker = adoptPtrWillBeNoop(new AsyncCallTracker(m_workerDebuggerAgent, m_instrumentingAgents.get()));
 
     m_agents.append(InspectorProfilerAgent::create(m_injectedScriptManager.get(), 0));
     m_agents.append(InspectorHeapProfilerAgent::create(m_injectedScriptManager.get()));
-    m_agents.append(WorkerConsoleAgent::create(timelineAgent.get(), m_injectedScriptManager.get(), workerGlobalScope));
-    m_agents.append(timelineAgent.release());
+    m_agents.append(WorkerConsoleAgent::create(m_injectedScriptManager.get(), workerGlobalScope));
+    m_agents.append(InspectorTimelineAgent::create(0, 0, 0, InspectorTimelineAgent::WorkerInspector, 0));
 
     m_injectedScriptManager->injectedScriptHost()->init(m_instrumentingAgents.get(), m_debugServer.get());
 }
 
 WorkerInspectorController::~WorkerInspectorController()
 {
+}
+
+void WorkerInspectorController::registerModuleAgent(PassOwnPtrWillBeRawPtr<InspectorAgent> agent)
+{
+    m_agents.append(agent);
 }
 
 void WorkerInspectorController::connectFrontend()
@@ -181,6 +187,7 @@ void WorkerInspectorController::trace(Visitor* visitor)
     visitor->trace(m_backendDispatcher);
     visitor->trace(m_agents);
     visitor->trace(m_workerDebuggerAgent);
+    visitor->trace(m_asyncCallTracker);
 }
 
-}
+} // namespace blink

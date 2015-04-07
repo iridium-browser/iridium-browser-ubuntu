@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "media/video/capture/mac/video_capture_device_mac.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 @implementation VideoCaptureDeviceAVFoundation
 
@@ -256,7 +256,7 @@
   CVImageBufferRef videoFrame =
       CoreMediaGlue::CMSampleBufferGetImageBuffer(sampleBuffer);
   // Lock the frame and calculate frame size.
-  const int kLockFlags = 0;
+  const int kLockFlags = kCVPixelBufferLock_ReadOnly;
   if (CVPixelBufferLockBaseAddress(videoFrame, kLockFlags) ==
           kCVReturnSuccess) {
     void* baseAddress = CVPixelBufferGetBaseAddress(videoFrame);
@@ -270,10 +270,14 @@
         gfx::Size(frameWidth, frameHeight),
         frameRate_,
         media::PIXEL_FORMAT_UYVY);
-    base::AutoLock lock(lock_);
-    if (!frameReceiver_)
-      return;
-    frameReceiver_->ReceiveFrame(addressToPass, frameSize, captureFormat, 0, 0);
+    {
+      base::AutoLock lock(lock_);
+      if (frameReceiver_) {
+        frameReceiver_->ReceiveFrame(
+            addressToPass, frameSize, captureFormat, 0, 0);
+      }
+    }
+
     CVPixelBufferUnlockBaseAddress(videoFrame, kLockFlags);
   }
 }

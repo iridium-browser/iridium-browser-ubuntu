@@ -15,6 +15,7 @@ import os
 
 from metrics import power
 from telemetry import benchmark
+from telemetry import page as page_module
 from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.util import statistics
@@ -66,7 +67,8 @@ DESCRIPTIONS = {
 
 class _OctaneMeasurement(page_test.PageTest):
   def __init__(self):
-    super(_OctaneMeasurement, self).__init__()
+    super(_OctaneMeasurement, self).__init__(
+        action_name_to_run='RunPageInteractions')
     self._power_metric = None
 
   def CustomizeBrowserOptions(self, options):
@@ -96,8 +98,9 @@ class _OctaneMeasurement(page_test.PageTest):
     self._power_metric.Start(page, tab)
 
   def ValidateAndMeasurePage(self, page, tab, results):
+    tab.WaitForJavaScriptExpression('window.completed', 10)
     tab.WaitForJavaScriptExpression(
-        'completed && !document.getElementById("progress-bar-container")', 1200)
+        '!document.getElementById("progress-bar-container")', 1200)
 
     self._power_metric.Stop(page, tab)
     self._power_metric.AddResults(tab, results)
@@ -128,14 +131,18 @@ class _OctaneMeasurement(page_test.PageTest):
 
 
 class Octane(benchmark.Benchmark):
-  """Google's Octane JavaScript benchmark."""
+  """Google's Octane JavaScript benchmark.
+
+  http://octane-benchmark.googlecode.com/svn/latest/index.html
+  """
   test = _OctaneMeasurement
 
   def CreatePageSet(self, options):
     ps = page_set.PageSet(
       archive_data_file='../page_sets/data/octane.json',
-      make_javascript_deterministic=False,
-      file_path=os.path.abspath(__file__))
-    ps.AddPageWithDefaultRunNavigate(
-      'http://octane-benchmark.googlecode.com/svn/latest/index.html?auto=1')
+      file_path=os.path.abspath(__file__),
+      bucket=page_set.PUBLIC_BUCKET)
+    ps.AddUserStory(page_module.Page(
+        'http://octane-benchmark.googlecode.com/svn/latest/index.html?auto=1',
+        ps, ps.base_dir, make_javascript_deterministic=False))
     return ps

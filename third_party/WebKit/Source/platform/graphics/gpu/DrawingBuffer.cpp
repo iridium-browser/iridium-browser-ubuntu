@@ -33,7 +33,6 @@
 #include "platform/graphics/gpu/DrawingBuffer.h"
 
 #include "platform/RuntimeEnabledFeatures.h"
-#include <algorithm>
 #include "platform/TraceEvent.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/ImageBuffer.h"
@@ -44,6 +43,7 @@
 #include "public/platform/WebExternalTextureLayer.h"
 #include "public/platform/WebGraphicsContext3D.h"
 #include "public/platform/WebGraphicsContext3DProvider.h"
+#include <algorithm>
 #ifndef NDEBUG
 #include "wtf/RefCountedLeakCounter.h"
 #endif
@@ -147,7 +147,7 @@ DrawingBuffer::DrawingBuffer(PassOwnPtr<WebGraphicsContext3D> context,
     , m_multisampleColorBuffer(0)
     , m_contentsChanged(true)
     , m_contentsChangeCommitted(false)
-    , m_layerComposited(false)
+    , m_bufferClearNeeded(false)
     , m_multisampleMode(None)
     , m_internalColorFormat(0)
     , m_colorFormat(0)
@@ -157,6 +157,7 @@ DrawingBuffer::DrawingBuffer(PassOwnPtr<WebGraphicsContext3D> context,
     , m_packAlignment(4)
     , m_destructionInProgress(false)
     , m_isHidden(false)
+    , m_filterLevel(SkPaint::kLow_FilterLevel)
     , m_contextEvictionManager(contextEvictionManager)
 {
     // Used by browser tests to detect the use of a DrawingBuffer.
@@ -181,17 +182,20 @@ void DrawingBuffer::markContentsChanged()
 {
     m_contentsChanged = true;
     m_contentsChangeCommitted = false;
-    m_layerComposited = false;
 }
 
-bool DrawingBuffer::layerComposited() const
+bool DrawingBuffer::bufferClearNeeded() const
 {
-    return m_layerComposited;
+    return m_bufferClearNeeded;
 }
 
-void DrawingBuffer::markLayerComposited()
+void DrawingBuffer::setBufferClearNeeded(bool flag)
 {
-    m_layerComposited = true;
+    if (m_preserveDrawingBuffer == Discard) {
+        m_bufferClearNeeded = flag;
+    } else {
+        ASSERT(!m_bufferClearNeeded);
+    }
 }
 
 WebGraphicsContext3D* DrawingBuffer::context()
@@ -206,6 +210,15 @@ void DrawingBuffer::setIsHidden(bool hidden)
     m_isHidden = hidden;
     if (m_isHidden)
         freeRecycledMailboxes();
+}
+
+void DrawingBuffer::setFilterLevel(SkPaint::FilterLevel filterLevel)
+{
+    if (m_filterLevel != filterLevel) {
+        m_filterLevel = filterLevel;
+        if (m_layer)
+            m_layer->setNearestNeighbor(filterLevel == SkPaint::kNone_FilterLevel);
+    }
 }
 
 void DrawingBuffer::freeRecycledMailboxes()
@@ -295,7 +308,7 @@ bool DrawingBuffer::prepareMailbox(WebExternalTextureMailbox* outMailbox, WebExt
     m_context->flush();
     frontColorBufferMailbox->mailbox.syncPoint = m_context->insertSyncPoint();
     frontColorBufferMailbox->mailbox.allowOverlay = frontColorBufferMailbox->textureInfo.imageId != 0;
-    markLayerComposited();
+    setBufferClearNeeded(true);
 
     // set m_parentDrawingBuffer to make sure 'this' stays alive as long as it has live mailboxes
     ASSERT(!frontColorBufferMailbox->m_parentDrawingBuffer);
@@ -459,7 +472,7 @@ bool DrawingBuffer::initialize(const IntSize& size)
 }
 
 bool DrawingBuffer::copyToPlatformTexture(WebGraphicsContext3D* context, Platform3DObject texture, GLenum internalFormat,
-    GLenum destType, GLint level, bool premultiplyAlpha, bool flipY, SourceBuffer source)
+    GLenum destType, GLint level, bool premultiplyAlpha, bool flipY, SourceDrawingBuffer sourceBuffer)
 {
     if (m_contentsChanged) {
         if (m_multisampleMode != None) {
@@ -478,7 +491,7 @@ bool DrawingBuffer::copyToPlatformTexture(WebGraphicsContext3D* context, Platfor
     // Contexts may be in a different share group. We must transfer the texture through a mailbox first
     WebExternalTextureMailbox mailbox;
     GLint textureId = 0;
-    if (source == Front && m_frontColorBuffer.texInfo.textureId) {
+    if (sourceBuffer == FrontBuffer && m_frontColorBuffer.texInfo.textureId) {
         textureId = m_frontColorBuffer.texInfo.textureId;
         mailbox = m_frontColorBuffer.mailbox;
     } else {
@@ -528,6 +541,7 @@ WebLayer* DrawingBuffer::platformLayer()
         m_layer->setOpaque(!m_actualAttributes.alpha);
         m_layer->setBlendBackgroundColor(m_actualAttributes.alpha);
         m_layer->setPremultipliedAlpha(m_actualAttributes.premultipliedAlpha);
+        m_layer->setNearestNeighbor(m_filterLevel == SkPaint::kNone_FilterLevel);
         GraphicsLayer::registerContentsLayer(m_layer->layer());
     }
 
@@ -887,7 +901,7 @@ void DrawingBuffer::paintRenderingResultsToCanvas(ImageBuffer* imageBuffer)
     paintFramebufferToCanvas(framebuffer(), size().width(), size().height(), !m_actualAttributes.premultipliedAlpha, imageBuffer);
 }
 
-PassRefPtr<Uint8ClampedArray> DrawingBuffer::paintRenderingResultsToImageData(int& width, int& height)
+PassRefPtr<Uint8ClampedArray> DrawingBuffer::paintRenderingResultsToImageData(int& width, int& height, SourceDrawingBuffer sourceBuffer)
 {
     if (m_actualAttributes.premultipliedAlpha)
         return nullptr;
@@ -903,9 +917,28 @@ PassRefPtr<Uint8ClampedArray> DrawingBuffer::paintRenderingResultsToImageData(in
 
     RefPtr<Uint8ClampedArray> pixels = Uint8ClampedArray::createUninitialized(width * height * 4);
 
-    m_context->bindFramebuffer(GL_FRAMEBUFFER, framebuffer());
+    GLint fbo = 0;
+    if (sourceBuffer == FrontBuffer && m_frontColorBuffer.texInfo.textureId) {
+        fbo = m_context->createFramebuffer();
+        m_context->bindFramebuffer(GL_FRAMEBUFFER, fbo);
+        m_context->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_frontColorBuffer.texInfo.textureId, 0);
+    } else {
+        m_context->bindFramebuffer(GL_FRAMEBUFFER, framebuffer());
+    }
+
     readBackFramebuffer(pixels->data(), width, height, ReadbackRGBA, WebGLImageConversion::AlphaDoNothing);
     flipVertically(pixels->data(), width, height);
+
+    if (fbo) {
+        m_context->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+        m_context->deleteFramebuffer(fbo);
+    }
+
+    if (m_framebufferBinding) {
+        restoreFramebufferBinding();
+    } else {
+        bind();
+    }
 
     return pixels.release();
 }

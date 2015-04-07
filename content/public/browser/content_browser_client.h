@@ -16,10 +16,10 @@
 #include "base/memory/scoped_vector.h"
 #include "base/values.h"
 #include "content/public/browser/certificate_request_result_type.h"
-#include "content/public/browser/desktop_notification_delegate.h"
 #include "content/public/browser/permission_type.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/media_stream_request.h"
+#include "content/public/common/permission_status.mojom.h"
 #include "content/public/common/resource_type.h"
 #include "content/public/common/socket_permission_request.h"
 #include "content/public/common/window_container_type.h"
@@ -28,7 +28,6 @@
 #include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_job_factory.h"
 #include "storage/browser/fileapi/file_system_context.h"
-#include "third_party/WebKit/public/platform/WebNotificationPermission.h"
 #include "ui/base/window_open_disposition.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -58,7 +57,6 @@ class ImageSkia;
 namespace net {
 class CookieOptions;
 class CookieStore;
-class HttpNetworkSession;
 class NetLog;
 class SSLCertRequestInfo;
 class SSLInfo;
@@ -90,24 +88,23 @@ class BrowserMainParts;
 class BrowserPluginGuestDelegate;
 class BrowserPpapiHost;
 class BrowserURLHandler;
-class DesktopNotificationDelegate;
 class DevToolsManagerDelegate;
 class ExternalVideoSurfaceContainer;
 class LocationProvider;
 class MediaObserver;
+class PlatformNotificationService;
 class QuotaPermissionContext;
 class RenderFrameHost;
 class RenderProcessHost;
 class RenderViewHost;
 class ResourceContext;
+class ServiceRegistry;
 class SiteInstance;
 class SpeechRecognitionManagerDelegate;
-class VibrationProvider;
 class WebContents;
 class WebContentsViewDelegate;
 struct MainFunctionParams;
 struct Referrer;
-struct ShowDesktopNotificationHostMsgParams;
 struct WebPreferences;
 
 // A mapping from the scheme name to the protocol handler that services its
@@ -402,9 +399,8 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual void SelectClientCertificate(
       int render_process_id,
       int render_frame_id,
-      const net::HttpNetworkSession* network_session,
       net::SSLCertRequestInfo* cert_request_info,
-      const base::Callback<void(net::X509Certificate*)>& callback) {}
+      const base::Callback<void(net::X509Certificate*)>& callback);
 
   // Adds a new installable certificate or private key.
   // Typically used to install an X.509 user certificate.
@@ -420,22 +416,10 @@ class CONTENT_EXPORT ContentBrowserClient {
   // return NULL if they're not interested.
   virtual MediaObserver* GetMediaObserver();
 
-  // Checks if the given page has permission to show desktop notifications.
-  // This is called on the IO thread.
-  virtual blink::WebNotificationPermission
-      CheckDesktopNotificationPermission(
-          const GURL& source_url,
-          ResourceContext* context,
-          int render_process_id);
-
-  // Show a desktop notification. If |cancel_callback| is non-null, it's set to
-  // a callback which can be used to cancel the notification.
-  virtual void ShowDesktopNotification(
-      const ShowDesktopNotificationHostMsgParams& params,
-      BrowserContext* browser_context,
-      int render_process_id,
-      scoped_ptr<DesktopNotificationDelegate> delegate,
-      base::Closure* cancel_callback) {}
+  // Returns the platform notification service, capable of displaying Web
+  // Notifications to the user. The embedder can return a nullptr if they don't
+  // support this functionality. May be called from any thread.
+  virtual PlatformNotificationService* GetPlatformNotificationService();
 
   virtual void RequestPermission(
       PermissionType permission,
@@ -454,6 +438,12 @@ class CONTENT_EXPORT ContentBrowserClient {
                                        WebContents* web_contents,
                                        const GURL& frame_url,
                                        const GURL& main_frame_url) {}
+
+  virtual PermissionStatus GetPermissionStatus(
+      PermissionType permission,
+      BrowserContext* browser_context,
+      const GURL& requesting_origin,
+      const GURL& embedding_origin);
 
   // Returns true if the given page is allowed to open a window of the given
   // type. If true is returned, |no_javascript_access| will indicate whether
@@ -481,7 +471,7 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Allows the embedder to return a delegate for the SpeechRecognitionManager.
   // The delegate will be owned by the manager. It's valid to return NULL.
   virtual SpeechRecognitionManagerDelegate*
-      GetSpeechRecognitionManagerDelegate();
+      CreateSpeechRecognitionManagerDelegate();
 
   // Getters for common objects.
   virtual net::NetLog* GetNetLog();
@@ -566,13 +556,6 @@ class CONTENT_EXPORT ContentBrowserClient {
   // information.
   virtual LocationProvider* OverrideSystemLocationProvider();
 
-  // Allows an embedder to return its own VibrationProvider implementation.
-  // Return NULL to use the default one for the platform to be created.
-  // FYI: Used by an external project; please don't remove.
-  // Contact Viatcheslav Ostapenko at sl.ostapenko@samsung.com for more
-  // information.
-  virtual VibrationProvider* OverrideVibrationProvider();
-
   // Creates a new DevToolsManagerDelegate. The caller owns the returned value.
   // It's valid to return NULL.
   virtual DevToolsManagerDelegate* GetDevToolsManagerDelegate();
@@ -593,6 +576,17 @@ class CONTENT_EXPORT ContentBrowserClient {
   // This is called on the IO thread.
   virtual net::CookieStore* OverrideCookieStoreForRenderProcess(
       int render_process_id);
+
+  // Checks if |security_origin| has permission to access the microphone or
+  // camera. Note that this does not query the user. |type| must be
+  // MEDIA_DEVICE_AUDIO_CAPTURE or MEDIA_DEVICE_VIDEO_CAPTURE.
+  virtual bool CheckMediaAccessPermission(BrowserContext* browser_context,
+                                          const GURL& security_origin,
+                                          MediaStreamType type);
+
+  // Allows to override browser Mojo services exposed through the
+  // RenderProcessHost.
+  virtual void OverrideRenderProcessMojoServices(ServiceRegistry* registry) {}
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Populates |mappings| with all files that need to be mapped before launching
@@ -620,13 +614,6 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual ExternalVideoSurfaceContainer*
   OverrideCreateExternalVideoSurfaceContainer(WebContents* web_contents);
 #endif
-
-// Checks if |security_origin| has permission to access the microphone or
-// camera. Note that this does not query the user. |type| must be
-// MEDIA_DEVICE_AUDIO_CAPTURE or MEDIA_DEVICE_VIDEO_CAPTURE.
-virtual bool CheckMediaAccessPermission(BrowserContext* browser_context,
-                                        const GURL& security_origin,
-                                        MediaStreamType type);
 };
 
 }  // namespace content

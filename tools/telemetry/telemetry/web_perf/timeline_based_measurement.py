@@ -63,28 +63,37 @@ class _ResultsWrapper(object):
     value.name = self._GetResultName(value.name)
     self._results.AddValue(value)
 
+def _GetRendererThreadsToInteractionRecordsMap(model):
+  threads_to_records_map = defaultdict(list)
+  interaction_labels_of_previous_threads = set()
+  for curr_thread in model.GetAllThreads():
+    for event in curr_thread.async_slices:
+      # TODO(nduca): Add support for page-load interaction record.
+      if tir_module.IsTimelineInteractionRecord(event.name):
+        interaction = tir_module.TimelineInteractionRecord.FromAsyncEvent(event)
+        threads_to_records_map[curr_thread].append(interaction)
+        if interaction.label in interaction_labels_of_previous_threads:
+          raise InvalidInteractions(
+            'Interaction record label %s is duplicated on different '
+            'threads' % interaction.label)
+    if curr_thread in threads_to_records_map:
+      interaction_labels_of_previous_threads.update(
+        r.label for r in threads_to_records_map[curr_thread])
+
+  return threads_to_records_map
+
 class _TimelineBasedMetrics(object):
-  def __init__(self, model, renderer_thread,
+  def __init__(self, model, renderer_thread, interaction_records,
                get_metric_from_metric_type_callback):
     self._model = model
     self._renderer_thread = renderer_thread
+    self._interaction_records = interaction_records
     self._get_metric_from_metric_type_callback = \
         get_metric_from_metric_type_callback
 
-  def FindTimelineInteractionRecords(self):
-    # TODO(nduca): Add support for page-load interaction record.
-    return [tir_module.TimelineInteractionRecord.FromAsyncEvent(event) for
-            event in self._renderer_thread.async_slices
-            if tir_module.IsTimelineInteractionRecord(event.name)]
-
   def AddResults(self, results):
-    all_interactions = self.FindTimelineInteractionRecords()
-    if len(all_interactions) == 0:
-      raise InvalidInteractions('Expected at least one interaction record on '
-                                'the page')
-
     interactions_by_label = defaultdict(list)
-    for i in all_interactions:
+    for i in self._interaction_records:
       interactions_by_label[i.label].append(i)
 
     for label, interactions in interactions_by_label.iteritems():
@@ -111,75 +120,124 @@ class _TimelineBasedMetrics(object):
                         interactions, wrapped_results)
 
 
-class TimelineBasedMeasurement(page_test.PageTest):
-  """Collects multiple metrics pages based on their interaction records.
+class Options(object):
+  """A class to be used to configure TimelineBasedMeasurement.
 
-  A timeline measurement shifts the burden of what metrics to collect onto the
-  page under test, or the pageset running that page. Instead of the measurement
-  having a fixed set of values it collects about the page, the page being tested
+  This is created and returned by
+  Benchmark.CreateTimelineBasedMeasurementOptions.
+  """
+
+  def __init__(self, overhead_level=NO_OVERHEAD_LEVEL):
+    """Save the overhead level.
+
+    As the amount of instrumentation increases, so does the overhead.
+    The user of the measurement chooses the overhead level that is appropriate,
+    and the tracing is filtered accordingly.
+
+    overhead_level: one of NO_OVERHEAD_LEVEL, V8_OVERHEAD_LEVEL,
+        MINIMAL_OVERHEAD_LEVEL, or DEBUG_OVERHEAD_LEVEL.
+        The v8 overhead level is a temporary solution that may be removed.
+    """
+    self._overhead_level = overhead_level
+
+
+class TimelineBasedMeasurement(object):
+  """Collects multiple metrics based on their interaction records.
+
+  A timeline based measurement shifts the burden of what metrics to collect onto
+  the user story under test. Instead of the measurement
+  having a fixed set of values it collects, the user story being tested
   issues (via javascript) an Interaction record into the user timing API that
-  describing what the page is doing at that time, as well as a standardized set
+  describing what is happening at that time, as well as a standardized set
   of flags describing the semantics of the work being done. The
   TimelineBasedMeasurement object collects a trace that includes both these
-  interaction recorsd, and a user-chosen amount of performance data using
+  interaction records, and a user-chosen amount of performance data using
   Telemetry's various timeline-producing APIs, tracing especially.
 
   It then passes the recorded timeline to different TimelineBasedMetrics based
-  on those flags. This allows a single run through a page to produce load timing
-  data, smoothness data, critical jank information and overall cpu usage
-  information.
+  on those flags. As an example, this allows a single user story run to produce
+  load timing data, smoothness data, critical jank information and overall cpu
+  usage information.
 
   For information on how to mark up a page to work with
   TimelineBasedMeasurement, refer to the
   perf.metrics.timeline_interaction_record module.
-
   """
-  def __init__(self):
-    super(TimelineBasedMeasurement, self).__init__('RunPageInteractions')
+  def __init__(self, options):
+    self._overhead_level = options._overhead_level
 
-  @classmethod
-  def AddCommandLineArgs(cls, parser):
-    parser.add_option(
-        '--overhead-level', dest='overhead_level', type='choice',
-        choices=ALL_OVERHEAD_LEVELS,
-        default=NO_OVERHEAD_LEVEL,
-        help='How much overhead to incur during the measurement.')
+  def WillRunUserStory(self, tracing_controller,
+                       synthetic_delay_categories=None):
+    """Configure and start tracing.
 
-  def WillNavigateToPage(self, page, tab):
-    if not tab.browser.platform.tracing_controller.IsChromeTracingSupported(
-        tab.browser):
+    Args:
+      app: an app.App subclass instance.
+      synthetic_delay_categories: iterable of delays. For example:
+          ['DELAY(cc.BeginMainFrame;0.014;alternating)']
+          where 'cc.BeginMainFrame' is a timeline event, 0.014 is the delay,
+          and 'alternating' is the mode.
+    """
+    if not tracing_controller.IsChromeTracingSupported():
       raise Exception('Not supported')
-
-    assert self.options.overhead_level in ALL_OVERHEAD_LEVELS
-    if self.options.overhead_level == NO_OVERHEAD_LEVEL:
+    assert self._overhead_level in ALL_OVERHEAD_LEVELS
+    if self._overhead_level == NO_OVERHEAD_LEVEL:
       category_filter = tracing_category_filter.CreateNoOverheadFilter()
     # TODO(ernstm): Remove this overhead level when benchmark relevant v8 events
     # become available in the 'benchmark' category.
-    elif self.options.overhead_level == V8_OVERHEAD_LEVEL:
+    elif self._overhead_level == V8_OVERHEAD_LEVEL:
       category_filter = tracing_category_filter.CreateNoOverheadFilter()
       category_filter.AddIncludedCategory('v8')
-    elif self.options.overhead_level == MINIMAL_OVERHEAD_LEVEL:
+    elif self._overhead_level == MINIMAL_OVERHEAD_LEVEL:
       category_filter = tracing_category_filter.CreateMinimalOverheadFilter()
     else:
       category_filter = tracing_category_filter.CreateDebugOverheadFilter()
 
-    for delay in page.GetSyntheticDelayCategories():
+    # TODO(slamm): Move synthetic_delay_categories to the TBM options.
+    for delay in synthetic_delay_categories or []:
       category_filter.AddSyntheticDelay(delay)
     options = tracing_options.TracingOptions()
     options.enable_chrome_trace = True
-    tab.browser.platform.tracing_controller.Start(options, category_filter)
+    if tracing_controller.IsDisplayTracingSupported():
+      options.enable_platform_display_trace = True
+    tracing_controller.Start(options, category_filter)
 
-  def ValidateAndMeasurePage(self, page, tab, results):
-    """ Collect all possible metrics and added them to results. """
-    trace_result = tab.browser.platform.tracing_controller.Stop()
+  def Measure(self, tracing_controller, results):
+    """Collect all possible metrics and added them to results."""
+    trace_result = tracing_controller.Stop()
     results.AddValue(trace.TraceValue(results.current_page, trace_result))
     model = model_module.TimelineModel(trace_result)
-    renderer_thread = model.GetRendererThreadFromTabId(tab.id)
-    meta_metrics = _TimelineBasedMetrics(
-        model, renderer_thread, _GetMetricFromMetricType)
-    meta_metrics.AddResults(results)
+    threads_to_records_map = _GetRendererThreadsToInteractionRecordsMap(model)
+    for renderer_thread, interaction_records in (
+        threads_to_records_map.iteritems()):
+      meta_metrics = _TimelineBasedMetrics(
+          model, renderer_thread, interaction_records, _GetMetricFromMetricType)
+      meta_metrics.AddResults(results)
 
+  def DidRunUserStory(self, tracing_controller):
+    if tracing_controller.is_tracing_running:
+      tracing_controller.Stop()
+
+
+class TimelineBasedPageTest(page_test.PageTest):
+  """Page test that collects metrics with TimelineBasedMeasurement."""
+  def __init__(self, tbm):
+    super(TimelineBasedPageTest, self).__init__('RunPageInteractions')
+    self._measurement = tbm
+
+  @property
+  def measurement(self):
+    return self._measurement
+
+  def WillNavigateToPage(self, page, tab):
+    tracing_controller = tab.browser.platform.tracing_controller
+    self._measurement.WillRunUserStory(
+        tracing_controller, page.GetSyntheticDelayCategories())
+
+  def ValidateAndMeasurePage(self, page, tab, results):
+    """Collect all possible metrics and added them to results."""
+    tracing_controller = tab.browser.platform.tracing_controller
+    self._measurement.Measure(tracing_controller, results)
 
   def CleanUpAfterPage(self, page, tab):
-    if tab.browser.platform.tracing_controller.is_tracing_running:
-      tab.browser.platform.tracing_controller.Stop()
+    tracing_controller = tab.browser.platform.tracing_controller
+    self._measurement.DidRunUserStory(tracing_controller)

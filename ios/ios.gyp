@@ -10,9 +10,10 @@
       'target_name': 'ios',
       'type': 'none',
       'dependencies': [
+        'chrome/ios_chrome_tests.gyp:*',
         'ios_base.gyp:*',
         'ios_tests_unit.gyp:*',
-        'provider/ios_provider_web.gyp:*',
+        'provider/ios_provider_chrome.gyp:*',
         'web/ios_web.gyp:*',
       ],
     },

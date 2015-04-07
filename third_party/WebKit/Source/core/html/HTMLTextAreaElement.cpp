@@ -156,8 +156,8 @@ void HTMLTextAreaElement::collectStyleForPresentationAttribute(const QualifiedNa
 void HTMLTextAreaElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
     if (name == rowsAttr) {
-        int rows = value.toInt();
-        if (rows <= 0)
+        int rows = 0;
+        if (value.isEmpty() || !parseHTMLInteger(value, rows) || rows <= 0)
             rows = defaultRows;
         if (m_rows != rows) {
             m_rows = rows;
@@ -165,8 +165,8 @@ void HTMLTextAreaElement::parseAttribute(const QualifiedName& name, const Atomic
                 renderer()->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
         }
     } else if (name == colsAttr) {
-        int cols = value.toInt();
-        if (cols <= 0)
+        int cols = 0;
+        if (value.isEmpty() || !parseHTMLInteger(value, cols) || cols <= 0)
             cols = defaultCols;
         if (m_cols != cols) {
             m_cols = cols;
@@ -243,7 +243,7 @@ bool HTMLTextAreaElement::shouldShowFocusRingOnMouseFocus() const
 void HTMLTextAreaElement::updateFocusAppearance(bool restorePreviousSelection)
 {
     if (!restorePreviousSelection)
-        setSelectionRange(0, 0);
+        setSelectionRange(0, 0, SelectionHasNoDirection, NotDispatchSelectEvent);
     else
         restoreCachedSelection();
 
@@ -373,7 +373,7 @@ void HTMLTextAreaElement::setValueCommon(const String& newValue, TextFieldEventB
             if (isFinishedParsingChildren()) {
                 // Set the caret to the end of the text value except for initialize.
                 unsigned endOfString = m_value.length();
-                setSelectionRange(endOfString, endOfString, SelectionHasNoDirection, ChangeSelectionIfFocused);
+                setSelectionRange(endOfString, endOfString, SelectionHasNoDirection, NotDispatchSelectEvent, ChangeSelectionIfFocused);
             }
         }
         return;
@@ -390,7 +390,7 @@ void HTMLTextAreaElement::setValueCommon(const String& newValue, TextFieldEventB
     if (isFinishedParsingChildren()) {
         // Set the caret to the end of the text value except for initialize.
         unsigned endOfString = m_value.length();
-        setSelectionRange(endOfString, endOfString, SelectionHasNoDirection, ChangeSelectionIfFocused);
+        setSelectionRange(endOfString, endOfString, SelectionHasNoDirection, NotDispatchSelectEvent, ChangeSelectionIfFocused);
     }
 
     notifyFormStateChanged();

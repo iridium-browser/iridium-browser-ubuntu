@@ -25,6 +25,7 @@ SurfaceDisplayOutputSurface::SurfaceDisplayOutputSurface(
       allocator_(allocator) {
   capabilities_.delegated_rendering = true;
   capabilities_.max_frames_pending = 1;
+  capabilities_.can_force_reclaim_resources = true;
 }
 
 SurfaceDisplayOutputSurface::~SurfaceDisplayOutputSurface() {
@@ -48,11 +49,11 @@ void SurfaceDisplayOutputSurface::SwapBuffers(cc::CompositorFrame* frame) {
       factory_.Destroy(surface_id_);
     }
     surface_id_ = allocator_->GenerateId();
-    factory_.Create(surface_id_, frame_size);
+    factory_.Create(surface_id_);
     display_size_ = frame_size;
   }
-  display_client_->display()->Resize(
-      surface_id_, frame_size, frame->metadata.device_scale_factor);
+  display_client_->display()->SetSurfaceId(surface_id_,
+                                           frame->metadata.device_scale_factor);
 
   scoped_ptr<cc::CompositorFrame> frame_copy(new cc::CompositorFrame());
   frame->AssignTo(frame_copy.get());
@@ -75,6 +76,15 @@ bool SurfaceDisplayOutputSurface::BindToClient(
   return display_client_->Initialize();
 }
 
+void SurfaceDisplayOutputSurface::ForceReclaimResources() {
+  if (!surface_id_.is_null()) {
+    scoped_ptr<cc::CompositorFrame> empty_frame(new cc::CompositorFrame());
+    empty_frame->delegated_frame_data.reset(new cc::DelegatedFrameData);
+    factory_.SubmitFrame(surface_id_, empty_frame.Pass(),
+                         cc::SurfaceFactory::DrawCallback());
+  }
+}
+
 void SurfaceDisplayOutputSurface::ReturnResources(
     const cc::ReturnedResourceArray& resources) {
   cc::CompositorFrameAck ack;
@@ -83,8 +93,9 @@ void SurfaceDisplayOutputSurface::ReturnResources(
     client_->ReclaimResources(&ack);
 }
 
-void SurfaceDisplayOutputSurface::SwapBuffersComplete() {
-  client_->DidSwapBuffersComplete();
+void SurfaceDisplayOutputSurface::SwapBuffersComplete(bool drawn) {
+  if (client_)
+    client_->DidSwapBuffersComplete();
 }
 
 }  // namespace content

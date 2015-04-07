@@ -90,6 +90,8 @@ static String initiatorFor(const StringImpl* tagImpl)
         return linkTag.localName();
     if (match(tagImpl, scriptTag))
         return scriptTag.localName();
+    if (match(tagImpl, videoTag))
+        return videoTag.localName();
     ASSERT_NOT_REACHED();
     return emptyString();
 }
@@ -117,13 +119,13 @@ public:
     {
         if (match(m_tagImpl, imgTag)
             || match(m_tagImpl, sourceTag)) {
-            if (RuntimeEnabledFeatures::pictureSizesEnabled())
-                m_sourceSize = SizesAttributeParser(m_mediaValues, String()).length();
+            m_sourceSize = SizesAttributeParser(m_mediaValues, String()).length();
             return;
         }
         if ( !match(m_tagImpl, inputTag)
             && !match(m_tagImpl, linkTag)
-            && !match(m_tagImpl, scriptTag))
+            && !match(m_tagImpl, scriptTag)
+            && !match(m_tagImpl, videoTag))
             m_tagImpl = 0;
     }
 
@@ -202,7 +204,7 @@ private:
             m_srcsetAttributeValue = attributeValue;
             m_srcsetImageCandidate = bestFitSourceForSrcsetAttribute(m_mediaValues->devicePixelRatio(), m_sourceSize, attributeValue);
             setUrlToLoad(bestFitSourceForImageAttributes(m_mediaValues->devicePixelRatio(), m_sourceSize, m_imgSrcUrl, m_srcsetImageCandidate), AllowURLReplacement);
-        } else if (RuntimeEnabledFeatures::pictureSizesEnabled() && match(attributeName, sizesAttr) && !m_sourceSizeSet) {
+        } else if (match(attributeName, sizesAttr) && !m_sourceSizeSet) {
             m_sourceSize = SizesAttributeParser(m_mediaValues, attributeValue).length();
             m_sourceSizeSet = true;
             if (!m_srcsetImageCandidate.isEmpty()) {
@@ -254,7 +256,13 @@ private:
             // FIXME - Don't match media multiple times.
             m_matchedMediaAttribute = mediaAttributeMatches(*m_mediaValues, attributeValue);
         }
+    }
 
+    template<typename NameType>
+    void processVideoAttribute(const NameType& attributeName, const String& attributeValue)
+    {
+        if (match(attributeName, posterAttr))
+            setUrlToLoad(attributeValue, DisallowURLReplacement);
     }
 
     template<typename NameType>
@@ -273,6 +281,8 @@ private:
             processInputAttribute(attributeName, attributeValue);
         else if (match(m_tagImpl, sourceTag))
             processSourceAttribute(attributeName, attributeValue);
+        else if (match(m_tagImpl, videoTag))
+            processVideoAttribute(attributeName, attributeValue);
     }
 
     static bool relAttributeIsStyleSheet(const String& attributeValue)
@@ -296,7 +306,7 @@ private:
     const String& charset() const
     {
         // FIXME: Its not clear that this if is needed, the loader probably ignores charset for image requests anyway.
-        if (match(m_tagImpl, imgTag))
+        if (match(m_tagImpl, imgTag) || match(m_tagImpl, videoTag))
             return emptyString();
         return m_charset;
     }
@@ -305,7 +315,7 @@ private:
     {
         if (match(m_tagImpl, scriptTag))
             return Resource::Script;
-        if (match(m_tagImpl, imgTag) || (match(m_tagImpl, inputTag) && m_inputIsImage))
+        if (match(m_tagImpl, imgTag) || match(m_tagImpl, videoTag) || (match(m_tagImpl, inputTag) && m_inputIsImage))
             return Resource::Image;
         if (match(m_tagImpl, linkTag) && m_linkIsStyleSheet)
             return Resource::CSSStyleSheet;
@@ -374,6 +384,8 @@ TokenPreloadScanner::TokenPreloadScanner(const KURL& documentURL, PassRefPtr<Med
     : m_documentURL(documentURL)
     , m_inStyle(false)
     , m_inPicture(false)
+    , m_isAppCacheEnabled(false)
+    , m_isCSPEnabled(false)
     , m_templateCount(0)
     , m_mediaValues(mediaValues)
 {
@@ -386,7 +398,7 @@ TokenPreloadScanner::~TokenPreloadScanner()
 TokenPreloadScannerCheckpoint TokenPreloadScanner::createCheckpoint()
 {
     TokenPreloadScannerCheckpoint checkpoint = m_checkpoints.size();
-    m_checkpoints.append(Checkpoint(m_predictedBaseElementURL, m_inStyle, m_templateCount));
+    m_checkpoints.append(Checkpoint(m_predictedBaseElementURL, m_inStyle, m_isAppCacheEnabled, m_isCSPEnabled, m_templateCount));
     return checkpoint;
 }
 
@@ -396,6 +408,8 @@ void TokenPreloadScanner::rewindTo(TokenPreloadScannerCheckpoint checkpointIndex
     const Checkpoint& checkpoint = m_checkpoints[checkpointIndex];
     m_predictedBaseElementURL = checkpoint.predictedBaseElementURL;
     m_inStyle = checkpoint.inStyle;
+    m_isAppCacheEnabled = checkpoint.isAppCacheEnabled;
+    m_isCSPEnabled = checkpoint.isCSPEnabled;
     m_templateCount = checkpoint.templateCount;
     m_cssScanner.reset();
     m_checkpoints.clear();
@@ -414,6 +428,14 @@ void TokenPreloadScanner::scan(const CompactHTMLToken& token, const SegmentedStr
 template<typename Token>
 void TokenPreloadScanner::scanCommon(const Token& token, const SegmentedString& source, PreloadRequestStream& requests)
 {
+    // Disable preload for documents with AppCache.
+    if (m_isAppCacheEnabled)
+        return;
+
+    // http://crbug.com/434230 Disable preload for documents with CSP <meta> tags
+    if (m_isCSPEnabled)
+        return;
+
     switch (token.type()) {
     case HTMLToken::Character: {
         if (!m_inStyle)
@@ -457,6 +479,18 @@ void TokenPreloadScanner::scanCommon(const Token& token, const SegmentedString& 
             updatePredictedBaseURL(token);
             return;
         }
+        if (match(tagImpl, htmlTag) && token.getAttributeItem(manifestAttr)) {
+            m_isAppCacheEnabled = true;
+            return;
+        }
+        if (match(tagImpl, metaTag)) {
+            const typename Token::Attribute* equivAttribute = token.getAttributeItem(http_equivAttr);
+            if (equivAttribute && equalIgnoringCase(String(equivAttribute->value), "content-security-policy")) {
+                m_isCSPEnabled = true;
+                return;
+            }
+        }
+
         if (RuntimeEnabledFeatures::pictureEnabled() && (match(tagImpl, pictureTag))) {
             m_inPicture = true;
             m_pictureSourceURL = String();

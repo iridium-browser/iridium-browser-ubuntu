@@ -6,6 +6,7 @@ package org.chromium.cronet_test_apk;
 
 import android.test.suitebuilder.annotation.SmallTest;
 
+import org.chromium.base.PathUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.cronet_test_apk.TestUrlRequestListener.FailureType;
 import org.chromium.cronet_test_apk.TestUrlRequestListener.ResponseStep;
@@ -15,7 +16,9 @@ import org.chromium.net.UrlRequest;
 import org.chromium.net.UrlRequestContextConfig;
 import org.chromium.net.UrlRequestException;
 
+import java.io.File;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 
 /**
  * Test CronetUrlRequestContext.
@@ -49,7 +52,7 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
             assertTrue(byteBuffer.capacity() != 0);
             byte[] receivedDataAfter = new byte[byteBuffer.capacity()];
             byteBuffer.get(receivedDataAfter);
-            assertEquals(receivedDataBefore, receivedDataAfter);
+            assertTrue(Arrays.equals(receivedDataBefore, receivedDataAfter));
         }
 
         @Override
@@ -80,8 +83,8 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
         };
         mActivity = launchCronetTestAppWithUrlAndCommandLineArgs(TEST_URL,
                 commandLineArgs);
-        waitForActiveShellToBeDoneLoading();
-        assertTrue(UploadTestServer.startUploadTestServer());
+        assertTrue(UploadTestServer.startUploadTestServer(
+                getInstrumentation().getTargetContext()));
         TestUrlRequestListener listener = new TestUrlRequestListener();
         UrlRequest urlRequest = mActivity.mUrlRequestContext.createRequest(
                 UploadTestServer.getEchoHeaderURL(userAgentName), listener,
@@ -178,5 +181,99 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
         Thread.sleep(1000);
 
         mActivity.mUrlRequestContext.shutdown();
+    }
+
+    @SmallTest
+    @Feature({"Cronet"})
+    public void testNetLog() throws Exception {
+        mActivity = launchCronetTestApp();
+        File directory = new File(PathUtils.getDataDirectory(
+                getInstrumentation().getTargetContext()));
+        File file = File.createTempFile("cronet", "json", directory);
+        mActivity.mUrlRequestContext.startNetLogToFile(file.getPath());
+        // Start a request.
+        TestUrlRequestListener listener = new TestUrlRequestListener();
+        UrlRequest urlRequest = mActivity.mUrlRequestContext.createRequest(
+                TEST_URL, listener, listener.getExecutor());
+        urlRequest.start();
+        listener.blockForDone();
+        mActivity.mUrlRequestContext.stopNetLog();
+        assertTrue(file.exists());
+        assertTrue(file.length() != 0);
+        assertTrue(file.delete());
+        assertTrue(!file.exists());
+    }
+
+    @SmallTest
+    @Feature({"Cronet"})
+    public void testNetLogAfterShutdown() throws Exception {
+        mActivity = launchCronetTestApp();
+        TestUrlRequestListener listener = new TestUrlRequestListener();
+        UrlRequest urlRequest = mActivity.mUrlRequestContext.createRequest(
+                TEST_URL, listener, listener.getExecutor());
+        urlRequest.start();
+        listener.blockForDone();
+        mActivity.mUrlRequestContext.shutdown();
+
+        File directory = new File(PathUtils.getDataDirectory(
+                getInstrumentation().getTargetContext()));
+        File file = File.createTempFile("cronet", "json", directory);
+        mActivity.mUrlRequestContext.startNetLogToFile(file.getPath());
+        mActivity.mUrlRequestContext.stopNetLog();
+        assertTrue(file.exists());
+        assertTrue(file.length() == 0);
+        assertTrue(file.delete());
+        assertTrue(!file.exists());
+    }
+
+    @SmallTest
+    @Feature({"Cronet"})
+    public void testNetLogStartMultipleTimes() throws Exception {
+        mActivity = launchCronetTestApp();
+        File directory = new File(PathUtils.getDataDirectory(
+                getInstrumentation().getTargetContext()));
+        File file = File.createTempFile("cronet", "json", directory);
+        // Start NetLog multiple times.
+        mActivity.mUrlRequestContext.startNetLogToFile(file.getPath());
+        mActivity.mUrlRequestContext.startNetLogToFile(file.getPath());
+        mActivity.mUrlRequestContext.startNetLogToFile(file.getPath());
+        mActivity.mUrlRequestContext.startNetLogToFile(file.getPath());
+        // Start a request.
+        TestUrlRequestListener listener = new TestUrlRequestListener();
+        UrlRequest urlRequest = mActivity.mUrlRequestContext.createRequest(
+                TEST_URL, listener, listener.getExecutor());
+        urlRequest.start();
+        listener.blockForDone();
+        mActivity.mUrlRequestContext.stopNetLog();
+        assertTrue(file.exists());
+        assertTrue(file.length() != 0);
+        assertTrue(file.delete());
+        assertTrue(!file.exists());
+    }
+
+    @SmallTest
+    @Feature({"Cronet"})
+    public void testNetLogStopMultipleTimes() throws Exception {
+        mActivity = launchCronetTestApp();
+        File directory = new File(PathUtils.getDataDirectory(
+                getInstrumentation().getTargetContext()));
+        File file = File.createTempFile("cronet", "json", directory);
+        mActivity.mUrlRequestContext.startNetLogToFile(file.getPath());
+        // Start a request.
+        TestUrlRequestListener listener = new TestUrlRequestListener();
+        UrlRequest urlRequest = mActivity.mUrlRequestContext.createRequest(
+                TEST_URL, listener, listener.getExecutor());
+        urlRequest.start();
+        listener.blockForDone();
+        // Stop NetLog multiple times.
+        mActivity.mUrlRequestContext.stopNetLog();
+        mActivity.mUrlRequestContext.stopNetLog();
+        mActivity.mUrlRequestContext.stopNetLog();
+        mActivity.mUrlRequestContext.stopNetLog();
+        mActivity.mUrlRequestContext.stopNetLog();
+        assertTrue(file.exists());
+        assertTrue(file.length() != 0);
+        assertTrue(file.delete());
+        assertTrue(!file.exists());
     }
 }

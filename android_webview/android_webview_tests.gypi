@@ -17,11 +17,11 @@
         'java_in_dir': 'test/shell',
         'native_lib_target': 'libstandalonelibwebviewchromium',
         'resource_dir': 'test/shell/res',
-        'extensions_to_not_compress': 'pak',
+        'extensions_to_not_compress': 'pak,dat,bin',
         'extra_native_libs': ['<(SHARED_LIB_DIR)/libdrawgl.>(android_product_extension)'],
         'additional_input_paths': [
-          '<(PRODUCT_DIR)/android_webview_assets/webviewchromium.pak',
-          '<(PRODUCT_DIR)/android_webview_assets/en-US.pak',
+          '<(PRODUCT_DIR)/android_webview_apk/assets/webviewchromium.pak',
+          '<(PRODUCT_DIR)/android_webview_apk/assets/en-US.pak',
           '<(PRODUCT_DIR)/android_webview_apk/assets/asset_file.html',
           '<(PRODUCT_DIR)/android_webview_apk/assets/cookie_test.html',
           '<(PRODUCT_DIR)/android_webview_apk/assets/asset_icon.png',
@@ -58,7 +58,7 @@
             '<(java_in_dir)/assets/full_screen_video_inside_div_test.html',
             '<(java_in_dir)/assets/video.mp4',
           ],
-	  'conditions': [
+          'conditions': [
             ['icu_use_data_file_flag==1', {
               'files': [
                 '<(PRODUCT_DIR)/icudtl.dat',
@@ -113,6 +113,7 @@
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../ui/base/ui_base.gyp:ui_base_jni_headers',
+        '../ui/gl/gl.gyp:gl',
         'android_webview_common',
         'android_webview_unittests_jni',
       ],
@@ -124,8 +125,13 @@
       'sources': [
         'browser/aw_static_cookie_policy_unittest.cc',
         'browser/aw_form_database_service_unittest.cc',
+        'browser/browser_view_renderer_unittest.cc',
         'browser/net/android_stream_reader_url_request_job_unittest.cc',
         'browser/net/input_stream_reader_unittest.cc',
+        'browser/test/fake_window.cc',
+        'browser/test/fake_window.h',
+        'browser/test/rendering_test.cc',
+        'browser/test/rendering_test.h',
         'lib/main/webview_tests.cc',
         'native/aw_contents_client_bridge_unittest.cc',
         'native/aw_media_url_interceptor_unittest.cc',

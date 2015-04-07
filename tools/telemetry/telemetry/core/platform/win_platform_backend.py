@@ -6,6 +6,7 @@ import atexit
 import collections
 import contextlib
 import ctypes
+import logging
 import os
 import platform
 import re
@@ -28,9 +29,10 @@ from telemetry.util import path
 try:
   import pywintypes  # pylint: disable=F0401
   import win32api  # pylint: disable=F0401
-  from win32com.shell import shell  # pylint: disable=F0401
-  from win32com.shell import shellcon  # pylint: disable=F0401
+  from win32com.shell import shell  # pylint: disable=F0401,E0611
+  from win32com.shell import shellcon  # pylint: disable=F0401,E0611
   import win32con  # pylint: disable=F0401
+  import win32gui  # pylint: disable=F0401
   import win32process  # pylint: disable=F0401
   import win32security  # pylint: disable=F0401
 except ImportError:
@@ -39,6 +41,7 @@ except ImportError:
   shellcon = None
   win32api = None
   win32con = None
+  win32gui = None
   win32process = None
   win32security = None
 
@@ -87,6 +90,10 @@ class WinPlatformBackend(desktop_platform_backend.DesktopPlatformBackend):
     self._msr_server_port = None
     self._power_monitor = msr_power_monitor.MsrPowerMonitor(self)
 
+  @classmethod
+  def IsPlatformBackendForHost(cls):
+    return sys.platform == 'win32'
+
   def __del__(self):
     self.close()
 
@@ -100,16 +107,6 @@ class WinPlatformBackend(desktop_platform_backend.DesktopPlatformBackend):
     TerminateProcess(self._msr_server_handle)
     self._msr_server_handle = None
     self._msr_server_port = None
-
-  # pylint: disable=W0613
-  def StartRawDisplayFrameRateMeasurement(self):
-    raise NotImplementedError()
-
-  def StopRawDisplayFrameRateMeasurement(self):
-    raise NotImplementedError()
-
-  def GetRawDisplayFrameRateMeasurements(self):
-    raise NotImplementedError()
 
   def IsThermallyThrottled(self):
     raise NotImplementedError()
@@ -144,13 +141,6 @@ class WinPlatformBackend(desktop_platform_backend.DesktopPlatformBackend):
             'VMPeak': memory_info['PeakPagefileUsage'],
             'WorkingSetSize': memory_info['WorkingSetSize'],
             'WorkingSetSizePeak': memory_info['PeakWorkingSetSize']}
-
-  def GetIOStats(self, pid):
-    io_stats = self._GetWin32ProcessInfo(win32process.GetProcessIoCounters, pid)
-    return {'ReadOperationCount': io_stats['ReadOperationCount'],
-            'WriteOperationCount': io_stats['WriteOperationCount'],
-            'ReadTransferCount': io_stats['ReadTransferCount'],
-            'WriteTransferCount': io_stats['WriteTransferCount']}
 
   def KillProcess(self, pid, kill_process_tree=False):
     # os.kill for Windows is Python 2.7.
@@ -274,6 +264,7 @@ class WinPlatformBackend(desktop_platform_backend.DesktopPlatformBackend):
 
       def __init__(self):
         self.size = ctypes.sizeof(self)
+        # pylint: disable=bad-super-call
         super(PerformanceInfo, self).__init__()
 
     performance_info = PerformanceInfo()
@@ -362,3 +353,38 @@ class WinPlatformBackend(desktop_platform_backend.DesktopPlatformBackend):
     finally:
       sock.close()
     return struct.unpack('Q', response)[0] >> start & ((1 << length) - 1)
+
+  def IsCooperativeShutdownSupported(self):
+    return True
+
+  def CooperativelyShutdown(self, proc, app_name):
+    pid = proc.pid
+
+    # http://timgolden.me.uk/python/win32_how_do_i/
+    #   find-the-window-for-my-subprocess.html
+    #
+    # It seems that intermittently this code manages to find windows
+    # that don't belong to Chrome -- for example, the cmd.exe window
+    # running slave.bat on the tryservers. Try to be careful about
+    # finding only Chrome's windows. This works for both the browser
+    # and content_shell.
+    #
+    # It seems safest to send the WM_CLOSE messages after discovering
+    # all of the sub-process's windows.
+    def find_chrome_windows(hwnd, hwnds):
+      _, win_pid = win32process.GetWindowThreadProcessId(hwnd)
+      if (pid == win_pid and
+          win32gui.IsWindowVisible(hwnd) and
+          win32gui.IsWindowEnabled(hwnd) and
+          win32gui.GetClassName(hwnd).lower().startswith(app_name)):
+        hwnds.append(hwnd)
+      return True
+    hwnds = []
+    win32gui.EnumWindows(find_chrome_windows, hwnds)
+    if hwnds:
+      for hwnd in hwnds:
+        win32gui.SendMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+      return True
+    else:
+      logging.info('Did not find any windows owned by target process')
+    return False

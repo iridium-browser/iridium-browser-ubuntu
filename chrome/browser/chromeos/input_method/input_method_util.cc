@@ -16,14 +16,17 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/extensions/extension_constants.h"
+
 // TODO(nona): move this header from this file.
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/ime/component_extension_ime_manager.h"
-#include "chromeos/ime/extension_ime_util.h"
+
+#include "ui/base/ime/chromeos/component_extension_ime_manager.h"
+#include "ui/base/ime/chromeos/extension_ime_util.h"
+
 // For SetHardwareKeyboardLayoutForTesting.
-#include "chromeos/ime/fake_input_method_delegate.h"
-#include "chromeos/ime/input_method_delegate.h"
-#include "chromeos/ime/input_method_whitelist.h"
+#include "ui/base/ime/chromeos/fake_input_method_delegate.h"
+#include "ui/base/ime/chromeos/input_method_delegate.h"
+#include "ui/base/ime/chromeos/input_method_whitelist.h"
 
 namespace {
 
@@ -471,31 +474,37 @@ std::string InputMethodUtil::GetLanguageDefaultInputMethodId(
   return std::string();
 }
 
+std::string InputMethodUtil::MigrateInputMethod(
+    const std::string& input_method_id) {
+  std::string engine_id = input_method_id;
+  // Migrates some Engine IDs from VPD.
+  for (size_t j = 0; j < arraysize(kEngineIdMigrationMap); ++j) {
+    size_t pos = engine_id.find(kEngineIdMigrationMap[j][0]);
+    if (pos == 0) {
+      engine_id.replace(0,
+                        strlen(kEngineIdMigrationMap[j][0]),
+                        kEngineIdMigrationMap[j][1]);
+      break;
+    }
+  }
+  // Migrates the extension IDs.
+  std::string id =
+      extension_ime_util::GetInputMethodIDByEngineID(engine_id);
+  if (extension_ime_util::IsComponentExtensionIME(id)) {
+    std::string id_new = extension_ime_util::GetInputMethodIDByEngineID(
+        extension_ime_util::GetComponentIDByInputMethodID(id));
+    if (extension_ime_util::IsComponentExtensionIME(id_new))
+      id = id_new;
+  }
+  return id;
+}
+
 bool InputMethodUtil::MigrateInputMethods(
     std::vector<std::string>* input_method_ids) {
   bool rewritten = false;
   std::vector<std::string>& ids = *input_method_ids;
   for (size_t i = 0; i < ids.size(); ++i) {
-    std::string engine_id = ids[i];
-    // Migrates some Engine IDs from VPD.
-    for (size_t j = 0; j < arraysize(kEngineIdMigrationMap); ++j) {
-      size_t pos = engine_id.find(kEngineIdMigrationMap[j][0]);
-      if (pos == 0) {
-        engine_id.replace(0,
-                          strlen(kEngineIdMigrationMap[j][0]),
-                          kEngineIdMigrationMap[j][1]);
-        break;
-      }
-    }
-    // Migrates the extension IDs.
-    std::string id =
-        extension_ime_util::GetInputMethodIDByEngineID(engine_id);
-    if (extension_ime_util::IsComponentExtensionIME(id)) {
-      std::string id_new = extension_ime_util::GetInputMethodIDByEngineID(
-          extension_ime_util::GetComponentIDByInputMethodID(id));
-      if (extension_ime_util::IsComponentExtensionIME(id_new))
-        id = id_new;
-    }
+    std::string id = MigrateInputMethod(ids[i]);
     if (id != ids[i]) {
       ids[i] = id;
       rewritten = true;

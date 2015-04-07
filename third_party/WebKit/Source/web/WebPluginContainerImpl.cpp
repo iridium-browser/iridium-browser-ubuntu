@@ -80,11 +80,11 @@
 #include "public/platform/WebURL.h"
 #include "public/platform/WebURLError.h"
 #include "public/platform/WebURLRequest.h"
-#include "public/platform/WebVector.h"
 #include "public/web/WebElement.h"
 #include "public/web/WebInputEvent.h"
 #include "public/web/WebPlugin.h"
 #include "public/web/WebPrintParams.h"
+#include "public/web/WebPrintPresetOptions.h"
 #include "public/web/WebViewClient.h"
 #include "web/ChromeClientImpl.h"
 #include "web/ScrollbarGroup.h"
@@ -136,6 +136,8 @@ void WebPluginContainerImpl::invalidateRect(const IntRect& rect)
         return;
 
     RenderBox* renderer = toRenderBox(m_element->renderer());
+    if (!renderer)
+        return;
 
     IntRect dirtyRect = rect;
     dirtyRect.move(renderer->borderLeft() + renderer->paddingLeft(),
@@ -322,9 +324,9 @@ bool WebPluginContainerImpl::isPrintScalingDisabled() const
     return m_webPlugin->isPrintScalingDisabled();
 }
 
-int WebPluginContainerImpl::getCopiesToPrint() const
+bool WebPluginContainerImpl::getPrintPresetOptionsFromDocument(WebPrintPresetOptions* presetOptions) const
 {
-    return m_webPlugin->getCopiesToPrint();
+    return m_webPlugin->getPrintPresetOptionsFromDocument(presetOptions);
 }
 
 int WebPluginContainerImpl::printBegin(const WebPrintParams& printParams) const
@@ -546,7 +548,7 @@ WebPoint WebPluginContainerImpl::windowToLocalPoint(const WebPoint& point)
     if (!view)
         return point;
     WebPoint windowPoint = view->windowToContents(point);
-    return roundedIntPoint(m_element->renderer()->absoluteToLocal(LayoutPoint(windowPoint), UseTransforms));
+    return roundedIntPoint(m_element->renderer()->absoluteToLocal(FloatPoint(windowPoint), UseTransforms));
 }
 
 WebPoint WebPluginContainerImpl::localToWindowPoint(const WebPoint& point)
@@ -554,7 +556,7 @@ WebPoint WebPluginContainerImpl::localToWindowPoint(const WebPoint& point)
     FrameView* view = toFrameView(parent());
     if (!view)
         return point;
-    IntPoint absolutePoint = roundedIntPoint(m_element->renderer()->localToAbsolute(LayoutPoint(point), UseTransforms));
+    IntPoint absolutePoint = roundedIntPoint(m_element->renderer()->localToAbsolute(FloatPoint(point), UseTransforms));
     return view->contentsToWindow(absolutePoint);
 }
 
@@ -591,6 +593,12 @@ WebLayer* WebPluginContainerImpl::platformLayer() const
 v8::Local<v8::Object> WebPluginContainerImpl::scriptableObject(v8::Isolate* isolate)
 {
     v8::Local<v8::Object> object = m_webPlugin->v8ScriptableObject(isolate);
+    // |m_webPlugin| may be destroyed during the above line due to re-entrancy
+    // caused by sync messages to the plugin. If this is the case just return an
+    // empty handle. crbug.com/423263.
+    if (!m_webPlugin)
+        return v8::Local<v8::Object>();
+
     if (!object.IsEmpty()) {
         // WebPlugin implementation can't provide the obsolete NPObject at the same time:
         ASSERT(!m_webPlugin->scriptableObject());
@@ -907,7 +915,7 @@ void WebPluginContainerImpl::handleGestureEvent(GestureEvent* event)
         return;
     }
 
-    if (webEvent.type == WebInputEvent::GestureScrollUpdate || webEvent.type == WebInputEvent::GestureScrollUpdateWithoutPropagation) {
+    if (webEvent.type == WebInputEvent::GestureScrollUpdate) {
         if (!m_scrollbarGroup)
             return;
         if (gestureScrollHelper(m_scrollbarGroup.get(), ScrollLeft, ScrollRight, webEvent.data.scrollUpdate.deltaX))

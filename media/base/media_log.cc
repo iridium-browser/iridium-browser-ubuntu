@@ -16,7 +16,7 @@ namespace media {
 // unique IDs.
 static base::StaticAtomicSequenceNumber g_media_log_count;
 
-const char* MediaLog::EventTypeToString(MediaLogEvent::Type type) {
+std::string MediaLog::EventTypeToString(MediaLogEvent::Type type) {
   switch (type) {
     case MediaLogEvent::WEBMEDIAPLAYER_CREATED:
       return "WEBMEDIAPLAYER_CREATED";
@@ -61,7 +61,7 @@ const char* MediaLog::EventTypeToString(MediaLogEvent::Type type) {
   return NULL;
 }
 
-const char* MediaLog::PipelineStatusToString(PipelineStatus status) {
+std::string MediaLog::PipelineStatusToString(PipelineStatus status) {
   switch (status) {
     case PIPELINE_OK:
       return "pipeline: ok";
@@ -88,7 +88,7 @@ const char* MediaLog::PipelineStatusToString(PipelineStatus status) {
     case DEMUXER_ERROR_COULD_NOT_OPEN:
       return "demuxer: could not open";
     case DEMUXER_ERROR_COULD_NOT_PARSE:
-      return "dumuxer: could not parse";
+      return "demuxer: could not parse";
     case DEMUXER_ERROR_NO_SUPPORTED_STREAMS:
       return "demuxer: no supported streams";
     case DECODER_ERROR_NOT_SUPPORTED:
@@ -121,21 +121,27 @@ scoped_ptr<MediaLogEvent> MediaLog::CreateEvent(MediaLogEvent::Type type) {
 }
 
 scoped_ptr<MediaLogEvent> MediaLog::CreateBooleanEvent(
-    MediaLogEvent::Type type, const char* property, bool value) {
+    MediaLogEvent::Type type,
+    const std::string& property,
+    bool value) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(type));
   event->params.SetBoolean(property, value);
   return event.Pass();
 }
 
 scoped_ptr<MediaLogEvent> MediaLog::CreateStringEvent(
-    MediaLogEvent::Type type, const char* property, const std::string& value) {
+    MediaLogEvent::Type type,
+    const std::string& property,
+    const std::string& value) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(type));
   event->params.SetString(property, value);
   return event.Pass();
 }
 
 scoped_ptr<MediaLogEvent> MediaLog::CreateTimeEvent(
-    MediaLogEvent::Type type, const char* property, base::TimeDelta value) {
+    MediaLogEvent::Type type,
+    const std::string& property,
+    base::TimeDelta value) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(type));
   if (value.is_max())
     event->params.SetString(property, "unknown");
@@ -167,7 +173,7 @@ scoped_ptr<MediaLogEvent> MediaLog::CreatePipelineStateChangedEvent(
 scoped_ptr<MediaLogEvent> MediaLog::CreatePipelineErrorEvent(
     PipelineStatus error) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::PIPELINE_ERROR));
-  event->params.SetString("pipeline_error", PipelineStatusToString(error));
+  event->params.SetInteger("pipeline_error", error);
   return event.Pass();
 }
 
@@ -200,35 +206,35 @@ scoped_ptr<MediaLogEvent> MediaLog::CreateMediaSourceErrorEvent(
 }
 
 void MediaLog::SetStringProperty(
-    const char* key, const std::string& value) {
+    const std::string& key, const std::string& value) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::PROPERTY_CHANGE));
   event->params.SetString(key, value);
   AddEvent(event.Pass());
 }
 
 void MediaLog::SetIntegerProperty(
-    const char* key, int value) {
+    const std::string& key, int value) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::PROPERTY_CHANGE));
   event->params.SetInteger(key, value);
   AddEvent(event.Pass());
 }
 
 void MediaLog::SetDoubleProperty(
-    const char* key, double value) {
+    const std::string& key, double value) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::PROPERTY_CHANGE));
   event->params.SetDouble(key, value);
   AddEvent(event.Pass());
 }
 
 void MediaLog::SetBooleanProperty(
-    const char* key, bool value) {
+    const std::string& key, bool value) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::PROPERTY_CHANGE));
   event->params.SetBoolean(key, value);
   AddEvent(event.Pass());
 }
 
 void MediaLog::SetTimeProperty(
-    const char* key, base::TimeDelta value) {
+    const std::string& key, base::TimeDelta value) {
   scoped_ptr<MediaLogEvent> event(CreateEvent(MediaLogEvent::PROPERTY_CHANGE));
   if (value.is_max())
     event->params.SetString(key, "unknown");

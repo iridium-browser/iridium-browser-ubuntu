@@ -13,14 +13,15 @@
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/safe_json_parser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
-#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/common/extensions/chrome_utility_extensions_messages.h"
+#include "chrome/common/extensions/extension_metrics.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/web_application_info.h"
 #include "content/public/browser/browser_context.h"
@@ -37,87 +38,6 @@
 
 namespace {
 
-// This class helps ManagementGetPermissionWarningsByManifestFunction manage
-// sending manifest JSON strings to the utility process for parsing.
-class SafeManifestJSONParser : public content::UtilityProcessHostClient {
- public:
-  SafeManifestJSONParser(
-      extensions::ManagementGetPermissionWarningsByManifestFunction* client,
-      const std::string& manifest)
-      : client_(client), manifest_(manifest) {}
-
-  void Start() {
-    CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-    content::BrowserThread::PostTask(
-        content::BrowserThread::IO, FROM_HERE,
-        base::Bind(&SafeManifestJSONParser::StartWorkOnIOThread, this));
-  }
-
-  void StartWorkOnIOThread() {
-    CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
-    content::UtilityProcessHost* host = content::UtilityProcessHost::Create(
-        this, base::MessageLoopProxy::current().get());
-    host->Send(new ChromeUtilityMsg_ParseJSON(manifest_));
-  }
-
-  bool OnMessageReceived(const IPC::Message& message) override {
-    bool handled = true;
-    IPC_BEGIN_MESSAGE_MAP(SafeManifestJSONParser, message)
-    IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_ParseJSON_Succeeded,
-                        OnJSONParseSucceeded)
-    IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_ParseJSON_Failed,
-                        OnJSONParseFailed)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-    IPC_END_MESSAGE_MAP()
-    return handled;
-  }
-
-  void OnJSONParseSucceeded(const base::ListValue& wrapper) {
-    CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
-    const base::Value* value = NULL;
-    CHECK(wrapper.Get(0, &value));
-    if (value->IsType(base::Value::TYPE_DICTIONARY))
-      parsed_manifest_.reset(
-          static_cast<const base::DictionaryValue*>(value)->DeepCopy());
-    else
-      error_ = extension_management_api_constants::kManifestParseError;
-
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&SafeManifestJSONParser::ReportResultFromUIThread, this));
-  }
-
-  void OnJSONParseFailed(const std::string& error) {
-    CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
-    error_ = error;
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&SafeManifestJSONParser::ReportResultFromUIThread, this));
-  }
-
-  void ReportResultFromUIThread() {
-    CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-    if (error_.empty() && parsed_manifest_.get())
-      client_->OnParseSuccess(parsed_manifest_.Pass());
-    else
-      client_->OnParseFailure(error_);
-  }
-
- private:
-  ~SafeManifestJSONParser() override {}
-
-  // The client who we'll report results back to.
-  extensions::ManagementGetPermissionWarningsByManifestFunction* client_;
-
-  // Data to parse.
-  std::string manifest_;
-
-  // Results of parsing.
-  scoped_ptr<base::DictionaryValue> parsed_manifest_;
-
-  std::string error_;
-};
-
 class ManagementSetEnabledFunctionInstallPromptDelegate
     : public ExtensionInstallPrompt::Delegate,
       public extensions::InstallPromptDelegate {
@@ -130,7 +50,7 @@ class ManagementSetEnabledFunctionInstallPromptDelegate
         new ExtensionInstallPrompt(details_.GetAssociatedWebContents()));
     install_prompt_->ConfirmReEnable(this, extension);
   }
-  virtual ~ManagementSetEnabledFunctionInstallPromptDelegate() {}
+  ~ManagementSetEnabledFunctionInstallPromptDelegate() override {}
 
  protected:
   // ExtensionInstallPrompt::Delegate.
@@ -200,7 +120,7 @@ class ChromeAppForLinkDelegate : public extensions::AppForLinkDelegate {
       const GURL& launch_url,
       const favicon_base::FaviconImageResult& image_result) {
     WebApplicationInfo web_app;
-    web_app.title = base::UTF8ToUTF16(std::string(title));
+    web_app.title = base::UTF8ToUTF16(title);
     web_app.app_url = launch_url;
 
     if (!image_result.image.IsEmpty()) {
@@ -242,11 +162,11 @@ bool ChromeManagementAPIDelegate::LaunchAppFunctionDelegate(
   // returned.
   extensions::LaunchContainer launch_container =
       GetLaunchContainer(extensions::ExtensionPrefs::Get(context), extension);
-  OpenApplication(AppLaunchParams(Profile::FromBrowserContext(context),
-                                  extension, launch_container,
-                                  NEW_FOREGROUND_TAB));
-  CoreAppLauncherHandler::RecordAppLaunchType(
-      extension_misc::APP_LAUNCH_EXTENSION_API, extension->GetType());
+  OpenApplication(AppLaunchParams(
+      Profile::FromBrowserContext(context), extension, launch_container,
+      NEW_FOREGROUND_TAB, extensions::SOURCE_MANAGEMENT_API));
+  extensions::RecordAppLaunchType(extension_misc::APP_LAUNCH_EXTENSION_API,
+                                  extension->GetType());
 
   return true;
 }
@@ -266,8 +186,16 @@ void ChromeManagementAPIDelegate::
     GetPermissionWarningsByManifestFunctionDelegate(
         extensions::ManagementGetPermissionWarningsByManifestFunction* function,
         const std::string& manifest_str) const {
-  scoped_refptr<SafeManifestJSONParser> parser =
-      new SafeManifestJSONParser(function, manifest_str);
+  scoped_refptr<SafeJsonParser> parser(new SafeJsonParser(
+      manifest_str,
+      base::Bind(
+          &extensions::ManagementGetPermissionWarningsByManifestFunction::
+              OnParseSuccess,
+          function),
+      base::Bind(
+          &extensions::ManagementGetPermissionWarningsByManifestFunction::
+              OnParseFailure,
+          function)));
   parser->Start();
 }
 

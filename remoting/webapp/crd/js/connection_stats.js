@@ -14,17 +14,58 @@ var remoting = remoting || {};
 
 /**
  * @constructor
+ * @implements {remoting.WindowShape.ClientUI}
  * @param {Element} statsElement The HTML div to which to update stats.
  */
 remoting.ConnectionStats = function(statsElement) {
-  this.statsElement = statsElement;
+  /**
+   * @private
+   */
+  this.statsElement_ = statsElement;
+
+  /**
+   * @type {remoting.ClientSession.PerfStats}
+   * @private
+   */
+  this.mostRecent_ = null
+
+  remoting.windowShape.addCallback(this);
+};
+
+/**
+ * @return {remoting.ClientSession.PerfStats} The most recently-set PerfStats,
+ *     or null if update() has not yet been called.
+ */
+remoting.ConnectionStats.prototype.mostRecent = function() {
+  return this.mostRecent_;
 };
 
 /**
  * Show or hide the connection stats div.
  */
 remoting.ConnectionStats.prototype.toggle = function() {
-  this.statsElement.hidden = !this.statsElement.hidden;
+  this.statsElement_.hidden = !this.statsElement_.hidden;
+};
+
+/**
+ * Show or hide the connection stats div.
+ * @param {boolean} show
+ */
+remoting.ConnectionStats.prototype.show = function(show) {
+  this.statsElement_.hidden = !show;
+};
+
+/**
+ * If the stats panel is visible, add its bounding rectangle to the specified
+ * region.
+ * @param {Array.<{left: number, top: number, width: number, height: number}>}
+ *     rects List of rectangles.
+ */
+
+remoting.ConnectionStats.prototype.addToRegion = function(rects) {
+  if (!this.statsElement_.hidden) {
+    rects.push(this.statsElement_.getBoundingClientRect());
+  }
 };
 
 /**
@@ -32,6 +73,7 @@ remoting.ConnectionStats.prototype.toggle = function() {
  * @param {remoting.ClientSession.PerfStats} stats The connection statistics.
  */
 remoting.ConnectionStats.prototype.update = function(stats) {
+  this.mostRecent_ = stats;
   var units = '';
   var videoBandwidth = stats.videoBandwidth;
   if (videoBandwidth != undefined) {
@@ -63,7 +105,7 @@ remoting.ConnectionStats.prototype.update = function(stats) {
   }
 
   var statistics = document.getElementById('statistics');
-  this.statsElement.innerText = (
+  this.statsElement_.innerText = (
       'Bandwidth: ' + formatStatNumber(videoBandwidth, units) +
       ', Frame Rate: ' + formatStatNumber(stats.videoFrameRate, 'fps') +
       ', Capture: ' + formatStatNumber(stats.captureLatency, 'ms') +

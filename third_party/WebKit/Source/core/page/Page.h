@@ -75,7 +75,7 @@ class Page final : public NoBaseWillBeGarbageCollectedFinalized<Page>, public Wi
     WTF_MAKE_NONCOPYABLE(Page);
     friend class Settings;
 public:
-    static void scheduleForcedStyleRecalcForAllPages();
+    static void platformColorsChanged();
 
     // It is up to the platform to ensure that non-null clients are provided where required.
     struct PageClients {
@@ -111,7 +111,7 @@ public:
 
     ViewportDescription viewportDescription() const;
 
-    static void refreshPlugins(bool reload);
+    static void refreshPlugins();
     PluginData* pluginData() const;
 
     EditorClient& editorClient() const { return *m_editorClient; }

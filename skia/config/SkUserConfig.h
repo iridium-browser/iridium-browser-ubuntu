@@ -138,6 +138,16 @@
 #define SK_SUPPORT_UNITTEST
 #endif
 
+/* If cross process SkPictureImageFilters are not explicitly enabled then
+   they are always disabled.
+ */
+#ifndef SK_ALLOW_CROSSPROCESS_PICTUREIMAGEFILTERS
+    #ifndef SK_DISALLOW_CROSSPROCESS_PICTUREIMAGEFILTERS
+        #define SK_DISALLOW_CROSSPROCESS_PICTUREIMAGEFILTERS
+    #endif
+#endif
+
+
 /* If your system embeds skia and has complex event logging, define this
    symbol to name a file that maps the following macros to your system's
    equivalents:
@@ -197,14 +207,14 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #define SK_CPU_LENDIAN
 #undef  SK_CPU_BENDIAN
 
-#elif defined(SK_BUILD_FOR_UNIX)
+#elif defined(SK_BUILD_FOR_UNIX) || defined(SK_BUILD_FOR_ANDROID)
 
 // Prefer FreeType's emboldening algorithm to Skia's
 // TODO: skia used to just use hairline, but has improved since then, so
 // we should revisit this choice...
 #define SK_USE_FREETYPE_EMBOLDEN
 
-#ifdef SK_CPU_BENDIAN
+#if defined(SK_BUILD_FOR_UNIX) && defined(SK_CPU_BENDIAN)
 // Above we set the order for ARGB channels in registers. I suspect that, on
 // big endian machines, you can keep this the same and everything will work.
 // The in-memory order will be different, of course, but as long as everything
@@ -221,10 +231,6 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 // problems. Instead, pipe this through to the logging function as a fatal
 // assertion.
 #define SK_CRASH() SkDebugf_FileLine(__FILE__, __LINE__, true, "SK_CRASH")
-
-// Uncomment the following line to forward skia trace events to Chrome
-// tracing.
-// #define SK_USER_TRACE_INCLUDE_FILE "skia/ext/skia_trace_shim.h"
 
 #ifndef SK_ATOMICS_PLATFORM_H
 #  if defined(SK_BUILD_FOR_WIN)
@@ -261,8 +267,8 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #   define SK_SUPPORT_LEGACY_PUBLIC_IMAGEINFO_FIELDS
 #endif
 
-#ifndef    SK_SUPPORT_LEGACY_PICTURE_CLONE
-#   define SK_SUPPORT_LEGACY_PICTURE_CLONE
+#ifndef    SK_SUPPORT_LEGACY_GRADIENT_PRECISION
+#   define SK_SUPPORT_LEGACY_GRADIENT_PRECISION
 #endif
 
 #ifndef    SK_IGNORE_ETC1_SUPPORT
@@ -273,24 +279,22 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #   define SK_IGNORE_GPU_DITHER
 #endif
 
-#ifndef    SK_LEGACY_PICTURE_SIZE_API
-#   define SK_LEGACY_PICTURE_SIZE_API
+#ifndef SK_SUPPORT_LEGACY_ADDOVAL
+#   define SK_SUPPORT_LEGACY_ADDOVAL
 #endif
 
-#ifndef    SK_LEGACY_PICTURE_DRAW_API
-#   define SK_LEGACY_PICTURE_DRAW_API
+#ifndef SK_SUPPORT_LEGACY_ADDRRECT
+#   define SK_SUPPORT_LEGACY_ADDRRECT
 #endif
 
+#ifndef SK_IGNORE_GPU_LAYER_HOISTING
+#   define SK_IGNORE_GPU_LAYER_HOISTING
+#endif
 
-// Turns SkPicture::clone() into a simple "return SkRef(this);" as a way to
-// test the threadsafety of SkPicture playback.
-#define SK_PICTURE_CLONE_NOOP 1
-
-// Turns on new (nicer, hopefully faster) SkPicture backend.
-#define SK_PICTURE_USE_SK_RECORD 1
-
-// Run a few optimization passes over the SkRecord after recording.
-#define SK_PICTURE_OPTIMIZE_SK_RECORD 1
+// If this goes well, we can have Skia respect DYNAMIC_ANNOTATIONS_ENABLED directly.
+#if DYNAMIC_ANNOTATIONS_ENABLED
+#    define SK_DYNAMIC_ANNOTATIONS_ENABLED 1
+#endif
 
 // ===== End Chrome-specific definitions =====
 

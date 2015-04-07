@@ -28,6 +28,7 @@
 #include "third_party/WebKit/public/web/WebPluginContainer.h"
 #include "third_party/WebKit/public/web/WebPluginParams.h"
 #include "third_party/WebKit/public/web/WebPrintParams.h"
+#include "third_party/WebKit/public/web/WebPrintPresetOptions.h"
 #include "third_party/WebKit/public/web/WebPrintScalingOption.h"
 #include "url/gurl.h"
 
@@ -54,11 +55,14 @@ struct PepperWebPluginImpl::InitData {
   GURL url;
 };
 
-PepperWebPluginImpl::PepperWebPluginImpl(PluginModule* plugin_module,
-                                         const WebPluginParams& params,
-                                         RenderFrameImpl* render_frame)
+PepperWebPluginImpl::PepperWebPluginImpl(
+    PluginModule* plugin_module,
+    const WebPluginParams& params,
+    RenderFrameImpl* render_frame,
+    RenderFrame::PluginPowerSaverMode power_saver_mode)
     : init_data_(new InitData()),
       full_frame_(params.loadManually),
+      power_saver_mode_(power_saver_mode),
       instance_object_(PP_MakeUndefined()),
       container_(NULL) {
   DCHECK(plugin_module);
@@ -90,8 +94,9 @@ bool PepperWebPluginImpl::initialize(WebPluginContainer* container) {
   // Enable script objects for this plugin.
   container->allowScriptObjects();
 
-  bool success = instance_->Initialize(
-      init_data_->arg_names, init_data_->arg_values, full_frame_);
+  bool success =
+      instance_->Initialize(init_data_->arg_names, init_data_->arg_values,
+                            full_frame_, power_saver_mode_);
   if (!success) {
     instance_->Delete();
     instance_ = NULL;
@@ -269,6 +274,11 @@ bool PepperWebPluginImpl::printPage(int page_number, blink::WebCanvas* canvas) {
 }
 
 void PepperWebPluginImpl::printEnd() { return instance_->PrintEnd(); }
+
+bool PepperWebPluginImpl::getPrintPresetOptionsFromDocument(
+    blink::WebPrintPresetOptions* preset_options) {
+  return instance_->GetPrintPresetOptionsFromDocument(preset_options);
+}
 
 bool PepperWebPluginImpl::canRotateView() { return instance_->CanRotateView(); }
 

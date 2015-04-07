@@ -345,6 +345,16 @@ void QuicDispatcher::OnWriteBlocked(
   write_blocked_list_.insert(make_pair(blocked_writer, true));
 }
 
+void QuicDispatcher::OnConnectionAddedToTimeWaitList(
+    QuicConnectionId connection_id) {
+  DVLOG(1) << "Connection " << connection_id << " added to time wait list.";
+}
+
+void QuicDispatcher::OnConnectionRemovedFromTimeWaitList(
+    QuicConnectionId connection_id) {
+  DVLOG(1) << "Connection " << connection_id << " removed from time wait list.";
+}
+
 QuicSession* QuicDispatcher::CreateQuicSession(
     QuicConnectionId connection_id,
     const IPEndPoint& server_address,
@@ -352,8 +362,7 @@ QuicSession* QuicDispatcher::CreateQuicSession(
   QuicServerSession* session = new QuicServerSession(
       config_,
       CreateQuicConnection(connection_id, server_address, client_address),
-      this,
-      crypto_config_.HasProofSource());
+      this);
   session->InitializeSession(crypto_config_);
   return session;
 }
@@ -368,6 +377,7 @@ QuicConnection* QuicDispatcher::CreateQuicConnection(
                             connection_writer_factory_,
                             /* owns_writer= */ true,
                             /* is_server= */ true,
+                            crypto_config_.HasProofSource(),
                             supported_versions_);
 }
 

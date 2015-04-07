@@ -28,29 +28,17 @@
 
 #include "bindings/core/v8/ScriptState.h"
 #include "core/dom/DOMArrayBuffer.h"
-#include "core/dom/DOMArrayBufferView.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "modules/encryptedmedia/MediaKeySession.h"
-#include "modules/encryptedmedia/SimpleContentDecryptionModuleResult.h"
-#include "platform/ContentType.h"
+#include "modules/encryptedmedia/SimpleContentDecryptionModuleResultPromise.h"
 #include "platform/Logging.h"
-#include "platform/MIMETypeRegistry.h"
 #include "platform/Timer.h"
 #include "public/platform/WebContentDecryptionModule.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
-
-static bool isKeySystemSupportedWithContentType(const String& keySystem, const String& contentType)
-{
-    ASSERT(!keySystem.isEmpty());
-
-    ContentType type(contentType);
-    String codecs = type.parameter("codecs");
-    return MIMETypeRegistry::isSupportedEncryptedMediaMIMEType(keySystem, type.type(), codecs);
-}
 
 // A class holding a pending action.
 class MediaKeys::PendingAction : public GarbageCollectedFinalized<MediaKeys::PendingAction> {
@@ -110,7 +98,7 @@ MediaKeys::~MediaKeys()
     WTF_LOG(Media, "MediaKeys(%p)::~MediaKeys", this);
 }
 
-MediaKeySession* MediaKeys::createSession(ScriptState* scriptState, const String& sessionType)
+MediaKeySession* MediaKeys::createSession(ScriptState* scriptState, const String& sessionType, ExceptionState& exceptionState)
 {
     WTF_LOG(Media, "MediaKeys(%p)::createSession", this);
 
@@ -120,8 +108,15 @@ MediaKeySession* MediaKeys::createSession(ScriptState* scriptState, const String
     // 1. If sessionType is not supported by the content decryption module
     //    corresponding to the keySystem, throw a DOMException whose name is
     //    "NotSupportedError".
-    // FIXME: Check whether sessionType is actually supported by the CDM.
     ASSERT(MediaKeySession::isValidSessionType(sessionType));
+    // FIXME: Check whether sessionType is actually supported by the CDM.
+    // (http://crbug.com/384152)
+    // FIXME: Enable "persistent-release-message" session type once support
+    // added to CDMs.
+    if (sessionType == "persistent-release-message") {
+        exceptionState.throwDOMException(NotSupportedError, "'persistent-release-message' is not supported.");
+        return nullptr;
+    }
 
     // 2. Let session be a new MediaKeySession object, and initialize it as
     //    follows:
@@ -130,19 +125,7 @@ MediaKeySession* MediaKeys::createSession(ScriptState* scriptState, const String
     return MediaKeySession::create(scriptState, this, sessionType);
 }
 
-ScriptPromise MediaKeys::setServerCertificate(ScriptState* scriptState, DOMArrayBuffer* serverCertificate)
-{
-    RefPtr<DOMArrayBuffer> serverCertificateCopy = DOMArrayBuffer::create(serverCertificate->data(), serverCertificate->byteLength());
-    return setServerCertificateInternal(scriptState, serverCertificateCopy.release());
-}
-
-ScriptPromise MediaKeys::setServerCertificate(ScriptState* scriptState, DOMArrayBufferView* serverCertificate)
-{
-    RefPtr<DOMArrayBuffer> serverCertificateCopy = DOMArrayBuffer::create(serverCertificate->baseAddress(), serverCertificate->byteLength());
-    return setServerCertificateInternal(scriptState, serverCertificateCopy.release());
-}
-
-ScriptPromise MediaKeys::setServerCertificateInternal(ScriptState* scriptState, PassRefPtr<DOMArrayBuffer> serverCertificate)
+ScriptPromise MediaKeys::setServerCertificate(ScriptState* scriptState, const DOMArrayPiece& serverCertificate)
 {
     // From https://dvcs.w3.org/hg/html-media/raw-file/default/encrypted-media/encrypted-media.html#dom-setservercertificate:
     // The setServerCertificate(serverCertificate) method provides a server
@@ -150,7 +133,7 @@ ScriptPromise MediaKeys::setServerCertificateInternal(ScriptState* scriptState, 
     // It must run the following steps:
     // 1. If serverCertificate is an empty array, return a promise rejected
     //    with a new DOMException whose name is "InvalidAccessError".
-    if (!serverCertificate->byteLength()) {
+    if (!serverCertificate.byteLength()) {
         return ScriptPromise::rejectWithDOMException(
             scriptState, DOMException::create(InvalidAccessError, "The serverCertificate parameter is empty."));
     }
@@ -162,41 +145,19 @@ ScriptPromise MediaKeys::setServerCertificateInternal(ScriptState* scriptState, 
 
     // 3. Let certificate be a copy of the contents of the serverCertificate
     //    parameter.
-    //    (Done in caller.)
+    RefPtr<DOMArrayBuffer> serverCertificateBuffer = DOMArrayBuffer::create(serverCertificate.data(), serverCertificate.byteLength());
 
     // 4. Let promise be a new promise.
-    SimpleContentDecryptionModuleResult* result = new SimpleContentDecryptionModuleResult(scriptState);
+    SimpleContentDecryptionModuleResultPromise* result = new SimpleContentDecryptionModuleResultPromise(scriptState);
     ScriptPromise promise = result->promise();
 
     // 5. Run the following steps asynchronously (documented in timerFired()).
-    m_pendingActions.append(PendingAction::CreatePendingSetServerCertificate(result, serverCertificate));
+    m_pendingActions.append(PendingAction::CreatePendingSetServerCertificate(result, serverCertificateBuffer.release()));
     if (!m_timer.isActive())
         m_timer.startOneShot(0, FROM_HERE);
 
     // 6. Return promise.
     return promise;
-}
-
-bool MediaKeys::isTypeSupported(const String& keySystem, const String& contentType)
-{
-    WTF_LOG(Media, "MediaKeys::isTypeSupported(%s, %s)", keySystem.ascii().data(), contentType.ascii().data());
-
-    // 1. If keySystem is an empty string, return false and abort these steps.
-    if (keySystem.isEmpty())
-        return false;
-
-    // 2. If keySystem contains an unrecognized or unsupported Key System, return false and abort
-    // these steps. Key system string comparison is case-sensitive.
-    if (!isKeySystemSupportedWithContentType(keySystem, ""))
-        return false;
-
-    // 3. If contentType is an empty string, return true and abort these steps.
-    if (contentType.isEmpty())
-        return true;
-
-    // 4. If the Key System specified by keySystem does not support decrypting the container and/or
-    // codec specified by contentType, return false and abort these steps.
-    return isKeySystemSupportedWithContentType(keySystem, contentType);
 }
 
 void MediaKeys::timerFired(Timer<MediaKeys>*)
@@ -232,6 +193,7 @@ WebContentDecryptionModule* MediaKeys::contentDecryptionModule()
 void MediaKeys::trace(Visitor* visitor)
 {
     visitor->trace(m_pendingActions);
+    ContextLifecycleObserver::trace(visitor);
 }
 
 void MediaKeys::contextDestroyed()

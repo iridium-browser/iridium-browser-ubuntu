@@ -38,6 +38,7 @@
 #include "breakpad/src/client/linux/minidump_writer/directory_reader.h"
 #include "breakpad/src/common/linux/linux_libc_support.h"
 #include "breakpad/src/common/memory.h"
+#include "build/build_config.h"
 #include "components/crash/app/breakpad_linux_impl.h"
 #include "components/crash/app/crash_reporter_client.h"
 #include "content/public/common/content_descriptors.h"
@@ -86,6 +87,7 @@ uint64_t g_process_start_time = 0;
 pid_t g_pid = 0;
 char* g_crash_log_path = NULL;
 ExceptionHandler* g_breakpad = NULL;
+ExceptionHandler* g_microdump = NULL;
 
 #if defined(ADDRESS_SANITIZER)
 const char* g_asan_report_str = NULL;
@@ -203,7 +205,7 @@ size_t LengthWithoutTrailingSpaces(const char* str, size_t len) {
   return len;
 }
 
-void SetClientIdFromCommandLine(const CommandLine& command_line) {
+void SetClientIdFromCommandLine(const base::CommandLine& command_line) {
   // Get the guid from the command line switch.
   std::string switch_value =
       command_line.GetSwitchValueASCII(switches::kEnableCrashReporter);
@@ -509,6 +511,10 @@ void CrashReporterWriter::AddFileContents(const char* filename_msg,
 void DumpProcess() {
   if (g_breakpad)
     g_breakpad->WriteMinidump();
+
+  // If microdumps are enabled write also a microdump on the system log.
+  if (g_microdump)
+    g_microdump->WriteMinidump();
 }
 
 #if defined(OS_ANDROID)
@@ -528,18 +534,22 @@ size_t WriteNewline() {
 }
 
 #if defined(OS_ANDROID)
+void AndroidLogWriteHorizontalRule() {
+  __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
+                      "### ### ### ### ### ### ### ### ### ### ### ### ###");
+}
+
 // Android's native crash handler outputs a diagnostic tombstone to the device
 // log. By returning false from the HandlerCallbacks, breakpad will reinstall
 // the previous (i.e. native) signal handlers before returning from its own
 // handler. A Chrome build fingerprint is written to the log, so that the
 // specific build of Chrome and the location of the archived Chrome symbols can
 // be determined directly from it.
-bool FinalizeCrashDoneAndroid() {
+bool FinalizeCrashDoneAndroid(bool is_browser_process) {
   base::android::BuildInfo* android_build_info =
       base::android::BuildInfo::GetInstance();
 
-  __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
-                      "### ### ### ### ### ### ### ### ### ### ### ### ###");
+  AndroidLogWriteHorizontalRule();
   __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
                       "Chrome build fingerprint:");
   __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
@@ -548,8 +558,23 @@ bool FinalizeCrashDoneAndroid() {
                       android_build_info->package_version_code());
   __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
                       CHROME_BUILD_ID);
-  __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
-                      "### ### ### ### ### ### ### ### ### ### ### ### ###");
+  AndroidLogWriteHorizontalRule();
+
+  if (!is_browser_process &&
+      android_build_info->sdk_int() >= 18 &&
+      my_strcmp(android_build_info->build_type(), "eng") != 0 &&
+      my_strcmp(android_build_info->build_type(), "userdebug") != 0) {
+    // On JB MR2 and later, the system crash handler displays a dialog. For
+    // renderer crashes, this is a bad user experience and so this is disabled
+    // for user builds of Android.
+    // TODO(cjhopman): There should be some way to recover the crash stack from
+    // non-uploading user clients. See http://crbug.com/273706.
+    __android_log_write(ANDROID_LOG_WARN,
+                        kGoogleBreakpad,
+                        "Tombstones are disabled on JB MR2+ user builds.");
+    AndroidLogWriteHorizontalRule();
+    return true;
+  }
   return false;
 }
 #endif
@@ -590,7 +615,7 @@ bool CrashDone(const MinidumpDescriptor& minidump,
   info.crash_keys = g_crash_keys;
   HandleCrashDump(info);
 #if defined(OS_ANDROID)
-  return FinalizeCrashDoneAndroid();
+  return FinalizeCrashDoneAndroid(true /* is_browser_process */);
 #else
   return true;
 #endif
@@ -641,7 +666,12 @@ void EnableCrashDumping(bool unattended) {
   }
   DCHECK(!g_breakpad);
   MinidumpDescriptor minidump_descriptor(dumps_path.value());
-  minidump_descriptor.set_size_limit(kMaxMinidumpFileSize);
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kFullMemoryCrashReport)) {
+    minidump_descriptor.set_size_limit(-1);  // unlimited.
+  } else {
+    minidump_descriptor.set_size_limit(kMaxMinidumpFileSize);
+  }
 #if defined(OS_ANDROID)
   unattended = true;  // Android never uploads directly.
 #endif
@@ -669,6 +699,49 @@ void EnableCrashDumping(bool unattended) {
 }
 
 #if defined(OS_ANDROID)
+bool MicrodumpCrashDone(const MinidumpDescriptor& minidump,
+                        void* context,
+                        bool succeeded) {
+  // WARNING: this code runs in a compromised context. It may not call into
+  // libc nor allocate memory normally.
+  if (!succeeded) {
+    static const char msg[] = "Microdump crash handler failed.\n";
+    WriteLog(msg, sizeof(msg) - 1);
+    return false;
+  }
+
+  const bool is_browser_process = (context != NULL);
+  return FinalizeCrashDoneAndroid(is_browser_process);
+ }
+
+// When unwind tables are stripped out (to save binary size) the stack traces
+// produced locally in the case of a crash / CHECK are meaningless. In order to
+// provide meaningful development diagnostics (and keep the binary size savings)
+// on Android we attach a secondary crash handler, in addition to the breakpad
+// minidump uploader (which depends on the user consent).
+// The microdump handler does NOT upload anything. It just dumps out on the
+// system console (logcat) a restricted and serialized variant of a minidump.
+// See crbug.com/410294 for more details.
+void InitMicrodumpCrashHandlerIfNecessary(const std::string& process_type) {
+#if !defined(NO_UNWIND_TABLES) \
+    || (!defined(ARCH_CPU_ARMEL) && !defined(ARCH_CPU_ARM64))
+  // TODO(primiano): For the moment microdumps are enabled only on arm (32/64).
+  // Extend support to other architectures (requires some breakpad changes).
+  return;
+#endif
+  VLOG(1) << "Enabling microdumps crash handler (process_type:"
+          << process_type << ")";
+  DCHECK(!g_microdump);
+  g_microdump = new ExceptionHandler(
+        MinidumpDescriptor(MinidumpDescriptor::kMicrodumpOnConsole),
+        NULL,
+        MicrodumpCrashDone,
+        reinterpret_cast<void*>(process_type.empty()),
+        true,  // Install handlers.
+        -1);   // Server file descriptor. -1 for in-process.
+    return;
+}
+
 bool CrashDoneInProcessNoUpload(
     const google_breakpad::MinidumpDescriptor& descriptor,
     void* context,
@@ -694,27 +767,7 @@ bool CrashDoneInProcessNoUpload(
   info.pid = g_pid;
   info.crash_keys = g_crash_keys;
   HandleCrashDump(info);
-  bool finalize_result = FinalizeCrashDoneAndroid();
-  base::android::BuildInfo* android_build_info =
-      base::android::BuildInfo::GetInstance();
-  if (android_build_info->sdk_int() >= 18 &&
-      my_strcmp(android_build_info->build_type(), "eng") != 0 &&
-      my_strcmp(android_build_info->build_type(), "userdebug") != 0) {
-    // On JB MR2 and later, the system crash handler displays a dialog. For
-    // renderer crashes, this is a bad user experience and so this is disabled
-    // for user builds of Android.
-    // TODO(cjhopman): There should be some way to recover the crash stack from
-    // non-uploading user clients. See http://crbug.com/273706.
-    __android_log_write(ANDROID_LOG_WARN,
-                        kGoogleBreakpad,
-                        "Tombstones are disabled on JB MR2+ user builds.");
-    __android_log_write(ANDROID_LOG_WARN,
-                        kGoogleBreakpad,
-                        "### ### ### ### ### ### ### ### ### ### ### ### ###");
-    return true;
-  } else {
-    return finalize_result;
-  }
+  return FinalizeCrashDoneAndroid(false /* is_browser_process */);
 }
 
 void EnableNonBrowserCrashDumping(const std::string& process_type,
@@ -722,7 +775,7 @@ void EnableNonBrowserCrashDumping(const std::string& process_type,
   // This will guarantee that the BuildInfo has been initialized and subsequent
   // calls will not require memory allocation.
   base::android::BuildInfo::GetInstance();
-  SetClientIdFromCommandLine(*CommandLine::ForCurrentProcess());
+  SetClientIdFromCommandLine(*base::CommandLine::ForCurrentProcess());
 
   // On Android, the current sandboxing uses process isolation, in which the
   // child process runs with a different UID. That breaks the normal crash
@@ -798,11 +851,11 @@ class NonBrowserCrashHandler : public google_breakpad::CrashGenerationClient {
             &serialized_map));
     iov[5].iov_base = serialized_map;
 #if !defined(ADDRESS_SANITIZER)
-    COMPILE_ASSERT(5 == kCrashIovSize - 1, Incorrect_Number_Of_Iovec_Members);
+    static_assert(5 == kCrashIovSize - 1, "kCrashIovSize should equal 6");
 #else
     iov[6].iov_base = const_cast<char*>(g_asan_report_str);
     iov[6].iov_len = kMaxAsanReportSize + 1;
-    COMPILE_ASSERT(6 == kCrashIovSize - 1, Incorrect_Number_Of_Iovec_Members);
+    static_assert(6 == kCrashIovSize - 1, "kCrashIovSize should equal 7");
 #endif
 
     msg.msg_iov = iov;
@@ -1581,9 +1634,15 @@ void InitCrashReporter(const std::string& process_type) {
   // This will guarantee that the BuildInfo has been initialized and subsequent
   // calls will not require memory allocation.
   base::android::BuildInfo::GetInstance();
+
+  // Handler registration is LIFO. Install the microdump handler first, such
+  // that if conventional minidump crash reporting is enabled below, it takes
+  // precedence (i.e. its handler is run first) over the microdump handler.
+  InitMicrodumpCrashHandlerIfNecessary(process_type);
 #endif
   // Determine the process type and take appropriate action.
-  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& parsed_command_line =
+      *base::CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(switches::kDisableBreakpad))
     return;
 
@@ -1628,7 +1687,14 @@ void InitCrashReporter(const std::string& process_type) {
 
 #if defined(OS_ANDROID)
 void InitNonBrowserCrashReporterForAndroid(const std::string& process_type) {
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+
+  // Handler registration is LIFO. Install the microdump handler first, such
+  // that if conventional minidump crash reporting is enabled below, it takes
+  // precedence (i.e. its handler is run first) over the microdump handler.
+  InitMicrodumpCrashHandlerIfNecessary(process_type);
+
   if (command_line->HasSwitch(switches::kEnableCrashReporter)) {
     // On Android we need to provide a FD to the file where the minidump is
     // generated as the renderer and browser run with different UIDs

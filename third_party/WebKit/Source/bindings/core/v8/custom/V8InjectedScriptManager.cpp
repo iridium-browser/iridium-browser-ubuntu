@@ -65,7 +65,7 @@ static v8::Local<v8::Object> createInjectedScriptHostV8Wrapper(PassRefPtrWillBeR
 {
     ASSERT(host);
 
-    v8::Handle<v8::Object> wrapper = V8DOMWrapper::createWrapper(creationContext, &V8InjectedScriptHost::wrapperTypeInfo, host->toScriptWrappableBase(), isolate);
+    v8::Handle<v8::Object> wrapper = V8DOMWrapper::createWrapper(isolate, creationContext, &V8InjectedScriptHost::wrapperTypeInfo, host.get());
     if (UNLIKELY(wrapper.IsEmpty()))
         return wrapper;
 
@@ -76,7 +76,7 @@ static v8::Local<v8::Object> createInjectedScriptHostV8Wrapper(PassRefPtrWillBeR
     callbackData->handle.set(isolate, wrapper);
     callbackData->handle.setWeak(callbackData, &InjectedScriptManager::setWeakCallback);
 
-    V8DOMWrapper::setNativeInfo(wrapper, &V8InjectedScriptHost::wrapperTypeInfo, host->toScriptWrappableBase());
+    V8DOMWrapper::setNativeInfo(wrapper, &V8InjectedScriptHost::wrapperTypeInfo, host.get());
     ASSERT(V8DOMWrapper::isDOMWrapper(wrapper));
     return wrapper;
 }
@@ -118,7 +118,7 @@ bool InjectedScriptManager::canAccessInspectedWindow(ScriptState* scriptState)
     v8::Handle<v8::Object> holder = V8Window::findInstanceInPrototypeChain(global, scriptState->isolate());
     if (holder.IsEmpty())
         return false;
-    LocalFrame* frame = V8Window::toImpl(holder)->frame();
+    LocalFrame* frame = toLocalDOMWindow(V8Window::toImpl(holder))->frame();
 
     return BindingSecurity::shouldAllowAccessToFrame(scriptState->isolate(), frame, DoNotReportSecurityError);
 }

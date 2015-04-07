@@ -15,9 +15,9 @@
 #include "cc/output/gl_renderer.h"
 #include "cc/output/output_surface_client.h"
 #include "cc/output/software_renderer.h"
-#include "cc/resources/raster_worker_pool.h"
 #include "cc/resources/resource_provider.h"
 #include "cc/resources/texture_mailbox_deleter.h"
+#include "cc/resources/tile_task_worker_pool.h"
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/paths.h"
 #include "cc/test/pixel_test_output_surface.h"
@@ -114,7 +114,7 @@ bool PixelTest::PixelsMatchReference(const base::FilePath& ref_file,
   if (!result_bitmap_)
     return false;
 
-  CommandLine* cmd = CommandLine::ForCurrentProcess();
+  base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
   if (cmd->HasSwitch(switches::kCCRebaselinePixeltests))
     return WritePNGFile(*result_bitmap_, test_data_dir.Append(ref_file), true);
 
@@ -144,12 +144,9 @@ void PixelTest::SetUpGLRenderer(bool use_skia_gpu_backend,
   texture_mailbox_deleter_ = make_scoped_ptr(
       new TextureMailboxDeleter(base::MessageLoopProxy::current()));
 
-  renderer_ = GLRenderer::Create(this,
-                                 &settings_,
-                                 output_surface_.get(),
-                                 resource_provider_.get(),
-                                 texture_mailbox_deleter_.get(),
-                                 0);
+  renderer_ = GLRenderer::Create(
+      this, &settings_.renderer_settings, output_surface_.get(),
+      resource_provider_.get(), texture_mailbox_deleter_.get(), 0);
 }
 
 void PixelTest::ForceExpandedViewport(const gfx::Size& surface_expansion) {
@@ -188,8 +185,9 @@ void PixelTest::SetUpSoftwareRenderer() {
                                0,
                                false,
                                1);
-  renderer_ = SoftwareRenderer::Create(
-      this, &settings_, output_surface_.get(), resource_provider_.get());
+  renderer_ =
+      SoftwareRenderer::Create(this, &settings_.renderer_settings,
+                               output_surface_.get(), resource_provider_.get());
 }
 
 }  // namespace cc

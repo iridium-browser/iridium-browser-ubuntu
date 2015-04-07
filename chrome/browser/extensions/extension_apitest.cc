@@ -11,10 +11,13 @@
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "extensions/browser/api/test/test_api.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/test/result_catcher.h"
@@ -307,11 +310,10 @@ bool ExtensionApiTest::RunExtensionTestImpl(const std::string& extension_name,
     else
       ui_test_utils::NavigateToURL(browser(), url);
   } else if (launch_platform_app) {
-    AppLaunchParams params(browser()->profile(),
-                           extension,
-                           extensions::LAUNCH_CONTAINER_NONE,
-                           NEW_WINDOW);
-    params.command_line = *CommandLine::ForCurrentProcess();
+    AppLaunchParams params(browser()->profile(), extension,
+                           extensions::LAUNCH_CONTAINER_NONE, NEW_WINDOW,
+                           extensions::SOURCE_TEST);
+    params.command_line = *base::CommandLine::ForCurrentProcess();
     OpenApplication(params);
   }
 
@@ -325,34 +327,33 @@ bool ExtensionApiTest::RunExtensionTestImpl(const std::string& extension_name,
 
 // Test that exactly one extension is loaded, and return it.
 const extensions::Extension* ExtensionApiTest::GetSingleLoadedExtension() {
-  ExtensionService* service = extensions::ExtensionSystem::Get(
-      browser()->profile())->extension_service();
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(browser()->profile());
 
-  const extensions::Extension* extension = NULL;
-  for (extensions::ExtensionSet::const_iterator it =
-           service->extensions()->begin();
-       it != service->extensions()->end(); ++it) {
+  const extensions::Extension* result = NULL;
+  for (const scoped_refptr<const extensions::Extension>& extension :
+       registry->enabled_extensions()) {
     // Ignore any component extensions. They are automatically loaded into all
     // profiles and aren't the extension we're looking for here.
-    if ((*it)->location() == extensions::Manifest::COMPONENT)
+    if (extension->location() == extensions::Manifest::COMPONENT)
       continue;
 
-    if (extension != NULL) {
+    if (result != NULL) {
       // TODO(yoz): this is misleading; it counts component extensions.
       message_ = base::StringPrintf(
           "Expected only one extension to be present.  Found %u.",
-          static_cast<unsigned>(service->extensions()->size()));
+          static_cast<unsigned>(registry->enabled_extensions().size()));
       return NULL;
     }
 
-    extension = it->get();
+    result = extension.get();
   }
 
-  if (!extension) {
+  if (!result) {
     message_ = "extension pointer is NULL.";
     return NULL;
   }
-  return extension;
+  return result;
 }
 
 bool ExtensionApiTest::StartEmbeddedTestServer() {
@@ -412,7 +413,7 @@ bool ExtensionApiTest::StartSpawnedTestServer() {
   return true;
 }
 
-void ExtensionApiTest::SetUpCommandLine(CommandLine* command_line) {
+void ExtensionApiTest::SetUpCommandLine(base::CommandLine* command_line) {
   ExtensionBrowserTest::SetUpCommandLine(command_line);
   test_data_dir_ = test_data_dir_.AppendASCII("api_test");
 }

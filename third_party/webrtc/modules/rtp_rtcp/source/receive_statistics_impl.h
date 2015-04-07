@@ -31,8 +31,10 @@ class StreamStatisticianImpl : public StreamStatistician {
   virtual ~StreamStatisticianImpl() {}
 
   virtual bool GetStatistics(RtcpStatistics* statistics, bool reset) OVERRIDE;
-  virtual void GetDataCounters(uint32_t* bytes_received,
+  virtual void GetDataCounters(size_t* bytes_received,
                                uint32_t* packets_received) const OVERRIDE;
+  virtual void GetReceiveStreamDataCounters(
+      StreamDataCounters* data_counters) const OVERRIDE;
   virtual uint32_t BitrateReceived() const OVERRIDE;
   virtual void ResetStatistics() OVERRIDE;
   virtual bool IsRetransmitOfOldPacket(const RTPHeader& header,
@@ -40,7 +42,7 @@ class StreamStatisticianImpl : public StreamStatistician {
   virtual bool IsPacketInOrder(uint16_t sequence_number) const OVERRIDE;
 
   void IncomingPacket(const RTPHeader& rtp_header,
-                      size_t bytes,
+                      size_t packet_length,
                       bool retransmitted);
   void FecPacketReceived();
   void SetMaxReorderingThreshold(int max_reordering_threshold);
@@ -54,7 +56,7 @@ class StreamStatisticianImpl : public StreamStatistician {
                     uint32_t receive_time_secs,
                     uint32_t receive_time_frac);
   void UpdateCounters(const RTPHeader& rtp_header,
-                      size_t bytes,
+                      size_t packet_length,
                       bool retransmitted);
   void NotifyRtpCallback() LOCKS_EXCLUDED(stream_lock_.get());
   void NotifyRtcpCallback() LOCKS_EXCLUDED(stream_lock_.get());
@@ -80,8 +82,11 @@ class StreamStatisticianImpl : public StreamStatistician {
   uint16_t received_seq_wraps_;
 
   // Current counter values.
-  uint16_t received_packet_overhead_;
+  size_t received_packet_overhead_;
   StreamDataCounters receive_counters_;
+
+  // Stored counter values. Includes sum of reset counter values for the stream.
+  StreamDataCounters stored_sum_receive_counters_;
 
   // Counter values when we sent the last report.
   uint32_t last_report_inorder_packets_;
@@ -103,7 +108,7 @@ class ReceiveStatisticsImpl : public ReceiveStatistics,
 
   // Implement ReceiveStatistics.
   virtual void IncomingPacket(const RTPHeader& header,
-                              size_t bytes,
+                              size_t packet_length,
                               bool retransmitted) OVERRIDE;
   virtual void FecPacketReceived(uint32_t ssrc) OVERRIDE;
   virtual StatisticianMap GetActiveStatisticians() const OVERRIDE;
@@ -112,7 +117,7 @@ class ReceiveStatisticsImpl : public ReceiveStatistics,
 
   // Implement Module.
   virtual int32_t Process() OVERRIDE;
-  virtual int32_t TimeUntilNextProcess() OVERRIDE;
+  virtual int64_t TimeUntilNextProcess() OVERRIDE;
 
   virtual void RegisterRtcpStatisticsCallback(RtcpStatisticsCallback* callback)
       OVERRIDE;
@@ -123,6 +128,7 @@ class ReceiveStatisticsImpl : public ReceiveStatistics,
  private:
   virtual void StatisticsUpdated(const RtcpStatistics& statistics,
                                  uint32_t ssrc) OVERRIDE;
+  virtual void CNameChanged(const char* cname, uint32_t ssrc) OVERRIDE;
   virtual void DataCountersUpdated(const StreamDataCounters& counters,
                                    uint32_t ssrc) OVERRIDE;
 

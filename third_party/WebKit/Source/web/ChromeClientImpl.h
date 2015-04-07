@@ -33,6 +33,7 @@
 #define ChromeClientImpl_h
 
 #include "core/page/ChromeClient.h"
+#include "core/page/WindowFeatures.h"
 #include "modules/navigatorcontentutils/NavigatorContentUtilsClient.h"
 #include "platform/PopupMenu.h"
 #include "platform/weborigin/KURL.h"
@@ -91,7 +92,7 @@ public:
     virtual void setMenubarVisible(bool) override;
     virtual bool menubarVisible() override;
     virtual void setResizable(bool) override;
-    virtual bool shouldReportDetailedMessageForSource(const WTF::String&) override;
+    virtual bool shouldReportDetailedMessageForSource(LocalFrame&, const WTF::String&) override;
     virtual void addMessageToConsole(
         LocalFrame*, MessageSource, MessageLevel,
         const WTF::String& message, unsigned lineNumber,
@@ -108,16 +109,15 @@ public:
     virtual void setStatusbarText(const WTF::String& message) override;
     virtual bool tabsToLinks() override;
     virtual IntRect windowResizerRect() const override;
-    virtual void invalidateContentsAndRootView(const IntRect&) override;
-    virtual void invalidateContentsForSlowScroll(const IntRect&) override;
+    virtual void invalidateRect(const IntRect&) override;
     virtual void scheduleAnimation() override;
+    virtual void scheduleAnimationForFrame(LocalFrame* localRoot) override;
     virtual IntRect rootViewToScreen(const IntRect&) const override;
     virtual WebScreenInfo screenInfo() const override;
     virtual void contentsSizeChanged(LocalFrame*, const IntSize&) const override;
     virtual void deviceOrPageScaleFactorChanged() const override;
     virtual void layoutUpdated(LocalFrame*) const override;
-    virtual void mouseDidMoveOverElement(
-        const HitTestResult&, unsigned modifierFlags) override;
+    virtual void mouseDidMoveOverElement(const HitTestResult&) override;
     virtual void setToolTip(const WTF::String& tooltipText, TextDirection) override;
     virtual void dispatchViewportPropertiesDidChange(const ViewportDescription&) const override;
     virtual void print(LocalFrame*) override;
@@ -125,7 +125,6 @@ public:
     virtual bool paintCustomOverhangArea(GraphicsContext*, const IntRect&, const IntRect&, const IntRect&) override;
     virtual PassOwnPtrWillBeRawPtr<ColorChooser> createColorChooser(LocalFrame*, ColorChooserClient*, const Color&) override;
     virtual PassRefPtr<DateTimeChooser> openDateTimeChooser(DateTimeChooserClient*, const DateTimeChooserParameters&) override;
-    virtual void openTextDataListChooser(HTMLInputElement&) override;
     virtual void runOpenPanel(LocalFrame*, PassRefPtr<FileChooser>) override;
     virtual void enumerateChosenDirectory(FileChooser*) override;
     virtual void setCursor(const Cursor&) override;
@@ -135,7 +134,7 @@ public:
     virtual GraphicsLayerFactory* graphicsLayerFactory() const override;
 
     // Pass 0 as the GraphicsLayer to detatch the root layer.
-    virtual void attachRootGraphicsLayer(GraphicsLayer*) override;
+    virtual void attachRootGraphicsLayer(GraphicsLayer*, LocalFrame* localRoot) override;
 
     virtual void enterFullScreenForElement(Element*) override;
     virtual void exitFullScreenForElement(Element*) override;
@@ -152,40 +151,41 @@ public:
     void setNewWindowNavigationPolicy(WebNavigationPolicy);
 
     virtual bool hasOpenedPopup() const override;
-    virtual PassRefPtrWillBeRawPtr<PopupMenu> createPopupMenu(LocalFrame&, PopupMenuClient*) const override;
+    virtual PassRefPtrWillBeRawPtr<PopupMenu> createPopupMenu(LocalFrame&, PopupMenuClient*) override;
     PagePopup* openPagePopup(PagePopupClient*, const IntRect&);
     void closePagePopup(PagePopup*);
-    virtual void setPagePopupDriver(PagePopupDriver*) override;
-    virtual void resetPagePopupDriver() override;
-    virtual PagePopupDriver* pagePopupDriver() const override { return m_pagePopupDriver; }
+    virtual DOMWindow* pagePopupWindowForTesting() const override;
 
     virtual bool shouldRunModalDialogDuringPageDismissal(const DialogType&, const String& dialogMessage, Document::PageDismissalType) const override;
 
     virtual bool requestPointerLock() override;
     virtual void requestPointerUnlock() override;
 
-    virtual void didAssociateFormControls(const WillBeHeapVector<RefPtrWillBeMember<Element> >&) override;
+    // AutofillClient pass throughs:
+    virtual void didAssociateFormControls(const WillBeHeapVector<RefPtrWillBeMember<Element>>&, LocalFrame*) override;
+    virtual void handleKeyboardEventOnTextField(HTMLInputElement&, KeyboardEvent&) override;
     virtual void didChangeValueInTextField(HTMLFormControlElement&) override;
     virtual void didEndEditingOnTextField(HTMLInputElement&) override;
-    virtual void handleKeyboardEventOnTextField(HTMLInputElement&, KeyboardEvent&) override;
+    virtual void openTextDataListChooser(HTMLInputElement&) override;
+    virtual void textFieldDataListChanged(HTMLInputElement&) override;
 
     virtual void didCancelCompositionOnSelectionChange() override;
     virtual void willSetInputMethodState() override;
     virtual void didUpdateTextOfFocusedElementByNonUserInput() override;
     virtual void showImeIfNeeded() override;
 
+    virtual void registerViewportLayers() const override;
+
+    virtual void showUnhandledTapUIIfNeeded(IntPoint, Node*, bool) override;
+
 private:
     virtual bool isChromeClientImpl() const override { return true; }
 
-    WebNavigationPolicy getNavigationPolicy();
+    WebNavigationPolicy getNavigationPolicy(const WindowFeatures&);
     void setCursor(const WebCursorInfo&);
 
     WebViewImpl* m_webView;  // weak pointer
-    bool m_toolbarsVisible;
-    bool m_statusbarVisible;
-    bool m_scrollbarsVisible;
-    bool m_menubarVisible;
-    bool m_resizable;
+    WindowFeatures m_windowFeatures;
 
     PagePopupDriver* m_pagePopupDriver;
 };

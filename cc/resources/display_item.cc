@@ -1,0 +1,16 @@
+// Copyright 2014 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#include "cc/resources/display_item.h"
+
+namespace cc {
+
+DisplayItem::DisplayItem() {
+}
+
+void DisplayItem::RasterForTracing(SkCanvas* canvas) const {
+  Raster(canvas, nullptr);
+}
+
+}  // namespace cc

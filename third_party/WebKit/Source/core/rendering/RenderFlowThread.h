@@ -30,17 +30,12 @@
 #ifndef RenderFlowThread_h
 #define RenderFlowThread_h
 
-
+#include "core/rendering/LayerFragment.h"
 #include "core/rendering/RenderBlockFlow.h"
-#include "wtf/HashCountedSet.h"
 #include "wtf/ListHashSet.h"
-#include "wtf/PassRefPtr.h"
 
 namespace blink {
 
-struct LayerFragment;
-typedef Vector<LayerFragment, 1> LayerFragments;
-class RenderFlowThread;
 class RenderMultiColumnSet;
 class RenderRegion;
 
@@ -61,6 +56,8 @@ public:
     virtual bool isRenderMultiColumnFlowThread() const { return false; }
     virtual bool isRenderPagedFlowThread() const { return false; }
 
+    virtual bool supportsPaintInvalidationStateCachedOffsets() const override { return false; }
+
     virtual void layout() override;
 
     // Always create a RenderLayer for the RenderFlowThread so that we
@@ -68,6 +65,7 @@ public:
     virtual LayerType layerTypeRequired() const override final { return NormalLayer; }
 
     virtual void flowThreadDescendantWasInserted(RenderObject*) { }
+    virtual void flowThreadDescendantWillBeRemoved(RenderObject*) { }
 
     virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) override final;
 
@@ -82,7 +80,7 @@ public:
     void invalidateRegions();
     bool hasValidRegionInfo() const { return !m_regionsInvalidated && !m_multiColumnSetList.isEmpty(); }
 
-    void paintInvalidationRectangleInRegions(const LayoutRect&) const;
+    virtual void mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect&, const PaintInvalidationState*) const override;
 
     LayoutUnit pageLogicalHeightForOffset(LayoutUnit);
     LayoutUnit pageRemainingLogicalHeightForOffset(LayoutUnit, PageBoundaryRule = IncludePageBoundary);
@@ -102,16 +100,12 @@ public:
     bool pageLogicalSizeChanged() const { return m_pageLogicalSizeChanged; }
 
     void collectLayerFragments(LayerFragments&, const LayoutRect& layerBoundingBox, const LayoutRect& dirtyRect);
-    LayoutRect fragmentsBoundingBox(const LayoutRect& layerBoundingBox);
+    LayoutRect fragmentsBoundingBox(const LayoutRect& layerBoundingBox) const;
 
     LayoutPoint flowThreadPointToVisualPoint(const LayoutPoint& flowThreadPoint) const
     {
         return flowThreadPoint + columnOffset(flowThreadPoint);
     }
-
-    void pushFlowThreadLayoutState(const RenderObject&);
-    void popFlowThreadLayoutState();
-    LayoutUnit offsetFromLogicalTopOfFirstRegion(const RenderBlock*) const;
 
     // Used to estimate the maximum height of the flow thread.
     static LayoutUnit maxLogicalHeight() { return LayoutUnit::max() / 2; }
@@ -120,15 +114,8 @@ protected:
     virtual const char* renderName() const = 0;
 
     void updateRegionsFlowThreadPortionRect();
-    bool shouldIssuePaintInvalidations(const LayoutRect&) const;
 
     virtual RenderMultiColumnSet* columnSetAtBlockOffset(LayoutUnit) const = 0;
-
-    bool cachedOffsetFromLogicalTopOfFirstRegion(const RenderBox*, LayoutUnit&) const;
-    void setOffsetFromLogicalTopOfFirstRegion(const RenderBox*, LayoutUnit);
-    void clearOffsetFromLogicalTopOfFirstRegion(const RenderBox*);
-
-    const RenderBox* currentStatePusherRenderBox() const;
 
     RenderMultiColumnSetList m_multiColumnSetList;
 
@@ -154,13 +141,6 @@ protected:
         RenderRegion* m_result;
     };
 
-    // Stack of objects that pushed a LayoutState object on the RenderView. The
-    // objects on the stack are the ones that are curently in the process of being
-    // laid out.
-    ListHashSet<const RenderObject*> m_statePusherObjectsStack;
-    typedef HashMap<const RenderBox*, LayoutUnit> RenderBoxToOffsetMap;
-    RenderBoxToOffsetMap m_boxesToOffsetMap;
-
     MultiColumnSetIntervalTree m_multiColumnSetIntervalTree;
 
     bool m_regionsInvalidated : 1;
@@ -169,16 +149,6 @@ protected:
 };
 
 DEFINE_RENDER_OBJECT_TYPE_CASTS(RenderFlowThread, isRenderFlowThread());
-
-class CurrentRenderFlowThreadMaintainer {
-    WTF_MAKE_NONCOPYABLE(CurrentRenderFlowThreadMaintainer);
-public:
-    CurrentRenderFlowThreadMaintainer(RenderFlowThread*);
-    ~CurrentRenderFlowThreadMaintainer();
-private:
-    RenderFlowThread* m_renderFlowThread;
-    RenderFlowThread* m_previousRenderFlowThread;
-};
 
 // These structures are used by PODIntervalTree for debugging.
 #ifndef NDEBUG

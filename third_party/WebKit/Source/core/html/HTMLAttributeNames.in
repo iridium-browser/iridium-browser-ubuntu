@@ -15,6 +15,7 @@ alt
 archive
 aria-activedescendant
 aria-atomic
+aria-autocomplete
 aria-busy
 aria-checked
 aria-controls
@@ -54,7 +55,6 @@ axis
 background
 behavior
 bgcolor
-bgproperties
 border
 bordercolor
 capture
@@ -261,6 +261,7 @@ ping
 poster
 preload
 pseudo
+radiogroup
 readonly
 rel
 required

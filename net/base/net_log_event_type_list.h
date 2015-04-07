@@ -26,21 +26,12 @@ EVENT_TYPE(CANCELLED)
 //   }
 EVENT_TYPE(FAILED)
 
-// Marks the creation/destruction of a request (net::URLRequest or
-// SocketStream).
+// Marks the creation/destruction of a request (net::URLRequest).
 EVENT_TYPE(REQUEST_ALIVE)
 
 // ------------------------------------------------------------------------
 // HostResolverImpl
 // ------------------------------------------------------------------------
-
-// The start/end of waiting on a host resolve (DNS) request.
-// The BEGIN phase contains the following parameters:
-//
-//   {
-//     "source_dependency": <Source id of the request being waited on>,
-//   }
-EVENT_TYPE(HOST_RESOLVER_IMPL)
 
 // The start/end of a host resolve (DNS) request.  Note that these events are
 // logged for all DNS requests, though not all requests result in the creation
@@ -50,12 +41,11 @@ EVENT_TYPE(HOST_RESOLVER_IMPL)
 //
 //   {
 //     "host": <Hostname associated with the request>,
-//     "address_family": <The address family to restrict results to>
+//     "address_family": <The address family to restrict results to>,
 //     "allow_cached_response": <Whether it is ok to return a result from
-//                               the host cache>
+//                               the host cache>,
 //     "is_speculative": <Whether this request was started by the DNS
 //                        prefetcher>
-//     "source_dependency": <Source id, if any, of what created the request>,
 //   }
 //
 // If an error occurred, the END phase will contain these parameters:
@@ -594,6 +584,20 @@ EVENT_TYPE(SIGNED_CERTIFICATE_TIMESTAMPS_RECEIVED)
 // }
 EVENT_TYPE(SIGNED_CERTIFICATE_TIMESTAMPS_CHECKED)
 
+// The EV certificate was checked for compliance with Certificate Transparency
+// requirements.
+//
+// The following parameters are attached to the event:
+// {
+//    "certificate": <An X.509 certificate, same format as in
+//                   CERT_VERIFIER_JOB.>
+//    "policy_enforcement_required": <boolean>
+//    "build_timely": <boolean>
+//    "ct_compliance_status": <string describing compliance status>
+//    "ev_whitelist_version": <optional; string representing whitelist version>
+// }
+EVENT_TYPE(EV_CERT_CT_COMPLIANCE_CHECKED)
+
 // ------------------------------------------------------------------------
 // DatagramSocket
 // ------------------------------------------------------------------------
@@ -806,6 +810,14 @@ EVENT_TYPE(URL_REQUEST_FAKE_RESPONSE_HEADERS_CREATED)
 //     "headers": <The list of header:value pairs>,
 //   }
 
+EVENT_TYPE(URL_REQUEST_FILTERS_SET)
+// This event is logged when a URLRequestJob sets up the filters, if any
+// filters were added to the job.  It logs the filters added.
+// The following parameters are attached:
+//   {
+//     "filters": <The list of filter names>
+//   }
+
 // ------------------------------------------------------------------------
 // HttpCache
 // ------------------------------------------------------------------------
@@ -834,6 +846,20 @@ EVENT_TYPE(HTTP_CACHE_WRITE_INFO)
 // Measures the time while reading/writing a disk cache entry's body.
 EVENT_TYPE(HTTP_CACHE_READ_DATA)
 EVENT_TYPE(HTTP_CACHE_WRITE_DATA)
+
+// The request headers received by the HTTP cache.
+// The following parameters are attached:
+//   {
+//     "line": <empty>,
+//     "headers": <The list of header:value pairs>,
+//   }
+EVENT_TYPE(HTTP_CACHE_CALLER_REQUEST_HEADERS)
+
+// Signal a significant change on the flow of the satate machine: start again
+// from scratch or create a new network request for byte-range operations.
+// There are no parameters.
+EVENT_TYPE(HTTP_CACHE_RESTART_PARTIAL_REQUEST)
+EVENT_TYPE(HTTP_CACHE_RE_SEND_PARTIAL_REQUEST)
 
 // Identifies the NetLog::Source() for the asynchronous HttpCache::Transaction
 // that will revalidate this entry.
@@ -1327,6 +1353,10 @@ EVENT_TYPE(SPDY_SESSION_POOL_REMOVE_SESSION)
 EVENT_TYPE(SPDY_STREAM)
 
 // A stream is attached to a pushed stream.
+//   {
+//     "stream_id":  <The stream id>,
+//     "url":        <The url of the pushed resource>,
+//   }
 EVENT_TYPE(SPDY_STREAM_ADOPTED_PUSH_STREAM)
 
 // A stream is unstalled by flow control.
@@ -1692,49 +1722,6 @@ EVENT_TYPE(QUIC_HTTP_STREAM_READ_RESPONSE_HEADERS)
 
 // Measures the time to read HTTP response headers from the server.
 EVENT_TYPE(HTTP_STREAM_PARSER_READ_HEADERS)
-
-// ------------------------------------------------------------------------
-// SocketStream
-// ------------------------------------------------------------------------
-
-// Measures the time between SocketStream::Connect() and
-// SocketStream::DidEstablishConnection()
-//
-// For the BEGIN phase, the following parameters are attached:
-//   {
-//      "url": <String of URL being loaded>,
-//   }
-//
-// For the END phase, if there was an error, the following parameters are
-// attached:
-//   {
-//      "net_error": <Net error code of the failure>,
-//   }
-EVENT_TYPE(SOCKET_STREAM_CONNECT)
-
-// A message sent on the SocketStream.
-EVENT_TYPE(SOCKET_STREAM_SENT)
-
-// A message received on the SocketStream.
-EVENT_TYPE(SOCKET_STREAM_RECEIVED)
-
-// ------------------------------------------------------------------------
-// WebSocketJob
-// ------------------------------------------------------------------------
-
-// This event is sent for a WebSocket handshake request.
-// The following parameters are attached:
-//   {
-//     "headers": <handshake request message>,
-//   }
-EVENT_TYPE(WEB_SOCKET_SEND_REQUEST_HEADERS)
-
-// This event is sent on receipt of the WebSocket handshake response headers.
-// The following parameters are attached:
-//   {
-//     "headers": <handshake response message>,
-//   }
-EVENT_TYPE(WEB_SOCKET_READ_RESPONSE_HEADERS)
 
 // ------------------------------------------------------------------------
 // SOCKS5ClientSocket
@@ -2416,3 +2403,107 @@ EVENT_TYPE(SIMPLE_CACHE_ENTRY_CLOSE_END)
 // This event is created (in a source of the same name) when the internal DNS
 // resolver creates a UDP socket to check for global IPv6 connectivity.
 EVENT_TYPE(IPV6_REACHABILITY_CHECK)
+
+// ------------------------------------------------------------------------
+// SDCH
+// ------------------------------------------------------------------------
+
+// This event is created when some problem occurs during sdch-encoded resource
+// handling. It contains the following parameters:
+//   {
+//     "sdch_problem_code": <SDCH problem code>,
+//     "net_error": <Always ERR_FAILED, present just to indicate this is a
+//                   failure>,
+//   }
+EVENT_TYPE(SDCH_DECODING_ERROR)
+
+// This event is created when SdchFilter initialization fails due to the
+// response corruption. It contains the following parameters:
+//   {
+//     "cause": <Response corruption detection cause>,
+//     "cached": <True if response was read from cache>,
+//   }
+EVENT_TYPE(SDCH_RESPONSE_CORRUPTION_DETECTION)
+
+// This event is created when some problem occurs during sdch dictionary fetch.
+// It contains the following parameters:
+//   {
+//     "dictionary_url": <Dictionary url>,
+//     "sdch_problem_code": <SDCH problem code>,
+//     "net_error": <Only present on unexpected errors. Always ERR_FAILED when
+//                   present. Used to indicate this is a real failure>,
+//   }
+EVENT_TYPE(SDCH_DICTIONARY_ERROR)
+
+// This event is created when SdchDictionaryFetcher starts fetch.  It contains
+// no parameters.
+EVENT_TYPE(SDCH_DICTIONARY_FETCH)
+
+// This event is created if the SdchDictionaryFetcher URLRequest returns
+// no error, but signals an error through bytes_read < 0.
+// It contains the following parameters:
+//   {
+//     "net_error": <error created>
+//   }
+EVENT_TYPE(SDCH_DICTIONARY_FETCH_IMPLIED_ERROR)
+
+// -----------------------------------------------------------------------------
+// Data Reduction Proxy events.
+// -----------------------------------------------------------------------------
+
+// This event is created when the data reduction proxy has been turned on or
+// off. It always contains the parameter:
+//  {
+//    "enabled": <true if the proxy is enabled>
+//  }
+//
+// If it is enabled, it contains additional parameters:
+//  {
+//    "primary_restricted": <Whether the primary proxy is restricted or not>,
+//    "fallback_restricted": <Whether the fallback proxy is restricted or not>,
+//    "primary_origin": <The primary proxy origin address>,
+//    "fallback_origin": <The fallback proxy origin address>,
+//    "ssl_origin": <The SSL proxy origin address>,
+//  }
+EVENT_TYPE(DATA_REDUCTION_PROXY_ENABLED)
+
+// The start/end of a canary request is sent to the data reduction proxy.
+//
+// The BEGIN phase contains the following parameters:
+//  {
+//    "url": <The URL of the canary endpoint>,
+//  }
+//
+// The END phase contains the following parameters:
+//  {
+//    "net_error": <The net_error of the completion of the canary request>,
+//  }
+EVENT_TYPE(DATA_REDUCTION_PROXY_CANARY_REQUEST)
+
+// This event is created when a response to the canary request has been
+// received with the following parameters:
+//  {
+//    "headers": <The list of header:value pairs>,
+//  }
+EVENT_TYPE(DATA_REDUCTION_PROXY_CANARY_RESPONSE_RECEIVED)
+
+// This event is created when a bypass event takes place with the following
+// parameters:
+//  {
+//    "action": <For DRP proxy sourced bypasses in the chrome-proxy header,
+//               the bypass type>,
+//    "bypass_type": <For non-DRP proxy sourced bypasses, the bypass type>,
+//    "url": <The origin URL of the remote endpoint which resulted in the
+//            bypass>,
+//    "bypass_duration_seconds": <The length of time to be in a bypass state>,
+//  }
+EVENT_TYPE(DATA_REDUCTION_PROXY_BYPASS_REQUESTED)
+
+// This event is created when the data reduction proxy configuration changes
+// (i.e. a switch between primary and fallback) with the following parameters:
+//  {
+//    "proxy_server": <The URL of the proxy server no longer being used>,
+//    "net_error": <The net_error encountered when using the proxy server; this
+//                  can be 0 if the proxy server is explicitly skipped>,
+//  }
+EVENT_TYPE(DATA_REDUCTION_PROXY_FALLBACK)

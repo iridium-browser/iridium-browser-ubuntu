@@ -88,7 +88,13 @@ class ConnectionCompare {
     cricket::Connection* a = const_cast<cricket::Connection*>(ca);
     cricket::Connection* b = const_cast<cricket::Connection*>(cb);
 
-    ASSERT(a->port()->IceProtocol() == b->port()->IceProtocol());
+    // The IceProtocol is initialized to ICEPROTO_HYBRID and can be updated to
+    // GICE or RFC5245 when an answer SDP is set, or when a STUN message is
+    // received. So the port receiving the STUN message may have a different
+    // IceProtocol if the answer SDP is not set yet.
+    ASSERT(a->port()->IceProtocol() == b->port()->IceProtocol() ||
+           a->port()->IceProtocol() == cricket::ICEPROTO_HYBRID ||
+           b->port()->IceProtocol() == cricket::ICEPROTO_HYBRID);
 
     // Compare first on writability and static preferences.
     int cmp = CompareConnections(a, b);
@@ -218,6 +224,36 @@ void P2PTransportChannel::SetIceTiebreaker(uint64 tiebreaker) {
   }
 
   tiebreaker_ = tiebreaker;
+}
+
+// Currently a channel is considered ICE completed once there is no
+// more than one connection per Network. This works for a single NIC
+// with both IPv4 and IPv6 enabled. However, this condition won't
+// happen when there are multiple NICs and all of them have
+// connectivity.
+// TODO(guoweis): Change Completion to be driven by a channel level
+// timer.
+TransportChannelState P2PTransportChannel::GetState() const {
+  std::set<rtc::Network*> networks;
+
+  if (connections_.size() == 0) {
+    return TransportChannelState::STATE_FAILED;
+  }
+
+  for (uint32 i = 0; i < connections_.size(); ++i) {
+    rtc::Network* network = connections_[i]->port()->Network();
+    if (networks.find(network) == networks.end()) {
+      networks.insert(network);
+    } else {
+      LOG_J(LS_VERBOSE, this) << "Ice not completed yet for this channel as "
+                              << network->ToString()
+                              << " has more than 1 connection.";
+      return TransportChannelState::STATE_CONNECTING;
+    }
+  }
+  LOG_J(LS_VERBOSE, this) << "Ice is completed for this channel.";
+
+  return TransportChannelState::STATE_COMPLETED;
 }
 
 bool P2PTransportChannel::GetIceProtocolType(IceProtocolType* type) const {
@@ -470,11 +506,10 @@ void P2PTransportChannel::OnUnknownAddress(
     }
 
     std::string id = rtc::CreateRandomString(8);
-    new_remote_candidate = Candidate(
-        id, component(), ProtoToString(proto), address,
-        0, remote_username, remote_password, type,
-        port->Network()->name(), 0U,
-        rtc::ToString<uint32>(rtc::ComputeCrc32(id)));
+    new_remote_candidate =
+        Candidate(id, component(), ProtoToString(proto), address, 0,
+                  remote_username, remote_password, type, 0U,
+                  rtc::ToString<uint32>(rtc::ComputeCrc32(id)));
     new_remote_candidate.set_priority(
         new_remote_candidate.GetPriority(ICE_TYPE_PREFERENCE_SRFLX,
                                          port->Network()->preference(), 0));
@@ -842,6 +877,8 @@ bool P2PTransportChannel::GetStats(ConnectionInfos *infos) {
     info.rtt = connection->rtt();
     info.sent_total_bytes = connection->sent_total_bytes();
     info.sent_bytes_second = connection->sent_bytes_second();
+    info.sent_discarded_packets = connection->sent_discarded_packets();
+    info.sent_total_packets = connection->sent_total_packets();
     info.recv_total_bytes = connection->recv_total_bytes();
     info.recv_bytes_second = connection->recv_bytes_second();
     info.local_candidate = connection->local_candidate();
@@ -1057,7 +1094,7 @@ void P2PTransportChannel::HandleAllTimedOut() {
 // If we have a best connection, return it, otherwise return top one in the
 // list (later we will mark it best).
 Connection* P2PTransportChannel::GetBestConnectionOnNetwork(
-    rtc::Network* network) {
+    rtc::Network* network) const {
   // If the best connection is on this network, then it wins.
   if (best_connection_ && (best_connection_->port()->Network() == network))
     return best_connection_;

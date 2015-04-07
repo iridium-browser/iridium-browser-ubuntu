@@ -4,6 +4,8 @@
 
 """Cros unit test library, with utility functions."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import collections
@@ -29,6 +31,7 @@ import urllib
 
 from chromite.cbuildbot import constants
 from chromite.lib import cidb
+from chromite.lib import git
 import cros_build_lib
 import gob_util
 import osutils
@@ -95,7 +98,7 @@ def _FlattenStructure(base_path, dir_struct):
       flattened.append(new_base + os.sep)
       flattened.extend(_FlattenStructure(new_base, obj.contents))
     else:
-      assert(isinstance(obj, basestring))
+      assert isinstance(obj, basestring)
       flattened.append(os.path.join(base_path, obj))
   return flattened
 
@@ -1109,19 +1112,23 @@ class GerritTestCase(MockTempDirTestCase):
 
   def setUp(self):
     """Sets up the gerrit instances in a class-specific temp dir."""
-    # Create gerrit instance.
-    gi = self.gerrit_instance = self._create_gerrit_instance(self.tempdir)
     old_home = os.environ['HOME']
     os.environ['HOME'] = self.tempdir
-    self._populate_netrc(os.path.join(old_home, '.netrc'))
+
+    # Create gerrit instance.
+    gi = self.gerrit_instance = self._create_gerrit_instance(self.tempdir)
+
+    netrc_path = os.path.join(old_home, '.netrc')
+    if os.path.exists(netrc_path):
+      self._populate_netrc(netrc_path)
+      # Set netrc file for http authentication.
+      self.PatchObject(gob_util, 'NETRC', netrc.netrc(gi.netrc_file))
 
     if gi.cookies_path:
       cros_build_lib.RunCommand(
           ['git', 'config', '--global', 'http.cookiefile', gi.cookies_path],
           quiet=True)
 
-    # Set netrc file for http authentication.
-    self.PatchObject(gob_util, 'NETRC', netrc.netrc(gi.netrc_file))
 
     # Set cookie file for http authentication
     if gi.cookies_path:
@@ -1180,10 +1187,11 @@ class GerritTestCase(MockTempDirTestCase):
 
   def _CloneProject(self, name, path):
     """Clone a project from the test gerrit server."""
-    osutils.SafeMakedirs(os.path.dirname(path))
+    root = os.path.dirname(path)
+    osutils.SafeMakedirs(root)
     url = '%s://%s/%s' % (
         gob_util.GIT_PROTOCOL, self.gerrit_instance.git_host, name)
-    cros_build_lib.RunCommand(['git', 'clone', url, path], quiet=True)
+    git.RunGit(root, ['clone', url, path])
     # Install commit-msg hook.
     hook_path = os.path.join(path, '.git', 'hooks', 'commit-msg')
     hook_cmd = ['curl', '-n', '-o', hook_path]
@@ -1265,7 +1273,7 @@ class GerritTestCase(MockTempDirTestCase):
       if match:
         sha1 = match.group(1)
         continue
-      match = re.match('^\s+Change-Id:\s*(\S+)$', line)
+      match = re.match(r'^\s+Change-Id:\s*(\S+)$', line)
       if match:
         change_id = match.group(1)
         continue
@@ -1413,6 +1421,13 @@ class MoxOutputTestCase(OutputTestCase, MoxTestCase):
   """
 
 
+class MoxTempDirTestOutputCase(OutputTestCase, MoxTempDirTestCase):
+  """Conevenience class mixing OutputTestCase and MoxTempDirTestCase
+
+  Note: mox is deprecated; please use MockOutputTestCase instead.
+  """
+
+
 class MockOutputTestCase(MockTestCase, OutputTestCase):
   """Convenience class mixing Output and Mock."""
 
@@ -1457,40 +1472,38 @@ def FindTests(directory, module_namespace=''):
   return [module_namespace + x[:-3].replace('/', '.') for x in results]
 
 
-def main(**kwargs):
-  """Helper wrapper around unittest.main.  Invoke this, not unittest.main.
+class TestProgram(unittest.TestProgram):
+  """Helper wrapper around unittest.TestProgram
 
   Any passed in kwargs are passed directly down to unittest.main; via this, you
   can inject custom argv for example (to limit what tests run).
   """
-  # Default to exit=True; this matches old behaviour, and allows unittest
-  # to trigger sys.exit on its own.  Unfortunately, the exit keyword is only
-  # available in 2.7- as such, handle it ourselves.
-  allow_exit = kwargs.pop('exit', True)
-  if '--network' in sys.argv:
-    sys.argv.remove('--network')
-    GlobalTestConfig.RUN_NETWORK_TESTS = True
-  level = kwargs.pop('level', logging.CRITICAL)
-  for flag in ('-d', '--debug'):
-    if flag in sys.argv:
-      sys.argv.remove(flag)
-      level = logging.DEBUG
-  cros_build_lib.SetupBasicLogging(level)
-  try:
-    unittest.main(**kwargs)
-    raise SystemExit(0)
-  except SystemExit as e:
-    if GlobalTestConfig.NETWORK_TESTS_SKIPPED:
-      print('Note: %i network test(s) skipped; use --network to run them.' %
-            GlobalTestConfig.NETWORK_TESTS_SKIPPED)
-    if e.__class__ != SystemExit or allow_exit:
-      raise
-    # Redo the exit code ourselves- unittest throws True on occasion.
-    # This is why the lack of typing for SystemExit code attribute makes life
-    # suck, in parallel to unittest being special.
-    # Finally, note that it's possible for code to be a string...
-    if isinstance(e.code, (int, long)):
-      # This is done since exit code may be something other than 1/0; if they
-      # explicitly pass it, we'll honor it.
-      return e.code
-    return 1 if e.code else 0
+
+  USAGE = unittest.main.USAGE + """
+Chromite Options:
+  -d, --debug      Set logging level to debug
+      --network    Include network based tests (default: skip network tests)
+"""
+
+  def __init__(self, **kwargs):
+    if '--network' in sys.argv:
+      sys.argv.remove('--network')
+      GlobalTestConfig.RUN_NETWORK_TESTS = True
+
+    level = kwargs.pop('level', logging.CRITICAL)
+    for flag in ('-d', '--debug'):
+      if flag in sys.argv:
+        sys.argv.remove(flag)
+        level = logging.DEBUG
+    cros_build_lib.SetupBasicLogging(level)
+
+    try:
+      super(TestProgram, self).__init__(**kwargs)
+    finally:
+      if GlobalTestConfig.NETWORK_TESTS_SKIPPED:
+        print('Note: %i network test(s) skipped; use --network to run them.' %
+              GlobalTestConfig.NETWORK_TESTS_SKIPPED)
+
+
+class main(TestProgram):
+  """Chromite's version of unittest.main.  Invoke this, not unittest.main."""

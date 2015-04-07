@@ -45,6 +45,7 @@
 <translation id="568643307450491754">Trobareu les adreces d'interès al menú de Chrome o a la barra d'adreces d'interès.</translation>
 <translation id="8556340503434111824">Hi ha disponible una nova versió de Google Chrome, i és més ràpida que mai.</translation>
 <translation id="8987477933582888019">Navegador web</translation>
+<translation id="3749644715096758981">Chrome no ha pogut actualitzar-se a la darrera versió, així que no podeu gaudir de les funcions noves ni de les correccions de seguretat. Heu d'actualitzar Chrome.</translation>
 <translation id="4728575227883772061">S'ha produït un error no especificat durant la instal·lació. Si Google Chrome s'està executant en aquests moments, tanca'l i torna-ho a provar.</translation>
 <translation id="3080151273017101988">Continua executant aplicacions de segon pla en tancar Google Chrome</translation>
 <translation id="4149882025268051530">L'instal·lador no ha pogut descomprimir el fitxer. Torna a baixar Google Chrome.</translation>
@@ -83,6 +84,7 @@
 <translation id="225614027745146050">Benvingut</translation>
 <translation id="7473891865547856676">No, gràcies</translation>
 <translation id="3149510190863420837">Aplicacions de Chrome</translation>
+<translation id="8851136666856101339">principal</translation>
 <translation id="7473136999113284234">Chrome s'actualitza automàticament perquè en tingueu sempre la versió més recent.</translation>
 <translation id="7084448929020576097"><ph name="FILE_NAME"/> és maliciós i Chrome l'ha bloquejat.</translation>
 <translation id="6368958679917195344">Chrome OS és possible gràcies a <ph name="BEGIN_LINK_CROS_OSS"/>programari addicional de codi obert<ph name="END_LINK_CROS_OSS"/>.</translation>
@@ -142,7 +144,6 @@ En iniciar la sessió, sigui amb l'usuari que sigui, es combinarà amb <ph name=
 <translation id="5855036575689098185">El programari que s'executa al vostre ordinador no és compatible amb Google Chrome.</translation>
 <translation id="7164397146364144019">Si voleu col·laborar perquè Chrome sigui més segur i fàcil d'utilitzar, informeu automàticament Google dels detalls sobre possibles incidents de seguretat.</translation>
 <translation id="8008534537613507642">Torna a instal·lar Chrome</translation>
-<translation id="2044287590254833138">Barra d'eines de Google Chrome</translation>
 <translation id="8862326446509486874">No disposeu dels drets necessaris per instal·lar aplicacions al sistema. Proveu de tornar a executar l'instal·lador com a administrador.</translation>
 <translation id="2874156562296220396">Google Chrome ha estat possible gràcies al projecte de codi obert <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> i altres <ph name="BEGIN_LINK_OSS"/>programes de codi obert<ph name="END_LINK_OSS"/>.</translation>
 <translation id="7191567847629796517">Google Chrome OS no admet que s'iniciï una aplicació externa per gestionar els enllaços de <ph name="SCHEME"/>. L'enllaç sol·licitat és <ph name="PROTOLINK"/>.</translation>
@@ -154,6 +155,7 @@ En iniciar la sessió, sigui amb l'usuari que sigui, es combinarà amb <ph name=
 <translation id="2290095356545025170">Esteu segur que voleu desinstal·lar Google Chrome?</translation>
 <translation id="7062966102157262887">En aquests moments hi ha una baixada en curs. Voleu sortir de Google Chrome i cancel·lar la baixada?</translation>
 <translation id="4273752058983339720">Google Chrome està configurat per iniciar-se automàticament cada vegada que inicieu l'equip.</translation>
+<translation id="2316129865977710310">No, gràcies</translation>
 <translation id="415994390253732730">Chrome es comporta de manera estranya?</translation>
 <translation id="1104959162601287462">Quant a &amp;SO Chrome</translation>
 <translation id="5328989068199000832">Binaris Google Chrome</translation>
@@ -251,10 +253,11 @@ En iniciar la sessió, sigui amb l'usuari que sigui, es combinarà amb <ph name=
 <translation id="3451115285585441894">S'està afegint a Chrome...</translation>
 <translation id="3047079729301751317">Si desconnecteu <ph name="USERNAME"/> s'esborraran l'historial, les adreces d'interès, la configuració i totes les dades de Chrome que hi hagi desades en aquest dispositiu. Les dades emmagatzemades al compte de Google no s'esborraran, i es poden gestionar des del <ph name="GOOGLE_DASHBOARD_LINK"/>Tauler de Google<ph name="END_GOOGLE_DASHBOARD_LINK"/>.</translation>
 <translation id="1001534784610492198">El fitxer d'instal·lació està malmès o no és vàlid. Torna a baixar Google Chrome.</translation>
-<translation id="2246246234298806438">Google Chrome no pot mostrar la visualització prèvia d'impressió perquè falta el lector de PDF incorporat.</translation>
+<translation id="2246246234298806438">Google Chrome no pot mostrar la previsualització d'impressió perquè falta el lector de PDF incorporat.</translation>
 <translation id="6626317981028933585">Lamentablement, la vostra configuració de Mozilla Firefox no estarà disponible mentre aquest navegador s'estigui executant. Per importar aquesta configuració a Google Chrome, deseu la feina que hagueu fet i tanqueu totes les finestres de Firefox. Seguidament, feu clic a &quot;Continua&quot;.</translation>
 <translation id="7242029209006116544">Esteu a punt d'iniciar la sessió amb un compte gestionat i d'atorgar el control del vostre perfil de Google Chrome a l'administrador corresponent. Les vostres dades de Chrome, com ara aplicacions, adreces d'interès, historial, contrasenyes i altres configuracions, s'enllaçaran permanentment amb <ph name="USER_NAME"/>. Podreu suprimir aquestes dades mitjançant el Tauler de Comptes de Google, però no les podreu associar amb un altre compte. De manera opcional, podeu crear un perfil nou per mantenir les vostres dades de Chrome a part. <ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">També controla la pàgina que es mostra quan inicieu Chrome o quan feu una cerca des de l'omnibox.</translation>
+<translation id="1553358976309200471">Actualitza Chrome</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Copyright <ph name="YEAR"/> Google Inc. Tots els drets reservats.</translation>
 <translation id="1698376642261615901">Google Chrome és un navegador web que executa pàgines web i aplicacions a gran velocitat. És ràpid, estable i fàcil d'utilitzar. Navegueu d'una manera més segura pel web amb la protecció contra programari maliciós i llocs de pesca integrada a Google Chrome.</translation>

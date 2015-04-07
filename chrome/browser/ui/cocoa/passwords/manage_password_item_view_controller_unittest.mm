@@ -36,20 +36,19 @@ class ManagePasswordItemViewControllerTest
     : public ManagePasswordsControllerTest {
  public:
   ManagePasswordItemViewControllerTest() {}
-  virtual ~ManagePasswordItemViewControllerTest() {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     ManagePasswordsControllerTest::SetUp();
     PasswordStoreFactory::GetInstance()->SetTestingFactory(
         profile(), MockPasswordStoreService::Build);
-    ui_controller()->SetPendingCredentials(credentials());
+    ui_controller()->SetPendingPassword(credentials());
   }
 
   ManagePasswordItemViewController* controller() {
     if (!controller_) {
       controller_.reset([[ManagePasswordItemViewController alloc]
           initWithModel:model()
-           passwordForm:ui_controller()->PendingCredentials()
+           passwordForm:ui_controller()->PendingPassword()
                position:password_manager::ui::FIRST_ITEM]);
     }
     return controller_.get();

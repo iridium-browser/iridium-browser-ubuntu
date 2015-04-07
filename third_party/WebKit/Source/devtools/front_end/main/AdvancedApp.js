@@ -11,7 +11,7 @@ WebInspector.AdvancedApp = function()
     WebInspector.App.call(this);
     if (WebInspector.overridesSupport.responsiveDesignAvailable()) {
         this._toggleEmulationButton = new WebInspector.StatusBarButton(WebInspector.UIString("Toggle device mode."), "emulation-status-bar-item");
-        this._toggleEmulationButton.toggled = WebInspector.overridesSupport.emulationEnabled();
+        this._toggleEmulationButton.setToggled(WebInspector.overridesSupport.emulationEnabled());
         this._toggleEmulationButton.addEventListener("click", this._toggleEmulationEnabled, this);
         WebInspector.overridesSupport.addEventListener(WebInspector.OverridesSupport.Events.EmulationStateChanged, this._emulationEnabledChanged, this);
         WebInspector.overridesSupport.addEventListener(WebInspector.OverridesSupport.Events.OverridesWarningUpdated, this._overridesWarningUpdated, this);
@@ -22,7 +22,7 @@ WebInspector.AdvancedApp = function()
 WebInspector.AdvancedApp.prototype = {
     _toggleEmulationEnabled: function()
     {
-        var enabled = !this._toggleEmulationButton.toggled;
+        var enabled = !this._toggleEmulationButton.toggled();
         if (enabled)
             WebInspector.userMetrics.DeviceModeEnabled.record();
         WebInspector.overridesSupport.setEmulationEnabled(enabled);
@@ -30,7 +30,7 @@ WebInspector.AdvancedApp.prototype = {
 
     _emulationEnabledChanged: function()
     {
-        this._toggleEmulationButton.toggled = WebInspector.overridesSupport.emulationEnabled();
+        this._toggleEmulationButton.setToggled(WebInspector.overridesSupport.emulationEnabled());
         if (!WebInspector.overridesSupport.responsiveDesignAvailable() && WebInspector.overridesSupport.emulationEnabled())
             WebInspector.inspectorView.showViewInDrawer("emulation", true);
     },
@@ -40,7 +40,7 @@ WebInspector.AdvancedApp.prototype = {
         if (!this._toggleEmulationButton)
             return;
         var message = WebInspector.overridesSupport.warningMessage();
-        this._toggleEmulationButton.title = message || WebInspector.UIString("Toggle device mode.");
+        this._toggleEmulationButton.setTitle(message || WebInspector.UIString("Toggle device mode."));
         this._toggleEmulationButton.element.classList.toggle("warning", !!message);
     },
 
@@ -55,12 +55,12 @@ WebInspector.AdvancedApp.prototype = {
         this._rootSplitView = new WebInspector.SplitView(false, true, "InspectorView.splitViewState", 300, 300, true);
         this._rootSplitView.show(rootView.element);
 
-        WebInspector.inspectorView.show(this._rootSplitView.sidebarElement());
+        this._rootSplitView.setSidebarView(WebInspector.inspectorView);
 
         this._inspectedPagePlaceholder = new WebInspector.InspectedPagePlaceholder();
         this._inspectedPagePlaceholder.addEventListener(WebInspector.InspectedPagePlaceholder.Events.Update, this._onSetInspectedPageBounds.bind(this, false), this);
         this._responsiveDesignView = new WebInspector.ResponsiveDesignView(this._inspectedPagePlaceholder);
-        this._responsiveDesignView.show(this._rootSplitView.mainElement());
+        this._rootSplitView.setMainView(this._responsiveDesignView);
 
         WebInspector.dockController.addEventListener(WebInspector.DockController.Events.BeforeDockSideChanged, this._onBeforeDockSideChange, this);
         WebInspector.dockController.addEventListener(WebInspector.DockController.Events.DockSideChanged, this._onDockSideChange, this);
@@ -86,7 +86,7 @@ WebInspector.AdvancedApp.prototype = {
         if (this._toolboxWindow)
             return;
 
-        var url = window.location.href.replace("devtools.html", "toolbox.html");
+        var url = window.location.href.replace("inspector.html", "toolbox.html");
         this._toolboxWindow = window.open(url, undefined);
     },
 
@@ -178,7 +178,7 @@ WebInspector.AdvancedApp.prototype = {
      */
     _updateForDocked: function(dockSide)
     {
-        this._rootSplitView.setVertical(dockSide === WebInspector.DockController.State.DockedToLeft || dockSide === WebInspector.DockController.State.DockedToRight);
+        this._rootSplitView.setVertical(dockSide === WebInspector.DockController.State.DockedToRight);
         this._rootSplitView.setSecondIsSidebar(dockSide === WebInspector.DockController.State.DockedToRight || dockSide === WebInspector.DockController.State.DockedToBottom);
         this._rootSplitView.toggleResizer(this._rootSplitView.resizerElement(), true);
         this._rootSplitView.toggleResizer(WebInspector.inspectorView.topResizerElement(), dockSide === WebInspector.DockController.State.DockedToBottom);
@@ -250,6 +250,7 @@ WebInspector.AdvancedApp.DeviceCounter.prototype = {
     },
 
     /**
+     * @override
      * @return {?WebInspector.StatusBarItem}
      */
     item: function()
@@ -268,6 +269,7 @@ WebInspector.AdvancedApp.EmulationButtonProvider = function()
 
 WebInspector.AdvancedApp.EmulationButtonProvider.prototype = {
     /**
+     * @override
      * @return {?WebInspector.StatusBarItem}
      */
     item: function()
@@ -288,6 +290,7 @@ WebInspector.AdvancedApp.ToggleDeviceModeActionDelegate = function()
 
 WebInspector.AdvancedApp.ToggleDeviceModeActionDelegate.prototype = {
     /**
+     * @override
      * @return {boolean}
      */
     handleAction: function()

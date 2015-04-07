@@ -38,8 +38,14 @@ template<> const SVGEnumerationStringEntries& getStaticStringEntries<CompositeOp
         entries.append(std::make_pair(FECOMPOSITE_OPERATOR_ATOP, "atop"));
         entries.append(std::make_pair(FECOMPOSITE_OPERATOR_XOR, "xor"));
         entries.append(std::make_pair(FECOMPOSITE_OPERATOR_ARITHMETIC, "arithmetic"));
+        entries.append(std::make_pair(FECOMPOSITE_OPERATOR_LIGHTER, "lighter"));
     }
     return entries;
+}
+
+template<> unsigned short getMaxExposedEnumValue<CompositeOperationType>()
+{
+    return FECOMPOSITE_OPERATOR_ARITHMETIC;
 }
 
 inline SVGFECompositeElement::SVGFECompositeElement(Document& document)
@@ -59,6 +65,18 @@ inline SVGFECompositeElement::SVGFECompositeElement(Document& document)
     addToPropertyMap(m_in1);
     addToPropertyMap(m_in2);
     addToPropertyMap(m_svgOperator);
+}
+
+void SVGFECompositeElement::trace(Visitor* visitor)
+{
+    visitor->trace(m_k1);
+    visitor->trace(m_k2);
+    visitor->trace(m_k3);
+    visitor->trace(m_k4);
+    visitor->trace(m_in1);
+    visitor->trace(m_in2);
+    visitor->trace(m_svgOperator);
+    SVGFilterPrimitiveStandardAttributes::trace(visitor);
 }
 
 DEFINE_NODE_FACTORY(SVGFECompositeElement)
@@ -128,7 +146,7 @@ void SVGFECompositeElement::svgAttributeChanged(const QualifiedName& attrName)
     ASSERT_NOT_REACHED();
 }
 
-PassRefPtr<FilterEffect> SVGFECompositeElement::build(SVGFilterBuilder* filterBuilder, Filter* filter)
+PassRefPtrWillBeRawPtr<FilterEffect> SVGFECompositeElement::build(SVGFilterBuilder* filterBuilder, Filter* filter)
 {
     FilterEffect* input1 = filterBuilder->getEffectById(AtomicString(m_in1->currentValue()->value()));
     FilterEffect* input2 = filterBuilder->getEffectById(AtomicString(m_in2->currentValue()->value()));
@@ -136,7 +154,7 @@ PassRefPtr<FilterEffect> SVGFECompositeElement::build(SVGFilterBuilder* filterBu
     if (!input1 || !input2)
         return nullptr;
 
-    RefPtr<FilterEffect> effect = FEComposite::create(filter, m_svgOperator->currentValue()->enumValue(), m_k1->currentValue()->value(), m_k2->currentValue()->value(), m_k3->currentValue()->value(), m_k4->currentValue()->value());
+    RefPtrWillBeRawPtr<FilterEffect> effect = FEComposite::create(filter, m_svgOperator->currentValue()->enumValue(), m_k1->currentValue()->value(), m_k2->currentValue()->value(), m_k3->currentValue()->value(), m_k4->currentValue()->value());
     FilterEffectVector& inputEffects = effect->inputEffects();
     inputEffects.reserveCapacity(2);
     inputEffects.append(input1);

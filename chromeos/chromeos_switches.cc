@@ -4,6 +4,8 @@
 
 #include "chromeos/chromeos_switches.h"
 
+#include "base/command_line.h"
+
 namespace chromeos {
 namespace switches {
 
@@ -24,6 +26,15 @@ const char kDbusStub[] = "dbus-stub";
 // Comma-spearated list of dbus clients that should be unstubbed.
 // See chromeos/dbus/dbus_client_bundle.cc for the names of the dbus clients.
 const char kDbusUnstubClients[] = "dbus-unstub-clients";
+
+// Indicates that the wallpaper images specified by
+// kAshDefaultWallpaper{Large,Small} are OEM-specific (i.e. they are not
+// downloadable from Google).
+const char kDefaultWallpaperIsOem[] = "default-wallpaper-is-oem";
+
+// Default wallpaper to use (as paths to trusted, non-user-writable JPEG files).
+const char kDefaultWallpaperLarge[] = "default-wallpaper-large";
+const char kDefaultWallpaperSmall[] = "default-wallpaper-small";
 
 // Time before a machine at OOBE is considered derelict.
 const char kDerelictDetectionTimeout[] = "derelict-detection-timeout";
@@ -68,15 +79,15 @@ const char kDisableRollbackOption[] = "disable-rollback-option";
 // Disables volume adjust sound.
 const char kDisableVolumeAdjustSound[] = "disable-volume-adjust-sound";
 
+// Disables wake on wifi features.
+const char kDisableWakeOnWifi[] = "disable-wake-on-wifi";
+
 // Disables notifications about captive portals in session.
 const char kDisableNetworkPortalNotification[] =
     "disable-network-portal-notification";
 
 // Enables switching between different cellular carriers from the UI.
 const char kEnableCarrierSwitching[] = "enable-carrier-switching";
-
-// Enables the next generation version of ChromeVox.
-const char kEnableChromeVoxNext[] = "enable-chromevox-next";
 
 // Enables cloud backup feature.
 const char kEnableCloudBackup[] = "enable-cloud-backup";
@@ -95,6 +106,9 @@ const char kEnableEmbeddedSignin[] = "enable-embedded-signin";
 // If this switch is set, the new Korean IME will be available in
 // chrome://settings/languages.
 const char kEnableNewKoreanIme[] = "enable-new-korean-ime";
+
+// If this switch is set, the input view keyboard will be in materia design.
+const char kEnableNewQPInputView[] = "enable-new-qp-input-view";
 
 // If this switch is set, the US keyboard input method will provide suggestions
 // as typing on physical keyboard.
@@ -158,6 +172,11 @@ const char kForceLoginManagerInTests[] = "force-login-manager-in-tests";
 // mode. Should completely disable extensions, sync and bookmarks.
 const char kGuestSession[] = "bwsi";
 
+// Wallpaper to use in guest mode (as paths to trusted, non-user-writable JPEG
+// files).
+const char kGuestWallpaperLarge[] = "guest-wallpaper-large";
+const char kGuestWallpaperSmall[] = "guest-wallpaper-small";
+
 // If true, the Chromebook has a Chrome OS keyboard. Don't use the flag for
 // Chromeboxes.
 const char kHasChromeOSKeyboard[] = "has-chromeos-keyboard";
@@ -177,9 +196,6 @@ const char kHostPairingOobe[] = "host-pairing-oobe";
 // turn on multi-profile feature on ChromeOS.
 const char kIgnoreUserProfileMappingForTests[] =
     "ignore-user-profile-mapping-for-tests";
-
-// Path for the screensaver used in Kiosk mode
-const char kKioskModeScreensaverPath[] = "kiosk-mode-screensaver-path";
 
 // Enables Chrome-as-a-login-manager behavior.
 const char kLoginManager[] = "login-manager";
@@ -238,6 +254,10 @@ const char kSmsTestMessages[] = "sms-test-messages";
 // This option is for testing the chromeos build of chrome on the desktop only.
 const char kStubCrosSettings[] = "stub-cros-settings";
 
+// Indicates that the system is running in dev mode. The dev mode probing is
+// done by session manager.
+const char kSystemDevMode[] = "system-developer-mode";
+
 // Enables animated transitions during first-run tutorial.
 const char kEnableFirstRunUITransitions[] = "enable-first-run-ui-transitions";
 
@@ -246,6 +266,9 @@ const char kForceFirstRunUI[] = "force-first-run-ui";
 
 // Enables testing for auto update UI.
 const char kTestAutoUpdateUI[] = "test-auto-update-ui";
+
+// Enable memory pressure checks on ChromeOS.
+const char kUseMemoryPressureSystemChromeOS[] = "use-memory-pressure-chromeos";
 
 // Enables waking the device based on the receipt of some network packets.
 const char kWakeOnPackets[] = "wake-on-packets";
@@ -256,6 +279,14 @@ const char kGoldenScreenshotsDir[] = "golden-screenshots-dir";
 
 // Screenshot testing: specifies the directoru where artifacts will be stored.
 const char kArtifactsDir[] = "artifacts-dir";
+
+// Bypass proxy for captive portal authorization.
+const char kEnableCaptivePortalBypassProxy[] =
+    "enable-captive-portal-bypass-proxy";
+
+bool WakeOnWifiEnabled() {
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(kDisableWakeOnWifi);
+}
 
 }  // namespace switches
 }  // namespace chromeos

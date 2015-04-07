@@ -35,7 +35,6 @@
 #include "content/common/child_process_messages.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/cookie_data.h"
-#include "content/common/desktop_notification_messages.h"
 #include "content/common/frame_messages.h"
 #include "content/common/gpu/client/gpu_memory_buffer_impl.h"
 #include "content/common/host_discardable_shared_memory_manager.h"
@@ -71,7 +70,6 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ppapi/shared_impl/file_type_conversion.h"
-#include "third_party/WebKit/public/web/WebNotificationPresenter.h"
 #include "ui/gfx/color_profile.h"
 
 #if defined(OS_MACOSX)
@@ -108,7 +106,6 @@ const int kPluginsRefreshThresholdInSeconds = 3;
 
 const uint32 kFilteredMessageClasses[] = {
   ChildProcessMsgStart,
-  DesktopNotificationMsgStart,
   FrameMsgStart,
   ViewMsgStart,
 };
@@ -134,6 +131,12 @@ class RenderMessageCompletionCallback {
   }
 
   virtual ~RenderMessageCompletionCallback() {
+    if (reply_msg_) {
+      // If the owner of this class failed to call SendReplyAndDeleteThis(),
+      // send an error reply to prevent the renderer from being hung.
+      reply_msg_->set_reply_error();
+      filter_->Send(reply_msg_);
+    }
   }
 
   RenderMessageFilter* filter() { return filter_.get(); }
@@ -141,6 +144,7 @@ class RenderMessageCompletionCallback {
 
   void SendReplyAndDeleteThis() {
     filter_->Send(reply_msg_);
+    reply_msg_ = NULL;
     delete this;
   }
 
@@ -400,8 +404,6 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
         RenderWidgetResizeHelper::Get()->PostRendererProcessMsg(
             render_process_id_, message))
 #endif
-    IPC_MESSAGE_HANDLER(DesktopNotificationHostMsg_CheckPermission,
-                        OnCheckNotificationPermission)
     IPC_MESSAGE_HANDLER(ChildProcessHostMsg_SyncAllocateSharedMemory,
                         OnAllocateSharedMemory)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(
@@ -418,10 +420,6 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(
         ChildProcessHostMsg_SyncAllocateLockedDiscardableSharedMemory,
         OnAllocateLockedDiscardableSharedMemory)
-#if defined(OS_POSIX) && !defined(OS_ANDROID)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_AllocTransportDIB, OnAllocTransportDIB)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_FreeTransportDIB, OnFreeTransportDIB)
-#endif
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidGenerateCacheableMetadata,
                         OnCacheableMetadataAvailable)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_Keygen, OnKeygen)
@@ -898,17 +896,6 @@ void RenderMessageFilter::OnSaveImageFromDataURL(int render_view_id,
   DownloadUrl(render_view_id, data_url, Referrer(), base::string16(), true);
 }
 
-void RenderMessageFilter::OnCheckNotificationPermission(
-    const GURL& source_origin, int* result) {
-#if defined(ENABLE_NOTIFICATIONS)
-  *result = GetContentClient()->browser()->
-      CheckDesktopNotificationPermission(source_origin, resource_context_,
-                                         render_process_id_);
-#else
-  *result = blink::WebNotificationPresenter::PermissionAllowed;
-#endif
-}
-
 void RenderMessageFilter::OnAllocateSharedMemory(
     uint32 buffer_size,
     base::SharedMemoryHandle* handle) {
@@ -986,18 +973,6 @@ net::CookieStore* RenderMessageFilter::GetCookieStoreForURL(
   // for this renderer.
   return request_context_->GetURLRequestContext()->cookie_store();
 }
-
-#if defined(OS_POSIX) && !defined(OS_ANDROID)
-void RenderMessageFilter::OnAllocTransportDIB(
-    uint32 size, bool cache_in_browser, TransportDIB::Handle* handle) {
-  render_widget_helper_->AllocTransportDIB(size, cache_in_browser, handle);
-}
-
-void RenderMessageFilter::OnFreeTransportDIB(
-    TransportDIB::Id dib_id) {
-  render_widget_helper_->FreeTransportDIB(dib_id);
-}
-#endif
 
 void RenderMessageFilter::OnCacheableMetadataAvailable(
     const GURL& url,

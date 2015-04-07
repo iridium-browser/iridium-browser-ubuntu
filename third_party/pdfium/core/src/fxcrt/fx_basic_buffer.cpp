@@ -192,7 +192,7 @@ CFX_WideTextBuf& CFX_WideTextBuf::operator << (FX_WSTR str)
 }
 CFX_WideTextBuf& CFX_WideTextBuf::operator << (const CFX_WideString &str)
 {
-    AppendBlock((FX_LPCWSTR)str, str.GetLength() * sizeof(FX_WCHAR));
+    AppendBlock(str.c_str(), str.GetLength() * sizeof(FX_WCHAR));
     return *this;
 }
 CFX_WideTextBuf& CFX_WideTextBuf::operator << (int i)
@@ -371,7 +371,7 @@ CFX_ArchiveLoader& CFX_ArchiveLoader::operator >> (CFX_WideString& str)
 {
     CFX_ByteString encoded;
     operator >> (encoded);
-    str = CFX_WideString::FromUTF16LE((const unsigned short*)(FX_LPCSTR)encoded, encoded.GetLength());
+    str = CFX_WideString::FromUTF16LE((const unsigned short*)encoded.c_str(), encoded.GetLength());
     return *this;
 }
 FX_BOOL CFX_ArchiveLoader::Read(void* pBuf, FX_DWORD dwSize)

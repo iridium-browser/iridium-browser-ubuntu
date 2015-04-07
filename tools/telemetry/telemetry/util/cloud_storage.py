@@ -14,7 +14,7 @@ import sys
 import tarfile
 import urllib2
 
-from telemetry.core import platform
+from telemetry.core import util
 from telemetry.util import path
 
 
@@ -43,7 +43,7 @@ class CloudStorageError(Exception):
     if SupportsProdaccess(gsutil_path) and _FindExecutableInPath('prodaccess'):
       return 'Run prodaccess to authenticate.'
     else:
-      if platform.GetHostPlatform().GetOSName() == 'chromeos':
+      if util.IsRunningOnCrosDevice():
         gsutil_path = ('HOME=%s %s' % (_CROS_GSUTIL_HOME_WAR, gsutil_path))
       return ('To configure your credentials:\n'
               '  1. Run "%s config" and follow its instructions.\n'
@@ -127,7 +127,7 @@ def _RunCommand(args):
   # TODO(tbarzic): Figure out a better way to handle gsutil on cros.
   #     http://crbug.com/386416, http://crbug.com/359293.
   gsutil_env = None
-  if platform.GetHostPlatform().GetOSName() == 'chromeos':
+  if util.IsRunningOnCrosDevice():
     gsutil_env = os.environ.copy()
     gsutil_env['HOME'] = _CROS_GSUTIL_HOME_WAR
 
@@ -141,10 +141,11 @@ def _RunCommand(args):
         'You are attempting to access protected data with no configured',
         'Failure: No handler was ready to authenticate.')):
       raise CredentialsError(gsutil_path)
-    if 'status=403' in stderr or 'status 403' in stderr:
+    if ('status=403' in stderr or 'status 403' in stderr or
+        '403 Forbidden' in stderr):
       raise PermissionError(gsutil_path)
     if (stderr.startswith('InvalidUriError') or 'No such object' in stderr or
-        'No URLs matched' in stderr):
+        'No URLs matched' in stderr or 'One or more URLs matched no' in stderr):
       raise NotFoundError(stderr)
     if '500 Internal Server Error' in stderr:
       raise ServerError(stderr)
@@ -191,6 +192,17 @@ def Get(bucket, remote_path, local_path):
 
 
 def Insert(bucket, remote_path, local_path, publicly_readable=False):
+  """ Upload file in |local_path| to cloud storage.
+  Args:
+    bucket: the google cloud storage bucket name.
+    remote_path: the remote file path in |bucket|.
+    local_path: path of the local file to be uploaded.
+    publicly_readable: whether the uploaded file has publicly readable
+    permission.
+
+  Returns:
+    The url where the file is uploaded to.
+  """
   url = 'gs://%s/%s' % (bucket, remote_path)
   command_and_args = ['cp']
   extra_info = ''
@@ -200,6 +212,8 @@ def Insert(bucket, remote_path, local_path, publicly_readable=False):
   command_and_args += [local_path, url]
   logging.info('Uploading %s to %s%s' % (local_path, url, extra_info))
   _RunCommand(command_and_args)
+  return 'https://console.developers.google.com/m/cloudstorage/b/%s/o/%s' % (
+      bucket, remote_path)
 
 
 def GetIfChanged(file_path, bucket=None):

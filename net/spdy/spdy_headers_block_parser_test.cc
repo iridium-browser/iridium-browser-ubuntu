@@ -17,8 +17,6 @@ namespace net {
 using base::IntToString;
 using base::StringPiece;
 using std::string;
-using testing::ElementsAre;
-using testing::ElementsAreArray;
 
 // A mock the handler class to check that we parse out the correct headers
 // and call the callback methods when we should.
@@ -41,6 +39,7 @@ class SpdyHeadersBlockParserTest :
   void SetUp() override {
     // Create a parser using the mock handler.
     spdy_version_ = GetParam();
+
     parser_.reset(new SpdyHeadersBlockParser(spdy_version_, &handler_));
     length_field_size_ =
         SpdyHeadersBlockParser::LengthFieldSizeForVersion(spdy_version_);
@@ -226,7 +225,7 @@ TEST_P(SpdyHeadersBlockParserTest, LargeBlocksDiscardedTest) {
     EXPECT_EQ(SpdyHeadersBlockParser::HEADER_BLOCK_TOO_LARGE,
               parser_->get_error());
   }
-  parser_->Reset();
+  parser_.reset(new SpdyHeadersBlockParser(spdy_version_, &handler_));
   // Header block with one header, which has a too-long key.
   {
     EXPECT_CALL(handler_, OnHeaderBlock(1, 1)).Times(1);

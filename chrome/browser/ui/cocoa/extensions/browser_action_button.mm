@@ -11,16 +11,18 @@
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu_controller.h"
+#import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_action_view_delegate_cocoa.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
 #include "ui/gfx/canvas_skia_paint.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/rect.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
 NSString* const kBrowserActionButtonDraggingNotification =
@@ -37,8 +39,9 @@ static const CGFloat kMinimumDragDistance = 5;
 class ToolbarActionViewDelegateBridge : public ToolbarActionViewDelegateCocoa {
  public:
   ToolbarActionViewDelegateBridge(BrowserActionButton* owner,
-                                  BrowserActionsController* controller);
-  ~ToolbarActionViewDelegateBridge();
+                                  BrowserActionsController* controller,
+                                  ToolbarActionViewController* viewController);
+  ~ToolbarActionViewDelegateBridge() override;
 
   ExtensionActionContextMenuController* menuController() {
     return menuController_;
@@ -59,6 +62,9 @@ class ToolbarActionViewDelegateBridge : public ToolbarActionViewDelegateCocoa {
   // The BrowserActionsController that owns the button. Weak.
   BrowserActionsController* controller_;
 
+  // The ToolbarActionViewController for which this is the delegate. Weak.
+  ToolbarActionViewController* viewController_;
+
   // The context menu controller. Weak.
   ExtensionActionContextMenuController* menuController_;
 
@@ -67,18 +73,22 @@ class ToolbarActionViewDelegateBridge : public ToolbarActionViewDelegateCocoa {
 
 ToolbarActionViewDelegateBridge::ToolbarActionViewDelegateBridge(
     BrowserActionButton* owner,
-    BrowserActionsController* controller)
+    BrowserActionsController* controller,
+    ToolbarActionViewController* viewController)
     : owner_(owner),
       controller_(controller),
+      viewController_(viewController),
       menuController_(nil) {
+  viewController_->SetDelegate(this);
 }
 
 ToolbarActionViewDelegateBridge::~ToolbarActionViewDelegateBridge() {
+  viewController_->SetDelegate(nullptr);
 }
 
 ToolbarActionViewController*
 ToolbarActionViewDelegateBridge::GetPreferredPopupViewController() {
-  return [owner_ viewController];
+  return viewController_;
 }
 
 content::WebContents* ToolbarActionViewDelegateBridge::GetCurrentWebContents()
@@ -117,7 +127,7 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
 }
 
 - (id)initWithFrame:(NSRect)frame
-     viewController:(scoped_ptr<ToolbarActionViewController>)viewController
+     viewController:(ToolbarActionViewController*)viewController
          controller:(BrowserActionsController*)controller {
   if ((self = [super initWithFrame:frame])) {
     BrowserActionCell* cell = [[[BrowserActionCell alloc] init] autorelease];
@@ -129,13 +139,12 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
     [self setCell:cell];
 
     browserActionsController_ = controller;
+    viewController_ = viewController;
     viewControllerDelegate_.reset(
-        new ToolbarActionViewDelegateBridge(self, controller));
-    viewController_ = viewController.Pass();
-    viewController_->SetDelegate(viewControllerDelegate_.get());
+        new ToolbarActionViewDelegateBridge(self, controller, viewController));
 
     [cell setBrowserActionsController:controller];
-    [cell setViewController:viewController_.get()];
+    [cell setViewController:viewController_];
     [cell
         accessibilitySetOverrideValue:base::SysUTF16ToNSString(
             viewController_->GetAccessibleName([controller currentWebContents]))
@@ -179,7 +188,8 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
   if (NSPointInRect(location, [self bounds])) {
     [[self cell] setHighlighted:YES];
     dragCouldStart_ = YES;
-    dragStartPoint_ = [theEvent locationInWindow];
+    dragStartPoint_ = [self convertPoint:[theEvent locationInWindow]
+                                fromView:nil];
   }
 }
 
@@ -187,22 +197,45 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
   if (!dragCouldStart_)
     return;
 
+  NSPoint eventPoint = [theEvent locationInWindow];
   if (!isBeingDragged_) {
     // Don't initiate a drag until it moves at least kMinimumDragDistance.
-    NSPoint currentPoint = [theEvent locationInWindow];
-    CGFloat dx = currentPoint.x - dragStartPoint_.x;
-    CGFloat dy = currentPoint.y - dragStartPoint_.y;
+    NSPoint dragStart = [self convertPoint:dragStartPoint_ toView:nil];
+    CGFloat dx = eventPoint.x - dragStart.x;
+    CGFloat dy = eventPoint.y - dragStart.y;
     if (dx*dx + dy*dy < kMinimumDragDistance*kMinimumDragDistance)
       return;
 
     // The start of a drag. Position the button above all others.
     [[self superview] addSubview:self positioned:NSWindowAbove relativeTo:nil];
+
+    // We reset the |dragStartPoint_| so that the mouse can always be in the
+    // same point along the button's x axis, and we avoid a "jump" when first
+    // starting to drag.
+    dragStartPoint_ = [self convertPoint:eventPoint fromView:nil];
+
+    isBeingDragged_ = YES;
   }
-  isBeingDragged_ = YES;
+
   NSRect buttonFrame = [self frame];
-  // TODO(andybons): Constrain the buttons to be within the container.
+  // The desired x is the current mouse point, minus the original offset of the
+  // mouse into the button.
+  NSPoint localPoint = [[self superview] convertPoint:eventPoint fromView:nil];
+  CGFloat desiredX = localPoint.x - dragStartPoint_.x;
   // Clamp the button to be within its superview along the X-axis.
-  buttonFrame.origin.x += [theEvent deltaX];
+  NSRect containerBounds = [[self superview] bounds];
+  desiredX = std::min(std::max(NSMinX(containerBounds), desiredX),
+                      NSMaxX(containerBounds) - NSWidth(buttonFrame));
+  buttonFrame.origin.x = desiredX;
+
+  // If the button is in the overflow menu, it could move along the y-axis, too.
+  if ([browserActionsController_ isOverflow]) {
+    CGFloat desiredY = localPoint.y - dragStartPoint_.y;
+    desiredY = std::min(std::max(NSMinY(containerBounds), desiredY),
+                        NSMaxY(containerBounds) - NSHeight(buttonFrame));
+    buttonFrame.origin.y = desiredY;
+  }
+
   [self setFrame:buttonFrame];
   [self setNeedsDisplay:YES];
   [[NSNotificationCenter defaultCenter]
@@ -244,14 +277,12 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
     if ([moveAnimation_ isAnimating])
       [moveAnimation_ stopAnimation];
 
-    NSDictionary* animationDictionary =
-        [NSDictionary dictionaryWithObjectsAndKeys:
-            self, NSViewAnimationTargetKey,
-            [NSValue valueWithRect:[self frame]], NSViewAnimationStartFrameKey,
-            [NSValue valueWithRect:frameRect], NSViewAnimationEndFrameKey,
-            nil];
-    [moveAnimation_ setViewAnimations:
-        [NSArray arrayWithObject:animationDictionary]];
+    NSDictionary* animationDictionary = @{
+      NSViewAnimationTargetKey : self,
+      NSViewAnimationStartFrameKey : [NSValue valueWithRect:[self frame]],
+      NSViewAnimationEndFrameKey : [NSValue valueWithRect:frameRect]
+    };
+    [moveAnimation_ setViewAnimations: @[ animationDictionary ]];
     [moveAnimation_ startAnimation];
   }
 }
@@ -261,6 +292,14 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
       [browserActionsController_ currentWebContents];
   if (!webContents)
     return;
+
+  if (viewController_->WantsToRun(webContents)) {
+    [[self cell] setImageID:IDR_BROWSER_ACTION_H
+        forButtonState:image_button_cell::kDefaultState];
+  } else {
+    [[self cell] setImageID:IDR_BROWSER_ACTION
+        forButtonState:image_button_cell::kDefaultState];
+  }
 
   base::string16 tooltip = viewController_->GetTooltip(webContents);
   [self setToolTip:(tooltip.empty() ? nil : base::SysUTF16ToNSString(tooltip))];
@@ -278,7 +317,7 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
 - (void)onRemoved {
   // The button is being removed from the toolbar, and the backing controller
   // will also be removed. Destroy the delegate.
-  // We only need to do this because in Cocoa's memory management, removing the
+  // We only need to do this because in cocoa's memory management, removing the
   // button from the toolbar doesn't synchronously dealloc it.
   viewControllerDelegate_.reset();
 }
@@ -287,8 +326,18 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
   return [moveAnimation_ isAnimating];
 }
 
+- (NSRect)frameAfterAnimation {
+  if ([moveAnimation_ isAnimating]) {
+    NSRect endFrame = [[[[moveAnimation_ viewAnimations] objectAtIndex:0]
+        valueForKey:NSViewAnimationEndFrameKey] rectValue];
+    return endFrame;
+  } else {
+    return [self frame];
+  }
+}
+
 - (ToolbarActionViewController*)viewController {
-  return viewController_.get();
+  return viewController_;
 }
 
 - (NSImage*)compositedImage {
@@ -350,7 +399,6 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
   DCHECK(viewController_);
   content::WebContents* webContents =
       [browserActionsController_ currentWebContents];
-  bool enabled = viewController_->IsEnabled(webContents);
   const NSSize imageSize = self.image.size;
   const NSRect imageRect =
       NSMakeRect(std::floor((NSWidth(cellFrame) - imageSize.width) / 2.0),
@@ -359,13 +407,22 @@ void ToolbarActionViewDelegateBridge::SetContextMenuController(
   [self.image drawInRect:imageRect
                 fromRect:NSZeroRect
                operation:NSCompositeSourceOver
-                fraction:enabled ? 1.0 : 0.4
+                fraction:1.0
           respectFlipped:YES
                    hints:nil];
 
   cellFrame.origin.y += kBrowserActionBadgeOriginYOffset;
   [self drawBadgeWithinFrame:cellFrame
               forWebContents:webContents];
+}
+
+- (ui::ThemeProvider*)themeProviderForWindow:(NSWindow*)window {
+  ui::ThemeProvider* themeProvider = [window themeProvider];
+  if (!themeProvider)
+    themeProvider =
+        [[browserActionsController_ browser]->window()->GetNativeWindow()
+            themeProvider];
+  return themeProvider;
 }
 
 @end

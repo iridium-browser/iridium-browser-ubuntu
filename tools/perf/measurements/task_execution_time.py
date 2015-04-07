@@ -10,12 +10,13 @@ from telemetry.util import statistics
 from telemetry.value import scalar
 
 _CATEGORIES = ['webkit.console',
-              'blink.console',
-              'benchmark',
-              'toplevel',
-              'blink',
-              'cc',
-              'v8']
+               'blink.console',
+               'benchmark',
+               'toplevel',
+               'blink',
+               'blink_gc',
+               'cc',
+               'v8']
 
 class TaskExecutionTime(page_test.PageTest):
 
@@ -23,7 +24,7 @@ class TaskExecutionTime(page_test.PageTest):
   _NUMBER_OF_RESULTS_TO_DISPLAY = 10
 
   def __init__(self):
-    super(TaskExecutionTime, self).__init__('RunSmoothness')
+    super(TaskExecutionTime, self).__init__('RunPageInteractions')
     self._renderer_thread = None
 
   def WillNavigateToPage(self, page, tab):
@@ -39,8 +40,8 @@ class TaskExecutionTime(page_test.PageTest):
         options, category_filter, self._TIME_OUT_IN_SECONDS)
 
   def DidRunActions(self, page, tab):
-    timeline_data = tab.browser.platform.tracing_controller.Stop()
-    timeline_model = TimelineModel(timeline_data=timeline_data)
+    trace_data = tab.browser.platform.tracing_controller.Stop()
+    timeline_model = TimelineModel(trace_data)
     self._renderer_thread = timeline_model.GetRendererThreadFromTabId(tab.id)
 
   def ValidateAndMeasurePage(self, page, tab, results):

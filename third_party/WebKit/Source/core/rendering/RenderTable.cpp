@@ -34,7 +34,6 @@
 #include "core/paint/TablePainter.h"
 #include "core/rendering/AutoTableLayout.h"
 #include "core/rendering/FixedTableLayout.h"
-#include "core/rendering/GraphicsContextAnnotator.h"
 #include "core/rendering/HitTestResult.h"
 #include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderTableCaption.h"
@@ -45,7 +44,6 @@
 #include "core/rendering/SubtreeLayoutScope.h"
 #include "core/rendering/TextAutosizer.h"
 #include "core/rendering/style/StyleInheritedData.h"
-#include "platform/graphics/GraphicsContextStateSaver.h"
 
 namespace blink {
 
@@ -350,27 +348,27 @@ LayoutUnit RenderTable::convertStyleLogicalHeightToComputedHeight(const Length& 
     return std::max<LayoutUnit>(0, computedLogicalHeight);
 }
 
-void RenderTable::layoutCaption(RenderTableCaption* caption)
+void RenderTable::layoutCaption(RenderTableCaption& caption)
 {
-    if (caption->needsLayout()) {
+    if (caption.needsLayout()) {
         // The margins may not be available but ensure the caption is at least located beneath any previous sibling caption
         // so that it does not mistakenly think any floats in the previous caption intrude into it.
-        caption->setLogicalLocation(LayoutPoint(caption->marginStart(), collapsedMarginBeforeForChild(caption) + logicalHeight()));
+        caption.setLogicalLocation(LayoutPoint(caption.marginStart(), collapsedMarginBeforeForChild(caption) + logicalHeight()));
         // If RenderTableCaption ever gets a layout() function, use it here.
-        caption->layoutIfNeeded();
+        caption.layoutIfNeeded();
     }
     // Apply the margins to the location now that they are definitely available from layout
     LayoutUnit captionLogicalTop = collapsedMarginBeforeForChild(caption) + logicalHeight();
     if (view()->layoutState()->isPaginated()) {
-        captionLogicalTop += caption->paginationStrut();
-        caption->setPaginationStrut(0);
+        captionLogicalTop += caption.paginationStrut();
+        caption.setPaginationStrut(0);
     }
-    caption->setLogicalLocation(LayoutPoint(caption->marginStart(), captionLogicalTop));
+    caption.setLogicalLocation(LayoutPoint(caption.marginStart(), captionLogicalTop));
 
     if (!selfNeedsLayout())
-        caption->setMayNeedPaintInvalidation(true);
+        caption.setMayNeedPaintInvalidation(true);
 
-    setLogicalHeight(logicalHeight() + caption->logicalHeight() + collapsedMarginBeforeForChild(caption) + collapsedMarginAfterForChild(caption));
+    setLogicalHeight(logicalHeight() + caption.logicalHeight() + collapsedMarginBeforeForChild(caption) + collapsedMarginAfterForChild(caption));
 }
 
 void RenderTable::distributeExtraLogicalHeight(int extraLogicalHeight)
@@ -425,10 +423,10 @@ void RenderTable::layout()
     LayoutUnit movedSectionLogicalTop = 0;
     {
         LayoutState state(*this, locationOffset());
+        LayoutUnit oldLogicalWidth = logicalWidth();
+        LayoutUnit oldLogicalHeight = logicalHeight();
 
         setLogicalHeight(0);
-
-        LayoutUnit oldLogicalWidth = logicalWidth();
         updateLogicalWidth();
 
         if (logicalWidth() != oldLogicalWidth) {
@@ -475,7 +473,7 @@ void RenderTable::layout()
             for (unsigned i = 0; i < m_captions.size(); i++) {
                 if (m_captions[i]->style()->captionSide() == CAPBOTTOM)
                     continue;
-                layoutCaption(m_captions[i]);
+                layoutCaption(*m_captions[i]);
             }
             if (logicalHeight() != oldTableLogicalTop) {
                 sectionMoved = true;
@@ -544,14 +542,14 @@ void RenderTable::layout()
         for (unsigned i = 0; i < m_captions.size(); i++) {
             if (m_captions[i]->style()->captionSide() != CAPBOTTOM)
                 continue;
-            layoutCaption(m_captions[i]);
+            layoutCaption(*m_captions[i]);
         }
 
         updateLogicalHeight();
 
         // table can be containing block of positioned elements.
-        // FIXME: Only pass true if width or height changed.
-        layoutPositionedObjects(true);
+        bool dimensionChanged = oldLogicalWidth != logicalWidth() || oldLogicalHeight != logicalHeight();
+        layoutPositionedObjects(dimensionChanged);
 
         updateLayerTransformAfterLayout();
 
@@ -563,7 +561,7 @@ void RenderTable::layout()
 
     // FIXME: This value isn't the intrinsic content logical height, but we need
     // to update the value as its used by flexbox layout. crbug.com/367324
-    updateIntrinsicContentLogicalHeight(contentLogicalHeight());
+    setIntrinsicContentLogicalHeight(contentLogicalHeight());
 
     if (view()->layoutState()->pageLogicalHeight())
         setPageLogicalOffset(view()->layoutState()->pageLogicalOffset(*this, logicalTop()));
@@ -598,9 +596,9 @@ void RenderTable::addOverflowFromChildren()
     // Technically it's odd that we are incorporating the borders into layout overflow, which is only supposed to be about overflow from our
     // descendant objects, but since tables don't support overflow:auto, this works out fine.
     if (collapseBorders()) {
-        int rightBorderOverflow = width() + outerBorderRight() - borderRight();
+        int rightBorderOverflow = size().width() + outerBorderRight() - borderRight();
         int leftBorderOverflow = borderLeft() - outerBorderLeft();
-        int bottomBorderOverflow = height() + outerBorderBottom() - borderBottom();
+        int bottomBorderOverflow = size().height() + outerBorderBottom() - borderBottom();
         int topBorderOverflow = borderTop() - outerBorderTop();
         IntRect borderOverflowRect(leftBorderOverflow, topBorderOverflow, rightBorderOverflow - leftBorderOverflow, bottomBorderOverflow - topBorderOverflow);
         if (borderOverflowRect != pixelSnappedBorderBoxRect()) {
@@ -618,12 +616,7 @@ void RenderTable::addOverflowFromChildren()
         addOverflowFromChild(section);
 }
 
-void RenderTable::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
-{
-    TablePainter(*this).paint(paintInfo, paintOffset);
-}
-
-void RenderTable::paintObject(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void RenderTable::paintObject(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     TablePainter(*this).paintObject(paintInfo, paintOffset);
 }
@@ -632,7 +625,7 @@ void RenderTable::subtractCaptionRect(LayoutRect& rect) const
 {
     for (unsigned i = 0; i < m_captions.size(); i++) {
         LayoutUnit captionLogicalHeight = m_captions[i]->logicalHeight() + m_captions[i]->marginBefore() + m_captions[i]->marginAfter();
-        bool captionIsBefore = (m_captions[i]->style()->captionSide() != CAPBOTTOM) ^ style()->slowIsFlippedBlocksWritingMode();
+        bool captionIsBefore = (m_captions[i]->style()->captionSide() != CAPBOTTOM) ^ style()->isFlippedBlocksWritingMode();
         if (style()->isHorizontalWritingMode()) {
             rect.setHeight(rect.height() - captionLogicalHeight);
             if (captionIsBefore)
@@ -645,12 +638,12 @@ void RenderTable::subtractCaptionRect(LayoutRect& rect) const
     }
 }
 
-void RenderTable::paintBoxDecorationBackground(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void RenderTable::paintBoxDecorationBackground(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     TablePainter(*this).paintBoxDecorationBackground(paintInfo, paintOffset);
 }
 
-void RenderTable::paintMask(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void RenderTable::paintMask(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     TablePainter(*this).paintMask(paintInfo, paintOffset);
 }
@@ -1289,10 +1282,10 @@ LayoutRect RenderTable::overflowClipRect(const LayoutPoint& location, OverlayScr
     // we might have to hack this code first (depending on what order we do these bug fixes in).
     if (!m_captions.isEmpty()) {
         if (style()->isHorizontalWritingMode()) {
-            rect.setHeight(height());
+            rect.setHeight(size().height());
             rect.setY(location.y());
         } else {
-            rect.setWidth(width());
+            rect.setWidth(size().width());
             rect.setX(location.x());
         }
     }

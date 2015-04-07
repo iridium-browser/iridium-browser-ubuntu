@@ -35,7 +35,6 @@
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/V8ElementRegistrationOptions.h"
-#include "core/accessibility/AXObjectCache.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/dom/CSSSelectorWatch.h"
 #include "core/dom/Document.h"
@@ -43,6 +42,7 @@
 #include "core/dom/Element.h"
 #include "core/dom/Fullscreen.h"
 #include "core/dom/StyleEngine.h"
+#include "core/events/Event.h"
 #include "core/html/HTMLAllCollection.h"
 #include "core/html/HTMLBodyElement.h"
 #include "core/html/HTMLCollection.h"
@@ -53,6 +53,8 @@
 #include "core/loader/DocumentLoader.h"
 #include "core/rendering/RenderObject.h"
 #include "core/rendering/RenderView.h"
+#include "modules/accessibility/AXObject.h"
+#include "modules/accessibility/AXObjectCacheImpl.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/WebURL.h"
 #include "public/web/WebAXObject.h"
@@ -283,30 +285,51 @@ WebSize WebDocument::maximumScrollOffset() const
     return WebSize();
 }
 
-void WebDocument::setIsTransitionDocument()
+void WebDocument::setIsTransitionDocument(bool isTransitionDocument)
 {
-    // This ensures the transition UA stylesheet gets applied.
-    unwrap<Document>()->setIsTransitionDocument();
+    // When isTransitionDocument is true, it ensures the transition UA
+    // stylesheet gets applied. When isTransitionDocument is false, it ensures
+    // the transition UA stylesheet is not applied when reverting the transition.
+    unwrap<Document>()->setIsTransitionDocument(isTransitionDocument);
 }
 
-void WebDocument::beginExitTransition(const WebString& cssSelector)
+void WebDocument::beginExitTransition(const WebString& cssSelector, bool exitToNativeApp)
+{
+    RefPtrWillBeRawPtr<Document> document = unwrap<Document>();
+    if (!exitToNativeApp)
+        document->hideTransitionElements(cssSelector);
+    document->styleEngine()->setExitTransitionStylesheetsEnabled(true);
+}
+
+void WebDocument::revertExitTransition()
+{
+    RefPtrWillBeRawPtr<Document> document = unwrap<Document>();
+    document->styleEngine()->setExitTransitionStylesheetsEnabled(false);
+}
+
+void WebDocument::hideTransitionElements(const WebString& cssSelector)
 {
     RefPtrWillBeRawPtr<Document> document = unwrap<Document>();
     document->hideTransitionElements(cssSelector);
-    document->styleEngine()->enableExitTransitionStylesheets();
+}
+
+void WebDocument::showTransitionElements(const WebString& cssSelector)
+{
+    RefPtrWillBeRawPtr<Document> document = unwrap<Document>();
+    document->showTransitionElements(cssSelector);
 }
 
 WebAXObject WebDocument::accessibilityObject() const
 {
     const Document* document = constUnwrap<Document>();
-    AXObjectCache* cache = document->axObjectCache();
-    return cache ? WebAXObject(cache->getOrCreateAXObjectFromRenderView(document->renderView())) : WebAXObject();
+    AXObjectCacheImpl* cache = toAXObjectCacheImpl(document->axObjectCache());
+    return cache ? WebAXObject(cache->getOrCreate(document->renderView())) : WebAXObject();
 }
 
 WebAXObject WebDocument::accessibilityObjectFromID(int axID) const
 {
     const Document* document = constUnwrap<Document>();
-    AXObjectCache* cache = document->axObjectCache();
+    AXObjectCacheImpl* cache = toAXObjectCacheImpl(document->axObjectCache());
     return cache ? WebAXObject(cache->objectFromAXID(axID)) : WebAXObject();
 }
 

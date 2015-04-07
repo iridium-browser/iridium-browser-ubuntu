@@ -20,6 +20,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/extension_pref_value_map.h"
 #include "extensions/browser/extension_pref_value_map_factory.h"
 #include "extensions/browser/extension_prefs.h"
@@ -30,6 +31,7 @@
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/feature_switch.h"
 #include "extensions/common/value_builder.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
 
@@ -390,11 +392,9 @@ class ExtensionMessageBubbleTest : public testing::Test {
     // service to work inside a unit test and access the extension prefs.
     thread_bundle_.reset(new content::TestBrowserThreadBundle);
     profile_.reset(new TestingProfile);
-    static_cast<TestExtensionSystem*>(
-        ExtensionSystem::Get(profile()))->CreateExtensionService(
-            CommandLine::ForCurrentProcess(),
-            base::FilePath(),
-            false);
+    static_cast<TestExtensionSystem*>(ExtensionSystem::Get(profile()))
+        ->CreateExtensionService(base::CommandLine::ForCurrentProcess(),
+                                 base::FilePath(), false);
     service_ = ExtensionSystem::Get(profile())->extension_service();
     service_->Init();
   }
@@ -405,7 +405,7 @@ class ExtensionMessageBubbleTest : public testing::Test {
   }
 
   void SetUp() override {
-    command_line_.reset(new CommandLine(CommandLine::NO_PROGRAM));
+    command_line_.reset(new base::CommandLine(base::CommandLine::NO_PROGRAM));
   }
 
  protected:
@@ -416,17 +416,14 @@ class ExtensionMessageBubbleTest : public testing::Test {
       const std::string& data,
       const std::string& id) {
     scoped_ptr<base::DictionaryValue> parsed_manifest(
-        extension_function_test_utils::ParseDictionary(data));
-    return extension_function_test_utils::CreateExtension(
-        location,
-        parsed_manifest.get(),
-        id);
+        api_test_utils::ParseDictionary(data));
+    return api_test_utils::CreateExtension(location, parsed_manifest.get(), id);
   }
 
   ExtensionService* service_;
 
  private:
-  scoped_ptr<CommandLine> command_line_;
+  scoped_ptr<base::CommandLine> command_line_;
   scoped_ptr<content::TestBrowserThreadBundle> thread_bundle_;
   scoped_ptr<TestingProfile> profile_;
 

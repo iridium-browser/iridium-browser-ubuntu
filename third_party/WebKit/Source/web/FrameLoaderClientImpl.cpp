@@ -50,6 +50,7 @@
 #include "core/page/Page.h"
 #include "core/page/WindowFeatures.h"
 #include "core/rendering/HitTestResult.h"
+#include "core/storage/DOMWindowStorageController.h"
 #include "modules/device_light/DeviceLightController.h"
 #include "modules/device_orientation/DeviceMotionController.h"
 #include "modules/device_orientation/DeviceOrientationController.h"
@@ -83,6 +84,7 @@
 #include "public/web/WebPluginParams.h"
 #include "public/web/WebPluginPlaceholder.h"
 #include "public/web/WebSecurityOrigin.h"
+#include "public/web/WebTransitionElementData.h"
 #include "public/web/WebViewClient.h"
 #include "web/PluginPlaceholderImpl.h"
 #include "web/SharedWorkerRepositoryClientImpl.h"
@@ -108,6 +110,12 @@ FrameLoaderClientImpl::~FrameLoaderClientImpl()
 {
 }
 
+void FrameLoaderClientImpl::didCreateNewDocument()
+{
+    if (m_webFrame->client())
+        m_webFrame->client()->didCreateNewDocument(m_webFrame);
+}
+
 void FrameLoaderClientImpl::dispatchDidClearWindowObjectInMainWorld()
 {
     if (m_webFrame->client()) {
@@ -121,6 +129,7 @@ void FrameLoaderClientImpl::dispatchDidClearWindowObjectInMainWorld()
             NavigatorGamepad::from(*document);
             if (RuntimeEnabledFeatures::serviceWorkerEnabled())
                 NavigatorServiceWorker::from(*document);
+            DOMWindowStorageController::from(*document);
         }
     }
 }
@@ -386,10 +395,10 @@ void FrameLoaderClientImpl::dispatchWillClose()
         m_webFrame->client()->willClose(m_webFrame);
 }
 
-void FrameLoaderClientImpl::dispatchDidStartProvisionalLoad(bool isTransitionNavigation)
+void FrameLoaderClientImpl::dispatchDidStartProvisionalLoad(bool isTransitionNavigation, double triggeringEventTime)
 {
     if (m_webFrame->client())
-        m_webFrame->client()->didStartProvisionalLoad(m_webFrame, isTransitionNavigation);
+        m_webFrame->client()->didStartProvisionalLoad(m_webFrame, isTransitionNavigation, triggeringEventTime);
 }
 
 void FrameLoaderClientImpl::dispatchDidReceiveTitle(const String& title)
@@ -459,10 +468,52 @@ void FrameLoaderClientImpl::dispatchDidChangeThemeColor()
         m_webFrame->client()->didChangeThemeColor();
 }
 
+static bool allowCreatingBackgroundTabs()
+{
+    const WebInputEvent* inputEvent = WebViewImpl::currentInputEvent();
+    if (!inputEvent || (inputEvent->type != WebInputEvent::MouseUp && (inputEvent->type != WebInputEvent::RawKeyDown && inputEvent->type != WebInputEvent::KeyDown)))
+        return false;
+
+    unsigned short buttonNumber;
+    if (WebInputEvent::isMouseEventType(inputEvent->type)) {
+        const WebMouseEvent* mouseEvent = static_cast<const WebMouseEvent*>(inputEvent);
+
+        switch (mouseEvent->button) {
+        case WebMouseEvent::ButtonLeft:
+            buttonNumber = 0;
+            break;
+        case WebMouseEvent::ButtonMiddle:
+            buttonNumber = 1;
+            break;
+        case WebMouseEvent::ButtonRight:
+            buttonNumber = 2;
+            break;
+        default:
+            return false;
+        }
+    } else {
+        // The click is simulated when triggering the keypress event.
+        buttonNumber = 0;
+    }
+    bool ctrl = inputEvent->modifiers & WebMouseEvent::ControlKey;
+    bool shift = inputEvent->modifiers & WebMouseEvent::ShiftKey;
+    bool alt = inputEvent->modifiers & WebMouseEvent::AltKey;
+    bool meta = inputEvent->modifiers & WebMouseEvent::MetaKey;
+
+    NavigationPolicy userPolicy;
+    if (!navigationPolicyFromMouseEvent(buttonNumber, ctrl, shift, alt, meta, &userPolicy))
+        return false;
+    return userPolicy == NavigationPolicyNewBackgroundTab;
+}
+
 NavigationPolicy FrameLoaderClientImpl::decidePolicyForNavigation(const ResourceRequest& request, DocumentLoader* loader, NavigationPolicy policy, bool isTransitionNavigation)
 {
     if (!m_webFrame->client())
         return NavigationPolicyIgnore;
+
+    if (policy == NavigationPolicyNewBackgroundTab && !allowCreatingBackgroundTabs())
+        policy = NavigationPolicyNewForegroundTab;
+
     WebDataSourceImpl* ds = WebDataSourceImpl::fromDocumentLoader(loader);
 
     WrappedResourceRequest wrappedResourceRequest(request);
@@ -478,10 +529,18 @@ NavigationPolicy FrameLoaderClientImpl::decidePolicyForNavigation(const Resource
     return static_cast<NavigationPolicy>(webPolicy);
 }
 
-void FrameLoaderClientImpl::dispatchAddNavigationTransitionData(const String& allowedDestinationOrigin, const String& selector, const String& markup)
+void FrameLoaderClientImpl::dispatchAddNavigationTransitionData(const Document::TransitionElementData& data)
 {
-    if (m_webFrame->client())
-        m_webFrame->client()->addNavigationTransitionData(allowedDestinationOrigin, selector, markup);
+    if (!m_webFrame->client())
+        return;
+
+    WebVector<WebTransitionElement> webElements(data.elements.size());
+    for (size_t i = 0; i < data.elements.size(); ++i) {
+        webElements[i].id = data.elements[i].id;
+        webElements[i].rect = data.elements[i].rect;
+    }
+    WebTransitionElementData webData(data.scope, data.selector, data.markup, webElements);
+    m_webFrame->client()->addNavigationTransitionData(webData);
 }
 
 void FrameLoaderClientImpl::dispatchWillRequestResource(FetchRequest* request)
@@ -619,9 +678,10 @@ void FrameLoaderClientImpl::transitionToCommittedForNewPage()
 PassRefPtrWillBeRawPtr<LocalFrame> FrameLoaderClientImpl::createFrame(
     const KURL& url,
     const AtomicString& name,
-    HTMLFrameOwnerElement* ownerElement)
+    HTMLFrameOwnerElement* ownerElement,
+    ContentSecurityPolicyDisposition shouldCheckContentSecurityPolicy)
 {
-    FrameLoadRequest frameRequest(m_webFrame->frame()->document(), url, name);
+    FrameLoadRequest frameRequest(m_webFrame->frame()->document(), url, name, shouldCheckContentSecurityPolicy);
     return m_webFrame->createChildFrame(frameRequest, ownerElement);
 }
 
@@ -796,8 +856,8 @@ void FrameLoaderClientImpl::dispatchWillStartUsingPeerConnectionHandler(WebRTCPe
 
 void FrameLoaderClientImpl::didRequestAutocomplete(HTMLFormElement* form)
 {
-    if (m_webFrame->viewImpl() && m_webFrame->viewImpl()->autofillClient())
-        m_webFrame->viewImpl()->autofillClient()->didRequestAutocomplete(WebFormElement(form));
+    if (m_webFrame->autofillClient())
+        m_webFrame->autofillClient()->didRequestAutocomplete(WebFormElement(form));
 }
 
 bool FrameLoaderClientImpl::allowWebGL(bool enabledPerSettings)

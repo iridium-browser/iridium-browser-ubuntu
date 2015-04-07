@@ -29,7 +29,6 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/common/user_agent.h"
 #include "extensions/common/constants.h"
-#include "extensions/common/feature_switch.h"
 #include "gpu/config/gpu_info.h"
 #include "net/http/http_util.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -48,7 +47,6 @@
 #if !defined(DISABLE_NACL)
 #include "components/nacl/common/nacl_constants.h"
 #include "components/nacl/common/nacl_process_type.h"
-#include "ppapi/native_client/src/trusted/plugin/ppapi_entrypoints.h"
 #endif
 
 #if defined(ENABLE_PLUGINS)
@@ -56,10 +54,6 @@
 #include "content/public/common/pepper_plugin_info.h"
 #include "flapper_version.h"  // In SHARED_INTERMEDIATE_DIR.
 #include "ppapi/shared_impl/ppapi_permissions.h"
-#endif
-
-#if defined(ENABLE_REMOTING)
-#include "remoting/client/plugin/pepper_entrypoints.h"
 #endif
 
 #if defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS) && \
@@ -102,6 +96,12 @@ const uint32 kGTalkPluginPermissions = ppapi::PERMISSION_PRIVATE |
                                        ppapi::PERMISSION_DEV;
 
 #if defined(ENABLE_REMOTING)
+
+content::PepperPluginInfo::GetInterfaceFunc g_remoting_get_interface;
+content::PepperPluginInfo::PPP_InitializeModuleFunc
+    g_remoting_initialize_module;
+content::PepperPluginInfo::PPP_ShutdownModuleFunc g_remoting_shutdown_module;
+
 #if defined(GOOGLE_CHROME_BUILD)
 const char kRemotingViewerPluginName[] = "Chrome Remote Desktop Viewer";
 #else
@@ -120,6 +120,12 @@ const char kRemotingViewerPluginMimeDescription[] = "";
 const uint32 kRemotingViewerPluginPermissions = ppapi::PERMISSION_PRIVATE |
                                                 ppapi::PERMISSION_DEV;
 #endif  // defined(ENABLE_REMOTING)
+
+#if !defined(DISABLE_NACL)
+content::PepperPluginInfo::GetInterfaceFunc g_nacl_get_interface;
+content::PepperPluginInfo::PPP_InitializeModuleFunc g_nacl_initialize_module;
+content::PepperPluginInfo::PPP_ShutdownModuleFunc g_nacl_shutdown_module;
+#endif
 
 // Appends the known built-in plugins to the given vector. Some built-in
 // plugins are "internal" which means they are compiled into the Chrome binary,
@@ -140,11 +146,7 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
       content::PepperPluginInfo pdf;
       pdf.path = path;
       pdf.name = ChromeContentClient::kPDFPluginName;
-      if (CommandLine::ForCurrentProcess()->HasSwitch(
-              switches::kOutOfProcessPdf)) {
-        // Always enable the MIME handler view flag for OOP PDF.
-        extensions::FeatureSwitch::mime_handler_view()->SetOverrideValue(
-            extensions::FeatureSwitch::OVERRIDE_ENABLED);
+      if (switches::OutOfProcessPdfEnabled()) {
         pdf.is_out_of_process = true;
         content::WebPluginMimeType pdf_mime_type(kPDFPluginOutOfProcessMimeType,
                                                  kPDFPluginExtension,
@@ -188,11 +190,9 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
                                                nacl::kPnaclPluginExtension,
                                                nacl::kPnaclPluginDescription);
     nacl.mime_types.push_back(pnacl_mime_type);
-    nacl.internal_entry_points.get_interface = nacl_plugin::PPP_GetInterface;
-    nacl.internal_entry_points.initialize_module =
-        nacl_plugin::PPP_InitializeModule;
-    nacl.internal_entry_points.shutdown_module =
-        nacl_plugin::PPP_ShutdownModule;
+    nacl.internal_entry_points.get_interface = g_nacl_get_interface;
+    nacl.internal_entry_points.initialize_module = g_nacl_initialize_module;
+    nacl.internal_entry_points.shutdown_module = g_nacl_shutdown_module;
     nacl.permissions = ppapi::PERMISSION_PRIVATE | ppapi::PERMISSION_DEV;
     plugins->push_back(nacl);
   }
@@ -281,14 +281,8 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
       codecs.push_back(kCdmSupportedCodecVp8);
       codecs.push_back(kCdmSupportedCodecVp9);
 #if defined(USE_PROPRIETARY_CODECS)
-// TODO(ddorwin): Rename these macros to reflect their real meaning: whether the
-// CDM Chrome was built [and shipped] with support these types.
-#if defined(WIDEVINE_CDM_AAC_SUPPORT_AVAILABLE)
       codecs.push_back(kCdmSupportedCodecAac);
-#endif
-#if defined(WIDEVINE_CDM_AVC1_SUPPORT_AVAILABLE)
       codecs.push_back(kCdmSupportedCodecAvc1);
-#endif
 #endif  // defined(USE_PROPRIETARY_CODECS)
       std::string codec_string =
           JoinString(codecs, kCdmSupportedCodecsValueDelimiter);
@@ -321,10 +315,9 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
       kRemotingViewerPluginMimeExtension,
       kRemotingViewerPluginMimeDescription);
   info.mime_types.push_back(remoting_mime_type);
-  info.internal_entry_points.get_interface = remoting::PPP_GetInterface;
-  info.internal_entry_points.initialize_module =
-      remoting::PPP_InitializeModule;
-  info.internal_entry_points.shutdown_module = remoting::PPP_ShutdownModule;
+  info.internal_entry_points.get_interface = g_remoting_get_interface;
+  info.internal_entry_points.initialize_module = g_remoting_initialize_module;
+  info.internal_entry_points.shutdown_module = g_remoting_shutdown_module;
   info.permissions = kRemotingViewerPluginPermissions;
 
   plugins->push_back(info);
@@ -371,8 +364,8 @@ content::PepperPluginInfo CreatePepperFlashInfo(const base::FilePath& path,
 
 void AddPepperFlashFromCommandLine(
     std::vector<content::PepperPluginInfo>* plugins) {
-  const CommandLine::StringType flash_path =
-      CommandLine::ForCurrentProcess()->GetSwitchValueNative(
+  const base::CommandLine::StringType flash_path =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueNative(
           switches::kPpapiFlashPath);
   if (flash_path.empty())
     return;
@@ -380,7 +373,7 @@ void AddPepperFlashFromCommandLine(
   // Also get the version from the command-line. Should be something like 11.2
   // or 11.2.123.45.
   std::string flash_version =
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kPpapiFlashVersion);
 
   plugins->push_back(
@@ -389,7 +382,7 @@ void AddPepperFlashFromCommandLine(
 
 bool GetBundledPepperFlash(content::PepperPluginInfo* plugin) {
 #if defined(FLAPPER_AVAILABLE)
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
   // Ignore bundled Pepper Flash if there is Pepper Flash specified from the
   // command-line.
@@ -421,7 +414,7 @@ std::string GetProduct() {
 }  // namespace
 
 std::string GetUserAgent() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kUserAgent)) {
     std::string ua = command_line->GetSwitchValueASCII(switches::kUserAgent);
     if (net::HttpUtil::IsValidHeaderValue(ua))
@@ -436,6 +429,30 @@ std::string GetUserAgent() {
 #endif
   return content::BuildUserAgentFromProduct(product);
 }
+
+
+#if defined(ENABLE_REMOTING)
+
+void ChromeContentClient::SetRemotingEntryFunctions(
+    content::PepperPluginInfo::GetInterfaceFunc get_interface,
+    content::PepperPluginInfo::PPP_InitializeModuleFunc initialize_module,
+    content::PepperPluginInfo::PPP_ShutdownModuleFunc shutdown_module) {
+  g_remoting_get_interface = get_interface;
+  g_remoting_initialize_module = initialize_module;
+  g_remoting_shutdown_module = shutdown_module;
+}
+#endif
+
+#if !defined(DISABLE_NACL)
+void ChromeContentClient::SetNaClEntryFunctions(
+    content::PepperPluginInfo::GetInterfaceFunc get_interface,
+    content::PepperPluginInfo::PPP_InitializeModuleFunc initialize_module,
+    content::PepperPluginInfo::PPP_ShutdownModuleFunc shutdown_module) {
+  g_nacl_get_interface = get_interface;
+  g_nacl_initialize_module = initialize_module;
+  g_nacl_shutdown_module = shutdown_module;
+}
+#endif
 
 void ChromeContentClient::SetActiveURL(const GURL& url) {
   base::debug::SetCrashKeyValue(crash_keys::kActiveURL,

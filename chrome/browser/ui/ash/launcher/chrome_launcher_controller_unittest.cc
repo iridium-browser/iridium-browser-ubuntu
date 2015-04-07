@@ -288,7 +288,7 @@ class ChromeLauncherControllerTest : public BrowserWithTestWindowTest {
         static_cast<extensions::TestExtensionSystem*>(
             extensions::ExtensionSystem::Get(profile())));
     extension_service_ = extension_system->CreateExtensionService(
-        CommandLine::ForCurrentProcess(), base::FilePath(), false);
+        base::CommandLine::ForCurrentProcess(), base::FilePath(), false);
 
     std::string error;
     extension1_ = Extension::Create(base::FilePath(), Manifest::UNPACKED,
@@ -402,6 +402,7 @@ class ChromeLauncherControllerTest : public BrowserWithTestWindowTest {
   }
 
   void TearDown() override {
+    launcher_controller_->SetShelfItemDelegateManagerForTest(nullptr);
     if (!ash::Shell::HasInstance())
       delete item_delegate_manager_;
     model_->RemoveObserver(model_observer_.get());
@@ -428,9 +429,9 @@ class ChromeLauncherControllerTest : public BrowserWithTestWindowTest {
   }
 
   void InitLauncherControllerWithBrowser() {
+    InitLauncherController();
     chrome::NewTab(browser());
     BrowserList::SetLastActive(browser());
-    InitLauncherController();
   }
 
   void SetAppIconLoader(extensions::AppIconLoader* loader) {
@@ -1485,7 +1486,8 @@ TEST_F(MultiProfileMultiBrowserShelfLayoutChromeLauncherControllerTest,
 
   // Transfer the window to another user's desktop and check that activating it
   // does pull it back to that user.
-  manager->ShowWindowForUser(window, user2);
+  manager->ShowWindowForUser(window,
+                             multi_user_util::GetUserIDFromProfile(profile2));
   EXPECT_FALSE(manager->IsWindowOnDesktopOfUser(window, current_user));
   launcher_controller_->ActivateWindowOrMinimizeIfActive(browser_window.get(),
                                                          false);
@@ -2595,6 +2597,7 @@ TEST_F(ChromeLauncherControllerTest, PersistLauncherItemPositions) {
   EXPECT_EQ(ash::TYPE_APP_SHORTCUT, model_->items()[2].type);
   EXPECT_EQ(ash::TYPE_BROWSER_SHORTCUT, model_->items()[3].type);
 
+  SetShelfItemDelegateManager(nullptr);
   launcher_controller_.reset();
   if (!ash::Shell::HasInstance()) {
     delete item_delegate_manager_;
@@ -2650,6 +2653,7 @@ TEST_F(ChromeLauncherControllerTest, PersistPinned) {
   EXPECT_FALSE(launcher_controller_->IsAppPinned("0"));
   EXPECT_EQ(initial_size + 1, model_->items().size());
 
+  SetShelfItemDelegateManager(nullptr);
   launcher_controller_.reset();
   if (!ash::Shell::HasInstance()) {
     delete item_delegate_manager_;

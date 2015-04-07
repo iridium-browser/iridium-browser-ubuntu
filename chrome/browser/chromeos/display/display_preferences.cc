@@ -21,7 +21,7 @@
 #include "components/user_manager/user_manager.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/gfx/display.h"
-#include "ui/gfx/insets.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/screen.h"
 #include "url/url_canon.h"
 #include "url/url_util.h"
@@ -100,7 +100,7 @@ ash::DisplayManager* GetDisplayManager() {
 bool UserCanSaveDisplayPreference() {
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   return user_manager->IsUserLoggedIn() &&
-      (user_manager->IsLoggedInAsRegularUser() ||
+      (user_manager->IsLoggedInAsUserWithGaiaAccount() ||
        user_manager->IsLoggedInAsSupervisedUser() ||
        user_manager->IsLoggedInAsKioskApp());
 }

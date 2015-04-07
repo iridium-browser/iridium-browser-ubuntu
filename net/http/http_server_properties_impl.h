@@ -6,6 +6,7 @@
 #define NET_HTTP_HTTP_SERVER_PROPERTIES_IMPL_H_
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,9 @@ class NET_EXPORT HttpServerPropertiesImpl
 
   void InitializeSupportsQuic(SupportsQuicMap* supports_quic_map);
 
+  void InitializeServerNetworkStats(
+      ServerNetworkStatsMap* server_network_stats_map);
+
   // Get the list of servers (host/port) that support SPDY. The max_size is the
   // number of MRU servers that support SPDY that are to be returned.
   void GetSpdyServerList(base::ListValue* spdy_server_list,
@@ -51,8 +55,7 @@ class NET_EXPORT HttpServerPropertiesImpl
 
   // Returns flattened string representation of the |host_port_pair|. Used by
   // unittests.
-  static std::string GetFlattenedSpdyServer(
-      const net::HostPortPair& host_port_pair);
+  static std::string GetFlattenedSpdyServer(const HostPortPair& host_port_pair);
 
   // Debugging to simulate presence of an AlternateProtocol.
   // If we don't have an alternate protocol in the map for any given host/port
@@ -62,7 +65,7 @@ class NET_EXPORT HttpServerPropertiesImpl
 
   // Returns the canonical host suffix for |server|, or std::string() if none
   // exists.
-  std::string GetCanonicalSuffix(const net::HostPortPair& server);
+  std::string GetCanonicalSuffix(const HostPortPair& server);
 
   // -----------------------------
   // HttpServerProperties methods:
@@ -79,6 +82,16 @@ class NET_EXPORT HttpServerPropertiesImpl
 
   // Add |server| into the persistent store.
   void SetSupportsSpdy(const HostPortPair& server, bool support_spdy) override;
+
+  // Returns true if |server| has required HTTP/1.1 via HTTP/2 error code.
+  bool RequiresHTTP11(const HostPortPair& server) override;
+
+  // Require HTTP/1.1 on subsequent connections.  Not persisted.
+  void SetHTTP11Required(const HostPortPair& server) override;
+
+  // Modify SSLConfig to force HTTP/1.1 if necessary.
+  void MaybeForceHTTP11(const HostPortPair& server,
+                        SSLConfig* ssl_config) override;
 
   // Returns true if |server| has an Alternate-Protocol header.
   bool HasAlternateProtocol(const HostPortPair& server) override;
@@ -142,20 +155,22 @@ class NET_EXPORT HttpServerPropertiesImpl
 
   const SupportsQuicMap& supports_quic_map() const override;
 
-  // Methods for NetworkStats.
+  // Methods for ServerNetworkStats.
   void SetServerNetworkStats(const HostPortPair& host_port_pair,
-                             NetworkStats stats) override;
+                             ServerNetworkStats stats) override;
 
-  const NetworkStats* GetServerNetworkStats(
-      const HostPortPair& host_port_pair) const override;
+  const ServerNetworkStats* GetServerNetworkStats(
+      const HostPortPair& host_port_pair) override;
+
+  const ServerNetworkStatsMap& server_network_stats_map() const override;
 
  private:
   // |spdy_servers_map_| has flattened representation of servers (host, port)
   // that either support or not support SPDY protocol.
   typedef base::MRUCache<std::string, bool> SpdyServerHostPortMap;
-  typedef std::map<HostPortPair, NetworkStats> ServerNetworkStatsMap;
   typedef std::map<HostPortPair, HostPortPair> CanonicalHostMap;
   typedef std::vector<std::string> CanonicalSufficList;
+  typedef std::set<HostPortPair> Http11ServerHostPortSet;
   // List of broken host:ports and the times when they can be expired.
   struct BrokenAlternateProtocolEntry {
     HostPortPair server;
@@ -175,6 +190,7 @@ class NET_EXPORT HttpServerPropertiesImpl
   void ScheduleBrokenAlternateProtocolMappingsExpiration();
 
   SpdyServerHostPortMap spdy_servers_map_;
+  Http11ServerHostPortSet http11_servers_;
 
   AlternateProtocolMap alternate_protocol_map_;
   BrokenAlternateProtocolList broken_alternate_protocol_list_;

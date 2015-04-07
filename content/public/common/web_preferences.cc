@@ -31,14 +31,24 @@ COMPILE_ASSERT_MATCHING_ENUMS(EDITING_BEHAVIOR_UNIX,
 COMPILE_ASSERT_MATCHING_ENUMS(EDITING_BEHAVIOR_ANDROID,
                               WebSettings::EditingBehaviorAndroid);
 
-COMPILE_ASSERT_MATCHING_ENUMS(V8_CACHE_OPTIONS_OFF,
-                              WebSettings::V8CacheOptionsOff);
+COMPILE_ASSERT_MATCHING_ENUMS(V8_CACHE_OPTIONS_DEFAULT,
+                              WebSettings::V8CacheOptionsDefault);
 COMPILE_ASSERT_MATCHING_ENUMS(V8_CACHE_OPTIONS_PARSE,
                               WebSettings::V8CacheOptionsParse);
 COMPILE_ASSERT_MATCHING_ENUMS(V8_CACHE_OPTIONS_CODE,
                               WebSettings::V8CacheOptionsCode);
+COMPILE_ASSERT_MATCHING_ENUMS(V8_CACHE_OPTIONS_CODE_COMPRESSED,
+                              WebSettings::V8CacheOptionsCodeCompressed);
+COMPILE_ASSERT_MATCHING_ENUMS(V8_CACHE_OPTIONS_NONE,
+                              WebSettings::V8CacheOptionsNone);
+COMPILE_ASSERT_MATCHING_ENUMS(V8_CACHE_OPTIONS_PARSE_MEMORY,
+                              WebSettings::V8CacheOptionsParseMemory);
+COMPILE_ASSERT_MATCHING_ENUMS(V8_CACHE_OPTIONS_HEURISTICS,
+                              WebSettings::V8CacheOptionsHeuristics);
+COMPILE_ASSERT_MATCHING_ENUMS(V8_CACHE_OPTIONS_HEURISTICS_MOBILE,
+                              WebSettings::V8CacheOptionsHeuristicsMobile);
 COMPILE_ASSERT_MATCHING_ENUMS(V8_CACHE_OPTIONS_LAST,
-                              WebSettings::V8CacheOptionsCode);
+                              WebSettings::V8CacheOptionsHeuristicsMobile);
 
 COMPILE_ASSERT_MATCHING_ENUMS(V8_SCRIPT_STREAMING_MODE_ALL,
                               WebSettings::V8ScriptStreamingModeAll);
@@ -51,6 +61,20 @@ COMPILE_ASSERT_MATCHING_ENUMS(
 COMPILE_ASSERT_MATCHING_ENUMS(
     V8_SCRIPT_STREAMING_MODE_LAST,
     WebSettings::V8ScriptStreamingModeAllPlusBlockParsingBlocking);
+
+COMPILE_ASSERT_MATCHING_ENUMS(ui::POINTER_TYPE_NONE,
+                              WebSettings::PointerTypeNone);
+COMPILE_ASSERT_MATCHING_ENUMS(ui::POINTER_TYPE_COARSE,
+                              WebSettings::PointerTypeCoarse);
+COMPILE_ASSERT_MATCHING_ENUMS(ui::POINTER_TYPE_FINE,
+                              WebSettings::PointerTypeFine);
+
+COMPILE_ASSERT_MATCHING_ENUMS(ui::HOVER_TYPE_NONE,
+                              WebSettings::HoverTypeNone);
+COMPILE_ASSERT_MATCHING_ENUMS(ui::HOVER_TYPE_ON_DEMAND,
+                              WebSettings::HoverTypeOnDemand);
+COMPILE_ASSERT_MATCHING_ENUMS(ui::HOVER_TYPE_HOVER,
+                              WebSettings::HoverTypeHover);
 
 WebPreferences::WebPreferences()
     : default_font_size(16),
@@ -95,7 +119,6 @@ WebPreferences::WebPreferences()
       privileged_webgl_extensions_enabled(false),
       webgl_errors_to_console_enabled(true),
       mock_scrollbars_enabled(false),
-      layer_squashing_enabled(true),
       asynchronous_spell_checking_enabled(true),
       unified_textchecker_enabled(false),
       accelerated_2d_canvas_enabled(false),
@@ -109,6 +132,7 @@ WebPreferences::WebPreferences()
       text_blobs_enabled(false),
       allow_displaying_insecure_content(true),
       allow_running_insecure_content(false),
+      strict_mixed_content_checking(false),
       password_echo_enabled(false),
       should_print_backgrounds(false),
       should_clear_document_background(true),
@@ -119,6 +143,10 @@ WebPreferences::WebPreferences()
       device_supports_mouse(true),
       touch_adjustment_enabled(true),
       pointer_events_max_touch_points(0),
+      available_pointer_types(0),
+      primary_pointer_type(ui::POINTER_TYPE_NONE),
+      available_hover_types(0),
+      primary_hover_type(ui::HOVER_TYPE_NONE),
       sync_xhr_in_documents_enabled(true),
       deferred_image_decoding_enabled(false),
       image_color_profiles_enabled(false),
@@ -148,9 +176,10 @@ WebPreferences::WebPreferences()
       spatial_navigation_enabled(false),
       pinch_virtual_viewport_enabled(false),
       pinch_overlay_scrollbar_thickness(0),
+      rubber_banding_on_compositor_thread(false),
       use_solid_color_scrollbars(false),
       navigate_on_drag_drop(true),
-      v8_cache_options(V8_CACHE_OPTIONS_OFF),
+      v8_cache_options(V8_CACHE_OPTIONS_DEFAULT),
       v8_script_streaming_enabled(false),
       v8_script_streaming_mode(V8_SCRIPT_STREAMING_MODE_ALL),
       slimming_paint_enabled(false),

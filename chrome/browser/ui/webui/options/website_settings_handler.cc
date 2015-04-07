@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/webui/options/website_settings_handler.h"
 
-#include "chrome/browser/extensions/extension_service.h"
+#include "base/metrics/histogram.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_iterator.h"
@@ -21,7 +21,6 @@
 #include "content/public/browser/web_ui.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -54,6 +53,27 @@ const ContentSettingsType kValidTypes[] = {
     CONTENT_SETTINGS_TYPE_PLUGINS,
     CONTENT_SETTINGS_TYPE_POPUPS};
 const size_t kValidTypesLength = arraysize(kValidTypes);
+
+// Enumeration used for UMA Histograms of parsing last_setting_.
+// Do not insert, remove, or reorder. Add only to end.
+// TODO: Remove histogram by 2015. crbug.com/433475
+enum LastSettingParsed {
+  UPDATE_EMPTY,
+  UPDATE_PARSED,
+  UPDATE_INVALID,
+  UPDATE_ORIGINS_EMPTY,
+  UPDATE_ORIGINS_PARSED,
+  UPDATE_ORIGINS_INVALID,
+  HANDLE_UPDATE_ORIGINS_EMPTY,
+  HANDLE_UPDATE_ORIGINS_PARSED,
+  HANDLE_UPDATE_ORIGINS_INVALID,
+  LAST_SETTING_MAX_ENUMERATION_VALUE
+};
+
+void RecordUmaHistogramOfLastSetting(LastSettingParsed parsed) {
+  UMA_HISTOGRAM_ENUMERATION("ContentSettings.LastSettingParsed", parsed,
+                            LAST_SETTING_MAX_ENUMERATION_VALUE);
+}
 
 }  // namespace
 
@@ -207,13 +227,26 @@ void WebsiteSettingsHandler::HandleUpdateOrigins(const base::ListValue* args) {
   DCHECK(rv);
 
   ContentSettingsType content_type;
-  rv = content_settings::GetTypeFromName(content_setting_name, &content_type);
-  DCHECK(rv);
+  if (!content_settings::GetTypeFromName(content_setting_name, &content_type))
+    return;
   DCHECK_NE(
       kValidTypes + kValidTypesLength,
       std::find(kValidTypes, kValidTypes + kValidTypesLength, content_type));
 
   last_setting_ = content_setting_name;
+
+  // Histogram to understand the source of parsing errors. crbug.com/432600.
+  // TODO: Remove histogram by 2015. crbug.com/433475
+  ContentSettingsType last_setting;
+  if (!content_settings::GetTypeFromName(last_setting_, &last_setting)) {
+    if (last_setting_.empty())
+      RecordUmaHistogramOfLastSetting(HANDLE_UPDATE_ORIGINS_EMPTY);
+    else
+      RecordUmaHistogramOfLastSetting(HANDLE_UPDATE_ORIGINS_INVALID);
+  } else {
+    RecordUmaHistogramOfLastSetting(HANDLE_UPDATE_ORIGINS_PARSED);
+  }
+
   UpdateOrigins();
 }
 
@@ -264,6 +297,19 @@ void WebsiteSettingsHandler::OnLocalStorageFetched(const std::list<
 
 void WebsiteSettingsHandler::Update() {
   DCHECK(!last_setting_.empty());
+
+  // Histogram to understand the source of parsing errors. crbug.com/432600.
+  // TODO: Remove histogram by 2015. crbug.com/433475
+  ContentSettingsType last_setting;
+  if (!content_settings::GetTypeFromName(last_setting_, &last_setting)) {
+    if (last_setting_.empty())
+      RecordUmaHistogramOfLastSetting(UPDATE_EMPTY);
+    else
+      RecordUmaHistogramOfLastSetting(UPDATE_INVALID);
+  } else {
+    RecordUmaHistogramOfLastSetting(UPDATE_PARSED);
+  }
+
   if (last_setting_ == kStorage)
     UpdateLocalStorage();
   else if (last_setting_ == kBattery)
@@ -278,7 +324,16 @@ void WebsiteSettingsHandler::UpdateOrigins() {
 
   ContentSettingsForOneType all_settings;
   ContentSettingsType last_setting;
-  content_settings::GetTypeFromName(last_setting_, &last_setting);
+  if (!content_settings::GetTypeFromName(last_setting_, &last_setting)) {
+    // TODO: Remove histogram by 2015. crbug.com/433475
+    if (last_setting_.empty())
+      RecordUmaHistogramOfLastSetting(UPDATE_ORIGINS_EMPTY);
+    else
+      RecordUmaHistogramOfLastSetting(UPDATE_ORIGINS_INVALID);
+
+    return;
+  }
+  RecordUmaHistogramOfLastSetting(UPDATE_ORIGINS_PARSED);
 
   if (last_setting == CONTENT_SETTINGS_TYPE_MEDIASTREAM)
     last_setting = CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC;
@@ -327,7 +382,7 @@ void WebsiteSettingsHandler::UpdateOrigins() {
     base::Time last_usage = settings->GetLastUsageByPattern(
         it->primary_pattern, it->secondary_pattern, last_setting);
 
-    base::DictionaryValue* origin_entry = new base::DictionaryValue();
+    scoped_ptr<base::DictionaryValue> origin_entry(new base::DictionaryValue());
     origin_entry->SetDoubleWithoutPathExpansion("usage",
                                                 last_usage.ToDoubleT());
     base::string16 usage_string;
@@ -341,9 +396,9 @@ void WebsiteSettingsHandler::UpdateOrigins() {
                                                 GetReadableName(origin_url));
 
     if (it->setting == CONTENT_SETTING_BLOCK)
-      blocked_origins.SetWithoutPathExpansion(origin, origin_entry);
+      blocked_origins.SetWithoutPathExpansion(origin, origin_entry.Pass());
     else
-      allowed_origins.SetWithoutPathExpansion(origin, origin_entry);
+      allowed_origins.SetWithoutPathExpansion(origin, origin_entry.Pass());
   }
 
   bool is_globally_allowed = settings->GetContentSettingOverride(last_setting);
@@ -371,8 +426,8 @@ void WebsiteSettingsHandler::HandleSetOriginPermission(
   bool rv = args->GetString(0, &setting_name);
   DCHECK(rv);
   ContentSettingsType settings_type;
-  rv = content_settings::GetTypeFromName(setting_name, &settings_type);
-  DCHECK(rv);
+  if (!content_settings::GetTypeFromName(setting_name, &settings_type))
+    return;
 
   std::string value;
   rv = args->GetString(1, &value);
@@ -453,17 +508,21 @@ void WebsiteSettingsHandler::HandleStopOrigin(const base::ListValue* args) {
   StopOrigin(last_site_);
 }
 
-// TODO(dhnishi): Remove default settings duplication from the
-//                WebsiteSettingsHandler and the ContentSettingsHandler.
 void WebsiteSettingsHandler::HandleUpdateDefaultSetting(
     const base::ListValue* args) {
-  ContentSettingsType last_setting;
-  content_settings::GetTypeFromName(last_setting_, &last_setting);
+  ContentSettingsType type;
+  if (!content_settings::GetTypeFromName(last_setting_, &type))
+    return;
+
+  Profile* profile = GetProfile();
+  std::string provider_id;
+  ContentSetting default_setting =
+      profile->GetHostContentSettingsMap()->GetDefaultContentSetting(
+          type, &provider_id);
 
   base::DictionaryValue filter_settings;
-  std::string provider_id;
   filter_settings.SetString(
-      "value", GetSettingDefaultFromModel(last_setting, &provider_id));
+      "value", content_settings::ContentSettingToString(default_setting));
   filter_settings.SetString("managedBy", provider_id);
 
   web_ui()->CallJavascriptFunction("WebsiteSettingsManager.updateDefault",
@@ -482,7 +541,8 @@ void WebsiteSettingsHandler::HandleSetDefaultSetting(
       content_settings::ContentSettingFromString(setting);
 
   ContentSettingsType last_setting;
-  content_settings::GetTypeFromName(last_setting_, &last_setting);
+  if (!content_settings::GetTypeFromName(last_setting_, &last_setting))
+    return;
   Profile* profile = GetProfile();
 
   HostContentSettingsMap* map = profile->GetHostContentSettingsMap();
@@ -539,8 +599,8 @@ void WebsiteSettingsHandler::HandleSetGlobalToggle(
   DCHECK(rv);
 
   ContentSettingsType last_setting;
-  rv = content_settings::GetTypeFromName(last_setting_, &last_setting);
-  DCHECK(rv);
+  if (!content_settings::GetTypeFromName(last_setting_, &last_setting))
+    return;
 
   Profile* profile = GetProfile();
   HostContentSettingsMap* map = profile->GetHostContentSettingsMap();
@@ -571,7 +631,7 @@ void WebsiteSettingsHandler::GetInfoForOrigin(const GURL& site_url,
     ContentSettingsType permission_type = kValidTypes[i];
 
     // Append the possible settings.
-    base::ListValue* options = new base::ListValue;
+    scoped_ptr<base::ListValue> options(new base::ListValue());
     ContentSetting default_value =
         map->GetDefaultContentSetting(permission_type, NULL);
     if (default_value != CONTENT_SETTING_ALLOW &&
@@ -615,14 +675,15 @@ void WebsiteSettingsHandler::GetInfoForOrigin(const GURL& site_url,
       permission = content_settings::ValueToContentSetting(v.get());
     }
 
-    base::DictionaryValue* permission_info = new base::DictionaryValue;
+    scoped_ptr<base::DictionaryValue>
+        permission_info(new base::DictionaryValue());
     permission_info->SetStringWithoutPathExpansion(
         "setting", content_settings::ContentSettingToString(permission));
-    permission_info->SetWithoutPathExpansion("options", options);
+    permission_info->SetWithoutPathExpansion("options", options.Pass());
     permission_info->SetBooleanWithoutPathExpansion(
         "editable", info.source == content_settings::SETTING_SOURCE_USER);
     permissions->SetWithoutPathExpansion(
-        content_settings::GetTypeName(permission_type), permission_info);
+        content_settings::GetTypeName(permission_type), permission_info.Pass());
   }
 
   base::Value* storage_used = new base::StringValue(l10n_util::GetStringFUTF16(
@@ -648,14 +709,14 @@ void WebsiteSettingsHandler::UpdateLocalStorage() {
     if (origin.find(last_filter_) == base::string16::npos)
       continue;
 
-    base::DictionaryValue* origin_entry = new base::DictionaryValue();
-    origin_entry->SetWithoutPathExpansion(
-        "usage", new base::FundamentalValue(static_cast<double>(it->size)));
-    origin_entry->SetWithoutPathExpansion(
-        "usageString", new base::StringValue(ui::FormatBytes(it->size)));
+    scoped_ptr<base::DictionaryValue> origin_entry(new base::DictionaryValue());
+    origin_entry->SetDoubleWithoutPathExpansion(
+        "usage", static_cast<double>(it->size));
+    origin_entry->SetStringWithoutPathExpansion(
+        "usageString", ui::FormatBytes(it->size));
     origin_entry->SetStringWithoutPathExpansion(
         "readableName", GetReadableName(it->origin_url));
-    local_storage_map.SetWithoutPathExpansion(origin, origin_entry);
+    local_storage_map.SetWithoutPathExpansion(origin, origin_entry.Pass());
   }
   web_ui()->CallJavascriptFunction("WebsiteSettingsManager.populateOrigins",
                                    local_storage_map);
@@ -674,7 +735,7 @@ void WebsiteSettingsHandler::UpdateBatteryUsage() {
     if (origin.find(last_filter_) == base::string16::npos)
       continue;
 
-    base::DictionaryValue* origin_entry = new base::DictionaryValue();
+    scoped_ptr<base::DictionaryValue> origin_entry(new base::DictionaryValue());
     origin_entry->SetInteger("usage", it->second);
     if (it->second == 0) {
       origin_entry->SetString(
@@ -688,21 +749,10 @@ void WebsiteSettingsHandler::UpdateBatteryUsage() {
     }
     origin_entry->SetStringWithoutPathExpansion("readableName",
                                                 GetReadableName(it->first));
-    power_map.SetWithoutPathExpansion(origin, origin_entry);
+    power_map.SetWithoutPathExpansion(origin, origin_entry.Pass());
   }
   web_ui()->CallJavascriptFunction("WebsiteSettingsManager.populateOrigins",
                                    power_map);
-}
-
-std::string WebsiteSettingsHandler::GetSettingDefaultFromModel(
-    ContentSettingsType type,
-    std::string* provider_id) {
-  Profile* profile = GetProfile();
-  ContentSetting default_setting =
-      profile->GetHostContentSettingsMap()->GetDefaultContentSetting(
-          type, provider_id);
-
-  return content_settings::ContentSettingToString(default_setting);
 }
 
 void WebsiteSettingsHandler::StopOrigin(const GURL& site_url) {
@@ -756,12 +806,10 @@ void WebsiteSettingsHandler::DeleteLocalStorage(const GURL& site_url) {
 const std::string& WebsiteSettingsHandler::GetReadableName(
     const GURL& site_url) {
   if (site_url.SchemeIs(extensions::kExtensionScheme)) {
-    Profile* profile = GetProfile();
-    ExtensionService* extension_service =
-        extensions::ExtensionSystem::Get(profile)->extension_service();
-
+    const extensions::ExtensionRegistry* registry =
+        extensions::ExtensionRegistry::Get(GetProfile());
     const extensions::Extension* extension =
-        extension_service->extensions()->GetExtensionOrAppByURL(site_url);
+        registry->enabled_extensions().GetByID(site_url.host());
     // If extension is NULL, it was removed and we cannot look up its name.
     if (!extension)
       return site_url.spec();

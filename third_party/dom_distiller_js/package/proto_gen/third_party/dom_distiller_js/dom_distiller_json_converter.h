@@ -362,6 +362,43 @@ namespace dom_distiller {
         }
       };
 
+      class TimingEntry {
+       public:
+        static bool ReadFromValue(const base::Value* json, dom_distiller::proto::TimingEntry* message) {
+          const base::DictionaryValue* dict;
+          if (!json->GetAsDictionary(&dict)) goto error;
+          if (dict->HasKey("1")) {
+            std::string field_value;
+            if (!dict->GetString("1", &field_value)) {
+              goto error;
+            }
+            message->set_name(field_value);
+          }
+          if (dict->HasKey("2")) {
+            double field_value;
+            if (!dict->GetDouble("2", &field_value)) {
+              goto error;
+            }
+            message->set_time(field_value);
+          }
+          return true;
+
+        error:
+          return false;
+        }
+
+        static scoped_ptr<base::Value> WriteToValue(const dom_distiller::proto::TimingEntry& message) {
+          scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+          if (message.has_name()) {
+            dict->SetString("1", message.name());
+          }
+          if (message.has_time()) {
+            dict->SetDouble("2", message.time());
+          }
+          return dict.Pass();
+        }
+      };
+
       class TimingInfo {
        public:
         static bool ReadFromValue(const base::Value* json, dom_distiller::proto::TimingInfo* message) {
@@ -402,6 +439,21 @@ namespace dom_distiller {
             }
             message->set_total_time(field_value);
           }
+          if (dict->HasKey("6")) {
+            const base::ListValue* field_list;
+            if (!dict->GetList("6", &field_list)) {
+              goto error;
+            }
+            for (size_t i = 0; i < field_list->GetSize(); ++i) {
+              const base::Value* inner_message_value;
+              if (!field_list->Get(i, &inner_message_value)) {
+                goto error;
+              }
+              if (!dom_distiller::proto::json::TimingEntry::ReadFromValue(inner_message_value, message->add_other_times())) {
+                goto error;
+              }
+            }
+          }
           return true;
 
         error:
@@ -424,6 +476,13 @@ namespace dom_distiller {
           }
           if (message.has_total_time()) {
             dict->SetDouble("5", message.total_time());
+          }
+          base::ListValue* field_list = new base::ListValue();
+          dict->Set("6", field_list);
+          for (int i = 0; i < message.other_times_size(); ++i) {
+            scoped_ptr<base::Value> inner_message_value =
+                dom_distiller::proto::json::TimingEntry::WriteToValue(message.other_times(i));
+            field_list->Append(inner_message_value.release());
           }
           return dict.Pass();
         }
@@ -485,6 +544,33 @@ namespace dom_distiller {
 
       class DomDistillerResult {
        public:
+        class ContentImage {
+         public:
+          static bool ReadFromValue(const base::Value* json, dom_distiller::proto::DomDistillerResult::ContentImage* message) {
+            const base::DictionaryValue* dict;
+            if (!json->GetAsDictionary(&dict)) goto error;
+            if (dict->HasKey("1")) {
+              std::string field_value;
+              if (!dict->GetString("1", &field_value)) {
+                goto error;
+              }
+              message->set_url(field_value);
+            }
+            return true;
+
+          error:
+            return false;
+          }
+
+          static scoped_ptr<base::Value> WriteToValue(const dom_distiller::proto::DomDistillerResult::ContentImage& message) {
+            scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+            if (message.has_url()) {
+              dict->SetString("1", message.url());
+            }
+            return dict.Pass();
+          }
+        };
+
         static bool ReadFromValue(const base::Value* json, dom_distiller::proto::DomDistillerResult* message) {
           const base::DictionaryValue* dict;
           if (!json->GetAsDictionary(&dict)) goto error;
@@ -511,19 +597,6 @@ namespace dom_distiller {
             }
             if (!dom_distiller::proto::json::PaginationInfo::ReadFromValue(inner_message_value, message->mutable_pagination_info())) {
               goto error;
-            }
-          }
-          if (dict->HasKey("4")) {
-            const base::ListValue* field_list;
-            if (!dict->GetList("4", &field_list)) {
-              goto error;
-            }
-            for (size_t i = 0; i < field_list->GetSize(); ++i) {
-              std::string field_value;
-              if (!field_list->GetString(i, &field_value)) {
-                goto error;
-              }
-              message->add_image_urls(field_value);
             }
           }
           if (dict->HasKey("5")) {
@@ -569,6 +642,21 @@ namespace dom_distiller {
             }
             message->set_text_direction(field_value);
           }
+          if (dict->HasKey("10")) {
+            const base::ListValue* field_list;
+            if (!dict->GetList("10", &field_list)) {
+              goto error;
+            }
+            for (size_t i = 0; i < field_list->GetSize(); ++i) {
+              const base::Value* inner_message_value;
+              if (!field_list->Get(i, &inner_message_value)) {
+                goto error;
+              }
+              if (!dom_distiller::proto::json::DomDistillerResult::ContentImage::ReadFromValue(inner_message_value, message->add_content_images())) {
+                goto error;
+              }
+            }
+          }
           return true;
 
         error:
@@ -589,11 +677,6 @@ namespace dom_distiller {
             scoped_ptr<base::Value> inner_message_value =
                 dom_distiller::proto::json::PaginationInfo::WriteToValue(message.pagination_info());
             dict->Set("3", inner_message_value.release());
-          }
-          base::ListValue* field_list = new base::ListValue();
-          dict->Set("4", field_list);
-          for (int i = 0; i < message.image_urls_size(); ++i) {
-            field_list->AppendString(message.image_urls(i));
           }
           if (message.has_markup_info()) {
             scoped_ptr<base::Value> inner_message_value =
@@ -617,6 +700,13 @@ namespace dom_distiller {
           }
           if (message.has_text_direction()) {
             dict->SetString("9", message.text_direction());
+          }
+          base::ListValue* field_list = new base::ListValue();
+          dict->Set("10", field_list);
+          for (int i = 0; i < message.content_images_size(); ++i) {
+            scoped_ptr<base::Value> inner_message_value =
+                dom_distiller::proto::json::DomDistillerResult::ContentImage::WriteToValue(message.content_images(i));
+            field_list->Append(inner_message_value.release());
           }
           return dict.Pass();
         }

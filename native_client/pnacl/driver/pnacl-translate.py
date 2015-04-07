@@ -135,6 +135,10 @@ EXTRA_ENV = {
   # use up to 4 modules if there are enough cores. If the user overrides,
   # use as many modules as specified (which could be only 1).
   'SPLIT_MODULE' : '0',
+  # Module split scheduling. 'dynamic' will produce non-deterministic results
+  # with faster compilation, whereas 'static' will still use multiple cores but
+  # will be deterministic and slightly slower.
+  'SPLIT_MODULE_SCHED' : '${SANDBOXED ? dynamic : static}',
 }
 
 
@@ -157,8 +161,9 @@ TranslatorPatterns = [
   ( '(-force-align-stack)', "env.append('LLC_FLAGS_EXTRA', $0)"),
   # These flags are usually used for linktime dead code/data
   # removal but also help with reloc overflows on ARM
-  ( '(-fdata-sections)',     "env.append('LLC_FLAGS_EXTRA', $0)"),
-  ( '(-ffunction-sections)', "env.append('LLC_FLAGS_EXTRA', $0)"),
+  ( '(-fdata-sections)',     "env.append('LLC_FLAGS_EXTRA', '-data-sections')"),
+  ( '(-ffunction-sections)',
+    "env.append('LLC_FLAGS_EXTRA', '-function-sections')"),
   ( '(--gc-sections)',       "env.append('LD_FLAGS', $0)"),
   ( '(-mattr=.*)', "env.append('LLC_FLAGS_EXTRA', $0)"),
   ( '(-mcpu=.*)', "env.set('LLC_MCPU', '')\n"
@@ -195,6 +200,7 @@ TranslatorPatterns = [
   ( '(--build-id)',    "env.append('LD_FLAGS', $0)"),
   ( '-bitcode-stream-rate=([0-9]+)', "env.set('BITCODE_STREAM_RATE', $0)"),
   ( '-split-module=([0-9]+)', "env.set('SPLIT_MODULE', $0)"),
+  ( '-split-module-sched=(.*)', "env.set('SPLIT_MODULE_SCHED', $0)"),
   ( '-no-stream-bitcode', "env.set('STREAM_BITCODE', '0')"),
 
   # Treat general linker flags as inputs so they don't get re-ordered
@@ -248,7 +254,8 @@ def SetUpArch():
       'ARM': ['-float-abi=hard', '-mattr=+neon'],
       # Once PNaCl's build of compiler-rt (libgcc.a) defines __aeabi_*
       # functions, we can drop '-arm-enable-aeabi-functions=0' option.
-      'ARM_NONSFI': ['-float-abi=hard', '-arm-enable-aeabi-functions=0'],
+      'ARM_NONSFI': ['-float-abi=hard', '-arm-enable-aeabi-functions=0',
+                     '-arm-enable-dwarf-eh=1'],
       # To translate x86-32 binary, we set -malign-double option so that the
       # backend's datalayout matches the datalayout for "le32" used by the
       # frontend. The le32 datalayout uses 8-byte alignment for the types i64
@@ -279,17 +286,7 @@ def SetUpLinkOptions():
     # "_begin" allows a PIE to find its load address in order to apply
     # dynamic relocations.
     env.append('LD_FLAGS', '-defsym=_begin=0')
-    if env.getbool('USE_IRT'):
-      env.append('LD_FLAGS', '-pie')
-    else:
-      # Note that we really want to use "-pie" for this case, but it
-      # currently adds a PT_INTERP header to the executable that we don't
-      # want because it stops the executable from being loadable by Linux.
-      # TODO(mseaborn): Add a linker option to omit PT_INTERP.
-      env.append('LD_FLAGS', '-static')
-      # Set _DYNAMIC to a dummy value.  TODO(mseaborn): Remove this when we
-      # use "-pie" instead of "-static" for this case.
-      env.append('LD_FLAGS', '-defsym=_DYNAMIC=1')
+    env.append('LD_FLAGS', '-pie')
   else:
     env.append('LD_FLAGS', '-static')
     # Give non-IRT builds 12MB of text before starting rodata instead of
@@ -352,14 +349,15 @@ def main(argv):
     # do module splitting when using it.
     env.set('SPLIT_MODULE', '1')
   else:
-    modules = env.getone('SPLIT_MODULE')
-    if modules != '1':
-      env.append('LLC_FLAGS_EXTRA', '-split-module=' + modules)
-      env.append('LD_FLAGS', '-split-module=' + modules)
+    # Do not set -streaming-bitcode for sandboxed mode, because it is already
+    # in the default command line.
     if not env.getbool('SANDBOXED') and env.getbool('STREAM_BITCODE'):
-      # Do not set -streaming-bitcode for sandboxed mode, because it is already
-      # in the default command line.
       env.append('LLC_FLAGS_EXTRA', '-streaming-bitcode')
+  modules = env.getone('SPLIT_MODULE')
+  module_sched = env.getone('SPLIT_MODULE_SCHED')
+  env.append('LLC_FLAGS_EXTRA', '-split-module=' + modules)
+  env.append('LD_FLAGS', '-split-module=' + modules)
+  env.append('LLC_FLAGS_EXTRA', '-split-module-sched=' + module_sched)
 
   # If there's a bitcode file, translate it now.
   tng = driver_tools.TempNameGen(inputs + bcfiles, output)
@@ -441,6 +439,7 @@ def RunHostLD(infile, outfile):
              + 'x86-32-%s/lib' % env.getone('TARGET_OS'))
   args = ['gcc', '-m32', infile, '-o', outfile,
           os.path.join(lib_dir, 'unsandboxed_irt.o'),
+          os.path.join(lib_dir, 'irt_random.o'),
           os.path.join(lib_dir, 'irt_query_list.o'),
           '-lpthread']
   if env.getone('TARGET_OS') == 'linux':

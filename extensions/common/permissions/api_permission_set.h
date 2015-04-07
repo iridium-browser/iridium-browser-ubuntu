@@ -15,8 +15,9 @@ class ListValue;
 
 namespace extensions {
 
-class Extension;
 class APIPermissionSet;
+class Extension;
+class PermissionIDSet;
 
 template<>
 struct BaseSetOperatorsTraits<APIPermissionSet> {
@@ -58,6 +59,91 @@ class APIPermissionSet : public BaseSetOperators<APIPermissionSet> {
       std::vector<std::string>* unhandled_permissions);
 
   void AddImpliedPermissions();
+};
+
+// An ID representing a single permission that belongs to an app or extension.
+//
+// Each PermissionID has a required ID to identify the permission. For most
+// permissions, this is all they have.
+//
+// Some more complex permissions have a parameter, which acts like an argument
+// for the permission. For example, host permissions might have the ID
+// kReadOnlyHost and the argument 'www.google.com' (the host which is
+// read-only). Parameters are passed to the permission message rules for this
+// permission, so they can affect the displayed message.
+//
+// TODO(sashab): Move this to the same file as PermissionIDSet once that moves
+// to its own file.
+class PermissionID : public std::pair<APIPermission::ID, base::string16> {
+ public:
+  PermissionID(APIPermission::ID id);
+  PermissionID(APIPermission::ID id, const base::string16& parameter);
+  virtual ~PermissionID();
+
+  const APIPermission::ID& id() const { return this->first; }
+  const base::string16& parameter() const { return this->second; }
+};
+
+// A set of permissions for an app or extension. Used for passing around groups
+// of permissions, such as required or optional permissions. Has convenience
+// constructors so that it can be constructed inline.
+//
+// Each permission can also store a string, such as a hostname or device number,
+// as a parameter that helps identify the permission. This parameter can then
+// be used when the permission message is generated. For example, the permission
+// kHostReadOnly might have the parameter "google.com", which means that the app
+// or extension has the permission to read the host google.com. This parameter
+// may then be included in the permission message when it is generated later.
+//
+// Example:
+//   // Create a PermissionIDSet.
+//   PermissionIDSet p(APIPermission::kBluetooth, APIPermission::kFavicon);
+//   // Add a permission to the set.
+//   p.insertPermission(APIPermission::kNetworkState);
+//   // Add a permission with a parameter to the set.
+//   p.insertPermission(APIPermission::kHostReadOnly,
+//           base::ASCIIToUTF16("http://www.google.com"));
+//
+// TODO(sashab): Move this to its own file and rename it to PermissionSet after
+// APIPermission is removed, the current PermissionSet is no longer used, and
+// APIPermission::ID is the only type of Permission ID.
+// TODO(sashab): Change BaseSetOperators to support storing plain objects
+// instead of pointers and change this to extend BaseSetOperators<PermissionID>.
+class PermissionIDSet {
+ public:
+  PermissionIDSet();
+  virtual ~PermissionIDSet();
+
+  // Convenience constructors for inline initialization.
+  PermissionIDSet(APIPermission::ID permission_one);
+  PermissionIDSet(APIPermission::ID permission_one,
+                  APIPermission::ID permission_two);
+  PermissionIDSet(APIPermission::ID permission_one,
+                  APIPermission::ID permission_two,
+                  APIPermission::ID permission_three);
+  PermissionIDSet(APIPermission::ID permission_one,
+                  APIPermission::ID permission_two,
+                  APIPermission::ID permission_three,
+                  APIPermission::ID permission_four);
+  PermissionIDSet(APIPermission::ID permission_one,
+                  APIPermission::ID permission_two,
+                  APIPermission::ID permission_three,
+                  APIPermission::ID permission_four,
+                  APIPermission::ID permission_five);
+  PermissionIDSet(APIPermission::ID permission_one,
+                  APIPermission::ID permission_two,
+                  APIPermission::ID permission_three,
+                  APIPermission::ID permission_four,
+                  APIPermission::ID permission_five,
+                  APIPermission::ID permission_six);
+
+  // Adds the given permission, and an optional parameter, to the set.
+  void insert(APIPermission::ID permission_id);
+  void insert(APIPermission::ID permission_id,
+              base::string16 permission_parameter);
+
+ private:
+  std::set<PermissionID> permissions_;
 };
 
 }  // namespace extensions

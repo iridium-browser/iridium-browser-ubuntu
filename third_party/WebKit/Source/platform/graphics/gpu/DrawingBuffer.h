@@ -139,9 +139,10 @@ public:
     bool discardFramebufferSupported() const { return m_discardFramebufferSupported; }
 
     void markContentsChanged();
-    void markLayerComposited();
-    bool layerComposited() const;
+    void setBufferClearNeeded(bool);
+    bool bufferClearNeeded() const;
     void setIsHidden(bool);
+    void setFilterLevel(SkPaint::FilterLevel);
 
     WebLayer* platformLayer();
 
@@ -155,15 +156,17 @@ public:
     virtual bool prepareMailbox(WebExternalTextureMailbox*, WebExternalBitmap*) override;
     virtual void mailboxReleased(const WebExternalTextureMailbox&, bool lostResource = false) override;
 
-    enum SourceBuffer { Front, Back };
     // Destroys the TEXTURE_2D binding for the owned context
     bool copyToPlatformTexture(WebGraphicsContext3D*, Platform3DObject texture, GLenum internalFormat,
-        GLenum destType, GLint level, bool premultiplyAlpha, bool flipY, SourceBuffer);
+        GLenum destType, GLint level, bool premultiplyAlpha, bool flipY, SourceDrawingBuffer);
 
     void setPackAlignment(GLint param);
 
     void paintRenderingResultsToCanvas(ImageBuffer*);
-    PassRefPtr<Uint8ClampedArray> paintRenderingResultsToImageData(int&, int&);
+    PassRefPtr<Uint8ClampedArray> paintRenderingResultsToImageData(int&, int&, SourceDrawingBuffer);
+
+    int sampleCount() const { return m_sampleCount; }
+    bool explicitResolveOfMultisampleData() const { return m_multisampleMode == ExplicitResolve; };
 
 protected: // For unittests
     DrawingBuffer(
@@ -268,7 +271,7 @@ private:
 
     // True if commit() has been called since the last time markContentsChanged() had been called.
     bool m_contentsChangeCommitted;
-    bool m_layerComposited;
+    bool m_bufferClearNeeded;
 
     enum MultisampleMode {
         None,
@@ -287,6 +290,7 @@ private:
     int m_packAlignment;
     bool m_destructionInProgress;
     bool m_isHidden;
+    SkPaint::FilterLevel m_filterLevel;
 
     OwnPtr<WebExternalTextureLayer> m_layer;
 

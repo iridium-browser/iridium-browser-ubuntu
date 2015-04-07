@@ -10,7 +10,7 @@
 #include "content/common/input/input_event_ack_state.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/events/gesture_detection/filtered_gesture_provider.h"
-#include "ui/gfx/size_f.h"
+#include "ui/gfx/geometry/size_f.h"
 
 namespace content {
 
@@ -57,7 +57,7 @@ class CONTENT_EXPORT TouchEmulator : public ui::GestureProviderClient {
   // Whether we should convert scrolls into pinches.
   bool InPinchGestureMode() const;
 
-  bool FillTouchEventAndPoint(const blink::WebMouseEvent& mouse_event);
+  void FillTouchEventAndPoint(const blink::WebMouseEvent& mouse_event);
   void FillPinchEvent(const blink::WebInputEvent& event);
 
   // The following methods generate and pass gesture events to the renderer.
@@ -66,7 +66,9 @@ class CONTENT_EXPORT TouchEmulator : public ui::GestureProviderClient {
   void PinchEnd(const blink::WebGestureEvent& event);
   void ScrollEnd(const blink::WebGestureEvent& event);
 
-  void ForwardTouchEventToClient();
+  // Offers the emulated event to |gesture_provider_|, conditionally forwarding
+  // it to the client if appropriate.
+  void HandleEmulatedTouchEvent(blink::WebTouchEvent event);
 
   TouchEmulatorClient* const client_;
   ui::FilteredGestureProvider gesture_provider_;

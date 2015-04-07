@@ -149,10 +149,6 @@ char kTSanDefaultSuppressions[] =
 // http://crbug.com/285242
 "race:media::PulseAudioOutputStream::SetVolume\n"
 
-// http://crbug.com/290964
-"race:PostponeInterruptsScope\n"
-"race:v8::internal::StackGuard::RequestInstallCode\n"
-
 // http://crbug.com/296883
 "race:net::URLFetcherCore::Stop\n"
 
@@ -168,10 +164,6 @@ char kTSanDefaultSuppressions[] =
 // http://crbug.com/327330
 "race:PrepareTextureMailbox\n"
 "race:cc::LayerTreeHost::PaintLayerContents\n"
-
-// http://crbug.com/328804
-"race:v8::internal::Heap::SetStackLimits\n"
-"race:ScavengePointer\n"
 
 // http://crbug.com/328826
 "race:gLCDOrder\n"
@@ -306,6 +298,19 @@ char kTSanDefaultSuppressions[] =
 
 // http://crbug.com/425057
 "deadlock:webrtc::ViEChannelManagerScoped::ViEChannelManagerScoped\n"
+
+// https://crbug.com/433993
+"deadlock:content::WebRtcAudioDeviceImpl\n"
+
+// http://crbug.com/417193
+// Suppressing both AudioContext.{cpp,h}.
+"race:modules/webaudio/AudioContext\n"
+
+// https://code.google.com/p/skia/issues/detail?id=3294
+"race:SkBaseMutex::acquire\n"
+
+// https://crbug.com/447461
+"race:net::SSLConfig::SSLConfig\n"
 
 // End of suppressions.
 ;  // Please keep this semicolon.

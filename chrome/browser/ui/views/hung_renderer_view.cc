@@ -9,7 +9,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
@@ -174,7 +173,7 @@ static const int kCentralColumnPadding =
 
 // static
 HungRendererDialogView* HungRendererDialogView::Create(
-    gfx::NativeView context) {
+    gfx::NativeWindow context) {
   if (!g_instance_) {
     g_instance_ = new HungRendererDialogView;
     views::DialogDelegate::CreateDialogWidget(g_instance_, context, NULL);
@@ -188,20 +187,44 @@ HungRendererDialogView* HungRendererDialogView::GetInstance() {
 }
 
 // static
-bool HungRendererDialogView::IsFrameActive(WebContents* contents) {
-  gfx::NativeView frame_view =
+void HungRendererDialogView::Show(WebContents* contents) {
+  if (logging::DialogsAreSuppressed())
+    return;
+
+  gfx::NativeWindow window =
       platform_util::GetTopLevel(contents->GetNativeView());
-  return platform_util::IsWindowActive(frame_view);
+#if defined(USE_AURA)
+  // Don't show the dialog if there is no root window for the renderer, because
+  // it's invisible to the user (happens when the renderer is for prerendering
+  // for example).
+  if (!window->GetRootWindow())
+    return;
+#endif
+  HungRendererDialogView* view = HungRendererDialogView::Create(window);
+  view->ShowForWebContents(contents);
+}
+
+// static
+void HungRendererDialogView::Hide(WebContents* contents) {
+  if (!logging::DialogsAreSuppressed() && HungRendererDialogView::GetInstance())
+    HungRendererDialogView::GetInstance()->EndForWebContents(contents);
+}
+
+// static
+bool HungRendererDialogView::IsFrameActive(WebContents* contents) {
+  gfx::NativeWindow window =
+      platform_util::GetTopLevel(contents->GetNativeView());
+  return platform_util::IsWindowActive(window);
 }
 
 // static
 void HungRendererDialogView::KillRendererProcess(
-    base::ProcessHandle process_handle) {
+    content::RenderProcessHost* rph) {
 #if defined(OS_WIN)
   // Try to generate a crash report for the hung process.
-  CrashDumpAndTerminateHungChildProcess(process_handle);
+  CrashDumpAndTerminateHungChildProcess(rph->GetHandle());
 #else
-  base::KillProcess(process_handle, content::RESULT_CODE_HUNG, false);
+  rph->Shutdown(content::RESULT_CODE_HUNG, false);
 #endif
 }
 
@@ -232,14 +255,14 @@ void HungRendererDialogView::ShowForWebContents(WebContents* contents) {
     Browser* browser = chrome::FindBrowserWithWebContents(contents);
     if (browser) {
       ChromeWebModalDialogManagerDelegate* manager = browser;
-      UpdateWidgetModalDialogPosition(
+      constrained_window::UpdateWidgetModalDialogPosition(
           GetWidget(), manager->GetWebContentsModalDialogHost());
     }
 
-    gfx::NativeView frame_view =
+    gfx::NativeWindow window =
         platform_util::GetTopLevel(contents->GetNativeView());
     views::Widget* insert_after =
-        views::Widget::GetWidgetForNativeView(frame_view);
+        views::Widget::GetWidgetForNativeWindow(window);
     if (insert_after)
       GetWidget()->StackAboveWidget(insert_after);
 
@@ -342,10 +365,7 @@ void HungRendererDialogView::ButtonPressed(
     views::Button* sender, const ui::Event& event) {
   if (sender == kill_button_ &&
       hung_pages_table_model_->GetRenderProcessHost()) {
-    base::ProcessHandle process_handle =
-        hung_pages_table_model_->GetRenderProcessHost()->GetHandle();
-
-    KillRendererProcess(process_handle);
+    KillRendererProcess(hung_pages_table_model_->GetRenderProcessHost());
   }
 }
 
@@ -426,27 +446,3 @@ void HungRendererDialogView::InitClass() {
     initialized = true;
   }
 }
-
-namespace chrome {
-
-void ShowHungRendererDialog(WebContents* contents) {
-  if (logging::DialogsAreSuppressed())
-    return;
-
-  gfx::NativeView toplevel_view =
-      platform_util::GetTopLevel(contents->GetNativeView());
-  // Don't show the dialog if there is no root window for the renderer, because
-  // it's invisible to the user (happens when the renderer is for prerendering
-  // for example).
-  if (!toplevel_view->GetRootWindow())
-    return;
-  HungRendererDialogView* view = HungRendererDialogView::Create(toplevel_view);
-  view->ShowForWebContents(contents);
-}
-
-void HideHungRendererDialog(WebContents* contents) {
-  if (!logging::DialogsAreSuppressed() && HungRendererDialogView::GetInstance())
-    HungRendererDialogView::GetInstance()->EndForWebContents(contents);
-}
-
-}  // namespace chrome

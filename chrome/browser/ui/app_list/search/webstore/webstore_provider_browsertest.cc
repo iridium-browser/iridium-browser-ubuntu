@@ -20,6 +20,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/search_result.h"
 
 using content::BrowserThread;
@@ -107,10 +108,10 @@ class WebstoreProviderTest : public InProcessBrowserTest {
     test_server_->RegisterRequestHandler(
         base::Bind(&WebstoreProviderTest::HandleRequest,
                    base::Unretained(this)));
-    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-        switches::kAppsGalleryURL, test_server_->base_url().spec());
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableEphemeralApps);
+    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        ::switches::kAppsGalleryURL, test_server_->base_url().spec());
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kEnableExperimentalAppList);
 
     webstore_provider_.reset(new WebstoreProvider(
         ProfileManager::GetActiveUserProfile(), NULL));
@@ -128,7 +129,7 @@ class WebstoreProviderTest : public InProcessBrowserTest {
 
   void RunQuery(const std::string& query,
                 const std::string& mock_server_response) {
-    webstore_provider_->Start(base::UTF8ToUTF16(query));
+    webstore_provider_->Start(false, base::UTF8ToUTF16(query));
 
     if (webstore_provider_->webstore_search_ && !mock_server_response.empty()) {
       mock_server_response_ = mock_server_response;

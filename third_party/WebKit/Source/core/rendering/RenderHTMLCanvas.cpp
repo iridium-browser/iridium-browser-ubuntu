@@ -40,7 +40,7 @@ namespace blink {
 using namespace HTMLNames;
 
 RenderHTMLCanvas::RenderHTMLCanvas(HTMLCanvasElement* element)
-    : RenderReplaced(element, element->size())
+    : RenderReplaced(element, LayoutSize(element->size()))
 {
     view()->frameView()->setIsVisuallyNonEmpty();
 }
@@ -50,7 +50,7 @@ LayerType RenderHTMLCanvas::layerTypeRequired() const
     return NormalLayer;
 }
 
-void RenderHTMLCanvas::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void RenderHTMLCanvas::paintReplaced(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     HTMLCanvasPainter(*this).paintReplaced(paintInfo, paintOffset);
 }
@@ -71,14 +71,16 @@ void RenderHTMLCanvas::canvasSizeChanged()
     if (!preferredLogicalWidthsDirty())
         setPreferredLogicalWidthsDirty();
 
+    if (selfNeedsLayout())
+        return;
+
     LayoutSize oldSize = size();
     updateLogicalWidth();
     updateLogicalHeight();
     if (oldSize == size())
         return;
 
-    if (!selfNeedsLayout())
-        setNeedsLayout();
+    setNeedsLayout();
 }
 
 CompositingReasons RenderHTMLCanvas::additionalCompositingReasons() const

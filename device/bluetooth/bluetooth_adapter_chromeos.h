@@ -17,6 +17,7 @@
 #include "dbus/object_path.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_device.h"
+#include "device/bluetooth/bluetooth_export.h"
 
 namespace device {
 class BluetoothSocketThread;
@@ -33,7 +34,7 @@ class BluetoothRemoteGattServiceChromeOS;
 
 // The BluetoothAdapterChromeOS class implements BluetoothAdapter for the
 // Chrome OS platform.
-class BluetoothAdapterChromeOS
+class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterChromeOS
     : public device::BluetoothAdapter,
       public chromeos::BluetoothAdapterClient::Observer,
       public chromeos::BluetoothDeviceClient::Observer,
@@ -43,6 +44,7 @@ class BluetoothAdapterChromeOS
   static base::WeakPtr<BluetoothAdapter> CreateAdapter();
 
   // BluetoothAdapter:
+  void DeleteOnCorrectThread() const override;
   virtual void AddObserver(
       device::BluetoothAdapter::Observer* observer) override;
   virtual void RemoveObserver(
@@ -115,6 +117,7 @@ class BluetoothAdapterChromeOS
       device::BluetoothDevice::PairingDelegate* pairing_delegate) override;
 
  private:
+  friend class base::DeleteHelper<BluetoothAdapterChromeOS>;
   friend class BluetoothChromeOSTest;
 
   // typedef for callback parameters that are passed to AddDiscoverySession

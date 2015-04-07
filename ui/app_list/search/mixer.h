@@ -5,9 +5,12 @@
 #ifndef UI_APP_LIST_SEARCH_MIXER_H_
 #define UI_APP_LIST_SEARCH_MIXER_H_
 
+#include <map>
+#include <vector>
+
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/scoped_vector.h"
+#include "base/memory/linked_ptr.h"
 #include "ui/app_list/app_list_export.h"
 #include "ui/app_list/app_list_model.h"
 #include "ui/app_list/search/history_types.h"
@@ -29,13 +32,13 @@ class SearchResult;
 // slots. The omnibox group takes all the remaining slots.
 class APP_LIST_EXPORT Mixer {
  public:
-  // The enum represents mixer groups. Note this must matches the order
-  // of group creation in Init().
+  // The enum represents mixer groups. Each must have a Group added in Init().
   enum GroupId {
     MAIN_GROUP = 0,
     OMNIBOX_GROUP = 1,
     WEBSTORE_GROUP = 2,
     PEOPLE_GROUP = 3,
+    SUGGESTIONS_GROUP = 4,
   };
 
   explicit Mixer(AppListModel::SearchResults* ui_results);
@@ -48,7 +51,7 @@ class APP_LIST_EXPORT Mixer {
   void AddProviderToGroup(GroupId group, SearchProvider* provider);
 
   // Collects the results, sorts and publishes them.
-  void MixAndPublish(const KnownResults& known_results);
+  void MixAndPublish(bool is_voice_query, const KnownResults& known_results);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(test::MixerTest, Publish);
@@ -66,7 +69,7 @@ class APP_LIST_EXPORT Mixer {
   typedef std::vector<Mixer::SortData> SortedResults;
 
   class Group;
-  typedef ScopedVector<Group> Groups;
+  typedef std::map<GroupId, linked_ptr<Group>> Groups;
 
   // Publishes the given |new_results| to |ui_results|, deleting any existing
   // results that are not in |new_results|. Results that already exist in
@@ -77,7 +80,7 @@ class APP_LIST_EXPORT Mixer {
   // Removes duplicates from |results|.
   static void RemoveDuplicates(SortedResults* results);
 
-  void FetchResults(const KnownResults& known_results);
+  void FetchResults(bool is_voice_query, const KnownResults& known_results);
 
   AppListModel::SearchResults* ui_results_;  // Not owned.
   Groups groups_;

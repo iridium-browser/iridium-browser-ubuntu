@@ -24,11 +24,13 @@ const char kNetworkManagerSpecificObject[] = "SpecificObject";
 const char kNetworkManagerDeviceType[] = "DeviceType";
 const char kNetworkManagerGetDevicesMethod[] = "GetDevices";
 const char kNetworkManagerGetAccessPointsMethod[] = "GetAccessPoints";
+const char kNetworkManagerDisconnectMethod[] = "Disconnect";
 const char kNetworkManagerAddAndActivateConnectionMethod[] =
     "AddAndActivateConnection";
 const char kNetworkManagerGetMethod[] = "Get";
 const char kNetworkManagerSsidProperty[] = "Ssid";
 const char kNetworkManagerStrengthProperty[] = "Strength";
+const char kNetworkManagerRsnFlagsProperty[] = "RsnFlags";
 const char kNetworkManagerWpaFlagsProperty[] = "WpaFlags";
 
 // Network manager connection configuration strings.

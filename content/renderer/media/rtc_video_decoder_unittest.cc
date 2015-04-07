@@ -39,8 +39,6 @@ class RTCVideoDecoderTest : public ::testing::Test,
         .WillRepeatedly(Return(vda_task_runner_));
     EXPECT_CALL(*mock_gpu_factories_.get(), DoCreateVideoDecodeAccelerator())
         .WillRepeatedly(Return(mock_vda_));
-    EXPECT_CALL(*mock_gpu_factories_.get(), CreateSharedMemory(_))
-        .WillRepeatedly(Return(static_cast<base::SharedMemory*>(NULL)));
     EXPECT_CALL(*mock_vda_, Initialize(_, _))
         .Times(1)
         .WillRepeatedly(Return(true));
@@ -48,7 +46,7 @@ class RTCVideoDecoderTest : public ::testing::Test,
   }
 
   void TearDown() override {
-    VLOG(2) << "TearDown";
+    DVLOG(2) << "TearDown";
     EXPECT_TRUE(vda_thread_.IsRunning());
     RunUntilIdle();  // Wait until all callbascks complete.
     vda_task_runner_->DeleteSoon(FROM_HERE, rtc_decoder_.release());
@@ -58,27 +56,27 @@ class RTCVideoDecoderTest : public ::testing::Test,
   }
 
   int32_t Decoded(webrtc::I420VideoFrame& decoded_image) override {
-    VLOG(2) << "Decoded";
+    DVLOG(2) << "Decoded";
     EXPECT_EQ(vda_task_runner_, base::MessageLoopProxy::current());
     return WEBRTC_VIDEO_CODEC_OK;
   }
 
   void CreateDecoder(webrtc::VideoCodecType codec_type) {
-    VLOG(2) << "CreateDecoder";
+    DVLOG(2) << "CreateDecoder";
     codec_.codecType = codec_type;
     rtc_decoder_ =
         RTCVideoDecoder::Create(codec_type, mock_gpu_factories_);
   }
 
   void Initialize() {
-    VLOG(2) << "Initialize";
+    DVLOG(2) << "Initialize";
     EXPECT_EQ(WEBRTC_VIDEO_CODEC_OK, rtc_decoder_->InitDecode(&codec_, 1));
     EXPECT_EQ(WEBRTC_VIDEO_CODEC_OK,
               rtc_decoder_->RegisterDecodeCompleteCallback(this));
   }
 
   void NotifyResetDone() {
-    VLOG(2) << "NotifyResetDone";
+    DVLOG(2) << "NotifyResetDone";
     vda_task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&RTCVideoDecoder::NotifyResetDone,
@@ -86,7 +84,7 @@ class RTCVideoDecoderTest : public ::testing::Test,
   }
 
   void RunUntilIdle() {
-    VLOG(2) << "RunUntilIdle";
+    DVLOG(2) << "RunUntilIdle";
     vda_task_runner_->PostTask(FROM_HERE,
                                base::Bind(&base::WaitableEvent::Signal,
                                           base::Unretained(&idle_waiter_)));

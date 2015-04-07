@@ -68,7 +68,6 @@ public:
         kNone,
         kHardNack,
         kSoftNack,
-        kDualDecoder,
         kReferenceSelection
     };
 
@@ -423,17 +422,6 @@ public:
     virtual int RegisterRenderBufferSizeCallback(
         VCMRenderBufferSizeCallback* callback) = 0;
 
-    // Waits for the next frame in the dual jitter buffer to become complete
-    // (waits no longer than maxWaitTimeMs), then passes it to the dual decoder
-    // for decoding. This will never trigger a render callback. Should be
-    // called frequently, and as long as it returns 1 it should be called again
-    // as soon as possible.
-    //
-    // Return value      : 1,           if a frame was decoded
-    //                     0,           if no frame was decoded
-    //                     < 0,         on error.
-    virtual int32_t DecodeDualFrame(uint16_t maxWaitTimeMs = 200) = 0;
-
     // Reset the decoder state to the initial state.
     //
     // Return value      : VCM_OK, on success.
@@ -467,8 +455,8 @@ public:
     // Return value      : VCM_OK, on success.
     //                     < 0,         on error.
     virtual int32_t IncomingPacket(const uint8_t* incomingPayload,
-                                       uint32_t payloadLength,
-                                       const WebRtcRTPHeader& rtpInfo) = 0;
+                                   size_t payloadLength,
+                                   const WebRtcRTPHeader& rtpInfo) = 0;
 
     // Minimum playout delay (Used for lip-sync). This is the minimum delay required
     // to sync with audio. Not included in  VideoCodingModule::Delay()
@@ -496,16 +484,6 @@ public:
     // Return value      : Total delay in ms, on success.
     //                     < 0,               on error.
     virtual int32_t Delay() const = 0;
-
-    // Get the received frame counters. Keeps track of the number of each frame type
-    // received since the start of the call.
-    //
-    // Output:
-    //      - frameCount      : Struct to be filled with the number of frames received.
-    //
-    // Return value           : VCM_OK,        on success.
-    //                          <0,                 on error.
-    virtual int32_t ReceivedFrameCount(VCMFrameCount& frameCount) const = 0;
 
     // Returns the number of packets discarded by the jitter buffer due to being
     // too late. This can include duplicated packets which arrived after the

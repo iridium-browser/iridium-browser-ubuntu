@@ -85,13 +85,13 @@ public class ChromeBrowserProvider extends ContentProvider {
     private static final String BROWSER_CONTRACT_HISTORY_CONTENT_ITEM_TYPE =
             "vnd.android.cursor.item/browser-history";
     private static final String BROWSER_CONTRACT_BOOKMARK_CONTENT_TYPE =
-        "vnd.android.cursor.dir/bookmark";
+            "vnd.android.cursor.dir/bookmark";
     private static final String BROWSER_CONTRACT_BOOKMARK_CONTENT_ITEM_TYPE =
-        "vnd.android.cursor.item/bookmark";
+            "vnd.android.cursor.item/bookmark";
     private static final String BROWSER_CONTRACT_SEARCH_CONTENT_TYPE =
-        "vnd.android.cursor.dir/searches";
+            "vnd.android.cursor.dir/searches";
     private static final String BROWSER_CONTRACT_SEARCH_CONTENT_ITEM_TYPE =
-        "vnd.android.cursor.item/searches";
+            "vnd.android.cursor.item/searches";
 
     // This Authority is for internal interface. It's concatenated with
     // Context.getPackageName() so that we can install different channels
@@ -330,7 +330,7 @@ public class ChromeBrowserProvider extends ContentProvider {
     @Override
     public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
             String sortOrder) {
-        if (!canHandleContentProviderApiCall()) return null;
+        if (!canHandleContentProviderApiCall() || !hasReadAccess()) return null;
 
         // Check for invalid id values if provided.
         long bookmarkId = getContentUriId(uri);
@@ -387,7 +387,7 @@ public class ChromeBrowserProvider extends ContentProvider {
 
     @Override
     public Uri insert(Uri uri, ContentValues values) {
-        if (!canHandleContentProviderApiCall()) return null;
+        if (!canHandleContentProviderApiCall() || !hasWriteAccess()) return null;
 
         int match = mUriMatcher.match(uri);
         Uri res = null;
@@ -420,7 +420,7 @@ public class ChromeBrowserProvider extends ContentProvider {
 
     @Override
     public int delete(Uri uri, String selection, String[] selectionArgs) {
-        if (!canHandleContentProviderApiCall()) return 0;
+        if (!canHandleContentProviderApiCall() || !hasWriteAccess()) return 0;
 
         // Check for invalid id values if provided.
         long bookmarkId = getContentUriId(uri);
@@ -469,7 +469,7 @@ public class ChromeBrowserProvider extends ContentProvider {
 
     @Override
     public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) {
-        if (!canHandleContentProviderApiCall()) return 0;
+        if (!canHandleContentProviderApiCall() || !hasWriteAccess()) return 0;
 
         // Check for invalid id values if provided.
         long bookmarkId = getContentUriId(uri);
@@ -748,6 +748,24 @@ public class ChromeBrowserProvider extends ContentProvider {
     }
 
     /**
+     * Read access restrictions may be set by the manifest or subclasses, but none are set
+     * by default.
+     * @return Whether the caller has read access to history and bookmarks information.
+     */
+    protected boolean hasReadAccess() {
+        return true;
+    }
+
+    /**
+     * Write access restrictions may be set by the manifest or subclasses, but none are set
+     * by default.
+     * @return Whether the caller has write access to history and bookmarks information.
+     */
+    protected boolean hasWriteAccess() {
+        return true;
+    }
+
+    /**
      * The type of a BookmarkNode.
      */
     public enum Type {
@@ -863,17 +881,17 @@ public class ChromeBrowserProvider extends ContentProvider {
          * The existence of parent and children nodes is checked, but their contents are not.
          */
         public boolean equalContents(BookmarkNode node) {
-            return node != null &&
-                    mId == node.mId &&
-                    !(mName == null ^ node.mName == null) &&
-                    (mName == null || mName.equals(node.mName)) &&
-                    !(mUrl == null ^ node.mUrl == null) &&
-                    (mUrl == null || mUrl.equals(node.mUrl)) &&
-                    mType == node.mType &&
-                    byteArrayEqual(mFavicon, node.mFavicon) &&
-                    byteArrayEqual(mThumbnail, node.mThumbnail) &&
-                    !(mParent == null ^ node.mParent == null) &&
-                    children().size() == node.children().size();
+            return node != null
+                    && mId == node.mId
+                    && !(mName == null ^ node.mName == null)
+                    && (mName == null || mName.equals(node.mName))
+                    && !(mUrl == null ^ node.mUrl == null)
+                    && (mUrl == null || mUrl.equals(node.mUrl))
+                    && mType == node.mType
+                    && byteArrayEqual(mFavicon, node.mFavicon)
+                    && byteArrayEqual(mThumbnail, node.mThumbnail)
+                    && !(mParent == null ^ node.mParent == null)
+                    && children().size() == node.children().size();
         }
 
         private static boolean byteArrayEqual(byte[] byte1, byte[] byte2) {
@@ -1292,8 +1310,8 @@ public class ChromeBrowserProvider extends ContentProvider {
         // devices whose API level is less than API 17.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
             UserHandle callingUserHandle = Binder.getCallingUserHandle();
-            if (callingUserHandle != null &&
-                    !callingUserHandle.equals(android.os.Process.myUserHandle())) {
+            if (callingUserHandle != null
+                    && !callingUserHandle.equals(android.os.Process.myUserHandle())) {
                 ThreadUtils.postOnUiThread(new Runnable() {
                     @Override
                     public void run() {

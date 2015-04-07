@@ -42,7 +42,7 @@ bool CheckSocketPermission(
     scoped_refptr<Extension> extension,
     SocketPermissionRequest::OperationType type,
     const char* host,
-    int port) {
+    uint16 port) {
   SocketPermission::CheckParam param(type, host, port);
   return extension->permissions_data()->CheckAPIPermissionWithParam(
       APIPermission::kSocket, &param);
@@ -562,7 +562,7 @@ TEST_F(ExtensionScriptAndCaptureVisibleTest, Permissions) {
 }
 
 TEST_F(ExtensionScriptAndCaptureVisibleTest, PermissionsWithChromeURLsEnabled) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kExtensionsOnChromeURLs);
 
   scoped_refptr<Extension> extension;

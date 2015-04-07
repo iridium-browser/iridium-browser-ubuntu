@@ -73,7 +73,7 @@ class PhishingDOMFeatureExtractorTest : public InProcessBrowserTest {
 
   ~PhishingDOMFeatureExtractorTest() override {}
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kSingleProcess);
 #if defined(OS_WIN)
     // Don't want to try to create a GPU process.
@@ -394,7 +394,13 @@ IN_PROC_BROWSER_TEST_F(PhishingDOMFeatureExtractorTest, SubFrames) {
   ExpectFeatureMapsAreEqual(features, expected_features);
 }
 
-IN_PROC_BROWSER_TEST_F(PhishingDOMFeatureExtractorTest, Continuation) {
+// Test flakes with LSAN enabled. See http://crbug.com/373155.
+#if defined(LEAK_SANITIZER)
+#define MAYBE_Continuation DISABLED_Continuation
+#else
+#define MAYBE_Continuation Continuation
+#endif
+IN_PROC_BROWSER_TEST_F(PhishingDOMFeatureExtractorTest, MAYBE_Continuation) {
   // For this test, we'll cause the feature extraction to run multiple
   // iterations by incrementing the clock.
 

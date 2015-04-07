@@ -119,8 +119,8 @@ component("app_list") {
       "views/apps_grid_view_folder_delegate.h",
       "views/cached_label.cc",
       "views/cached_label.h",
-      "views/contents_switcher_view.cc",
-      "views/contents_switcher_view.h",
+      "views/contents_animator.cc",
+      "views/contents_animator.h",
       "views/contents_view.cc",
       "views/contents_view.h",
       "views/folder_background_view.cc",
@@ -144,14 +144,18 @@ component("app_list") {
       "views/search_result_list_view.cc",
       "views/search_result_list_view.h",
       "views/search_result_list_view_delegate.h",
+      "views/search_result_page_view.cc",
+      "views/search_result_page_view.h",
+      "views/search_result_tile_item_list_view.cc",
+      "views/search_result_tile_item_list_view.h",
+      "views/search_result_tile_item_view.cc",
+      "views/search_result_tile_item_view.h",
       "views/search_result_view.cc",
       "views/search_result_view.h",
       "views/speech_view.cc",
       "views/speech_view.h",
       "views/start_page_view.cc",
       "views/start_page_view.h",
-      "views/search_result_tile_item_view.cc",
-      "views/search_result_tile_item_view.h",
       "views/tile_item_view.cc",
       "views/tile_item_view.h",
       "views/top_icon_animation_view.cc",
@@ -189,9 +193,7 @@ component("app_list") {
       "cocoa/scroll_view_with_no_scrollbars.h",
       "cocoa/scroll_view_with_no_scrollbars.mm",
     ]
-    deps += [
-      "//third_party/google_toolbox_for_mac",
-    ]
+    deps += [ "//third_party/google_toolbox_for_mac" ]
     libs = [ "QuartzCore.framework" ]
   }
 }
@@ -250,6 +252,7 @@ test("app_list_unittests") {
       "views/app_list_main_view_unittest.cc",
       "views/app_list_view_unittest.cc",
       "views/apps_grid_view_unittest.cc",
+      "views/contents_view_unittest.cc",
       "views/folder_header_view_unittest.cc",
       "views/search_box_view_unittest.cc",
       "views/search_result_list_view_unittest.cc",

@@ -142,7 +142,10 @@ CSSParserToken CSSTokenizer::plusOrFullStop(UChar cc)
 
 CSSParserToken CSSTokenizer::asterisk(UChar cc)
 {
-    return CSSParserToken(DelimiterToken, cc);
+    ASSERT(cc == '*');
+    if (consumeIfNext('='))
+        return CSSParserToken(SubstringMatchToken);
+    return CSSParserToken(DelimiterToken, '*');
 }
 
 CSSParserToken CSSTokenizer::comma(UChar cc)
@@ -192,6 +195,48 @@ CSSParserToken CSSTokenizer::hash(UChar cc)
     }
 
     return CSSParserToken(DelimiterToken, cc);
+}
+
+CSSParserToken CSSTokenizer::circumflexAccent(UChar cc)
+{
+    ASSERT(cc == '^');
+    if (consumeIfNext('='))
+        return CSSParserToken(PrefixMatchToken);
+    return CSSParserToken(DelimiterToken, '^');
+}
+
+CSSParserToken CSSTokenizer::dollarSign(UChar cc)
+{
+    ASSERT(cc == '$');
+    if (consumeIfNext('='))
+        return CSSParserToken(SuffixMatchToken);
+    return CSSParserToken(DelimiterToken, '$');
+}
+
+CSSParserToken CSSTokenizer::verticalLine(UChar cc)
+{
+    ASSERT(cc == '|');
+    if (consumeIfNext('='))
+        return CSSParserToken(DashMatchToken);
+    if (consumeIfNext('|'))
+        return CSSParserToken(ColumnToken);
+    return CSSParserToken(DelimiterToken, '|');
+}
+
+CSSParserToken CSSTokenizer::tilde(UChar cc)
+{
+    ASSERT(cc == '~');
+    if (consumeIfNext('='))
+        return CSSParserToken(IncludeMatchToken);
+    return CSSParserToken(DelimiterToken, '~');
+}
+
+CSSParserToken CSSTokenizer::commercialAt(UChar cc)
+{
+    ASSERT(cc == '@');
+    if (nextCharsAreIdentifier())
+        return CSSParserToken(AtKeywordToken, consumeName());
+    return CSSParserToken(DelimiterToken, '@');
 }
 
 CSSParserToken CSSTokenizer::reverseSolidus(UChar cc)
@@ -253,9 +298,9 @@ void CSSTokenizer::tokenize(String string, Vector<CSSParserToken>& outTokens)
     CSSTokenizer tokenizer(input);
     while (true) {
         CSSParserToken token = tokenizer.nextToken();
-        outTokens.append(token);
         if (token.type() == EOFToken)
             return;
+        outTokens.append(token);
     }
 }
 
@@ -376,7 +421,7 @@ CSSParserToken CSSTokenizer::consumeIdentLikeToken()
 {
     String name = consumeName();
     if (consumeIfNext('(')) {
-        if (name == "url") {
+        if (equalIgnoringCase(name, "url")) {
             // The spec is slightly different so as to avoid dropping whitespace
             // tokens, but they wouldn't be used and this is easier.
             consumeUntilNonWhitespace();

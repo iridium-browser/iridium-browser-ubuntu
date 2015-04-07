@@ -1,0 +1,10 @@
+include_rules = [
+    "+bindings",
+    "+core",
+    "+heap",
+    "-modules",
+    "+modules/fetch",
+    "+platform",
+    "+public/platform",
+    "-web",
+]

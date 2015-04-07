@@ -42,7 +42,7 @@ enum HttpProxyType {
 struct HttpProxyClientSocketPoolTestParams {
   HttpProxyClientSocketPoolTestParams()
       : proxy_type(HTTP),
-        protocol(kProtoSPDY3) {}
+        protocol(kProtoSPDY31) {}
 
   HttpProxyClientSocketPoolTestParams(
       HttpProxyType proxy_type,
@@ -171,6 +171,7 @@ class HttpProxyClientSocketPoolTest
                          NULL /* channel_id_store */,
                          NULL /* transport_security_state */,
                          NULL /* cert_transparency_verifier */,
+                         NULL /* cert_policy_enforcer */,
                          std::string() /* ssl_session_cache_shard */,
                          session_deps_.deterministic_socket_factory.get(),
                          &transport_socket_pool_,
@@ -188,7 +189,6 @@ class HttpProxyClientSocketPoolTest
               NULL,
               &transport_socket_pool_,
               &ssl_socket_pool_,
-              NULL,
               NULL) {}
 
   virtual ~HttpProxyClientSocketPoolTest() {
@@ -342,18 +342,15 @@ INSTANTIATE_TEST_CASE_P(
     HttpProxyClientSocketPoolTests,
     HttpProxyClientSocketPoolTest,
     ::testing::Values(
-        HttpProxyClientSocketPoolTestParams(HTTP, kProtoDeprecatedSPDY2),
-        HttpProxyClientSocketPoolTestParams(HTTPS, kProtoDeprecatedSPDY2),
-        HttpProxyClientSocketPoolTestParams(SPDY, kProtoDeprecatedSPDY2),
-        HttpProxyClientSocketPoolTestParams(HTTP, kProtoSPDY3),
-        HttpProxyClientSocketPoolTestParams(HTTPS, kProtoSPDY3),
-        HttpProxyClientSocketPoolTestParams(SPDY, kProtoSPDY3),
         HttpProxyClientSocketPoolTestParams(HTTP, kProtoSPDY31),
         HttpProxyClientSocketPoolTestParams(HTTPS, kProtoSPDY31),
         HttpProxyClientSocketPoolTestParams(SPDY, kProtoSPDY31),
-        HttpProxyClientSocketPoolTestParams(HTTP, kProtoSPDY4),
-        HttpProxyClientSocketPoolTestParams(HTTPS, kProtoSPDY4),
-        HttpProxyClientSocketPoolTestParams(SPDY, kProtoSPDY4)));
+        HttpProxyClientSocketPoolTestParams(HTTP, kProtoSPDY4_14),
+        HttpProxyClientSocketPoolTestParams(HTTPS, kProtoSPDY4_14),
+        HttpProxyClientSocketPoolTestParams(SPDY, kProtoSPDY4_14),
+        HttpProxyClientSocketPoolTestParams(HTTP, kProtoSPDY4_15),
+        HttpProxyClientSocketPoolTestParams(HTTPS, kProtoSPDY4_15),
+        HttpProxyClientSocketPoolTestParams(SPDY, kProtoSPDY4_15)));
 
 TEST_P(HttpProxyClientSocketPoolTest, NoTunnel) {
   Initialize(NULL, 0, NULL, 0, NULL, 0, NULL, 0);
@@ -395,8 +392,8 @@ TEST_P(HttpProxyClientSocketPoolTest, NeedAuth) {
     MockRead(ASYNC, 3, "Content-Length: 10\r\n\r\n"),
     MockRead(ASYNC, 4, "0123456789"),
   };
-  scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyConnect(NULL, 0, 1, LOW));
+  scoped_ptr<SpdyFrame> req(spdy_util_.ConstructSpdyConnect(
+      NULL, 0, 1, LOW, HostPortPair("www.google.com", 443)));
   scoped_ptr<SpdyFrame> rst(
       spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
   MockWrite spdy_writes[] = {
@@ -504,7 +501,8 @@ TEST_P(HttpProxyClientSocketPoolTest, AsyncHaveAuth) {
   };
 
   scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1, LOW));
+      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1, LOW,
+                                      HostPortPair("www.google.com", 443)));
   MockWrite spdy_writes[] = {
     CreateMockWrite(*req, 0, ASYNC)
   };
@@ -546,8 +544,8 @@ TEST_P(HttpProxyClientSocketPoolTest,
     return;
 
   scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize,
-                                      1, MEDIUM));
+      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1, MEDIUM,
+                                      HostPortPair("www.google.com", 443)));
   MockWrite spdy_writes[] = {
     CreateMockWrite(*req, 0, ASYNC)
   };
@@ -653,7 +651,8 @@ TEST_P(HttpProxyClientSocketPoolTest, TunnelUnexpectedClose) {
     MockRead(ASYNC, ERR_CONNECTION_CLOSED, 2),
   };
   scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1, LOW));
+      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1, LOW,
+                                      HostPortPair("www.google.com", 443)));
   MockWrite spdy_writes[] = {
     CreateMockWrite(*req, 0, ASYNC)
   };
@@ -727,7 +726,8 @@ TEST_P(HttpProxyClientSocketPoolTest, TunnelSetupError) {
     MockRead(ASYNC, 1, "HTTP/1.1 304 Not Modified\r\n\r\n"),
   };
   scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1, LOW));
+      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1, LOW,
+                                      HostPortPair("www.google.com", 443)));
   scoped_ptr<SpdyFrame> rst(
       spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
   MockWrite spdy_writes[] = {
@@ -778,7 +778,8 @@ TEST_P(HttpProxyClientSocketPoolTest, TunnelSetupRedirect) {
     MockRead(ASYNC, 1, responseText.c_str()),
   };
   scoped_ptr<SpdyFrame> req(
-      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1, LOW));
+      spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1, LOW,
+                                      HostPortPair("www.google.com", 443)));
   scoped_ptr<SpdyFrame> rst(
       spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
 

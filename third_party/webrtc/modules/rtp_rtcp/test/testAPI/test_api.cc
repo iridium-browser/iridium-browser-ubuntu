@@ -18,8 +18,8 @@ using namespace webrtc;
 class RtpRtcpAPITest : public ::testing::Test {
  protected:
   RtpRtcpAPITest() : module(NULL), fake_clock(123456) {
-    test_CSRC[0] = 1234;
-    test_CSRC[1] = 2345;
+    test_csrcs.push_back(1234);
+    test_csrcs.push_back(2345);
     test_id = 123;
     test_ssrc = 3456;
     test_timestamp = 4567;
@@ -50,15 +50,15 @@ class RtpRtcpAPITest : public ::testing::Test {
   uint32_t test_ssrc;
   uint32_t test_timestamp;
   uint16_t test_sequence_number;
-  uint32_t test_CSRC[webrtc::kRtpCsrcSize];
+  std::vector<uint32_t> test_csrcs;
   SimulatedClock fake_clock;
 };
 
 TEST_F(RtpRtcpAPITest, Basic) {
-  EXPECT_EQ(0, module->SetSequenceNumber(test_sequence_number));
+  module->SetSequenceNumber(test_sequence_number);
   EXPECT_EQ(test_sequence_number, module->SequenceNumber());
 
-  EXPECT_EQ(0, module->SetStartTimestamp(test_timestamp));
+  module->SetStartTimestamp(test_timestamp);
   EXPECT_EQ(test_timestamp, module->StartTimestamp());
 
   EXPECT_FALSE(module->Sending());
@@ -84,25 +84,17 @@ TEST_F(RtpRtcpAPITest, SSRC) {
   EXPECT_EQ(test_ssrc, module->SSRC());
 }
 
-TEST_F(RtpRtcpAPITest, CSRC) {
-  EXPECT_EQ(0, module->SetCSRCs(test_CSRC, 2));
-  uint32_t testOfCSRC[webrtc::kRtpCsrcSize];
-  EXPECT_EQ(2, module->CSRCs(testOfCSRC));
-  EXPECT_EQ(test_CSRC[0], testOfCSRC[0]);
-  EXPECT_EQ(test_CSRC[1], testOfCSRC[1]);
-}
-
 TEST_F(RtpRtcpAPITest, RTCP) {
   EXPECT_EQ(kRtcpOff, module->RTCP());
-  EXPECT_EQ(0, module->SetRTCPStatus(kRtcpCompound));
+  module->SetRTCPStatus(kRtcpCompound);
   EXPECT_EQ(kRtcpCompound, module->RTCP());
 
   EXPECT_EQ(0, module->SetCNAME("john.doe@test.test"));
 
   EXPECT_FALSE(module->TMMBR());
-  EXPECT_EQ(0, module->SetTMMBRStatus(true));
+  module->SetTMMBRStatus(true);
   EXPECT_TRUE(module->TMMBR());
-  EXPECT_EQ(0, module->SetTMMBRStatus(false));
+  module->SetTMMBRStatus(false);
   EXPECT_FALSE(module->TMMBR());
 
   EXPECT_EQ(kNackOff, rtp_receiver_->NACK());

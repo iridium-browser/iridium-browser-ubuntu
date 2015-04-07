@@ -6,6 +6,7 @@
 #include "DictionaryTest.h"
 
 #include "core/testing/InternalDictionary.h"
+#include "core/testing/InternalDictionaryDerived.h"
 
 namespace blink {
 
@@ -22,6 +23,10 @@ void DictionaryTest::set(const InternalDictionary& testingDictionary)
     reset();
     if (testingDictionary.hasLongMember())
         m_longMember = testingDictionary.longMember();
+    if (testingDictionary.hasLongMemberWithClamp())
+        m_longMemberWithClamp = testingDictionary.longMemberWithClamp();
+    if (testingDictionary.hasLongMemberWithEnforceRange())
+        m_longMemberWithEnforceRange = testingDictionary.longMemberWithEnforceRange();
     m_longMemberWithDefault = testingDictionary.longMemberWithDefault();
     if (testingDictionary.hasLongOrNullMember())
         m_longOrNullMember = testingDictionary.longOrNullMember();
@@ -35,6 +40,8 @@ void DictionaryTest::set(const InternalDictionary& testingDictionary)
         m_doubleMember = testingDictionary.doubleMember();
     m_stringMember = testingDictionary.stringMember();
     m_stringMemberWithDefault = testingDictionary.stringMemberWithDefault();
+    m_byteStringMember = testingDictionary.byteStringMember();
+    m_usvStringMember = testingDictionary.usvStringMember();
     if (testingDictionary.hasStringSequenceMember())
         m_stringSequenceMember = testingDictionary.stringSequenceMember();
     if (testingDictionary.hasStringSequenceOrNullMember())
@@ -48,12 +55,19 @@ void DictionaryTest::set(const InternalDictionary& testingDictionary)
         m_elementOrNullMember = testingDictionary.elementOrNullMember();
     m_objectMember = testingDictionary.objectMember();
     m_objectOrNullMemberWithDefault = testingDictionary.objectOrNullMemberWithDefault();
+    if (testingDictionary.hasDoubleOrStringMember())
+        m_doubleOrStringMember = testingDictionary.doubleOrStringMember();
+    m_eventTargetOrNullMember = testingDictionary.eventTargetOrNullMember();
 }
 
 void DictionaryTest::get(InternalDictionary& result)
 {
     if (m_longMember)
         result.setLongMember(m_longMember.get());
+    if (m_longMemberWithClamp)
+        result.setLongMemberWithClamp(m_longMemberWithClamp.get());
+    if (m_longMemberWithEnforceRange)
+        result.setLongMemberWithEnforceRange(m_longMemberWithEnforceRange.get());
     result.setLongMemberWithDefault(m_longMemberWithDefault);
     if (m_longOrNullMember)
         result.setLongOrNullMember(m_longOrNullMember.get());
@@ -65,6 +79,8 @@ void DictionaryTest::get(InternalDictionary& result)
         result.setDoubleMember(m_doubleMember.get());
     result.setStringMember(m_stringMember);
     result.setStringMemberWithDefault(m_stringMemberWithDefault);
+    result.setByteStringMember(m_byteStringMember);
+    result.setUsvStringMember(m_usvStringMember);
     if (m_stringSequenceMember)
         result.setStringSequenceMember(m_stringSequenceMember.get());
     if (m_stringSequenceOrNullMember)
@@ -78,20 +94,40 @@ void DictionaryTest::get(InternalDictionary& result)
         result.setElementOrNullMember(m_elementOrNullMember);
     result.setObjectMember(m_objectMember);
     result.setObjectOrNullMemberWithDefault(m_objectOrNullMemberWithDefault);
+    if (!m_doubleOrStringMember.isNull())
+        result.setDoubleOrStringMember(m_doubleOrStringMember);
+    result.setEventTargetOrNullMember(m_eventTargetOrNullMember);
+}
+
+void DictionaryTest::setDerived(const InternalDictionaryDerived& derived)
+{
+    set(derived);
+    if (derived.hasDerivedStringMember())
+        m_derivedStringMember = derived.derivedStringMember();
+    m_derivedStringMemberWithDefault = derived.derivedStringMemberWithDefault();
+}
+
+void DictionaryTest::getDerived(InternalDictionaryDerived& result)
+{
+    get(result);
+    result.setDerivedStringMember(m_derivedStringMember);
+    result.setDerivedStringMemberWithDefault(m_derivedStringMemberWithDefault);
 }
 
 void DictionaryTest::reset()
 {
-    m_longMember = Nullable<int>();
+    m_longMember = nullptr;
+    m_longMemberWithClamp = nullptr;
+    m_longMemberWithEnforceRange = nullptr;
     m_longMemberWithDefault = -1; // This value should not be returned.
-    m_longOrNullMember = Nullable<int>();
-    m_longOrNullMemberWithDefault = Nullable<int>();
-    m_booleanMember = Nullable<bool>();
-    m_doubleMember = Nullable<double>();
+    m_longOrNullMember = nullptr;
+    m_longOrNullMemberWithDefault = nullptr;
+    m_booleanMember = nullptr;
+    m_doubleMember = nullptr;
     m_stringMember = String();
     m_stringMemberWithDefault = String("Should not be returned");
-    m_stringSequenceMember = Nullable<Vector<String> >();
-    m_stringSequenceOrNullMember = Nullable<Vector<String> >();
+    m_stringSequenceMember = nullptr;
+    m_stringSequenceOrNullMember = nullptr;
     m_enumMember = String();
     m_enumMemberWithDefault = String();
     m_enumOrNullMember = String();
@@ -99,12 +135,17 @@ void DictionaryTest::reset()
     m_elementOrNullMember = nullptr;
     m_objectMember = ScriptValue();
     m_objectOrNullMemberWithDefault = ScriptValue();
+    m_doubleOrStringMember = DoubleOrString();
+    m_eventTargetOrNullMember = nullptr;
+    m_derivedStringMember = String();
+    m_derivedStringMemberWithDefault = String();
 }
 
 void DictionaryTest::trace(Visitor* visitor)
 {
     visitor->trace(m_elementMember);
     visitor->trace(m_elementOrNullMember);
+    visitor->trace(m_eventTargetOrNullMember);
 }
 
 }

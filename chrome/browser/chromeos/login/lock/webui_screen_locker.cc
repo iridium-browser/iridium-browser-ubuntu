@@ -98,6 +98,9 @@ void WebUIScreenLocker::LockScreen() {
   LoadURL(GURL(kLoginURL));
   lock_window->Grab();
 
+  signin_screen_controller_.reset(
+      new SignInScreenController(GetOobeUI(), this));
+
   login_display_.reset(new WebUILoginDisplay(this));
   login_display_->set_background_bounds(bounds);
   login_display_->set_parent_window(GetNativeWindow());
@@ -105,10 +108,6 @@ void WebUIScreenLocker::LockScreen() {
 
   GetOobeUI()->ShowSigninScreen(
       LoginScreenContext(), login_display_.get(), login_display_.get());
-
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
-                 content::NotificationService::AllSources());
 
   if (login::LoginScrollIntoViewEnabled())
     DisableKeyboardOverscroll();
@@ -159,6 +158,13 @@ void WebUIScreenLocker::FocusUserPod() {
   GetWebUI()->CallJavascriptFunction("cr.ui.Oobe.forceLockedUserPodFocus");
 }
 
+void WebUIScreenLocker::ResetAndFocusUserPod() {
+  if (!webui_ready_)
+    return;
+  GetWebUI()->CallJavascriptFunction("cr.ui.Oobe.clearUserPodPassword");
+  FocusUserPod();
+}
+
 WebUIScreenLocker::~WebUIScreenLocker() {
   DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(this);
 #if !defined(USE_ATHENA)
@@ -207,25 +213,6 @@ OobeUI* WebUIScreenLocker::GetOobeUI() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// WebUIScreenLocker, content::NotificationObserver implementation:
-
-void WebUIScreenLocker::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED: {
-      const user_manager::User& user =
-          *content::Details<user_manager::User>(details).ptr();
-      login_display_->OnUserImageChanged(user);
-      break;
-    }
-    default:
-      WebUILoginView::Observe(type, source, details);
-  }
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // WebUIScreenLocker, LoginDisplay::Delegate implementation:
 
 void WebUIScreenLocker::CancelPasswordChangedFlow()  {
@@ -263,6 +250,10 @@ void WebUIScreenLocker::OnSigninScreenReady() {
 }
 
 void WebUIScreenLocker::OnStartEnterpriseEnrollment() {
+  NOTREACHED();
+}
+
+void WebUIScreenLocker::OnStartEnableDebuggingScreen() {
   NOTREACHED();
 }
 
@@ -331,10 +322,19 @@ void WebUIScreenLocker::OnWidgetDestroying(views::Widget* widget) {
 
 void WebUIScreenLocker::LidEventReceived(bool open,
                                          const base::TimeTicks& time) {
+  if (open) {
+    content::BrowserThread::PostTask(
+        content::BrowserThread::UI, FROM_HERE,
+        base::Bind(&WebUIScreenLocker::FocusUserPod,
+                   weak_factory_.GetWeakPtr()));
+  }
+}
+
+void WebUIScreenLocker::SuspendImminent() {
   content::BrowserThread::PostTask(
-      content::BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&WebUIScreenLocker::FocusUserPod, weak_factory_.GetWeakPtr()));
+      content::BrowserThread::UI, FROM_HERE,
+      base::Bind(&WebUIScreenLocker::ResetAndFocusUserPod,
+                 weak_factory_.GetWeakPtr()));
 }
 
 void WebUIScreenLocker::SuspendDone(const base::TimeDelta& sleep_duration) {

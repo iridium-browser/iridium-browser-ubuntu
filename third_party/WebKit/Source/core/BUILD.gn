@@ -90,6 +90,7 @@ source_set("prerequisites") {
     "//third_party/npapi",
     "//third_party/ots",
     "//third_party/qcms",
+    "//third_party/snappy",
     "//third_party/sqlite",
     "//third_party/zlib",
     "//url",
@@ -238,12 +239,20 @@ source_set("remaining") {
   } else {  # !is_win
     sources -= [
       "rendering/RenderThemeChromiumFontProviderWin.cpp",
+      "rendering/RenderThemeChromiumWin.cpp",
+      "rendering/RenderThemeChromiumWin.h",
     ]
   }
-  if (!is_linux && !is_android) {
+  if (!is_linux) {
     sources -= [
-      "rendering/RenderThemeChromiumFontProviderLinux.cpp",
+      "rendering/RenderThemeChromiumLinux.cpp",
+      "rendering/RenderThemeChromiumLinux.h",
     ]
+    if (!is_android) {
+      sources -= [
+        "rendering/RenderThemeChromiumFontProviderLinux.cpp",
+      ]
+    }
   }
 
   if (is_android) {
@@ -260,6 +269,8 @@ source_set("remaining") {
 
   if (is_mac) {
     sources -= [
+      "rendering/RenderThemeChromiumDefault.cpp",
+      "rendering/RenderThemeChromiumDefault.h",
       "rendering/RenderThemeChromiumFontProvider.cpp",
       "rendering/RenderThemeChromiumFontProvider.h",
       "rendering/RenderThemeChromiumSkia.cpp",
@@ -312,8 +323,6 @@ source_set("testing") {
     "$bindings_core_v8_output_dir/V8UnionTypesTest.h",
     "$bindings_core_v8_output_dir/V8Internals.cpp",
     "$bindings_core_v8_output_dir/V8Internals.h",
-    "$bindings_core_v8_output_dir/V8InternalProfilers.cpp",
-    "$bindings_core_v8_output_dir/V8InternalProfilers.h",
     "$bindings_core_v8_output_dir/V8InternalSettings.cpp",
     "$bindings_core_v8_output_dir/V8InternalSettings.h",
     "$bindings_core_v8_output_dir/V8InternalSettingsGenerated.cpp",
@@ -328,6 +337,10 @@ source_set("testing") {
     "$bindings_core_v8_output_dir/V8RefCountedScriptWrappable.h",
     "$bindings_core_v8_output_dir/V8InternalDictionary.cpp",
     "$bindings_core_v8_output_dir/V8InternalDictionary.h",
+    "$bindings_core_v8_output_dir/V8InternalDictionaryDerived.cpp",
+    "$bindings_core_v8_output_dir/V8InternalDictionaryDerived.h",
+    "$bindings_core_v8_output_dir/V8PluginPlaceholderOptions.cpp",
+    "$bindings_core_v8_output_dir/V8PluginPlaceholderOptions.h",
   ]
 }
 

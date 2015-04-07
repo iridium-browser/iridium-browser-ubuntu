@@ -103,6 +103,12 @@ static leveldb::Status OpenDB(
   options.create_if_missing = true;
   options.paranoid_checks = true;
   options.filter_policy = filter_policy->get();
+#if defined(OS_CHROMEOS)
+  // Disabled on CrOS until crbug.com/460568 is fixed.
+  options.reuse_logs = false;
+#else
+  options.reuse_logs = true;
+#endif
   options.compression = leveldb::kSnappyCompression;
 
   // For info about the troubles we've run into with this parameter, see:
@@ -184,7 +190,7 @@ static void ParseAndHistogramIOErrorDetails(const std::string& histogram_name,
   leveldb_env::MethodID method;
   int error = -1;
   leveldb_env::ErrorParsingResult result =
-      leveldb_env::ParseMethodAndError(s.ToString().c_str(), &method, &error);
+      leveldb_env::ParseMethodAndError(s, &method, &error);
   if (result == leveldb_env::NONE)
     return;
   std::string method_histogram_name(histogram_name);

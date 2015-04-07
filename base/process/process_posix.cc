@@ -37,6 +37,12 @@ Process Process::Current() {
   return process.Pass();
 }
 
+// static
+Process Process::DeprecatedGetProcessFromHandle(ProcessHandle handle) {
+  DCHECK_NE(handle, GetCurrentProcessHandle());
+  return Process(handle);
+}
+
 #if !defined(OS_LINUX)
 // static
 bool Process::CanBackgroundProcesses() {
@@ -81,6 +87,18 @@ void Process::Terminate(int result_code) {
   // We don't wait here. It's the responsibility of other code to reap the
   // child.
   KillProcess(process_, result_code, false);
+}
+
+bool Process::WaitForExit(int* exit_code) {
+  // TODO(rvargas) crbug.com/417532: Remove this constant.
+  const int kNoTimeout = -1;
+  return WaitForExitWithTimeout(TimeDelta::FromMilliseconds(kNoTimeout),
+                                exit_code);
+}
+
+bool Process::WaitForExitWithTimeout(TimeDelta timeout, int* exit_code) {
+  // TODO(rvargas) crbug.com/417532: Move the implementation here.
+  return base::WaitForExitCodeWithTimeout(Handle(), exit_code, timeout);
 }
 
 #if !defined(OS_LINUX)

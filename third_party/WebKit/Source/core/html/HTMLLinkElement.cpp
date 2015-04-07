@@ -251,11 +251,11 @@ void HTMLLinkElement::process()
         link->process();
 }
 
-void HTMLLinkElement::enableIfExitTransitionStyle()
+void HTMLLinkElement::setEnabledIfExitTransitionStyle(bool enabled)
 {
     if (m_relAttribute.isTransitionExitingStylesheet()) {
         if (LinkStyle* link = linkStyle())
-            link->setDisabledState(false);
+            link->setDisabledState(!enabled);
     }
 }
 
@@ -453,6 +453,7 @@ void HTMLLinkElement::trace(Visitor* visitor)
 {
     visitor->trace(m_link);
     visitor->trace(m_sizes);
+    visitor->trace(m_linkLoader);
     HTMLElement::trace(visitor);
 }
 
@@ -507,9 +508,10 @@ void LinkStyle::setCSSStyleSheet(const String& href, const KURL& baseURL, const 
         return;
     }
 
-    if (!SubresourceIntegrity::CheckSubresourceIntegrity(*m_owner, cachedStyleSheet->sheetText(), KURL(KURL(), href))) {
+    if (!SubresourceIntegrity::CheckSubresourceIntegrity(*m_owner, cachedStyleSheet->sheetText(), KURL(KURL(), href), cachedStyleSheet->mimeType())) {
         m_loading = false;
         removePendingSheet();
+        notifyLoadedSheetAndAllCriticalSubresources(true);
         return;
     }
 

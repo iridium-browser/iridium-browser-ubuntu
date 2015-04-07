@@ -14,6 +14,7 @@
 
     <meta name="google" value="notranslate">
 
+    <link rel="stylesheet" href="chrome://resources/css/text_defaults.css">
     <link rel="stylesheet" href="chrome://resources/css/apps/topbutton_bar.css"></link>
 
     <link rel="stylesheet" href="foreground/css/list.css"></link>
@@ -38,9 +39,11 @@
 
       <!-- metrics.js initiates load performance tracking
            so we want to parse it as early as possible -->
+      <script src="foreground/js/metrics_base.js"></script>
       <script src="foreground/js/metrics.js"></script>
 
       <!-- Loads the client of the image loader extension -->
+      <script src="common/js/lru_cache.js"></script>
       <script src="chrome-extension://pmfjbimdmchhbnneeidfognadeopoehp/image_loader_client.js"></script>
 
       <script src="chrome://resources/js/load_time_data.js"></script>
@@ -84,7 +87,9 @@
       <script src="foreground/js/error_counter.js"></script>
 
       <script src="common/js/async_util.js"></script>
+      <script src="common/js/file_type.js"></script>
       <script src="common/js/volume_manager_common.js"></script>
+      <script src="common/js/importer_common.js"></script>
       <script src="common/js/util.js"></script>
       <script src="common/js/progress_center_common.js"></script>
 
@@ -93,8 +98,10 @@
       <script src="foreground/js/ui/file_manager_dialog_base.js"></script>
 
       <script src="foreground/js/app_installer.js"></script>
+      <script src="foreground/js/app_state_controller.js"></script>
       <script src="foreground/js/cws_container_client.js"></script>
       <script src="foreground/js/dialog_action_controller.js"></script>
+      <script src="foreground/js/dialog_type.js"></script>
       <script src="foreground/js/directory_contents.js"></script>
       <script src="foreground/js/directory_model.js"></script>
       <script src="foreground/js/file_manager.js"></script>
@@ -102,17 +109,22 @@
       <script src="foreground/js/file_selection.js"></script>
       <script src="foreground/js/file_tasks.js"></script>
       <script src="foreground/js/file_transfer_controller.js"></script>
-      <script src="foreground/js/file_type.js"></script>
       <script src="foreground/js/file_watcher.js"></script>
       <script src="foreground/js/folder_shortcuts_data_model.js"></script>
+      <script src="foreground/js/gear_menu_controller.js"></script>
+      <script src="foreground/js/import_controller.js"></script>
+      <script src="foreground/js/launch_param.js"></script>
       <script src="foreground/js/metadata/metadata_cache.js"></script>
+      <script src="foreground/js/metadata_update_controller.js"></script>
       <script src="foreground/js/naming_controller.js"></script>
       <script src="foreground/js/navigation_list_model.js"></script>
+      <script src="foreground/js/preview_panel_model.js"></script>
       <script src="foreground/js/progress_center_item_group.js"></script>
       <script src="foreground/js/scan_controller.js"></script>
       <script src="foreground/js/search_controller.js"></script>
       <script src="foreground/js/share_client.js"></script>
       <script src="foreground/js/spinner_controller.js"></script>
+      <script src="foreground/js/task_controller.js"></script>
       <script src="foreground/js/thumbnail_loader.js"></script>
       <script src="foreground/js/ui/conflict_dialog.js"></script>
       <script src="foreground/js/ui/default_action_dialog.js"></script>
@@ -124,6 +136,7 @@
       <script src="foreground/js/ui/file_grid.js"></script>
       <script src="foreground/js/ui/file_manager_ui.js"></script>
       <script src="foreground/js/ui/file_table.js"></script>
+      <script src="foreground/js/ui/gear_menu.js"></script>
       <script src="foreground/js/ui/list_container.js"></script>
       <script src="foreground/js/ui/location_line.js"></script>
       <script src="foreground/js/ui/multi_profile_share_dialog.js"></script>
@@ -134,6 +147,7 @@
       <script src="foreground/js/ui/share_dialog.js"></script>
       <script src="foreground/js/ui/suggest_apps_dialog.js"></script>
       <script src="foreground/js/ui/tree.css.js"></script>
+      <script src="foreground/js/main_window_component.js"></script>
       <script src="foreground/js/volume_manager_wrapper.js"></script>
 
       <!-- For accurate load performance tracking main.js should be
@@ -142,8 +156,7 @@
     </if>
 
   </head>
-  <body tabindex="-1" i18n-values=".style.fontFamily:WEB_FONT_FAMILY;
-                                   .style.fontSize:WEB_FONT_SIZE">
+  <body tabindex="-1">
     <commands>
       <!-- We have to use U+XXXX notation here according to event.keyIdentifier
            property -->
@@ -198,8 +211,13 @@
       <command id="open-with" i18n-values="label:OPEN_WITH_BUTTON_LABEL">
       <command id="zip-selection"
                i18n-values="label:ZIP_SELECTION_BUTTON_LABEL">
-      <command id="share" i18n-values="label:SHARE_BUTTON_LABEL"
+
+      <!-- The following commands' availability is refered by preview panel.
+           Set disabled until availability is obtained once. -->
+      <command id="share" i18n-values="label:SHARE_BUTTON_LABEL" disabled
                shortcut="U+00BE" hide-shortcut-text><!-- Shortcut: '.' -->
+      <command id="cloud-import" i18n-values="label:CLOUD_IMPORT_BUTTON_LABEL"
+               disabled>
 
       <command id="zoom-in" shortcut="U+00BB-Ctrl">
       <command id="zoom-out" shortcut="U+00BD-Ctrl">
@@ -212,54 +230,54 @@
       <command id="inspect-background" shortcut="U+0042-Shift-Ctrl">
     </commands>
 
-    <menu id="file-context-menu" class="chrome-menu" showShortcuts>
-      <menuitem id="default-action"
-                visibleif="full-page" hidden></menuitem>
-      <menuitem command="#open-with"
-                visibleif="full-page" hidden></menuitem>
+    <cr-menu id="file-context-menu" class="chrome-menu" showShortcuts>
+      <cr-menu-item id="default-action"
+                visibleif="full-page" hidden></cr-menu-item>
+      <cr-menu-item command="#open-with"
+                visibleif="full-page" hidden></cr-menu-item>
       <hr id="default-action-separator" visibleif="full-page" hidden>
-      <menuitem command="#toggle-pinned" checkable></menuitem>
-      <menuitem command="#share"></menuitem>
-      <menuitem command="#create-folder-shortcut"></menuitem>
+      <cr-menu-item command="#toggle-pinned" checkable></cr-menu-item>
+      <cr-menu-item command="#share"></cr-menu-item>
+      <cr-menu-item command="#create-folder-shortcut"></cr-menu-item>
       <hr command="#share">
-      <menuitem command="#cut" visibleif="full-page"></menuitem>
-      <menuitem command="#copy" visibleif="full-page"></menuitem>
-      <menuitem command="#paste" visibleif="full-page"></menuitem>
-      <menuitem command="#paste-into-folder" visibleif="full-page"></menuitem>
+      <cr-menu-item command="#cut" visibleif="full-page"></cr-menu-item>
+      <cr-menu-item command="#copy" visibleif="full-page"></cr-menu-item>
+      <cr-menu-item command="#paste" visibleif="full-page"></cr-menu-item>
+      <cr-menu-item command="#paste-into-folder" visibleif="full-page"></cr-menu-item>
       <hr visibleif="full-page">
-      <menuitem command="#rename"></menuitem>
-      <menuitem command="#delete" i18n-content="DELETE_BUTTON_LABEL"></menuitem>
-      <menuitem command="#zip-selection"></menuitem>
+      <cr-menu-item command="#rename"></cr-menu-item>
+      <cr-menu-item command="#delete" i18n-content="DELETE_BUTTON_LABEL"></cr-menu-item>
+      <cr-menu-item command="#zip-selection"></cr-menu-item>
       <hr visibleif="saveas-file full-page">
-      <menuitem command="#new-folder"
-                visibleif="saveas-file full-page"></menuitem>
-    </menu>
+      <cr-menu-item command="#new-folder"
+                visibleif="saveas-file full-page"></cr-menu-item>
+    </cr-menu>
 
-    <menu id="roots-context-menu" class="chrome-menu" >
-      <menuitem command="#unmount"></menuitem>
-      <menuitem command="#format"></menuitem>
-      <menuitem command="#remove-folder-shortcut"></menuitem>
-    </menu>
+    <cr-menu id="roots-context-menu" class="chrome-menu" >
+      <cr-menu-item command="#unmount"></cr-menu-item>
+      <cr-menu-item command="#format"></cr-menu-item>
+      <cr-menu-item command="#remove-folder-shortcut"></cr-menu-item>
+    </cr-menu>
 
-    <menu id="directory-tree-context-menu" class="chrome-menu" >
-      <menuitem command="#create-folder-shortcut"></menuitem>
-    </menu>
+    <cr-menu id="directory-tree-context-menu" class="chrome-menu" >
+      <cr-menu-item command="#create-folder-shortcut"></cr-menu-item>
+    </cr-menu>
 
-    <menu id="gear-menu" class="chrome-menu" showShortcuts>
-      <menuitem id="gear-menu-newwindow" command="#new-window"></menuitem>
-      <menuitem id="gear-menu-newfolder" command="#new-folder"></menuitem>
+    <cr-menu id="gear-menu" class="chrome-menu" showShortcuts>
+      <cr-menu-item id="gear-menu-newwindow" command="#new-window"></cr-menu-item>
+      <cr-menu-item id="gear-menu-newfolder" command="#new-folder"></cr-menu-item>
       <hr id="drive-separator">
-      <menuitem id="gear-menu-drive-sync-settings"
-                command="#drive-sync-settings"></menuitem>
-      <menuitem id="gear-menu-drive-hosted-settings"
-                command="#drive-hosted-settings"></menuitem>
+      <cr-menu-item id="gear-menu-drive-sync-settings"
+                command="#drive-sync-settings"></cr-menu-item>
+      <cr-menu-item id="gear-menu-drive-hosted-settings"
+                command="#drive-hosted-settings"></cr-menu-item>
       <hr id="help-separator">
-      <menuitem id="gear-menu-drive-buy-more-space"
-                command="#drive-buy-more-space"></menuitem>
-      <menuitem id="gear-menu-drive-go-to-drive"
-                command="#drive-go-to-drive"></menuitem>
-      <menuitem id="gear-menu-volume-help"
-                command="#volume-help"></menuitem>
+      <cr-menu-item id="gear-menu-drive-buy-more-space"
+                command="#drive-buy-more-space"></cr-menu-item>
+      <cr-menu-item id="gear-menu-drive-go-to-drive"
+                command="#drive-go-to-drive"></cr-menu-item>
+      <cr-menu-item id="gear-menu-volume-help"
+                command="#volume-help"></cr-menu-item>
       <hr id="volume-space-info-separator">
       <div id="volume-space-info">
         <div id="volume-space-info-contents">
@@ -269,17 +287,17 @@
           </div>
         </div>
       </div>
-    </menu>
+    </cr-menu>
 
-    <menu id="tasks-menu" class="chrome-menu">
-    </menu>
+    <cr-menu id="tasks-menu" class="chrome-menu">
+    </cr-menu>
 
-    <menu id="text-context-menu" class="chrome-menu" showShortcuts>
-        <menuitem command="#cut"></menuitem>
-        <menuitem command="#copy"></menuitem>
-        <menuitem command="#paste"></menuitem>
-        <menuitem command="#delete" i18n-content="DELETE_BUTTON_LABEL"></menuitem>
-    </menu>
+    <cr-menu id="text-context-menu" class="chrome-menu" showShortcuts>
+      <cr-menu-item command="#cut"></cr-menu-item>
+      <cr-menu-item command="#copy"></cr-menu-item>
+      <cr-menu-item command="#paste"></cr-menu-item>
+      <cr-menu-item command="#delete" i18n-content="DELETE_BUTTON_LABEL"></cr-menu-item>
+    </cr-menu>
 
     <div class="dialog-container">
       <div class="dialog-navigation-list">
@@ -363,11 +381,13 @@
               </div>
             </div>
             <div class="right buttonbar" visibleif="full-page">
-              <button id="share-button" command="#share" tabindex="10"
+              <button id="cloud-import-button" command="#cloud-import" tabindex="10"
+                      i18n-values="aria-label:CLOUD_IMPORT_BUTTON_LABEL"></button>
+              <button id="share-button" command="#share" tabindex="11"
                       i18n-values="aria-label:SHARE_BUTTON_LABEL"></button>
               <button id="tasks" class="combobutton" menu="#tasks-menu"
-                      tabindex="11"></button>
-              <button id="delete-button" command="#delete" tabindex="12"
+                      tabindex="12"></button>
+              <button id="delete-button" command="#delete" tabindex="13"
                       i18n-values="aria-label:DELETE_BUTTON_LABEL"></button>
             </div>
             <div class="preparing-label" i18n-content="PREPARING_LABEL"></div>
@@ -378,9 +398,9 @@
                  visibleif="open-file open-multi-file folder upload-folder">
               <select class="file-type" hidden></select>
               <button i18n-content="NEW_FOLDER_BUTTON_LABEL"
-                      visibleif="folder" command="#new-folder" tabindex="13"></button>
-              <button class="ok" disabled tabindex="14"></button>
-              <button class="cancel" i18n-content="CANCEL_LABEL" tabindex="15"></button>
+                      visibleif="folder" command="#new-folder" tabindex="14"></button>
+              <button class="ok" disabled tabindex="15"></button>
+              <button class="cancel" i18n-content="CANCEL_LABEL" tabindex="16"></button>
             </div>
           </div>
           <div id="unmounted-panel"></div>

@@ -45,14 +45,10 @@
 <include src="sockets_view.js">
 <include src="spdy_view.js">
 <include src="modules_view.js">
-<include src="logs_view.js">
 <include src="prerender_view.js">
 <include src="chromeos_view.js">
 <include src="bandwidth_view.js">
-<include src="cros_log_visualizer_view.js">
-<include src="cros_log_entry.js">
-<include src="cros_log_visualizer.js" >
-<include src="cros_log_marker.js" >
+<include src="sdch_view.js">
 
 document.addEventListener('DOMContentLoaded', function() {
   MainView.getInstance();  // from main.js

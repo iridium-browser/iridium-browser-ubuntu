@@ -35,6 +35,7 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
+#include "core/loader/FrameLoaderClient.h"
 #include "core/page/Chrome.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
@@ -210,6 +211,7 @@ void PinchViewport::setScaleAndLocation(float scale, const FloatPoint& location)
         Document* document = mainFrame()->document();
         document->enqueueScrollEventForNode(document);
 
+        mainFrame()->loader().client()->didChangeScrollOffset();
         valuesChanged = true;
     }
 
@@ -227,15 +229,16 @@ void PinchViewport::setScaleAndLocation(float scale, const FloatPoint& location)
 //
 // *rootTransformLayer
 //  +- *innerViewportContainerLayer (fixed pos container)
-//      +- *pageScaleLayer
-//  |       +- *innerViewportScrollLayer
-//  |           +-- overflowControlsHostLayer (root layer)
-//  |               +-- outerViewportContainerLayer (fixed pos container) [frame container layer in RenderLayerCompositor]
-//  |               |   +-- outerViewportScrollLayer [frame scroll layer in RenderLayerCompositor]
-//  |               |       +-- content layers ...
-//  |               +-- horizontal ScrollbarLayer (non-overlay)
-//  |               +-- verticalScrollbarLayer (non-overlay)
-//  |               +-- scroll corner (non-overlay)
+//  |   +- *overscrollElasticityLayer
+//  |       +- *pageScaleLayer
+//  |           +- *innerViewportScrollLayer
+//  |               +-- overflowControlsHostLayer (root layer)
+//  |                   +-- outerViewportContainerLayer (fixed pos container) [frame container layer in RenderLayerCompositor]
+//  |                   |   +-- outerViewportScrollLayer [frame scroll layer in RenderLayerCompositor]
+//  |                   |       +-- content layers ...
+//  |                   +-- horizontal ScrollbarLayer (non-overlay)
+//  |                   +-- verticalScrollbarLayer (non-overlay)
+//  |                   +-- scroll corner (non-overlay)
 //  +- *horizontalScrollbarLayer (overlay)
 //  +- *verticalScrollbarLayer (overlay)
 //
@@ -253,12 +256,14 @@ void PinchViewport::attachToLayerTree(GraphicsLayer* currentLayerTreeRoot, Graph
     if (!m_innerViewportScrollLayer) {
         ASSERT(!m_overlayScrollbarHorizontal
             && !m_overlayScrollbarVertical
+            && !m_overscrollElasticityLayer
             && !m_pageScaleLayer
             && !m_innerViewportContainerLayer);
 
         // FIXME: The root transform layer should only be created on demand.
         m_rootTransformLayer = GraphicsLayer::create(graphicsLayerFactory, this);
         m_innerViewportContainerLayer = GraphicsLayer::create(graphicsLayerFactory, this);
+        m_overscrollElasticityLayer = GraphicsLayer::create(graphicsLayerFactory, this);
         m_pageScaleLayer = GraphicsLayer::create(graphicsLayerFactory, this);
         m_innerViewportScrollLayer = GraphicsLayer::create(graphicsLayerFactory, this);
         m_overlayScrollbarHorizontal = GraphicsLayer::create(graphicsLayerFactory, this);
@@ -278,7 +283,8 @@ void PinchViewport::attachToLayerTree(GraphicsLayer* currentLayerTreeRoot, Graph
         m_innerViewportScrollLayer->platformLayer()->setUserScrollable(true, true);
 
         m_rootTransformLayer->addChild(m_innerViewportContainerLayer.get());
-        m_innerViewportContainerLayer->addChild(m_pageScaleLayer.get());
+        m_innerViewportContainerLayer->addChild(m_overscrollElasticityLayer.get());
+        m_overscrollElasticityLayer->addChild(m_pageScaleLayer.get());
         m_pageScaleLayer->addChild(m_innerViewportScrollLayer.get());
         m_innerViewportContainerLayer->addChild(m_overlayScrollbarHorizontal.get());
         m_innerViewportContainerLayer->addChild(m_overlayScrollbarVertical.get());
@@ -354,13 +360,14 @@ void PinchViewport::registerLayersWithTreeView(WebLayerTreeView* layerTreeView) 
 
     RenderLayerCompositor* compositor = frameHost().page().deprecatedLocalMainFrame()->contentRenderer()->compositor();
     // Get the outer viewport scroll layer.
-    WebLayer* scrollLayer = compositor->scrollLayer()->platformLayer();
+    WebLayer* scrollLayer = compositor->scrollLayer() ? compositor->scrollLayer()->platformLayer() : 0;
 
     m_webOverlayScrollbarHorizontal->setScrollLayer(scrollLayer);
     m_webOverlayScrollbarVertical->setScrollLayer(scrollLayer);
 
     ASSERT(compositor);
     layerTreeView->registerViewportLayers(
+        m_overscrollElasticityLayer->platformLayer(),
         m_pageScaleLayer->platformLayer(),
         m_innerViewportScrollLayer->platformLayer(),
         scrollLayer);
@@ -371,6 +378,14 @@ void PinchViewport::clearLayersForTreeView(WebLayerTreeView* layerTreeView) cons
     ASSERT(layerTreeView);
 
     layerTreeView->clearViewportLayers();
+}
+
+bool PinchViewport::shouldUseIntegerScrollOffset() const
+{
+    LocalFrame* frame = mainFrame();
+    if (frame && frame->settings() && frame->settings()->preferCompositingToLCDTextEnabled())
+        return true;
+    return false;
 }
 
 int PinchViewport::scrollSize(ScrollbarOrientation orientation) const
@@ -518,6 +533,8 @@ String PinchViewport::debugName(const GraphicsLayer* graphicsLayer)
     String name;
     if (graphicsLayer == m_innerViewportContainerLayer.get()) {
         name = "Inner Viewport Container Layer";
+    } else if (graphicsLayer == m_overscrollElasticityLayer.get()) {
+        name =  "Overscroll Elasticity Layer";
     } else if (graphicsLayer == m_pageScaleLayer.get()) {
         name =  "Page Scale Layer";
     } else if (graphicsLayer == m_innerViewportScrollLayer.get()) {

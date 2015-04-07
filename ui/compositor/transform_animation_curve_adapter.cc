@@ -4,6 +4,8 @@
 
 #include "ui/compositor/transform_animation_curve_adapter.h"
 
+#include "cc/base/time_util.h"
+
 namespace ui {
 
 TransformAnimationCurveAdapter::TransformAnimationCurveAdapter(
@@ -22,8 +24,8 @@ TransformAnimationCurveAdapter::TransformAnimationCurveAdapter(
 TransformAnimationCurveAdapter::~TransformAnimationCurveAdapter() {
 }
 
-double TransformAnimationCurveAdapter::Duration() const {
-  return duration_.InSecondsF();
+base::TimeDelta TransformAnimationCurveAdapter::Duration() const {
+  return duration_;
 }
 
 scoped_ptr<cc::AnimationCurve> TransformAnimationCurveAdapter::Clone() const {
@@ -32,12 +34,12 @@ scoped_ptr<cc::AnimationCurve> TransformAnimationCurveAdapter::Clone() const {
 }
 
 gfx::Transform TransformAnimationCurveAdapter::GetValue(
-    double t) const {
-  if (t >= duration_.InSecondsF())
+    base::TimeDelta t) const {
+  if (t >= duration_)
     return target_value_;
-  if (t <= 0.0)
+  if (t <= base::TimeDelta())
     return initial_value_;
-  double progress = t / duration_.InSecondsF();
+  double progress = cc::TimeUtil::Divide(t, duration_);
 
   gfx::DecomposedTransform to_return;
   gfx::BlendDecomposedTransforms(&to_return,
@@ -67,6 +69,12 @@ bool TransformAnimationCurveAdapter::IsTranslation() const {
          target_value_.IsIdentityOrTranslation();
 }
 
+bool TransformAnimationCurveAdapter::PreservesAxisAlignment() const {
+  return (initial_value_.IsIdentity() ||
+          initial_value_.IsScaleOrTranslation()) &&
+         (target_value_.IsIdentity() || target_value_.IsScaleOrTranslation());
+}
+
 bool TransformAnimationCurveAdapter::MaximumTargetScale(
     bool forward_direction,
     float* max_scale) const {
@@ -80,14 +88,15 @@ InverseTransformCurveAdapter::InverseTransformCurveAdapter(
     : base_curve_(base_curve),
       initial_value_(initial_value),
       duration_(duration) {
-  effective_initial_value_ = base_curve_.GetValue(0.0) * initial_value_;
+  effective_initial_value_ =
+      base_curve_.GetValue(base::TimeDelta()) * initial_value_;
 }
 
 InverseTransformCurveAdapter::~InverseTransformCurveAdapter() {
 }
 
-double InverseTransformCurveAdapter::Duration() const {
-  return duration_.InSeconds();
+base::TimeDelta InverseTransformCurveAdapter::Duration() const {
+  return duration_;
 }
 
 scoped_ptr<cc::AnimationCurve> InverseTransformCurveAdapter::Clone() const {
@@ -95,9 +104,8 @@ scoped_ptr<cc::AnimationCurve> InverseTransformCurveAdapter::Clone() const {
       new InverseTransformCurveAdapter(base_curve_, initial_value_, duration_));
 }
 
-gfx::Transform InverseTransformCurveAdapter::GetValue(
-    double t) const {
-  if (t <= 0.0)
+gfx::Transform InverseTransformCurveAdapter::GetValue(base::TimeDelta t) const {
+  if (t <= base::TimeDelta())
     return initial_value_;
 
   gfx::Transform base_transform = base_curve_.GetValue(t);
@@ -127,6 +135,12 @@ bool InverseTransformCurveAdapter::AffectsScale() const {
 bool InverseTransformCurveAdapter::IsTranslation() const {
   return initial_value_.IsIdentityOrTranslation() &&
          base_curve_.IsTranslation();
+}
+
+bool InverseTransformCurveAdapter::PreservesAxisAlignment() const {
+  return (initial_value_.IsIdentity() ||
+          initial_value_.IsScaleOrTranslation()) &&
+         (base_curve_.PreservesAxisAlignment());
 }
 
 bool InverseTransformCurveAdapter::MaximumTargetScale(bool forward_direction,

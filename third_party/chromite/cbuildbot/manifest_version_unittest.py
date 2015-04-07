@@ -24,7 +24,7 @@ from chromite.lib import git
 from chromite.lib import cros_test_lib
 from chromite.lib import osutils
 
-# pylint: disable=W0212,R0904
+
 FAKE_VERSION = """
 CHROMEOS_BUILD=%(build_number)s
 CHROMEOS_BRANCH=%(branch_build_number)s
@@ -40,6 +40,10 @@ CHROME_BRANCH = '13'
 GIT_TEST_PATH = 'chromite'
 
 MOCK_BUILD_ID = 162345
+
+
+# pylint: disable=protected-access
+
 
 class HelperMethodsTest(cros_test_lib.TempDirTestCase):
   """Test methods associated with methods not in a class."""
@@ -166,10 +170,10 @@ class BuildSpecsManagerTest(cros_test_lib.MoxTempDirTestCase,
     self.incr_type = 'branch'
 
     repo = repository.RepoRepository(
-      self.source_repo, self.tempdir, self.branch)
+        self.source_repo, self.tempdir, self.branch)
     self.manager = manifest_version.BuildSpecsManager(
-      repo, self.manifest_repo, self.build_names, self.incr_type, False,
-      branch=self.branch, dry_run=True)
+        repo, self.manifest_repo, self.build_names, self.incr_type, False,
+        branch=self.branch, dry_run=True)
 
     # Change default to something we clean up.
     self.tmpmandir = os.path.join(self.tempdir, 'man')
@@ -242,7 +246,7 @@ class BuildSpecsManagerTest(cros_test_lib.MoxTempDirTestCase,
         FAKE_VERSION_STRING, CHROME_BRANCH, incr_type='branch')
     mpath = os.path.join(self.manager.manifest_dir, 'buildspecs', CHROME_BRANCH)
     m1, m2, m3, m4 = [os.path.join(mpath, '1.2.%d.xml' % x)
-                      for x in [2,3,4,5]]
+                      for x in [2, 3, 4, 5]]
     for_build = os.path.join(self.manager.manifest_dir, 'build-name',
                              self.build_names[0])
 
@@ -252,8 +256,8 @@ class BuildSpecsManagerTest(cros_test_lib.MoxTempDirTestCase,
       osutils.Touch(m)
 
     # Fake BuilderStatus with status MISSING.
-    missing = manifest_version.BuilderStatus(
-        manifest_version.BuilderStatus.STATUS_MISSING, None)
+    missing = manifest_version.BuilderStatus(constants.BUILDER_STATUS_MISSING,
+                                             None)
 
     # Fail 1, pass 2, leave 3,4 unprocessed.
     manifest_version.CreateSymlink(m1, os.path.join(
@@ -341,9 +345,9 @@ class BuildSpecsManagerTest(cros_test_lib.MoxTempDirTestCase,
     failed_msg = failures_lib.BuildFailureMessage(
         'you failed', ['traceback'], True, 'taco', 'bot')
     failed_input_status = manifest_version.BuilderStatus(
-        manifest_version.BuilderStatus.STATUS_FAILED, failed_msg)
+        constants.BUILDER_STATUS_FAILED, failed_msg)
     passed_input_status = manifest_version.BuilderStatus(
-        manifest_version.BuilderStatus.STATUS_PASSED, None)
+        constants.BUILDER_STATUS_PASSED, None)
 
     failed_output_status = self.manager._UnpickleBuildStatus(
         failed_input_status.AsPickledDict())
@@ -352,9 +356,9 @@ class BuildSpecsManagerTest(cros_test_lib.MoxTempDirTestCase,
     empty_string_status = self.manager._UnpickleBuildStatus('')
 
     self.assertEqual(failed_input_status.AsFlatDict(),
-                failed_output_status.AsFlatDict())
+                     failed_output_status.AsFlatDict())
     self.assertEqual(passed_input_status.AsFlatDict(),
-                passed_output_status.AsFlatDict())
+                     passed_output_status.AsFlatDict())
     self.assertTrue(empty_string_status.Failed())
 
   def _GetBuildersStatus(self, builders, status_runs):
@@ -386,20 +390,20 @@ class BuildSpecsManagerTest(cros_test_lib.MoxTempDirTestCase,
 
   def testGetBuildersStatusBothFinished(self):
     """Tests GetBuilderStatus where both builds have finished."""
-    status_runs = [{'build1': manifest_version.BuilderStatus.STATUS_FAILED,
-                    'build2': manifest_version.BuilderStatus.STATUS_PASSED}]
+    status_runs = [{'build1': constants.BUILDER_STATUS_FAILED,
+                    'build2': constants.BUILDER_STATUS_PASSED}]
     statuses = self._GetBuildersStatus(['build1', 'build2'], status_runs)
     self.assertTrue(statuses['build1'].Failed())
     self.assertTrue(statuses['build2'].Passed())
 
   def testGetBuildersStatusLoop(self):
     """Tests GetBuilderStatus where builds are inflight."""
-    status_runs = [{'build1': manifest_version.BuilderStatus.STATUS_INFLIGHT,
-                    'build2': manifest_version.BuilderStatus.STATUS_MISSING},
-                   {'build1': manifest_version.BuilderStatus.STATUS_FAILED,
-                    'build2': manifest_version.BuilderStatus.STATUS_INFLIGHT},
-                   {'build1': manifest_version.BuilderStatus.STATUS_FAILED,
-                    'build2': manifest_version.BuilderStatus.STATUS_PASSED}]
+    status_runs = [{'build1': constants.BUILDER_STATUS_INFLIGHT,
+                    'build2': constants.BUILDER_STATUS_MISSING},
+                   {'build1': constants.BUILDER_STATUS_FAILED,
+                    'build2': constants.BUILDER_STATUS_INFLIGHT},
+                   {'build1': constants.BUILDER_STATUS_FAILED,
+                    'build2': constants.BUILDER_STATUS_PASSED}]
     statuses = self._GetBuildersStatus(['build1', 'build2'], status_runs)
     self.assertTrue(statuses['build1'].Failed())
     self.assertTrue(statuses['build2'].Passed())

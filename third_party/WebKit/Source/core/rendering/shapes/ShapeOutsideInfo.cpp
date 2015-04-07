@@ -89,7 +89,7 @@ static bool checkShapeImageOrigin(Document& document, const StyleImage& styleIma
 
     ASSERT(styleImage.cachedImage());
     ImageResource& imageResource = *(styleImage.cachedImage());
-    if (imageResource.isAccessAllowed(document.securityOrigin()))
+    if (imageResource.isAccessAllowed(&document, document.securityOrigin()))
         return true;
 
     const KURL& url = imageResource.url();
@@ -124,7 +124,7 @@ PassOwnPtr<Shape> ShapeOutsideInfo::createShapeForImage(StyleImage* styleImage, 
     const LayoutRect& marginRect = getShapeImageMarginRect(m_renderer, m_referenceBoxLogicalSize);
     const LayoutRect& imageRect = (m_renderer.isRenderImage())
         ? toRenderImage(m_renderer).replacedContentRect()
-        : LayoutRect(LayoutPoint(), imageSize);
+        : LayoutRect(LayoutPoint(), LayoutSize(imageSize));
 
     if (!isValidRasterShapeRect(marginRect) || !isValidRasterShapeRect(imageRect)) {
         m_renderer.document().addConsoleMessage(ConsoleMessage::create(RenderingMessageSource, ErrorMessageLevel, "The shape-outside image is too large."));
@@ -166,7 +166,7 @@ const Shape& ShapeOutsideInfo::computedShape() const
         m_shape = createShapeForImage(shapeValue.image(), shapeImageThreshold, writingMode, margin);
         break;
     case ShapeValue::Box: {
-        const RoundedRect& shapeRect = style.getRoundedBorderFor(LayoutRect(LayoutPoint(), m_referenceBoxLogicalSize), m_renderer.view());
+        const FloatRoundedRect& shapeRect = style.getRoundedBorderFor(LayoutRect(LayoutPoint(), m_referenceBoxLogicalSize), m_renderer.view());
         m_shape = Shape::createLayoutBoxShape(shapeRect, writingMode, margin);
         break;
     }
@@ -280,7 +280,7 @@ ShapeOutsideDeltas ShapeOutsideInfo::computeDeltasForContainingBlockLine(const R
 {
     ASSERT(lineHeight >= 0);
 
-    LayoutUnit borderBoxTop = containingBlock.logicalTopForFloat(&floatingObject) + containingBlock.marginBeforeForChild(&m_renderer);
+    LayoutUnit borderBoxTop = containingBlock.logicalTopForFloat(&floatingObject) + containingBlock.marginBeforeForChild(m_renderer);
     LayoutUnit borderBoxLineTop = lineTop - borderBoxTop;
 
     if (isShapeDirty() || !m_shapeOutsideDeltas.isForLine(borderBoxLineTop, lineHeight)) {
@@ -290,12 +290,12 @@ ShapeOutsideDeltas ShapeOutsideInfo::computeDeltasForContainingBlockLine(const R
         if (computedShape().lineOverlapsShapeMarginBounds(referenceBoxLineTop, lineHeight)) {
             LineSegment segment = computedShape().getExcludedInterval((borderBoxLineTop - logicalTopOffset()), std::min(lineHeight, shapeLogicalBottom() - borderBoxLineTop));
             if (segment.isValid) {
-                LayoutUnit logicalLeftMargin = containingBlock.style()->isLeftToRightDirection() ? containingBlock.marginStartForChild(&m_renderer) : containingBlock.marginEndForChild(&m_renderer);
+                LayoutUnit logicalLeftMargin = containingBlock.style()->isLeftToRightDirection() ? containingBlock.marginStartForChild(m_renderer) : containingBlock.marginEndForChild(m_renderer);
                 LayoutUnit rawLeftMarginBoxDelta = segment.logicalLeft + logicalLeftOffset() + logicalLeftMargin;
                 LayoutUnit leftMarginBoxDelta = clampTo<LayoutUnit>(rawLeftMarginBoxDelta, LayoutUnit(), floatMarginBoxWidth);
 
-                LayoutUnit logicalRightMargin = containingBlock.style()->isLeftToRightDirection() ? containingBlock.marginEndForChild(&m_renderer) : containingBlock.marginStartForChild(&m_renderer);
-                LayoutUnit rawRightMarginBoxDelta = segment.logicalRight + logicalLeftOffset() - containingBlock.logicalWidthForChild(&m_renderer) - logicalRightMargin;
+                LayoutUnit logicalRightMargin = containingBlock.style()->isLeftToRightDirection() ? containingBlock.marginEndForChild(m_renderer) : containingBlock.marginStartForChild(m_renderer);
+                LayoutUnit rawRightMarginBoxDelta = segment.logicalRight + logicalLeftOffset() - containingBlock.logicalWidthForChild(m_renderer) - logicalRightMargin;
                 LayoutUnit rightMarginBoxDelta = clampTo<LayoutUnit>(rawRightMarginBoxDelta, -floatMarginBoxWidth, LayoutUnit());
 
                 m_shapeOutsideDeltas = ShapeOutsideDeltas(leftMarginBoxDelta, rightMarginBoxDelta, true, borderBoxLineTop, lineHeight);
@@ -317,7 +317,7 @@ LayoutRect ShapeOutsideInfo::computedShapePhysicalBoundingBox() const
     LayoutRect physicalBoundingBox = computedShape().shapeMarginLogicalBoundingBox();
     physicalBoundingBox.setX(physicalBoundingBox.x() + logicalLeftOffset());
 
-    if (m_renderer.style()->slowIsFlippedBlocksWritingMode())
+    if (m_renderer.style()->isFlippedBlocksWritingMode())
         physicalBoundingBox.setY(m_renderer.logicalHeight() - physicalBoundingBox.maxY());
     else
         physicalBoundingBox.setY(physicalBoundingBox.y() + logicalTopOffset());
@@ -333,7 +333,7 @@ LayoutRect ShapeOutsideInfo::computedShapePhysicalBoundingBox() const
 FloatPoint ShapeOutsideInfo::shapeToRendererPoint(FloatPoint point) const
 {
     FloatPoint result = FloatPoint(point.x() + logicalLeftOffset(), point.y() + logicalTopOffset());
-    if (m_renderer.style()->slowIsFlippedBlocksWritingMode())
+    if (m_renderer.style()->isFlippedBlocksWritingMode())
         result.setY(m_renderer.logicalHeight() - result.y());
     if (!m_renderer.style()->isHorizontalWritingMode())
         result = result.transposedPoint();

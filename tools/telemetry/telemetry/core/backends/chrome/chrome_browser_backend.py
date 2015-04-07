@@ -23,9 +23,9 @@ from telemetry.core.backends import browser_backend
 from telemetry.core.backends.chrome import extension_backend
 from telemetry.core.backends.chrome import system_info_backend
 from telemetry.core.backends.chrome import tab_list_backend
-from telemetry.core.backends.chrome import tracing_backend
-from telemetry.timeline import tracing_timeline_data
-from telemetry.unittest import options_for_unittests
+from telemetry.core.backends.chrome_inspector import devtools_client_backend
+from telemetry.core.backends.chrome_inspector import devtools_http
+from telemetry.unittest_util import options_for_unittests
 
 
 class ChromeBrowserBackend(browser_backend.BrowserBackend):
@@ -37,14 +37,14 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
                supports_extensions, browser_options, output_profile_path,
                extensions_to_load):
     super(ChromeBrowserBackend, self).__init__(
+        platform_backend=platform_backend,
         supports_extensions=supports_extensions,
         browser_options=browser_options,
         tab_list_backend=tab_list_backend.TabListBackend)
     self._port = None
 
-    self._platform_backend = platform_backend
     self._supports_tab_control = supports_tab_control
-    self._tracing_backend = None
+    self._devtools_client = None
     self._system_info_backend = None
 
     self._output_profile_path = output_profile_path
@@ -67,6 +67,14 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
                        'unexpected effects due to profile-specific settings, '
                        'such as about:flags settings, cookies, and '
                        'extensions.\n')
+
+  @property
+  def devtools_client(self):
+    if not self._devtools_client:
+      assert self._port, 'No DevTools port info available.'
+      self._devtools_client = devtools_client_backend.DevToolsClientBackend(
+          self._port, self)
+    return self._devtools_client
 
   @property
   @decorators.Cache
@@ -121,18 +129,23 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
     if self.browser_options.disable_component_extensions_with_background_pages:
       args.append('--disable-component-extensions-with-background-pages')
 
+    # Disables the start page, as well as other external apps that can
+    # steal focus or make measurements inconsistent.
+    if self.browser_options.disable_default_apps:
+      args.append('--disable-default-apps')
+
     return args
 
-  @property
-  def _use_host_resolver_rules(self):
-    """Returns True if need --host-resolver-rules to send requests to replay."""
-    if self.browser_options.netsim:
-      # Avoid --host-resolver-rules with netsim because it causes Chrome to
-      # skip DNS requests. With netsim, we want to exercise DNS requests.
-      return False
+  def _UseHostResolverRules(self):
+    """Returns True to add --host-resolver-rules to send requests to replay."""
     if self.forwarder_factory.does_forwarder_override_dns:
-      # Avoid --host-resolver-rules when the forwarder can map DNS requests
-      # from devices to the replay DNS port on the host running Telemetry.
+      # Avoid --host-resolver-rules when the forwarder will map DNS requests
+      # from the target platform to replay (on the host platform).
+      # This allows the browser to exercise DNS requests.
+      return False
+    if self.browser_options.netsim and self.platform_backend.is_host_platform:
+      # Avoid --host-resolver-rules when replay will configure the platform to
+      # resolve hosts to replay.
       # This allows the browser to exercise DNS requests.
       return False
     return True
@@ -140,41 +153,26 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
   def GetReplayBrowserStartupArgs(self):
     if self.browser_options.wpr_mode == wpr_modes.WPR_OFF:
       return []
-    # Use Chrome's --host-resolver-rules flag if the forwarder does not send
-    # the HTTP requests directly to Replay. Also use --host-resolver-rules
-    # without netsim. With netsim, DNS requests should be sent (to get the
-    # simulated latency), however, the flag causes DNS requests to be skipped.
-    http_remote_port = self.wpr_port_pairs.http.remote_port
-    https_remote_port = self.wpr_port_pairs.https.remote_port
     replay_args = []
     if self.should_ignore_certificate_errors:
-      # Ignore certificate errors if the browser backend has not created
-      # and installed a root certificate. When |self.wpr_ca_cert_path| is
-      # set, Web Page Replay uses it to sign HTTPS responses.
+      # Ignore certificate errors if the platform backend has not created
+      # and installed a root certificate.
       replay_args.append('--ignore-certificate-errors')
-    if self._use_host_resolver_rules:
+    if self._UseHostResolverRules():
       replay_args.append('--host-resolver-rules=MAP * %s,EXCLUDE localhost' %
                          self.forwarder_factory.host_ip)  # replay's host_ip
     # Force the browser to send HTTP/HTTPS requests to fixed ports if they
-    # are not the standard defaults.
-    # Backstory:
-    #     That allows Telemetry to pick ports that do not require sudo
-    #     and leaves room for multiple instances running simultaneously.
-    #     The default ports are required for network simulation.
-    if http_remote_port != 80:
-      replay_args.append('--testing-fixed-http-port=%s' % http_remote_port)
-    if https_remote_port != 443:  # check if using the default HTTPS port
-      replay_args.append('--testing-fixed-https-port=%s' % https_remote_port)
+    # are not the standard HTTP/HTTPS ports.
+    http_port = self.platform_backend.wpr_http_device_port
+    https_port = self.platform_backend.wpr_https_device_port
+    if http_port != 80:
+      replay_args.append('--testing-fixed-http-port=%s' % http_port)
+    if https_port != 443:
+      replay_args.append('--testing-fixed-https-port=%s' % https_port)
     return replay_args
 
   def HasBrowserFinishedLaunching(self):
-    try:
-      self.Request('', timeout=.1)
-    except (exceptions.BrowserGoneException,
-            exceptions.BrowserConnectionGoneException):
-      return False
-    else:
-      return True
+    return self.devtools_client.IsAlive()
 
   def _WaitForBrowserToComeUp(self, wait_for_extensions=True):
     try:
@@ -230,20 +228,9 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
         raise
 
   def ListInspectableContexts(self):
-    return json.loads(self.Request(''))
-
-  def Request(self, path, timeout=30, throw_network_exception=False):
-    url = 'http://127.0.0.1:%i/json' % self._port
-    if path:
-      url += '/' + path
     try:
-      proxy_handler = urllib2.ProxyHandler({})  # Bypass any system proxy.
-      opener = urllib2.build_opener(proxy_handler)
-      with contextlib.closing(opener.open(url, timeout=timeout)) as req:
-        return req.read()
-    except (socket.error, httplib.BadStatusLine, urllib2.URLError) as e:
-      if throw_network_exception:
-        raise e
+      return self._devtools_client.ListInspectableContexts()
+    except devtools_http.DevToolsClientConnectionError as e:
       if not self.IsBrowserRunning():
         raise exceptions.BrowserGoneException(self.browser, e)
       raise exceptions.BrowserConnectionGoneException(self.browser, e)
@@ -255,29 +242,6 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
   @property
   def profile_directory(self):
     raise NotImplementedError()
-
-  @property
-  @decorators.Cache
-  def chrome_branch_number(self):
-    # Detect version information.
-    data = self.Request('version')
-    resp = json.loads(data)
-    if 'Protocol-Version' in resp:
-      if 'Browser' in resp:
-        branch_number_match = re.search('Chrome/\d+\.\d+\.(\d+)\.\d+',
-                                        resp['Browser'])
-      else:
-        branch_number_match = re.search(
-            'Chrome/\d+\.\d+\.(\d+)\.\d+ (Mobile )?Safari',
-            resp['User-Agent'])
-
-      if branch_number_match:
-        branch_number = int(branch_number_match.group(1))
-        if branch_number:
-          return branch_number
-
-    # Branch number can't be determined, so fail any branch number checks.
-    return 0
 
   @property
   def supports_tab_control(self):
@@ -298,35 +262,11 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
                          "webkit,cc,disabled-by-default-cc.debug" to trace only
                          those three event categories.
     """
-    assert trace_options and trace_options.enable_chrome_trace
-    if self._tracing_backend is None:
-      self._tracing_backend = tracing_backend.TracingBackend(self._port, self)
-    return self._tracing_backend.StartTracing(
+    return self.devtools_client.StartChromeTracing(
         trace_options, custom_categories, timeout)
 
-  @property
-  def is_tracing_running(self):
-    if not self._tracing_backend:
-      return None
-    return self._tracing_backend.is_tracing_running
-
-  def StopTracing(self):
-    """ Stops tracing and returns the result as TimelineData object. """
-    tab_ids_list = []
-    for (i, _) in enumerate(self.browser.tabs):
-      tab = self.tab_list_backend.Get(i, None)
-      if tab:
-        success = tab.EvaluateJavaScript(
-            "console.time('" + tab.id + "');" +
-            "console.timeEnd('" + tab.id + "');" +
-            "console.time.toString().indexOf('[native code]') != -1;")
-        if not success:
-          raise Exception('Page stomped on console.time')
-        tab_ids_list.append(tab.id)
-    trace_events = self._tracing_backend.StopTracing()
-    # Augment tab_ids data to trace events.
-    event_data = {'traceEvents' : trace_events, 'tabIds': tab_ids_list}
-    return tracing_timeline_data.TracingTimelineData(event_data)
+  def StopTracing(self, trace_data_builder):
+    self.devtools_client.StopChromeTracing(trace_data_builder)
 
   def GetProcessName(self, cmd_line):
     """Returns a user-friendly name for the process of the given |cmd_line|."""
@@ -344,9 +284,9 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
     return m.group(1)
 
   def Close(self):
-    if self._tracing_backend:
-      self._tracing_backend.Close()
-      self._tracing_backend = None
+    if self._devtools_client:
+      self._devtools_client.Close()
+      self._devtools_client = None
 
   @property
   def supports_system_info(self):

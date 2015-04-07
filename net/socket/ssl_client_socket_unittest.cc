@@ -2351,6 +2351,33 @@ TEST(SSLClientSocket, ClearSessionCache) {
   SSLClientSocket::ClearSessionCache();
 }
 
+TEST(SSLClientSocket, SerializeNextProtos) {
+  NextProtoVector next_protos;
+  next_protos.push_back(kProtoHTTP11);
+  next_protos.push_back(kProtoSPDY31);
+  static std::vector<uint8_t> serialized =
+      SSLClientSocket::SerializeNextProtos(next_protos, true);
+  ASSERT_EQ(18u, serialized.size());
+  EXPECT_EQ(8, serialized[0]);  // length("http/1.1")
+  EXPECT_EQ('h', serialized[1]);
+  EXPECT_EQ('t', serialized[2]);
+  EXPECT_EQ('t', serialized[3]);
+  EXPECT_EQ('p', serialized[4]);
+  EXPECT_EQ('/', serialized[5]);
+  EXPECT_EQ('1', serialized[6]);
+  EXPECT_EQ('.', serialized[7]);
+  EXPECT_EQ('1', serialized[8]);
+  EXPECT_EQ(8, serialized[9]);  // length("spdy/3.1")
+  EXPECT_EQ('s', serialized[10]);
+  EXPECT_EQ('p', serialized[11]);
+  EXPECT_EQ('d', serialized[12]);
+  EXPECT_EQ('y', serialized[13]);
+  EXPECT_EQ('/', serialized[14]);
+  EXPECT_EQ('3', serialized[15]);
+  EXPECT_EQ('.', serialized[16]);
+  EXPECT_EQ('1', serialized[17]);
+}
+
 // Test that the server certificates are properly retrieved from the underlying
 // SSL stack.
 TEST_F(SSLClientSocketTest, VerifyServerChainProperlyOrdered) {
@@ -2889,7 +2916,7 @@ TEST_F(SSLClientSocketFalseStartTest,
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
   server_options.enable_npn = true;
   SSLConfig client_config;
-  client_config.next_protos.push_back("http/1.1");
+  client_config.next_protos.push_back(kProtoHTTP11);
   monitor_handshake_callback_ = true;
   fail_handshake_after_false_start_ = true;
   ASSERT_NO_FATAL_FAILURE(TestFalseStart(server_options, client_config, true));
@@ -2904,7 +2931,7 @@ TEST_F(SSLClientSocketFalseStartTest,
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
   server_options.enable_npn = true;
   SSLConfig client_config;
-  client_config.next_protos.push_back("http/1.1");
+  client_config.next_protos.push_back(kProtoHTTP11);
   monitor_handshake_callback_ = true;
   ASSERT_NO_FATAL_FAILURE(TestFalseStart(server_options, client_config, true));
   ASSERT_TRUE(ran_handshake_completion_callback_);
@@ -2918,7 +2945,7 @@ TEST_F(SSLClientSocketFalseStartTest, FalseStartEnabled) {
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
   server_options.enable_npn = true;
   SSLConfig client_config;
-  client_config.next_protos.push_back("http/1.1");
+  client_config.next_protos.push_back(kProtoHTTP11);
   ASSERT_NO_FATAL_FAILURE(
       TestFalseStart(server_options, client_config, true));
 }
@@ -2941,7 +2968,7 @@ TEST_F(SSLClientSocketFalseStartTest, NoForwardSecrecy) {
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_RSA;
   server_options.enable_npn = true;
   SSLConfig client_config;
-  client_config.next_protos.push_back("http/1.1");
+  client_config.next_protos.push_back(kProtoHTTP11);
   ASSERT_NO_FATAL_FAILURE(
       TestFalseStart(server_options, client_config, false));
 }
@@ -2954,7 +2981,7 @@ TEST_F(SSLClientSocketFalseStartTest, SessionResumption) {
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
   server_options.enable_npn = true;
   SSLConfig client_config;
-  client_config.next_protos.push_back("http/1.1");
+  client_config.next_protos.push_back(kProtoHTTP11);
 
   // Let a full handshake complete with False Start.
   ASSERT_NO_FATAL_FAILURE(
@@ -2987,7 +3014,7 @@ TEST_F(SSLClientSocketFalseStartTest, NoSessionResumptionBeforeFinish) {
   ASSERT_TRUE(StartTestServer(server_options));
 
   SSLConfig client_config;
-  client_config.next_protos.push_back("http/1.1");
+  client_config.next_protos.push_back(kProtoHTTP11);
 
   // Start a handshake up to the server Finished message.
   TestCompletionCallback callback;

@@ -37,7 +37,6 @@
     Custom=(LegacyCallAsFunction,ToV8),
     DoNotCheckConstants,
     ImplementedAs=TestInterface5Implementation,
-    Iterable,
     RuntimeEnabled=FeatureName,
     SetWrapperReferenceTo(TestInterface5 referencedName),
     TypeChecking=(Interface,Unrestricted),
@@ -88,5 +87,11 @@
     [Exposed=Window] attribute long windowExposedAttribute;
 
     [Exposed=(Window,ServiceWorker)] void windowAndServiceWorkerExposedMethod();
+
+    // Union types
+    void voidMethodBooleanOrDOMStringArg((boolean or DOMString) arg);
+    void voidMethodDoubleOrDOMStringArg((double or DOMString) arg);
+
+    iterable<any>;
 };
 

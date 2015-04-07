@@ -37,7 +37,7 @@
 #include "core/rendering/svg/SVGResourcesCache.h"
 #include "core/svg/SVGImageElement.h"
 #include "platform/LengthFunctions.h"
-#include "platform/graphics/DisplayList.h"
+#include "third_party/skia/include/core/SkPicture.h"
 
 namespace blink {
 
@@ -77,6 +77,15 @@ FloatSize RenderSVGImage::computeImageViewportSize(ImageResource& cachedImage) c
     return intrinsicRatio;
 }
 
+static bool containerSizeIsSetForRenderer(ImageResource& cachedImage, const RenderObject* renderer)
+{
+    const Image* image = cachedImage.image();
+    // If a container size has been specified for this renderer, then
+    // imageForRenderer() will return the SVGImageForContainer while image()
+    // will return the underlying SVGImage.
+    return !image->isSVGImage() || image != cachedImage.imageForRenderer(renderer);
+}
+
 bool RenderSVGImage::updateImageViewport()
 {
     SVGImageElement* image = toSVGImageElement(element());
@@ -90,7 +99,8 @@ bool RenderSVGImage::updateImageViewport()
     ImageResource* cachedImage = m_imageResource->cachedImage();
     if (cachedImage && cachedImage->usesImageContainerSize()) {
         FloatSize imageViewportSize = computeImageViewportSize(*cachedImage);
-        if (imageViewportSize != m_imageResource->imageSize(style()->effectiveZoom())) {
+        if (LayoutSize(imageViewportSize) != m_imageResource->imageSize(style()->effectiveZoom())
+            || !containerSizeIsSetForRenderer(*cachedImage, this)) {
             m_imageResource->setContainerSizeForRenderer(roundedIntSize(imageViewportSize));
             updatedViewport = true;
         }
@@ -132,7 +142,7 @@ void RenderSVGImage::layout()
     clearNeedsLayout();
 }
 
-void RenderSVGImage::paint(PaintInfo& paintInfo, const LayoutPoint&)
+void RenderSVGImage::paint(const PaintInfo& paintInfo, const LayoutPoint&)
 {
     SVGImagePainter(*this).paint(paintInfo);
 }
@@ -181,7 +191,7 @@ void RenderSVGImage::imageChanged(WrappedImagePtr, const IntRect*)
     setShouldDoFullPaintInvalidation();
 }
 
-void RenderSVGImage::addFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoint&, const RenderLayerModelObject*) const
+void RenderSVGImage::addFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoint&) const
 {
     // this is called from paint() after the localTransform has already been applied
     LayoutRect contentRect = LayoutRect(paintInvalidationRectInLocalCoordinates());

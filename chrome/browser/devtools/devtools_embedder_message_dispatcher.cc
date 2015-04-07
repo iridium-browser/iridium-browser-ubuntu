@@ -233,7 +233,6 @@ DevToolsEmbedderMessageDispatcher*
                      &Delegate::InspectElementCompleted, delegate);
   d->RegisterHandler("inspectedURLChanged",
                      &Delegate::InspectedURLChanged, delegate);
-  d->RegisterHandler("moveWindowBy", &Delegate::MoveWindow, delegate);
   d->RegisterHandler("setIsDocked", &Delegate::SetIsDocked, delegate);
   d->RegisterHandler("openInNewTab", &Delegate::OpenInNewTab, delegate);
   d->RegisterHandler("save", &Delegate::SaveToFile, delegate);
@@ -260,5 +259,7 @@ DevToolsEmbedderMessageDispatcher*
                      &Delegate::SetDevicesUpdatesEnabled, delegate);
   d->RegisterHandler("sendMessageToBrowser",
                      &Delegate::SendMessageToBrowser, delegate);
+  d->RegisterHandler("recordActionUMA",
+                     &Delegate::RecordActionUMA, delegate);
   return d;
 }

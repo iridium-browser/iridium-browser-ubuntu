@@ -9,11 +9,13 @@
 #include "base/files/file_util_proxy.h"
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/sequenced_task_runner.h"
 #include "base/threading/thread_restrictions.h"
 #include "net/base/net_errors.h"
 #include "storage/browser/fileapi/file_stream_writer.h"
 #include "storage/browser/fileapi/file_system_context.h"
+#include "storage/common/fileapi/file_system_mount_option.h"
 #include "storage/common/fileapi/file_system_util.h"
 
 namespace storage {
@@ -90,6 +92,11 @@ void FileWriterDelegate::OnSSLCertificateError(net::URLRequest* request,
 }
 
 void FileWriterDelegate::OnResponseStarted(net::URLRequest* request) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 FileWriterDelegate::OnResponseStarted"));
+
   DCHECK_EQ(request_.get(), request);
   if (!request->status().is_success() || request->GetResponseCode() != 200) {
     OnError(base::File::FILE_ERROR_FAILED);
@@ -100,6 +107,11 @@ void FileWriterDelegate::OnResponseStarted(net::URLRequest* request) {
 
 void FileWriterDelegate::OnReadCompleted(net::URLRequest* request,
                                          int bytes_read) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 FileWriterDelegate::OnReadCompleted"));
+
   DCHECK_EQ(request_.get(), request);
   if (!request->status().is_success()) {
     OnError(base::File::FILE_ERROR_FAILED);
@@ -215,11 +227,12 @@ void FileWriterDelegate::MaybeFlushForCompletion(
     base::File::Error error,
     int bytes_written,
     WriteProgressStatus progress_status) {
-  if (flush_policy_ == NO_FLUSH_ON_COMPLETION) {
+  if (flush_policy_ == FlushPolicy::NO_FLUSH_ON_COMPLETION) {
     write_callback_.Run(error, bytes_written, progress_status);
     return;
   }
-  DCHECK_EQ(FLUSH_ON_COMPLETION, flush_policy_);
+  // DCHECK_EQ on enum classes is not supported.
+  DCHECK(flush_policy_ == FlushPolicy::FLUSH_ON_COMPLETION);
 
   int flush_error = file_stream_writer_->Flush(
       base::Bind(&FileWriterDelegate::OnFlushed, weak_factory_.GetWeakPtr(),

@@ -83,12 +83,9 @@ void IpcNetworkManager::OnNetworkListChanged(
       memcpy(&address, &it->address[0], sizeof(uint32));
       address = rtc::NetworkToHost32(address);
       rtc::IPAddress prefix =
-          rtc::TruncateIP(rtc::IPAddress(address), it->network_prefix);
+          rtc::TruncateIP(rtc::IPAddress(address), it->prefix_length);
       rtc::Network* network =
-          new rtc::Network(it->name,
-                           it->name,
-                           prefix,
-                           it->network_prefix,
+          new rtc::Network(it->name, it->name, prefix, it->prefix_length,
                            ConvertConnectionTypeToAdapterType(it->type));
       network->AddIP(rtc::IPAddress(address));
       networks.push_back(network);
@@ -99,12 +96,9 @@ void IpcNetworkManager::OnNetworkListChanged(
       rtc::IPAddress ip6_addr(address);
       if (!rtc::IPIsPrivate(ip6_addr)) {
         rtc::IPAddress prefix =
-            rtc::TruncateIP(rtc::IPAddress(ip6_addr), it->network_prefix);
+            rtc::TruncateIP(rtc::IPAddress(ip6_addr), it->prefix_length);
         rtc::Network* network =
-            new rtc::Network(it->name,
-                             it->name,
-                             prefix,
-                             it->network_prefix,
+            new rtc::Network(it->name, it->name, prefix, it->prefix_length,
                              ConvertConnectionTypeToAdapterType(it->type));
         network->AddIP(ip6_addr);
         networks.push_back(network);
@@ -120,8 +114,8 @@ void IpcNetworkManager::OnNetworkListChanged(
   UMA_HISTOGRAM_COUNTS_100("WebRTC.PeerConnection.IPv6Interfaces",
                            ipv6_interfaces);
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kAllowLoopbackInPeerConnection)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAllowLoopbackInPeerConnection)) {
     std::string name_v4("loopback_ipv4");
     rtc::IPAddress ip_address_v4(INADDR_LOOPBACK);
     rtc::Network* network_v4 = new rtc::Network(

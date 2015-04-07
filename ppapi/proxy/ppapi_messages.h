@@ -50,6 +50,7 @@
 #include "ppapi/c/private/ppb_pdf.h"
 #include "ppapi/c/private/ppb_talk_private.h"
 #include "ppapi/c/private/ppp_flash_browser_operations.h"
+#include "ppapi/c/private/ppp_pdf.h"
 #include "ppapi/proxy/host_resolver_private_resource.h"
 #include "ppapi/proxy/network_list_resource.h"
 #include "ppapi/proxy/ppapi_param_traits.h"
@@ -88,10 +89,11 @@ IPC_ENUM_TRAITS_MAX_VALUE(ppapi::TCPSocketVersion,
                           ppapi::TCP_SOCKET_VERSION_1_1_OR_ABOVE)
 IPC_ENUM_TRAITS(PP_AudioSampleRate)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_BlendMode, PP_BLENDMODE_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_CdmExceptionCode, PP_CDMEXCEPTIONCODE_OUTPUTERROR)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_CdmKeyStatus, PP_CDMKEYSTATUS_OUTPUTNOTALLOWED)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_CdmMessageType, PP_CDMMESSAGETYPE_LICENSE_RELEASE)
 IPC_ENUM_TRAITS(PP_DeviceType_Dev)
 IPC_ENUM_TRAITS(PP_DecryptorStreamType)
-IPC_ENUM_TRAITS(PP_SessionType)
-IPC_ENUM_TRAITS(PP_CdmExceptionCode)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_FileSystemType, PP_FILESYSTEMTYPE_ISOLATED)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_FileType, PP_FILETYPE_OTHER)
 IPC_ENUM_TRAITS(PP_Flash_BrowserOperations_Permission)
@@ -109,9 +111,11 @@ IPC_ENUM_TRAITS_MAX_VALUE(PP_NetworkList_Type, PP_NETWORKLIST_TYPE_CELLULAR)
 IPC_ENUM_TRAITS(PP_PrintOrientation_Dev)
 IPC_ENUM_TRAITS(PP_PrintOutputFormat_Dev)
 IPC_ENUM_TRAITS(PP_PrintScalingOption_Dev)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_PrintDuplexMode_Dev, PP_PRINTDUPLEXMODE_SHORT_EDGE)
 IPC_ENUM_TRAITS(PP_PrivateFontCharset)
 IPC_ENUM_TRAITS(PP_ResourceImage)
 IPC_ENUM_TRAITS(PP_ResourceString)
+IPC_ENUM_TRAITS_MAX_VALUE(PP_SessionType, PP_SESSIONTYPE_PERSISTENT_RELEASE)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_TalkEvent, PP_TALKEVENT_NUM_EVENTS - 1)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_TalkPermission,
                           PP_TALKPERMISSION_NUM_PERMISSIONS - 1)
@@ -203,6 +207,19 @@ IPC_STRUCT_TRAITS_BEGIN(PP_PrintSettings_Dev)
   IPC_STRUCT_TRAITS_MEMBER(print_scaling_option)
   IPC_STRUCT_TRAITS_MEMBER(grayscale)
   IPC_STRUCT_TRAITS_MEMBER(format)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(PP_PrintRange_Dev)
+  IPC_STRUCT_TRAITS_MEMBER(from)
+  IPC_STRUCT_TRAITS_MEMBER(to)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(PP_PdfPrintPresetOptions_Dev)
+  IPC_STRUCT_TRAITS_MEMBER(is_scaling_disabled)
+  IPC_STRUCT_TRAITS_MEMBER(copies)
+  IPC_STRUCT_TRAITS_MEMBER(duplex)
+  IPC_STRUCT_TRAITS_MEMBER(page_range)
+  IPC_STRUCT_TRAITS_MEMBER(page_range_count)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(PP_URLComponent_Dev)
@@ -698,6 +715,11 @@ IPC_MESSAGE_ROUTED1(PpapiMsg_PPPMouseLock_MouseLockLost,
 IPC_MESSAGE_ROUTED2(PpapiMsg_PPPPdf_Rotate,
                     PP_Instance /* instance */,
                     bool /* clockwise */)
+IPC_SYNC_MESSAGE_ROUTED1_2(
+    PpapiMsg_PPPPdf_PrintPresetOptions,
+    PP_Instance /* instance */,
+    PP_PdfPrintPresetOptions_Dev /* print preset options */,
+    PP_Bool /* result */)
 
 // Find
 IPC_MESSAGE_ROUTED2(PpapiPluginMsg_PPPFind_StartFind,
@@ -761,15 +783,17 @@ IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_SetServerCertificate,
                     PP_Instance /* instance */,
                     uint32_t /* promise_id */,
                     std::vector<uint8_t> /* certificate */)
-IPC_MESSAGE_ROUTED5(PpapiMsg_PPPContentDecryptor_CreateSession,
+IPC_MESSAGE_ROUTED5(
+    PpapiMsg_PPPContentDecryptor_CreateSessionAndGenerateRequest,
+    PP_Instance /* instance */,
+    uint32_t /* promise_id */,
+    PP_SessionType /* session_type */,
+    ppapi::proxy::SerializedVar /* init_data_type, String */,
+    ppapi::proxy::SerializedVar /* init_data, ArrayBuffer */)
+IPC_MESSAGE_ROUTED4(PpapiMsg_PPPContentDecryptor_LoadSession,
                     PP_Instance /* instance */,
                     uint32_t /* promise_id */,
-                    ppapi::proxy::SerializedVar /* init_data_type, String */,
-                    ppapi::proxy::SerializedVar /* init_data, ArrayBuffer */,
-                    PP_SessionType /* session_type */)
-IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_LoadSession,
-                    PP_Instance /* instance */,
-                    uint32_t /* promise_id */,
+                    PP_SessionType /* session_type */,
                     ppapi::proxy::SerializedVar /* web_session_id, String */)
 IPC_MESSAGE_ROUTED4(PpapiMsg_PPPContentDecryptor_UpdateSession,
                     PP_Instance /* instance */,
@@ -781,10 +805,6 @@ IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_CloseSession,
                     uint32_t /* promise_id */,
                     std::string /* web_session_id */)
 IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_RemoveSession,
-                    PP_Instance /* instance */,
-                    uint32_t /* promise_id */,
-                    std::string /* web_session_id */)
-IPC_MESSAGE_ROUTED3(PpapiMsg_PPPContentDecryptor_GetUsableKeyIds,
                     PP_Instance /* instance */,
                     uint32_t /* promise_id */,
                     std::string /* web_session_id */)
@@ -1108,32 +1128,27 @@ IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_PromiseResolvedWithSession,
                     PP_Instance /* instance */,
                     uint32_t /* promise_id */,
                     ppapi::proxy::SerializedVar /* web_session_id, String */)
-IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_PromiseResolvedWithKeyIds,
-                    PP_Instance /* instance */,
-                    uint32_t /* promise_id */,
-                    std::vector<std::vector<uint8_t> > /* key_ids */)
 IPC_MESSAGE_ROUTED5(PpapiHostMsg_PPBInstance_PromiseRejected,
                     PP_Instance /* instance */,
                     uint32_t /* promise_id */,
                     PP_CdmExceptionCode /* exception_code */,
                     int32_t /* system_code */,
                     ppapi::proxy::SerializedVar /* error_description, String */)
-IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBInstance_SessionMessage,
+IPC_MESSAGE_ROUTED5(PpapiHostMsg_PPBInstance_SessionMessage,
                     PP_Instance /* instance */,
                     ppapi::proxy::SerializedVar /* web_session_id, String */,
+                    PP_CdmMessageType /* message_type */,
                     ppapi::proxy::SerializedVar /* message, ArrayBuffer */,
                     ppapi::proxy::SerializedVar /* destination_url, String */)
-IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_SessionKeysChange,
+IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBInstance_SessionKeysChange,
                     PP_Instance /* instance */,
                     std::string /* web_session_id */,
-                    PP_Bool /* has_additional_usable_key */)
+                    PP_Bool /* has_additional_usable_key */,
+                    std::vector<PP_KeyInformation> /* key_information */)
 IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_SessionExpirationChange,
                     PP_Instance /* instance */,
                     std::string /* web_session_id */,
                     PP_Time /* new_expiry_time */)
-IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_SessionReady,
-                    PP_Instance /* instance */,
-                    ppapi::proxy::SerializedVar /* web_session_id, String */)
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_SessionClosed,
                     PP_Instance /* instance */,
                     ppapi::proxy::SerializedVar /* web_session_id, String */)
@@ -1180,9 +1195,9 @@ IPC_SYNC_MESSAGE_ROUTED3_1(
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBTesting_GetLiveObjectsForInstance,
                            PP_Instance /* instance */,
                            uint32 /* result */)
-IPC_SYNC_MESSAGE_ROUTED2_0(PpapiHostMsg_PPBTesting_SimulateInputEvent,
-                           PP_Instance /* instance */,
-                           ppapi::InputEventData /* input_event */)
+IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBTesting_SimulateInputEvent,
+                    PP_Instance /* instance */,
+                    ppapi::InputEventData /* input_event */)
 IPC_SYNC_MESSAGE_ROUTED1_0(
     PpapiHostMsg_PPBTesting_SetMinimumArrayBufferSizeForShmem,
     uint32_t /* threshold */)

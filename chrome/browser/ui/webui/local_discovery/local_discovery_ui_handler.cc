@@ -27,6 +27,7 @@
 #include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
@@ -109,8 +110,8 @@ LocalDiscoveryUIHandler::LocalDiscoveryUIHandler()
   // Google Chrome builds. Use a command-line switch for Windows non-Google
   //  Chrome builds.
   cloud_print_connector_ui_enabled_ =
-      CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableCloudPrintProxy);
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableCloudPrintProxy);
 #else
   // Always enabled for Linux and Google Chrome Windows builds.
   // Never enabled for Chrome OS, we don't even need to indicate it.
@@ -203,7 +204,7 @@ void LocalDiscoveryUIHandler::HandleStart(const base::ListValue* args) {
 #endif
 
 #if defined(ENABLE_WIFI_BOOTSTRAPPING)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableCloudDevices)) {
     StartWifiBootstrapping();
   }
@@ -263,8 +264,8 @@ void LocalDiscoveryUIHandler::HandleRequestDeviceList(
   cloud_devices_.clear();
 
   cloud_print_printer_list_ = CreateApiFlow();
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableCloudDevices)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableCloudDevices)) {
     cloud_device_list_ = CreateApiFlow();
   }
 
@@ -299,13 +300,7 @@ void LocalDiscoveryUIHandler::HandleShowSyncUI(
   Browser* browser = chrome::FindBrowserWithWebContents(
       web_ui()->GetWebContents());
   DCHECK(browser);
-
-  GURL url(signin::GetPromoURL(signin::SOURCE_DEVICES_PAGE,
-                               true));  // auto close after success.
-
-  browser->OpenURL(
-      content::OpenURLParams(url, content::Referrer(), SINGLETON_TAB,
-                             ui::PAGE_TRANSITION_AUTO_BOOKMARK, false));
+  chrome::ShowBrowserSignin(browser, signin_metrics::SOURCE_DEVICES_PAGE);
 }
 
 void LocalDiscoveryUIHandler::StartRegisterHTTP(

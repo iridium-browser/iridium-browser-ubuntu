@@ -14,7 +14,10 @@
 #include "chrome/browser/android/bookmarks/bookmarks_bridge.h"
 #include "chrome/browser/android/chrome_web_contents_delegate_android.h"
 #include "chrome/browser/android/chromium_application.h"
+#include "chrome/browser/android/compositor/layer_title_cache.h"
+#include "chrome/browser/android/compositor/tab_content_manager.h"
 #include "chrome/browser/android/content_view_util.h"
+#include "chrome/browser/android/cookies/cookies_fetcher.h"
 #include "chrome/browser/android/dev_tools_server.h"
 #include "chrome/browser/android/dom_distiller/feedback_reporter_android.h"
 #include "chrome/browser/android/enhanced_bookmarks/enhanced_bookmarks_bridge.h"
@@ -56,15 +59,18 @@
 #include "chrome/browser/search_engines/template_url_service_android.h"
 #include "chrome/browser/signin/android_profile_oauth2_token_service.h"
 #include "chrome/browser/speech/tts_android.h"
+#include "chrome/browser/supervised_user/child_accounts/child_account_feedback_reporter_android.h"
+#include "chrome/browser/supervised_user/child_accounts/child_account_service_android.h"
 #include "chrome/browser/sync/profile_sync_service_android.h"
 #include "chrome/browser/ui/android/autofill/autofill_dialog_controller_android.h"
 #include "chrome/browser/ui/android/autofill/autofill_dialog_result.h"
 #include "chrome/browser/ui/android/autofill/autofill_logger_android.h"
 #include "chrome/browser/ui/android/autofill/autofill_popup_view_android.h"
+#include "chrome/browser/ui/android/autofill/card_unmask_prompt_view_android.h"
+#include "chrome/browser/ui/android/autofill/credit_card_scanner_view_android.h"
 #include "chrome/browser/ui/android/autofill/password_generation_popup_view_android.h"
 #include "chrome/browser/ui/android/chrome_http_auth_handler.h"
 #include "chrome/browser/ui/android/context_menu_helper.h"
-#include "chrome/browser/ui/android/infobars/auto_login_infobar_delegate_android.h"
 #include "chrome/browser/ui/android/infobars/confirm_infobar.h"
 #include "chrome/browser/ui/android/infobars/data_reduction_proxy_infobar.h"
 #include "chrome/browser/ui/android/infobars/generated_password_saved_infobar.h"
@@ -73,6 +79,7 @@
 #include "chrome/browser/ui/android/infobars/translate_infobar.h"
 #include "chrome/browser/ui/android/javascript_app_modal_dialog_android.h"
 #include "chrome/browser/ui/android/navigation_popup.h"
+#include "chrome/browser/ui/android/omnibox/omnibox_url_emphasizer.h"
 #include "chrome/browser/ui/android/omnibox/omnibox_view_util.h"
 #include "chrome/browser/ui/android/ssl_client_certificate_request.h"
 #include "chrome/browser/ui/android/tab_model/tab_model_jni_bridge.h"
@@ -97,119 +104,124 @@ namespace chrome {
 namespace android {
 
 static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
-  // Register JNI for components we depend on.
-  { "AppMenuDragHelper", RegisterAppMenuDragHelper },
-  { "Bookmarks", bookmarks::android::RegisterBookmarks },
-  { "DomDistiller", dom_distiller::android::RegisterDomDistiller },
-  { "GCMDriver", gcm::android::RegisterGCMDriverJni },
-  { "Invalidation", invalidation::android::RegisterInvalidationJni },
-  { "NavigationInterception",
-    navigation_interception::RegisterNavigationInterceptionJni },
-  { "WebContentsDelegateAndroid",
-    web_contents_delegate_android::RegisterWebContentsDelegateAndroidJni },
-  // Register JNI for chrome classes.
-  { "AccessibilityUtils", AccessibilityUtil::Register },
-  { "AccountManagementScreenHelper", AccountManagementScreenHelper::Register },
-  { "AndroidProfileOAuth2TokenService",
-    AndroidProfileOAuth2TokenService::Register },
-  { "AnswersImageBridge", RegisterAnswersImageBridge },
-  { "AppBannerManager", banners::RegisterAppBannerManager },
-  { "ApplicationLifetime", RegisterApplicationLifetimeAndroid },
-  { "AutocompleteControllerAndroid", RegisterAutocompleteControllerAndroid },
-  { "AutofillDialogControllerAndroid",
-    autofill::AutofillDialogControllerAndroid::
-        RegisterAutofillDialogControllerAndroid },
-  { "AutofillDialogResult",
-    autofill::AutofillDialogResult::RegisterAutofillDialogResult },
-  { "AutofillLoggerAndroid",
-    autofill::AutofillLoggerAndroid::Register },
-  { "AutofillPopup",
-    autofill::AutofillPopupViewAndroid::RegisterAutofillPopupViewAndroid },
-  { "AutoLoginDelegate", AutoLoginInfoBarDelegateAndroid::Register },
-  { "BookmarksBridge", BookmarksBridge::RegisterBookmarksBridge },
-  { "CertificateViewer", RegisterCertificateViewer },
-  { "ChromeBrowserProvider",
-    ChromeBrowserProvider::RegisterChromeBrowserProvider },
-  { "ChromeHttpAuthHandler",
-    ChromeHttpAuthHandler::RegisterChromeHttpAuthHandler },
-  { "ChromeWebContentsDelegateAndroid",
-    RegisterChromeWebContentsDelegateAndroid },
-  { "ChromiumApplication",
-    ChromiumApplication::RegisterBindings },
-  { "ConfirmInfoBarDelegate", RegisterConfirmInfoBarDelegate },
-  { "ContentViewUtil", RegisterContentViewUtil },
-  { "ContextMenuHelper", RegisterContextMenuHelper },
-  { "DataReductionProxyInfoBarDelegate", DataReductionProxyInfoBar::Register },
-  { "DataReductionProxySettings", DataReductionProxySettingsAndroid::Register },
-  { "DevToolsServer", RegisterDevToolsServer },
-  { "DomDistillerServiceFactory",
-    dom_distiller::android::DomDistillerServiceFactoryAndroid::Register },
-  { "DomDistillerTabUtils", RegisterDomDistillerTabUtils },
-  { "EnhancedBookmarksBridge",
-    enhanced_bookmarks::android::RegisterEnhancedBookmarksBridge},
-  { "ExternalPrerenderRequestHandler",
-      prerender::ExternalPrerenderHandlerAndroid::
-      RegisterExternalPrerenderHandlerAndroid },
-  { "FaviconHelper", FaviconHelper::RegisterFaviconHelper },
-  { "FeatureUtilities", RegisterFeatureUtilities },
-  { "FeedbackReporter", dom_distiller::android::RegisterFeedbackReporter },
-  { "FindInPageBridge", FindInPageBridge::RegisterFindInPageBridge },
-  { "FontSizePrefsAndroid", FontSizePrefsAndroid::Register },
-  { "ForeignSessionHelper",
-    ForeignSessionHelper::RegisterForeignSessionHelper },
-  { "GeneratedPasswordSavedInfoBarDelegate",
-    RegisterGeneratedPasswordSavedInfoBarDelegate },
-  { "InfoBarContainer", RegisterInfoBarContainer },
-  { "InvalidationServiceFactory",
-    invalidation::InvalidationServiceFactoryAndroid::Register },
-  { "ShortcutHelper", ShortcutHelper::RegisterShortcutHelper },
-  { "IntentHelper", RegisterIntentHelper },
-  { "JavascriptAppModalDialog",
-    JavascriptAppModalDialogAndroid::RegisterJavascriptAppModalDialog },
-  { "LogoBridge", RegisterLogoBridge },
-  { "MostVisitedSites", MostVisitedSites::Register },
-  { "NativeInfoBar", RegisterNativeInfoBar },
-  { "NavigationPopup", NavigationPopup::RegisterNavigationPopup },
-  { "NewTabPagePrefs",
-    NewTabPagePrefs::RegisterNewTabPagePrefs },
-  { "NotificationUIManager",
-    NotificationUIManagerAndroid::RegisterNotificationUIManager },
-  { "OmniboxPrerender", RegisterOmniboxPrerender },
-  { "OmniboxViewUtil", OmniboxViewUtil::RegisterOmniboxViewUtil },
-  { "PasswordGenerationPopup",
-    autofill::PasswordGenerationPopupViewAndroid::Register},
-  { "PasswordUIViewAndroid",
-    PasswordUIViewAndroid::RegisterPasswordUIViewAndroid },
-  { "PersonalDataManagerAndroid",
-    autofill::PersonalDataManagerAndroid::Register },
-  { "PrefServiceBridge", RegisterPrefServiceBridge },
-  { "ProfileAndroid", ProfileAndroid::RegisterProfileAndroid },
-  { "ProfileDownloader", RegisterProfileDownloader },
-  { "ProfileSyncService", ProfileSyncServiceAndroid::Register },
-  { "RecentlyClosedBridge", RecentlyClosedTabsBridge::Register },
-  { "SigninManager", SigninManagerAndroid::Register },
-  { "SqliteCursor", SQLiteCursor::RegisterSqliteCursor },
-  { "SSLClientCertificateRequest", RegisterSSLClientCertificateRequestAndroid },
-  { "StartupMetricUtils", RegisterStartupMetricUtils },
-  { "TabAndroid", TabAndroid::RegisterTabAndroid },
-  { "TabModelJniBridge", TabModelJniBridge::Register},
-  { "TabState", RegisterTabState },
-  { "TemplateUrlServiceAndroid", TemplateUrlServiceAndroid::Register },
-  { "ToolbarModelAndroid", ToolbarModelAndroid::RegisterToolbarModelAndroid },
-  { "TranslateInfoBarDelegate", RegisterTranslateInfoBarDelegate },
-  { "TtsPlatformImpl", TtsPlatformImplAndroid::Register },
-  { "UmaBridge", RegisterUmaBridge },
-  { "UrlUtilities", RegisterUrlUtilities },
-  { "Variations", variations::android::RegisterVariations },
-  { "VoiceSearchTabHelper", RegisterVoiceSearchTabHelper },
-  { "WebsiteSettingsPopupAndroid",
-    WebsiteSettingsPopupAndroid::RegisterWebsiteSettingsPopupAndroid },
-  { "WebsiteSettingsPopupLegacyAndroid",
-    WebsiteSettingsPopupLegacyAndroid::
-        RegisterWebsiteSettingsPopupLegacyAndroid },
+    // Register JNI for components we depend on.
+    {"AppMenuDragHelper", RegisterAppMenuDragHelper},
+    {"Bookmarks", bookmarks::android::RegisterBookmarks},
+    {"DomDistiller", dom_distiller::android::RegisterDomDistiller},
+    {"GCMDriver", gcm::android::RegisterGCMDriverJni},
+    {"Invalidation", invalidation::android::RegisterInvalidationJni},
+    {"NavigationInterception",
+     navigation_interception::RegisterNavigationInterceptionJni},
+    {"WebContentsDelegateAndroid",
+     web_contents_delegate_android::RegisterWebContentsDelegateAndroidJni},
+    // Register JNI for chrome classes.
+    {"AccessibilityUtils", AccessibilityUtil::Register},
+    {"AccountManagementScreenHelper", AccountManagementScreenHelper::Register},
+    {"AndroidProfileOAuth2TokenService",
+     AndroidProfileOAuth2TokenService::Register},
+    {"AnswersImageBridge", RegisterAnswersImageBridge},
+    {"AppBannerManager", banners::RegisterAppBannerManager},
+    {"ApplicationLifetime", RegisterApplicationLifetimeAndroid},
+    {"AutocompleteControllerAndroid", RegisterAutocompleteControllerAndroid},
+    {"AutofillDialogControllerAndroid",
+     autofill::AutofillDialogControllerAndroid::
+         RegisterAutofillDialogControllerAndroid},
+    {"AutofillDialogResult",
+     autofill::AutofillDialogResult::RegisterAutofillDialogResult},
+    {"AutofillLoggerAndroid", autofill::AutofillLoggerAndroid::Register},
+    {"AutofillPopup",
+     autofill::AutofillPopupViewAndroid::RegisterAutofillPopupViewAndroid},
+    {"BookmarksBridge", BookmarksBridge::RegisterBookmarksBridge},
+    {"CardUnmaskPrompt", autofill::CardUnmaskPromptViewAndroid::Register},
+    {"CertificateViewer", RegisterCertificateViewer},
+    {"ChildAccountFeedbackReporter", RegisterChildAccountFeedbackReporter},
+    {"ChildAccountService", RegisterChildAccountService},
+    {"ChromeBrowserProvider",
+     ChromeBrowserProvider::RegisterChromeBrowserProvider},
+    {"ChromeHttpAuthHandler",
+     ChromeHttpAuthHandler::RegisterChromeHttpAuthHandler},
+    {"ChromeWebContentsDelegateAndroid",
+     RegisterChromeWebContentsDelegateAndroid},
+    {"ChromiumApplication", ChromiumApplication::RegisterBindings},
+    {"ConfirmInfoBarDelegate", RegisterConfirmInfoBarDelegate},
+    {"ContentViewUtil", RegisterContentViewUtil},
+    {"ContextMenuHelper", RegisterContextMenuHelper},
+    {"CookiesFetcher", RegisterCookiesFetcher},
+    {"CreditCardScanner", autofill::CreditCardScannerViewAndroid::Register},
+    {"DataReductionProxyInfoBarDelegate", DataReductionProxyInfoBar::Register},
+    {"DataReductionProxySettings", DataReductionProxySettingsAndroid::Register},
+    {"DevToolsServer", RegisterDevToolsServer},
+    {"DomDistillerServiceFactory",
+     dom_distiller::android::DomDistillerServiceFactoryAndroid::Register},
+    {"DomDistillerTabUtils", RegisterDomDistillerTabUtils},
+    {"EnhancedBookmarksBridge",
+     enhanced_bookmarks::android::RegisterEnhancedBookmarksBridge},
+    {"ExternalPrerenderRequestHandler",
+     prerender::ExternalPrerenderHandlerAndroid::
+         RegisterExternalPrerenderHandlerAndroid},
+    {"FaviconHelper", FaviconHelper::RegisterFaviconHelper},
+    {"FeatureUtilities", RegisterFeatureUtilities},
+    {"FeedbackReporter", dom_distiller::android::RegisterFeedbackReporter},
+    {"FindInPageBridge", FindInPageBridge::RegisterFindInPageBridge},
+    {"FontSizePrefsAndroid", FontSizePrefsAndroid::Register},
+    {"ForeignSessionHelper",
+     ForeignSessionHelper::RegisterForeignSessionHelper},
+    {"GeneratedPasswordSavedInfoBarDelegate",
+     RegisterGeneratedPasswordSavedInfoBarDelegate},
+    {"InfoBarContainer", RegisterInfoBarContainer},
+    {"InvalidationServiceFactory",
+     invalidation::InvalidationServiceFactoryAndroid::Register},
+    {"ShortcutHelper", ShortcutHelper::RegisterShortcutHelper},
+    {"IntentHelper", RegisterIntentHelper},
+    {"JavascriptAppModalDialog",
+     JavascriptAppModalDialogAndroid::RegisterJavascriptAppModalDialog},
+    {"LayerTitleCache", chrome::android::RegisterLayerTitleCache},
+    {"LogoBridge", RegisterLogoBridge},
+    {"MostVisitedSites", MostVisitedSites::Register},
+    {"NativeInfoBar", RegisterNativeInfoBar},
+    {"NavigationPopup", NavigationPopup::RegisterNavigationPopup},
+    {"NewTabPagePrefs", NewTabPagePrefs::RegisterNewTabPagePrefs},
+    {"NotificationUIManager",
+     NotificationUIManagerAndroid::RegisterNotificationUIManager},
+    {"OmniboxPrerender", RegisterOmniboxPrerender},
+    {"OmniboxUrlEmphasizer",
+     OmniboxUrlEmphasizer::RegisterOmniboxUrlEmphasizer},
+    {"OmniboxViewUtil", OmniboxViewUtil::RegisterOmniboxViewUtil},
+    {"PasswordGenerationPopup",
+     autofill::PasswordGenerationPopupViewAndroid::Register},
+    {"PasswordUIViewAndroid",
+     PasswordUIViewAndroid::RegisterPasswordUIViewAndroid},
+    {"PersonalDataManagerAndroid",
+     autofill::PersonalDataManagerAndroid::Register},
+    {"PrefServiceBridge", RegisterPrefServiceBridge},
+    {"ProfileAndroid", ProfileAndroid::RegisterProfileAndroid},
+    {"ProfileDownloader", RegisterProfileDownloader},
+    {"ProfileSyncService", ProfileSyncServiceAndroid::Register},
+    {"RecentlyClosedBridge", RecentlyClosedTabsBridge::Register},
+    {"SigninManager", SigninManagerAndroid::Register},
+    {"SqliteCursor", SQLiteCursor::RegisterSqliteCursor},
+    {"SSLClientCertificateRequest", RegisterSSLClientCertificateRequestAndroid},
+    {"StartupMetricUtils", RegisterStartupMetricUtils},
+    {"TabAndroid", TabAndroid::RegisterTabAndroid},
+    {"TabContentManager", chrome::android::RegisterTabContentManager},
+    {"TabModelJniBridge", TabModelJniBridge::Register},
+    {"TabState", RegisterTabState},
+    {"TemplateUrlServiceAndroid", TemplateUrlServiceAndroid::Register},
+    {"ToolbarModelAndroid", ToolbarModelAndroid::RegisterToolbarModelAndroid},
+    {"TranslateInfoBarDelegate", RegisterTranslateInfoBarDelegate},
+    {"TtsPlatformImpl", TtsPlatformImplAndroid::Register},
+    {"UmaBridge", RegisterUmaBridge},
+    {"UrlUtilities", RegisterUrlUtilities},
+    {"Variations", variations::android::RegisterVariations},
+    {"VoiceSearchTabHelper", RegisterVoiceSearchTabHelper},
+    {"WebsiteSettingsPopupAndroid",
+     WebsiteSettingsPopupAndroid::RegisterWebsiteSettingsPopupAndroid},
+    {"WebsiteSettingsPopupLegacyAndroid",
+     WebsiteSettingsPopupLegacyAndroid::
+         RegisterWebsiteSettingsPopupLegacyAndroid},
 #if defined(ENABLE_PRINTING) && !defined(ENABLE_PRINT_PREVIEW)
-  { "PrintingContext",
-    printing::PrintingContextAndroid::RegisterPrintingContext},
+    {"PrintingContext",
+     printing::PrintingContextAndroid::RegisterPrintingContext},
 #endif
 };
 

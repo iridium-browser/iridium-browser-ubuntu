@@ -19,7 +19,7 @@
 #include "ui/views/controls/textfield/textfield_controller.h"
 
 #if defined(OS_CHROMEOS)
-#include "chromeos/ime/input_method_manager.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 #endif
 
 class LocationBarView;
@@ -68,6 +68,7 @@ class OmniboxViewViews
   // OmniboxView:
   void SaveStateToTab(content::WebContents* tab) override;
   void OnTabChanged(const content::WebContents* web_contents) override;
+  void ResetTabState(content::WebContents* web_contents) override;
   void Update() override;
   void UpdatePlaceholderText() override;
   base::string16 GetText() const override;

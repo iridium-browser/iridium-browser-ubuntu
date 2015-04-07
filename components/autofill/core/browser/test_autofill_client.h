@@ -25,30 +25,31 @@ class TestAutofillClient : public AutofillClient {
   PrefService* GetPrefs() override;
   void HideRequestAutocompleteDialog() override;
   void ShowAutofillSettings() override;
-  void ConfirmSaveCreditCard(const AutofillMetrics& metric_logger,
-                             const base::Closure& save_card_callback) override;
+  void ShowUnmaskPrompt(const CreditCard& card,
+                        base::WeakPtr<CardUnmaskDelegate> delegate) override;
+  void OnUnmaskVerificationResult(bool success) override;
+  void ConfirmSaveCreditCard(const base::Closure& save_card_callback) override;
+  bool HasCreditCardScanFeature() override;
+  void ScanCreditCard(const CreditCardScanCallback& callback) override;
   void ShowRequestAutocompleteDialog(const FormData& form,
-                                     const GURL& source_url,
+                                     content::RenderFrameHost* rfh,
                                      const ResultCallback& callback) override;
   void ShowAutofillPopup(
       const gfx::RectF& element_bounds,
       base::i18n::TextDirection text_direction,
-      const std::vector<base::string16>& values,
-      const std::vector<base::string16>& labels,
-      const std::vector<base::string16>& icons,
-      const std::vector<int>& identifiers,
+      const std::vector<Suggestion>& suggestions,
       base::WeakPtr<AutofillPopupDelegate> delegate) override;
   void UpdateAutofillPopupDataListValues(
       const std::vector<base::string16>& values,
       const std::vector<base::string16>& labels) override;
   void HideAutofillPopup() override;
   bool IsAutocompleteEnabled() override;
-
   void DetectAccountCreationForms(
+      content::RenderFrameHost* rfh,
       const std::vector<autofill::FormStructure*>& forms) override;
-
   void DidFillOrPreviewField(const base::string16& autofilled_value,
                              const base::string16& profile_full_name) override;
+  void OnFirstUserGestureObserved() override;
 
   void SetPrefs(scoped_ptr<PrefService> prefs) { prefs_ = prefs.Pass(); }
 

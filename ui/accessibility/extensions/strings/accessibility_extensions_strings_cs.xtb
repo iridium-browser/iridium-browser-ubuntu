@@ -15,23 +15,27 @@
 <translation id="3622586652998721735">Nastavit jako výchozí schéma</translation>
 <translation id="2179565792157161713">Otevřít dlouhý popis na nové kartě</translation>
 <translation id="2471847333270902538">Barevné schéma webu <ph name="SITE"/>:</translation>
+<translation id="381767806621926835">Kliknutím pravým tlačítkem na libovolný prvek s atributem „longdesc“ nebo „aria-describedat“ získáte jeho dlouhý popis.</translation>
+<translation id="786423340267544509">Přidat k prvkům s atributem aria-describedat nebo longdesc ohraničení.</translation>
 <translation id="690628312087070417">Když kurzor přeskočí o velkou vzdálenost:</translation>
 <translation id="5331422999063554397">Převrácené barvy</translation>
 <translation id="2648340354586434750">Chcete-li se pohybovat po jednotlivých slovech, přidržte klávesu &lt;span class='key'&gt;Option&lt;/span&gt;.</translation>
+<translation id="4769065380738716500">Obrázky byly nahrazeny textem z atributu alt.</translation>
 <translation id="5287723860611749454">&lt;p&gt;V dokumentu se můžete pohybovat pomocí kláves s šipkami. &lt;/p&gt;&lt;p&gt;Chcete-li přesunout kurzor, klikněte na libovolné místo. &lt;/p&gt; &lt;p&gt; Chcete-li vybrat text, stiskněte klávesy se šipkami a přidržte klávesu &lt;span class='key'&gt;Shift&lt;/span&gt;.&lt;/p&gt;</translation>
 <translation id="5558600050691192317">Klávesové příkazy</translation>
 <translation id="633394792577263429">Chcete-li se pohybovat po jednotlivých slovech, přidržte klávesu &lt;span class='key'&gt;Control&lt;/span&gt;.</translation>
+<translation id="2079545284768500474">Zpět</translation>
 <translation id="8254860724243898966">Procházení pomocí kurzoru zapnete stisknutím klávesy &lt;span class='key'&gt;Alt&lt;/span&gt; a klávesy &lt;img src='increase_brightness.png'&gt; (klávesa zvýšení jasu nebo F7). Opakovaným stisknutím jej opět vypnete.</translation>
 <translation id="3812541808639806898">Image Alt Text Viewer</translation>
 <translation id="1287053896835709737">Žlutá na černé</translation>
 <translation id="4896660567607030658">Žádná zpětná vazba, jen zobrazit kurzor</translation>
 <translation id="5631241868147802353">Výchozí barevné schéma:</translation>
-<translation id="625377550964694810">Ke všem prvkům HTML s atributem „longdesc“ nebo „aria-describedat“ bude přidán široký a jasný rámeček. Když na prvek HTML kliknete pravým tlačítkem, v kontextové nabídce bude navíc dostupná možnost zobrazení dlouhého popisu.</translation>
 <translation id="5173942593318174089">Zvýraznit pozici kurzoru pomocí animace</translation>
 <translation id="894241283505723656">Dlouhé popisy v kontextové nabídce</translation>
 <translation id="5555153510860501336">Vysoký kontrast je deaktivován</translation>
 <translation id="1703735871906654364">Procházení pomocí kurzoru</translation>
 <translation id="7384431257964758081">Vysoký kontrast je aktivován</translation>
+<translation id="6550675742724504774">Možnosti</translation>
 <translation id="5650358096585648000">Vizuální zpětná vazba</translation>
 <translation id="4388820049312272371">Zvýraznit pozici kurzoru rychlým blikáním</translation>
 <translation id="4023902424053835668">Umožňuje procházet text webových stránek pomocí kláves s šipkami.</translation>

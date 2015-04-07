@@ -5,6 +5,8 @@
 
 """Unittests for chromite.lib.patch."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import copy
@@ -438,6 +440,8 @@ class TestGitRepoPatch(GitRepoPatchTestCase):
                       git1, cid1, [], 'CQ-DEPENDS=1')
     self.assertRaises(cros_patch.BrokenCQDepends, self._CheckPaladin,
                       git1, cid1, [], 'CQ_DEPEND=1')
+    self.assertRaises(cros_patch.BrokenCQDepends, self._CheckPaladin,
+                      git1, cid1, [], ' CQ-DEPEND=1')
 
 
 class TestApplyAgainstManifest(GitRepoPatchTestCase,
@@ -532,7 +536,7 @@ class TestLocalPatchGit(GitRepoPatchTestCase):
     patch.ProjectDir = ProjectDirMock
     # First suppress carbon copy behaviour so we verify pushing
     # plain works.
-    # pylint: disable=E1101
+    # pylint: disable=E1101,protected-access
     sha1 = patch.sha1
     patch._GetCarbonCopy = lambda: sha1
     patch.Upload(git2, 'refs/testing/test1')
@@ -774,7 +778,7 @@ class TestFormatting(cros_test_lib.TestCase):
     if raises:
       self.assertRaises2(ValueError, functor, value,
                          msg="%s(%r) did not throw a ValueError"
-                         % (functor.__name__, value),  **kwargs)
+                         % (functor.__name__, value), **kwargs)
     else:
       self.assertEqual(functor(value, **kwargs), expected,
                        msg="failed: %s(%r) != %r"
@@ -846,6 +850,72 @@ class TestFormatting(cros_test_lib.TestCase):
 
     self._assertBad(cros_patch.ParsePatchDep,
                     ['1454623', 'I47ea3', 'i47ea3'.ljust(41, '0')])
+
+
+class MockPatchBase(cros_test_lib.MockTestCase):
+  """Base test case with helper methods to generate mock patches."""
+
+  def setUp(self):
+    self.patch_mock = None
+    self._patch_counter = (itertools.count(1)).next
+
+  def MockPatch(self, change_id=None, patch_number=None, is_merged=False,
+                project='chromiumos/chromite', remote=constants.EXTERNAL_REMOTE,
+                tracking_branch='refs/heads/master', is_draft=False,
+                approvals=()):
+    """Helper function to create mock GerritPatch objects."""
+    if change_id is None:
+      change_id = self._patch_counter()
+    gerrit_number = str(change_id)
+    change_id = hex(change_id)[2:].rstrip('L').lower()
+    change_id = 'I%s' % change_id.rjust(40, '0')
+    sha1 = hex(_GetNumber())[2:].rstrip('L').lower().rjust(40, '0')
+    patch_number = (patch_number if patch_number is not None else _GetNumber())
+    fake_url = 'http://foo/bar'
+    if not approvals:
+      approvals = [{'type': 'VRIF', 'value': '1', 'grantedOn': 1391733002},
+                   {'type': 'CRVW', 'value': '2', 'grantedOn': 1391733002},
+                   {'type': 'COMR', 'value': '1', 'grantedOn': 1391733002},]
+
+    current_patch_set = {
+      'number': patch_number,
+      'revision': sha1,
+      'draft': is_draft,
+      'approvals': approvals,
+    }
+    patch_dict = {
+      'currentPatchSet': current_patch_set,
+      'id': change_id,
+      'number': gerrit_number,
+      'project': project,
+      'branch': tracking_branch,
+      'owner': {'email': 'elmer.fudd@chromium.org'},
+      'remote': remote,
+      'status': 'MERGED' if is_merged else 'NEW',
+      'url': '%s/%s' % (fake_url, change_id),
+    }
+
+    patch = cros_patch.GerritPatch(patch_dict, remote, fake_url)
+    patch.pass_count = 0
+    patch.fail_count = 1
+    patch.total_fail_count = 3
+    return patch
+
+  def GetPatches(self, how_many=1, always_use_list=False, **kwargs):
+    """Get a sequential list of patches.
+
+    Args:
+      how_many: How many patches to return.
+      always_use_list: Whether to use a list for a single item list.
+      **kwargs: Keyword arguments for self.MockPatch.
+    """
+    patches = [self.MockPatch(**kwargs) for _ in xrange(how_many)]
+    if self.patch_mock:
+      for i, patch in enumerate(patches):
+        self.patch_mock.SetGerritDependencies(patch, patches[:i + 1])
+    if how_many == 1 and not always_use_list:
+      return patches[0]
+    return patches
 
 
 if __name__ == '__main__':

@@ -30,6 +30,7 @@
 
 using chromeos::DeviceState;
 using chromeos::NetworkConfigurationHandler;
+using chromeos::NetworkConfigurationObserver;
 using chromeos::NetworkConnectionHandler;
 using chromeos::NetworkHandler;
 using chromeos::NetworkProfile;
@@ -135,7 +136,7 @@ void NetworkConnectImpl::HandleUnconfiguredNetwork(
 
   if (network->type() == shill::kTypeWifi) {
     // Only show the config view for secure networks, otherwise do nothing.
-    if (network->security() != shill::kSecurityNone) {
+    if (network->security_class() != shill::kSecurityNone) {
       delegate_->ShowNetworkConfigure(service_path);
     }
     return;
@@ -308,8 +309,9 @@ void NetworkConnectImpl::CallCreateConfiguration(
   properties->SetStringWithoutPathExpansion(shill::kProfileProperty,
                                             profile_path);
   NetworkHandler::Get()->network_configuration_handler()->CreateConfiguration(
-      *properties, base::Bind(&NetworkConnectImpl::OnConfigureSucceeded,
-                              weak_factory_.GetWeakPtr(), connect_on_configure),
+      *properties, NetworkConfigurationObserver::SOURCE_USER_ACTION,
+      base::Bind(&NetworkConnectImpl::OnConfigureSucceeded,
+                 weak_factory_.GetWeakPtr(), connect_on_configure),
       base::Bind(&NetworkConnectImpl::OnConfigureFailed,
                  weak_factory_.GetWeakPtr()));
 }
@@ -362,6 +364,7 @@ void NetworkConnectImpl::ConfigureSetProfileSucceeded(
   SetPropertiesToClear(properties_to_set.get(), &properties_to_clear);
   NetworkHandler::Get()->network_configuration_handler()->SetProperties(
       service_path, *properties_to_set,
+      NetworkConfigurationObserver::SOURCE_USER_ACTION,
       base::Bind(&NetworkConnectImpl::ClearPropertiesAndConnect,
                  weak_factory_.GetWeakPtr(), service_path, properties_to_clear),
       base::Bind(&NetworkConnectImpl::SetPropertiesFailed,
@@ -374,7 +377,7 @@ void NetworkConnectImpl::ConnectToNetwork(const std::string& service_path) {
   NET_LOG_USER("ConnectToNetwork", service_path);
   const NetworkState* network = GetNetworkState(service_path);
   if (network) {
-    if (!network->error().empty() && !network->security().empty()) {
+    if (!network->error().empty() && !network->security_class().empty()) {
       NET_LOG_USER("Configure: " + network->error(), service_path);
       // If the network is in an error state, show the configuration UI
       // directly to avoid a spurious notification.
@@ -505,6 +508,7 @@ void NetworkConnectImpl::ConfigureNetworkAndConnect(
   }
   NetworkHandler::Get()->network_configuration_handler()->SetNetworkProfile(
       service_path, profile_path,
+      NetworkConfigurationObserver::SOURCE_USER_ACTION,
       base::Bind(&NetworkConnectImpl::ConfigureSetProfileSucceeded,
                  weak_factory_.GetWeakPtr(), service_path,
                  base::Passed(&properties_to_set)),

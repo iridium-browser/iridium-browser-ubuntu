@@ -79,6 +79,9 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   int cols() const { return cols_; }
   int rows_per_page() const { return rows_per_page_; }
 
+  // Returns the size of a tile view including its padding.
+  static gfx::Size GetTotalTileSize();
+
   // This resets the grid view to a fresh state for showing the app list.
   void ResetForShowApps();
 
@@ -343,8 +346,8 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   void ReparentItemForReorder(AppListItemView* item_view, const Index& target);
 
   // Updates both data model and view_model_ for re-parenting a folder item
-  // to anther folder target.
-  void ReparentItemToAnotherFolder(AppListItemView* item_view,
+  // to anther folder target. Returns whether the reparent succeeded.
+  bool ReparentItemToAnotherFolder(AppListItemView* item_view,
                                    const Index& target);
 
   // If there is only 1 item left in the source folder after reparenting an item

@@ -17,7 +17,7 @@
 
 #include "webrtc/base/constructormagic.h"
 #include "webrtc/common_types.h"
-#include "webrtc/modules/audio_coding/neteq/interface/audio_decoder.h"
+#include "webrtc/modules/audio_coding/neteq/audio_decoder_impl.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
@@ -132,7 +132,7 @@ class NetEq {
   // Returns 0 on success, -1 on failure.
   virtual int InsertPacket(const WebRtcRTPHeader& rtp_header,
                            const uint8_t* payload,
-                           int length_bytes,
+                           size_t length_bytes,
                            uint32_t receive_timestamp) = 0;
 
   // Inserts a sync-packet into packet queue. Sync-packets are decoded to

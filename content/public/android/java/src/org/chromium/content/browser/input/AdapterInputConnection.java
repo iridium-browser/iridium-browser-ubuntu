@@ -19,6 +19,7 @@ import android.view.inputmethod.ExtractedText;
 import android.view.inputmethod.ExtractedTextRequest;
 
 import org.chromium.base.VisibleForTesting;
+import org.chromium.ui.base.ime.TextInputType;
 
 /**
  * InputConnection is created by ContentView.onCreateInputConnection.
@@ -68,51 +69,51 @@ public class AdapterInputConnection extends BaseInputConnection {
 
         int inputType = imeAdapter.getTextInputType();
         int inputFlags = imeAdapter.getTextInputFlags();
-        if ((inputFlags & imeAdapter.sTextInputFlagAutocompleteOff) != 0) {
+        if ((inputFlags & ImeAdapter.sTextInputFlagAutocompleteOff) != 0) {
             outAttrs.inputType |= EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
         }
 
-        if (inputType == ImeAdapter.sTextInputTypeText) {
+        if (inputType == TextInputType.TEXT) {
             // Normal text field
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_GO;
-            if ((inputFlags & imeAdapter.sTextInputFlagAutocorrectOff) == 0) {
+            if ((inputFlags & ImeAdapter.sTextInputFlagAutocorrectOff) == 0) {
                 outAttrs.inputType |= EditorInfo.TYPE_TEXT_FLAG_AUTO_CORRECT;
             }
-        } else if (inputType == ImeAdapter.sTextInputTypeTextArea ||
-                inputType == ImeAdapter.sTextInputTypeContentEditable) {
+        } else if (inputType == TextInputType.TEXT_AREA
+                || inputType == TextInputType.CONTENT_EDITABLE) {
             // TextArea or contenteditable.
             outAttrs.inputType |= EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE
                     | EditorInfo.TYPE_TEXT_FLAG_CAP_SENTENCES;
-            if ((inputFlags & imeAdapter.sTextInputFlagAutocorrectOff) == 0) {
+            if ((inputFlags & ImeAdapter.sTextInputFlagAutocorrectOff) == 0) {
                 outAttrs.inputType |= EditorInfo.TYPE_TEXT_FLAG_AUTO_CORRECT;
             }
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_NONE;
             mSingleLine = false;
-        } else if (inputType == ImeAdapter.sTextInputTypePassword) {
+        } else if (inputType == TextInputType.PASSWORD) {
             // Password
             outAttrs.inputType = InputType.TYPE_CLASS_TEXT
                     | InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD;
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_GO;
-        } else if (inputType == ImeAdapter.sTextInputTypeSearch) {
+        } else if (inputType == TextInputType.SEARCH) {
             // Search
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_SEARCH;
-        } else if (inputType == ImeAdapter.sTextInputTypeUrl) {
+        } else if (inputType == TextInputType.URL) {
             // Url
             outAttrs.inputType = InputType.TYPE_CLASS_TEXT
                     | InputType.TYPE_TEXT_VARIATION_URI;
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_GO;
-        } else if (inputType == ImeAdapter.sTextInputTypeEmail) {
+        } else if (inputType == TextInputType.EMAIL) {
             // Email
             outAttrs.inputType = InputType.TYPE_CLASS_TEXT
                     | InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS;
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_GO;
-        } else if (inputType == ImeAdapter.sTextInputTypeTel) {
+        } else if (inputType == TextInputType.TELEPHONE) {
             // Telephone
             // Number and telephone do not have both a Tab key and an
             // action in default OSK, so set the action to NEXT
             outAttrs.inputType = InputType.TYPE_CLASS_PHONE;
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_NEXT;
-        } else if (inputType == ImeAdapter.sTextInputTypeNumber) {
+        } else if (inputType == TextInputType.NUMBER) {
             // Number
             outAttrs.inputType = InputType.TYPE_CLASS_NUMBER
                     | InputType.TYPE_NUMBER_VARIATION_NORMAL
@@ -121,8 +122,8 @@ public class AdapterInputConnection extends BaseInputConnection {
         }
         outAttrs.initialSelStart = Selection.getSelectionStart(mEditable);
         outAttrs.initialSelEnd = Selection.getSelectionEnd(mEditable);
-        mLastUpdateSelectionStart = Selection.getSelectionStart(mEditable);
-        mLastUpdateSelectionEnd = Selection.getSelectionEnd(mEditable);
+        mLastUpdateSelectionStart = outAttrs.initialSelStart;
+        mLastUpdateSelectionEnd = outAttrs.initialSelEnd;
 
         Selection.setSelection(mEditable, outAttrs.initialSelStart, outAttrs.initialSelEnd);
         updateSelectionIfRequired();
@@ -210,10 +211,10 @@ public class AdapterInputConnection extends BaseInputConnection {
         int compositionStart = getComposingSpanStart(mEditable);
         int compositionEnd = getComposingSpanEnd(mEditable);
         // Avoid sending update if we sent an exact update already previously.
-        if (mLastUpdateSelectionStart == selectionStart &&
-                mLastUpdateSelectionEnd == selectionEnd &&
-                mLastUpdateCompositionStart == compositionStart &&
-                mLastUpdateCompositionEnd == compositionEnd) {
+        if (mLastUpdateSelectionStart == selectionStart
+                && mLastUpdateSelectionEnd == selectionEnd
+                && mLastUpdateCompositionStart == compositionStart
+                && mLastUpdateCompositionEnd == compositionEnd) {
             return;
         }
         if (DEBUG) {
@@ -356,10 +357,11 @@ public class AdapterInputConnection extends BaseInputConnection {
         // code. For multi-character deletion, executes deletion by calling
         // |ImeAdapter.deleteSurroundingText| and sends synthetic key events with a dummy key code.
         int keyCode = KeyEvent.KEYCODE_UNKNOWN;
-        if (originalBeforeLength == 1 && originalAfterLength == 0)
+        if (originalBeforeLength == 1 && originalAfterLength == 0) {
             keyCode = KeyEvent.KEYCODE_DEL;
-        else if (originalBeforeLength == 0 && originalAfterLength == 1)
+        } else if (originalBeforeLength == 0 && originalAfterLength == 1) {
             keyCode = KeyEvent.KEYCODE_FORWARD_DEL;
+        }
 
         boolean result = true;
         if (keyCode == KeyEvent.KEYCODE_UNKNOWN) {

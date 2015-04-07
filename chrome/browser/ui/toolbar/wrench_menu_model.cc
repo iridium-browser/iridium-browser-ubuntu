@@ -18,6 +18,7 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search/search.h"
@@ -36,8 +37,6 @@
 #include "chrome/browser/ui/toolbar/bookmark_sub_menu_model.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/ui/toolbar/recent_tabs_sub_menu_model.h"
-#include "chrome/browser/ui/zoom/zoom_controller.h"
-#include "chrome/browser/ui/zoom/zoom_event_manager.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -47,6 +46,8 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
+#include "components/ui/zoom/zoom_controller.h"
+#include "components/ui/zoom/zoom_event_manager.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -195,8 +196,6 @@ class WrenchMenuModel::HelpMenuModel : public ui::SimpleMenuModel {
       : SimpleMenuModel(delegate) {
     Build(browser);
   }
-  virtual ~HelpMenuModel() {
-  }
 
  private:
   void Build(Browser* browser) {
@@ -284,15 +283,10 @@ WrenchMenuModel::WrenchMenuModel(ui::AcceleratorProvider* provider,
   Build();
   UpdateZoomControls();
 
-  content_zoom_subscription_ =
-      content::HostZoomMap::GetDefaultForBrowserContext(browser->profile())
+  browser_zoom_subscription_ =
+      ui_zoom::ZoomEventManager::GetForBrowserContext(browser->profile())
           ->AddZoomLevelChangedCallback(base::Bind(
               &WrenchMenuModel::OnZoomLevelChanged, base::Unretained(this)));
-
-  browser_zoom_subscription_ = ZoomEventManager::GetForBrowserContext(
-      browser->profile())->AddZoomLevelChangedCallback(
-          base::Bind(&WrenchMenuModel::OnZoomLevelChanged,
-                     base::Unretained(this)));
 
   tab_strip_model_->AddObserver(this);
 
@@ -809,10 +803,11 @@ WrenchMenuModel::WrenchMenuModel()
 }
 
 bool WrenchMenuModel::ShouldShowNewIncognitoWindowMenuItem() {
-  if (browser_->profile()->IsSupervised())
+  if (browser_->profile()->IsGuestSession())
     return false;
 
-  return !browser_->profile()->IsGuestSession();
+  return IncognitoModePrefs::GetAvailability(browser_->profile()->GetPrefs()) !=
+      IncognitoModePrefs::DISABLED;
 }
 
 void WrenchMenuModel::Build() {
@@ -879,7 +874,7 @@ void WrenchMenuModel::Build() {
   // appended when this is a touch menu - otherwise it would get added twice.
   CreateCutCopyPasteMenu();
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableDomDistiller)) {
     AddItemWithStringId(IDC_DISTILL_PAGE, IDS_DISTILL_PAGE);
   }
@@ -924,7 +919,7 @@ void WrenchMenuModel::Build() {
 #endif
 
 #if defined(OS_CHROMEOS)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kEnableRequestTabletSite))
     AddCheckItemWithStringId(IDC_TOGGLE_REQUEST_TABLET_SITE,
                              IDS_TOGGLE_REQUEST_TABLET_SITE);
@@ -1003,21 +998,19 @@ void WrenchMenuModel::AddGlobalErrorMenuItems() {
 }
 
 void WrenchMenuModel::CreateExtensionToolbarOverflowMenu() {
-#if defined(TOOLKIT_VIEWS)
-  AddItem(IDC_EXTENSIONS_OVERFLOW_MENU, base::string16());
-  // We only add the separator if there are > 0 items to show in the overflow.
-  extensions::ExtensionToolbarModel* toolbar_model =
-      extensions::ExtensionToolbarModel::Get(browser_->profile());
-  // A count of -1 means all actions are visible.
-  if (!toolbar_model->all_icons_visible())
+  // We only add the extensions overflow container if there are any icons that
+  // aren't shown in the main container.
+  if (!extensions::ExtensionToolbarModel::Get(browser_->profile())->
+          all_icons_visible()) {
+    AddItem(IDC_EXTENSIONS_OVERFLOW_MENU, base::string16());
     AddSeparator(ui::UPPER_SEPARATOR);
-#endif  // defined(TOOLKIT_VIEWS)
+  }
 }
 
 void WrenchMenuModel::CreateCutCopyPasteMenu() {
   AddSeparator(ui::LOWER_SEPARATOR);
 
-#if defined(OS_POSIX) && !defined(TOOLKIT_VIEWS)
+#if defined(OS_MACOSX)
   // WARNING: Mac does not use the ButtonMenuItemModel, but instead defines the
   // layout for this menu item in Toolbar.xib. It does, however, use the
   // command_id value from AddButtonItem() to identify this special item.
@@ -1041,7 +1034,7 @@ void WrenchMenuModel::CreateZoomMenu() {
   // This menu needs to be enclosed by separators.
   AddSeparator(ui::LOWER_SEPARATOR);
 
-#if defined(OS_POSIX) && !defined(TOOLKIT_VIEWS)
+#if defined(OS_MACOSX)
   // WARNING: Mac does not use the ButtonMenuItemModel, but instead defines the
   // layout for this menu item in Toolbar.xib. It does, however, use the
   // command_id value from AddButtonItem() to identify this special item.
@@ -1071,7 +1064,7 @@ void WrenchMenuModel::CreateZoomMenu() {
 void WrenchMenuModel::UpdateZoomControls() {
   int zoom_percent = 100;
   if (browser_->tab_strip_model()->GetActiveWebContents()) {
-    zoom_percent = ZoomController::FromWebContents(
+    zoom_percent = ui_zoom::ZoomController::FromWebContents(
                        browser_->tab_strip_model()->GetActiveWebContents())
                        ->GetZoomPercent();
   }

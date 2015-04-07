@@ -11,6 +11,7 @@ namespace blink {
 
 class ExecutionContext;
 class KURL;
+class WorkerGlobalScopeProxy;
 class WorkerThread;
 
 // A proxy for talking to the worker inspector on the worker thread.
@@ -25,6 +26,7 @@ public:
     public:
         virtual ~PageInspector() { }
         virtual void dispatchMessageFromWorker(const String&) = 0;
+        virtual void workerConsoleAgentEnabled(WorkerGlobalScopeProxy*) = 0;
     };
 
     void workerThreadCreated(ExecutionContext*, WorkerThread*, const KURL&);
@@ -33,9 +35,12 @@ public:
     void connectToInspector(PageInspector*);
     void disconnectFromInspector();
     void sendMessageToInspector(const String&);
-    void writeTimelineStartedEvent(const String& sessionId);
+    void writeTimelineStartedEvent(const String& sessionId, int workerId);
 
-    PageInspector* pageInspector() const { return m_pageInspector; };
+    PageInspector* pageInspector() const { return m_pageInspector; }
+
+    void setWorkerGlobalScopeProxy(WorkerGlobalScopeProxy* proxy) { m_workerGlobalScopeProxy = proxy; }
+    WorkerGlobalScopeProxy* workerGlobalScopeProxy() const { return m_workerGlobalScopeProxy; }
 
 private:
     WorkerInspectorProxy();
@@ -43,6 +48,7 @@ private:
     WorkerThread* m_workerThread;
     ExecutionContext* m_executionContext;
     WorkerInspectorProxy::PageInspector* m_pageInspector;
+    WorkerGlobalScopeProxy* m_workerGlobalScopeProxy;
 };
 
 } // namespace blink

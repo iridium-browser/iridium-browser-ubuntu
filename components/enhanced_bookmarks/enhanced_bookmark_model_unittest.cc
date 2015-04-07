@@ -433,7 +433,9 @@ TEST_F(EnhancedBookmarkModelTest, TestDescriptionFallback) {
 // Makes sure that the stars.version field is set every time
 // EnhancedBookmarkModel makes a change to a node.
 TEST_F(EnhancedBookmarkModelTest, TestVersionField) {
-  const BookmarkNode* node = AddBookmark();
+  const BookmarkNode* node =
+      bookmark_model_->AddURL(bookmark_model_->other_node(), 0,
+                              base::ASCIIToUTF16("Title"), GURL(BOOKMARK_URL));
   EXPECT_EQ("", GetVersion(node));
 
   model_->SetDescription(node, "foo");
@@ -763,4 +765,10 @@ TEST_F(EnhancedBookmarkModelTest,
   const BookmarkNode* gp = parent->parent();
   bookmark_model_->Remove(gp, gp->GetIndexOf(parent));
   EXPECT_FALSE(model_->BookmarkForRemoteId(remote_id));
+}
+
+TEST_F(EnhancedBookmarkModelTest, AddsRemoteIdToNonClonedKeys) {
+  const std::set<std::string>& non_cloned_keys =
+      bookmark_model_->non_cloned_keys();
+  EXPECT_TRUE(non_cloned_keys.find("stars.id") != non_cloned_keys.end());
 }

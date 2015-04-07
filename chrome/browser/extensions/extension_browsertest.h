@@ -72,7 +72,8 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest {
   virtual Profile* profile();
 
   static const extensions::Extension* GetExtensionByPath(
-      const extensions::ExtensionSet* extensions, const base::FilePath& path);
+      const extensions::ExtensionSet& extensions,
+      const base::FilePath& path);
 
   // InProcessBrowserTest
   void SetUp() override;
@@ -280,6 +281,16 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest {
   // Wait for all extension views to load.
   bool WaitForExtensionViewsToLoad() {
     return observer_->WaitForExtensionViewsToLoad();
+  }
+
+  // Wait for the extension to be idle.
+  bool WaitForExtensionIdle(const std::string& extension_id) {
+    return observer_->WaitForExtensionIdle(extension_id);
+  }
+
+  // Wait for the extension to not be idle.
+  bool WaitForExtensionNotIdle(const std::string& extension_id) {
+    return observer_->WaitForExtensionNotIdle(extension_id);
   }
 
   // Simulates a page calling window.open on an URL and waits for the

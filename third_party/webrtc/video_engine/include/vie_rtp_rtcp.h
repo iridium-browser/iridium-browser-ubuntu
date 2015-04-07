@@ -69,25 +69,6 @@ class WEBRTC_DLLEXPORT ViERTPObserver {
   virtual ~ViERTPObserver() {}
 };
 
-// This class declares an abstract interface for a user defined observer. It is
-// up to the VideoEngine user to implement a derived class which implements the
-// observer class. The observer is registered using RegisterRTCPObserver() and
-// deregistered using DeregisterRTCPObserver().
-
-class WEBRTC_DLLEXPORT ViERTCPObserver {
- public:
-  // This method is called if a application-defined RTCP packet has been
-  // received.
-  virtual void OnApplicationDataReceived(
-      const int video_channel,
-      const unsigned char sub_type,
-      const unsigned int name,
-      const char* data,
-      const unsigned short data_length_in_bytes) = 0;
- protected:
-  virtual ~ViERTCPObserver() {}
-};
-
 class WEBRTC_DLLEXPORT ViERTP_RTCP {
  public:
   enum { KDefaultDeltaTransmitTimeSeconds = 15 };
@@ -134,15 +115,6 @@ class WEBRTC_DLLEXPORT ViERTP_RTCP {
   // doesn't enable RTX, SetLocalSSRC must still be called to enable RTX.
   virtual int SetRtxSendPayloadType(const int video_channel,
                                     const uint8_t payload_type) = 0;
-
-  // This enables sending redundant payloads when padding up the bitrate instead
-  // of sending dummy padding packets. This feature is off by default and will
-  // only have an effect if RTX is also enabled.
-  // TODO(holmer): Remove default implementation once this has been implemented
-  // in libjingle.
-  virtual int SetPadWithRedundantPayloads(int video_channel, bool enable) {
-    return 0;
-  }
 
   virtual int SetRtxReceivePayloadType(const int video_channel,
                                        const uint8_t payload_type) = 0;
@@ -370,9 +342,9 @@ class WEBRTC_DLLEXPORT ViERTP_RTCP {
   // TODO(sprang): Temporary hacks to prevent libjingle build from failing,
   // remove when libjingle has been lifted to support webrtc issue 2589
   virtual int GetRTPStatistics(const int video_channel,
-                       unsigned int& bytes_sent,
+                       size_t& bytes_sent,
                        unsigned int& packets_sent,
-                       unsigned int& bytes_received,
+                       size_t& bytes_received,
                        unsigned int& packets_received) const {
     StreamDataCounters sent;
     StreamDataCounters received;
@@ -467,13 +439,6 @@ class WEBRTC_DLLEXPORT ViERTP_RTCP {
 
   // Removes a registered instance of ViERTPObserver.
   virtual int DeregisterRTPObserver(const int video_channel) = 0;
-
-  // Registers an instance of a user implementation of the ViERTCPObserver.
-  virtual int RegisterRTCPObserver(const int video_channel,
-                                   ViERTCPObserver& observer) = 0;
-
-  // Removes a registered instance of ViERTCPObserver.
-  virtual int DeregisterRTCPObserver(const int video_channel) = 0;
 
   // Registers and instance of a user implementation of ViEFrameCountObserver
   virtual int RegisterSendFrameCountObserver(

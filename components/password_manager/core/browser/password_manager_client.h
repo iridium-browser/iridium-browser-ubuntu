@@ -5,16 +5,22 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_MANAGER_CLIENT_H_
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_MANAGER_CLIENT_H_
 
+#include "base/callback.h"
 #include "base/metrics/field_trial.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/password_store.h"
 
 class PrefService;
 
+namespace autofill {
+class AutofillManager;
+}
+
 namespace password_manager {
 
 struct CredentialInfo;
 class PasswordFormManager;
+class PasswordManager;
 class PasswordManagerDriver;
 class PasswordStore;
 
@@ -40,6 +46,11 @@ class PasswordManagerClient {
   // always returns true.
   virtual bool IsPasswordManagerEnabledForCurrentPage() const;
 
+  // Return true if "Allow to collect URL?" should be shown.
+  // TODO(vabr): If http://crbug.com/437528 gets fixed, make this a const
+  // method.
+  virtual bool ShouldAskUserToSubmitURL(const GURL& url);
+
   // Return true if |form| should not be available for autofill.
   virtual bool ShouldFilterAutofillResult(
       const autofill::PasswordForm& form) = 0;
@@ -53,6 +64,11 @@ class PasswordManagerClient {
   virtual bool IsSyncAccountCredential(
       const std::string& username, const std::string& origin) const = 0;
 
+  // This should be called if the password manager encounters a problem on
+  // |url|. The implementation should show the "Allow to collect URL?" bubble
+  // and, if the user confirms, report the |url|.
+  virtual void AskUserAndMaybeReportURL(const GURL& url) const;
+
   // Called when all autofill results have been computed. Client can use
   // this signal to report statistics. Default implementation is a noop.
   virtual void AutofillResultsComputed() {}
@@ -63,6 +79,17 @@ class PasswordManagerClient {
   // Returns true if the prompt was indeed displayed.
   virtual bool PromptUserToSavePassword(
       scoped_ptr<PasswordFormManager> form_to_save) = 0;
+
+  // Informs the embedder of a password forms that the user should choose from.
+  // Returns true if the prompt is indeed displayed. If the prompt is not
+  // displayed, returns false and does not call |callback|.
+  // |callback| should be invoked with the chosen form.
+  // Note: The implementation takes ownership of all PasswordForms in
+  // |local_forms| and |federated_forms|.
+  virtual bool PromptUserToChooseCredentials(
+      const std::vector<autofill::PasswordForm*>& local_forms,
+      const std::vector<autofill::PasswordForm*>& federated_forms,
+      base::Callback<void(const CredentialInfo&)> callback) = 0;
 
   // Called when a password is saved in an automated fashion. Embedder may
   // inform the user that this save has occured.
@@ -89,9 +116,6 @@ class PasswordManagerClient {
   // Returns the PasswordStore associated with this instance.
   virtual PasswordStore* GetPasswordStore() = 0;
 
-  // Returns the PasswordManagerDriver instance associated with this instance.
-  virtual PasswordManagerDriver* GetDriver() = 0;
-
   // Returns the probability that the experiment identified by |experiment_name|
   // should be enabled. The default implementation returns 0.
   virtual base::FieldTrial::Probability GetProbabilityForExperiment(
@@ -109,16 +133,35 @@ class PasswordManagerClient {
   virtual void OnLogRouterAvailabilityChanged(bool router_can_be_used);
 
   // Forward |text| for display to the LogRouter (if registered with one).
-  virtual void LogSavePasswordProgress(const std::string& text);
+  virtual void LogSavePasswordProgress(const std::string& text) const;
 
   // Returns true if logs recorded via LogSavePasswordProgress will be
   // displayed, and false otherwise.
   virtual bool IsLoggingActive() const;
 
+  // Returns true if last navigation page had HTTP error i.e 5XX or 4XX
+  virtual bool WasLastNavigationHTTPError() const;
+
   // Returns the authorization prompt policy to be used with the given form.
   // Only relevant on OSX.
   virtual PasswordStore::AuthorizationPromptPolicy GetAuthorizationPromptPolicy(
       const autofill::PasswordForm& form);
+
+  // Returns whether any SSL certificate errors were encountered as a result of
+  // the last page load.
+  virtual bool DidLastPageLoadEncounterSSLErrors();
+
+  // If this browsing session should not be persisted.
+  virtual bool IsOffTheRecord();
+
+  // Returns the PasswordManager associated with this client.
+  virtual PasswordManager* GetPasswordManager();
+
+  // Returns the AutofillManager for the main frame.
+  virtual autofill::AutofillManager* GetAutofillManagerForMainFrame();
+
+  // Returns the main frame URL.
+  virtual const GURL& GetMainFrameURL();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerClient);

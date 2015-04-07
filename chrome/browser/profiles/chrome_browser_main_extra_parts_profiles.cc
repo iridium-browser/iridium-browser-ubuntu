@@ -14,6 +14,8 @@
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
 #include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/extensions/api/networking_private/networking_private_delegate_factory.h"
+#include "chrome/browser/extensions/api/networking_private/networking_private_verify_delegate_factory_impl.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/geolocation/geolocation_permission_context_factory.h"
 #include "chrome/browser/google/google_url_tracker_factory.h"
@@ -72,6 +74,8 @@
 #include "chrome/browser/policy/schema_registry_service_factory.h"
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
+#include "chrome/browser/chromeos/policy/consumer_enrollment_handler_factory.h"
+#include "chrome/browser/chromeos/policy/consumer_management_notifier_factory.h"
 #include "chrome/browser/chromeos/policy/policy_cert_service_factory.h"
 #include "chrome/browser/chromeos/policy/recommendation_restorer_factory.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_factory_chromeos.h"
@@ -85,9 +89,9 @@
 #endif
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
+#include "chrome/browser/supervised_user/legacy/supervised_user_sync_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
-#include "chrome/browser/supervised_user/supervised_user_sync_service_factory.h"
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/supervised_user/chromeos/manager_password_service_factory.h"
 #include "chrome/browser/supervised_user/chromeos/supervised_user_password_service_factory.h"
@@ -101,7 +105,6 @@
 #if defined(OS_ANDROID)
 #include "chrome/browser/media/protected_media_identifier_permission_context_factory.h"
 #else
-#include "chrome/browser/notifications/sync_notifier/chrome_notifier_service_factory.h"
 #include "chrome/browser/profile_resetter/automatic_profile_resetter_factory.h"
 #endif
 
@@ -201,7 +204,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #if defined(ENABLE_SERVICE_DISCOVERY)
   local_discovery::PrivetNotificationServiceFactory::GetInstance();
 #endif
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
 #if defined(OS_CHROMEOS)
   chromeos::SupervisedUserPasswordServiceFactory::GetInstance();
   chromeos::ManagerPasswordServiceFactory::GetInstance();
@@ -209,9 +212,16 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   SupervisedUserServiceFactory::GetInstance();
   SupervisedUserSyncServiceFactory::GetInstance();
 #endif
+#if defined(OS_CHROMEOS) || defined(OS_WIN) || defined(OS_MACOSX)
+  scoped_ptr<extensions::NetworkingPrivateVerifyDelegateFactoryImpl>
+      networking_private_verify_delegate_factory(
+          new extensions::NetworkingPrivateVerifyDelegateFactoryImpl);
+  extensions::NetworkingPrivateDelegateFactory::GetInstance()
+      ->SetVerifyDelegateFactory(
+          networking_private_verify_delegate_factory.Pass());
+#endif
 #if !defined(OS_ANDROID)
   MediaGalleriesPreferencesFactory::GetInstance();
-  notifier::ChromeNotifierServiceFactory::GetInstance();
   NTPResourceCacheFactory::GetInstance();
 #endif
   PasswordStoreFactory::GetInstance();
@@ -225,6 +235,8 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #if defined(OS_CHROMEOS)
   chromeos::OwnerSettingsServiceChromeOSFactory::GetInstance();
+  policy::ConsumerEnrollmentHandlerFactory::GetInstance();
+  policy::ConsumerManagementNotifierFactory::GetInstance();
   policy::PolicyCertServiceFactory::GetInstance();
   policy::RecommendationRestorerFactory::GetInstance();
   policy::UserCloudPolicyManagerFactoryChromeOS::GetInstance();

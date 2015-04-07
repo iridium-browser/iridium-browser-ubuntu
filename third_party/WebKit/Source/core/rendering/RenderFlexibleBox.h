@@ -53,7 +53,7 @@ public:
     virtual int firstLineBoxBaseline() const override;
     virtual int inlineBlockBaseline(LineDirectionMode) const override;
 
-    virtual void paintChildren(PaintInfo&, const LayoutPoint&) override final;
+    virtual void paintChildren(const PaintInfo&, const LayoutPoint&) override final;
 
     bool isHorizontalFlow() const;
 
@@ -148,7 +148,7 @@ private:
     void freezeViolations(const Vector<Violation>&, LayoutUnit& availableFreeSpace, double& totalFlexGrow, double& totalWeightedFlexShrink, InflexibleFlexItemSize&, bool hasInfiniteLineLength);
 
     void resetAutoMarginsAndLogicalTopInCrossAxis(RenderBox& child);
-    void setLogicalOverrideSize(RenderBox& child, LayoutUnit childPreferredSize);
+    void setOverrideMainAxisSizeForChild(RenderBox& child, LayoutUnit childPreferredSize);
     void prepareChildForPositionedLayout(RenderBox& child, LayoutUnit mainAxisOffset, LayoutUnit crossAxisOffset, PositionedLayoutMode);
     size_t numberOfInFlowPositionedChildren(const OrderedFlexItemList&) const;
     void layoutAndPlaceChildren(LayoutUnit& crossAxisOffset, const OrderedFlexItemList&, const Vector<LayoutUnit, 16>& childSizes, LayoutUnit availableFreeSpace, bool relayoutChildren, Vector<LineContext>&, bool hasInfiniteLineLength);

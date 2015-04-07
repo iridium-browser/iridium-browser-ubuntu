@@ -33,7 +33,6 @@
 #include "components/policy/core/common/cloud/device_management_service.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
-#include "components/user_manager/user_type.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "policy/policy_constants.h"
@@ -117,7 +116,8 @@ scoped_ptr<UserCloudPolicyManagerChromeOS>
         Profile* profile,
         bool force_immediate_load,
         scoped_refptr<base::SequencedTaskRunner> background_task_runner) {
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
   // Don't initialize cloud policy for the signin profile.
   if (chromeos::ProfileHelper::IsSigninProfile(profile))
     return scoped_ptr<UserCloudPolicyManagerChromeOS>();
@@ -129,15 +129,15 @@ scoped_ptr<UserCloudPolicyManagerChromeOS>
       chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
   CHECK(user);
 
-  // Only USER_TYPE_REGULAR users have user cloud policy.
-  // USER_TYPE_RETAIL_MODE, USER_TYPE_KIOSK_APP, USER_TYPE_GUEST and
-  // USER_TYPE_SUPERVISED are not signed in and can't authenticate the
+  // Only users with gaia accounts have user cloud policy.
+  // USER_TYPE_RETAIL_MODE, USER_TYPE_KIOSK_APP, USER_TYPE_GUEST
+  // and USER_TYPE_SUPERVISED are not signed in and can't authenticate the
   // policy registration.
   // USER_TYPE_PUBLIC_ACCOUNT gets its policy from the
   // DeviceLocalAccountPolicyService.
   // Non-managed domains will be skipped by the below check
   const std::string& username = user->email();
-  if (user->GetType() != user_manager::USER_TYPE_REGULAR ||
+  if (!user->HasGaiaAccount() ||
       BrowserPolicyConnector::IsNonEnterpriseUser(username)) {
     return scoped_ptr<UserCloudPolicyManagerChromeOS>();
   }

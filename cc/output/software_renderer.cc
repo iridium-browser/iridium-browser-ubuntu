@@ -63,7 +63,7 @@ static SkShader::TileMode WrapModeToTileMode(GLint wrap_mode) {
 
 scoped_ptr<SoftwareRenderer> SoftwareRenderer::Create(
     RendererClient* client,
-    const LayerTreeSettings* settings,
+    const RendererSettings* settings,
     OutputSurface* output_surface,
     ResourceProvider* resource_provider) {
   return make_scoped_ptr(new SoftwareRenderer(
@@ -71,7 +71,7 @@ scoped_ptr<SoftwareRenderer> SoftwareRenderer::Create(
 }
 
 SoftwareRenderer::SoftwareRenderer(RendererClient* client,
-                                   const LayerTreeSettings* settings,
+                                   const RendererSettings* settings,
                                    OutputSurface* output_surface,
                                    ResourceProvider* resource_provider)
     : DirectRenderer(client, settings, output_surface, resource_provider),
@@ -108,6 +108,7 @@ void SoftwareRenderer::BeginDrawingFrame(DrawingFrame* frame) {
 void SoftwareRenderer::FinishDrawingFrame(DrawingFrame* frame) {
   TRACE_EVENT0("cc", "SoftwareRenderer::FinishDrawingFrame");
   current_framebuffer_lock_ = nullptr;
+  current_framebuffer_canvas_.clear();
   current_canvas_ = NULL;
   root_canvas_ = NULL;
 
@@ -151,6 +152,7 @@ void SoftwareRenderer::Finish() {}
 void SoftwareRenderer::BindFramebufferToOutputSurface(DrawingFrame* frame) {
   DCHECK(!output_surface_->HasExternalStencilTest());
   current_framebuffer_lock_ = nullptr;
+  current_framebuffer_canvas_.clear();
   current_canvas_ = root_canvas_;
 }
 
@@ -161,7 +163,9 @@ bool SoftwareRenderer::BindFramebufferToTexture(
   current_framebuffer_lock_ = make_scoped_ptr(
       new ResourceProvider::ScopedWriteLockSoftware(
           resource_provider_, texture->id()));
-  current_canvas_ = current_framebuffer_lock_->sk_canvas();
+  current_framebuffer_canvas_ =
+      skia::AdoptRef(new SkCanvas(current_framebuffer_lock_->sk_bitmap()));
+  current_canvas_ = current_framebuffer_canvas_.get();
   InitializeViewport(frame,
                      target_rect,
                      gfx::Rect(target_rect.size()),
@@ -343,15 +347,16 @@ void SoftwareRenderer::DrawPictureQuad(const DrawingFrame* frame,
   // (http://crbug.com/280374).
   skia::RefPtr<SkDrawFilter> opacity_filter =
       skia::AdoptRef(new skia::OpacityDrawFilter(
-          quad->opacity(), frame->disable_picture_quad_image_filtering));
+          quad->opacity(), frame->disable_picture_quad_image_filtering ||
+                               quad->nearest_neighbor));
   DCHECK(!current_canvas_->getDrawFilter());
   current_canvas_->setDrawFilter(opacity_filter.get());
 
   TRACE_EVENT0("cc",
                "SoftwareRenderer::DrawPictureQuad");
 
-  quad->picture_pile->RasterDirect(current_canvas_, quad->content_rect,
-                                   quad->contents_scale);
+  quad->raster_source->PlaybackToSharedCanvas(
+      current_canvas_, quad->content_rect, quad->contents_scale);
 
   current_canvas_->setDrawFilter(NULL);
 }
@@ -445,7 +450,9 @@ void SoftwareRenderer::DrawTileQuad(const DrawingFrame* frame,
       QuadVertexRect(), quad->rect, quad->visible_rect);
 
   SkRect uv_rect = gfx::RectFToSkRect(visible_tex_coord_rect);
-  current_paint_.setFilterLevel(SkPaint::kLow_FilterLevel);
+  current_paint_.setFilterLevel(quad->nearest_neighbor
+                                    ? SkPaint::kNone_FilterLevel
+                                    : SkPaint::kLow_FilterLevel);
   current_canvas_->drawBitmapRectToRect(
       *lock.sk_bitmap(),
       &uv_rect,

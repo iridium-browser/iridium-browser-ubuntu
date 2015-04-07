@@ -9,6 +9,8 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "device/bluetooth/bluetooth_device.h"
+#include "extensions/browser/api/bluetooth/bluetooth_extension_function.h"
 #include "extensions/browser/api/bluetooth_socket/bluetooth_socket_api.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/extension_function.h"
@@ -283,7 +285,7 @@ class EasyUnlockPrivateGetRemoteDevicesFunction : public SyncExtensionFunction {
 };
 
 class EasyUnlockPrivateGetSignInChallengeFunction :
-    public SyncExtensionFunction {
+    public AsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("easyUnlockPrivate.getSignInChallenge",
                              EASYUNLOCKPRIVATE_GETSIGNINCHALLENGE)
@@ -292,8 +294,11 @@ class EasyUnlockPrivateGetSignInChallengeFunction :
  private:
   ~EasyUnlockPrivateGetSignInChallengeFunction() override;
 
-  // SyncExtensionFunction:
-  bool RunSync() override;
+  // AsyncExtensionFunction:
+  bool RunAsync() override;
+
+  // Called when the challenge and the signed nonce have been generated.
+  void OnDone(const std::string& challenge, const std::string& signed_nonce);
 
   DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateGetSignInChallengeFunction);
 };
@@ -342,6 +347,25 @@ class EasyUnlockPrivateGetUserImageFunction : public SyncExtensionFunction {
   bool RunSync() override;
 
   DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateGetUserImageFunction);
+};
+
+class EasyUnlockPrivateGetConnectionInfoFunction
+    : public core_api::BluetoothExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("easyUnlockPrivate.getConnectionInfo",
+                             EASYUNLOCKPRIVATE_GETCONNECTIONINFO)
+  EasyUnlockPrivateGetConnectionInfoFunction();
+
+ private:
+  ~EasyUnlockPrivateGetConnectionInfoFunction() override;
+
+  // BluetoothExtensionFunction:
+  bool DoWork(scoped_refptr<device::BluetoothAdapter> adapter) override;
+
+  void OnConnectionInfo(
+      const device::BluetoothDevice::ConnectionInfo& connection_info);
+
+  DISALLOW_COPY_AND_ASSIGN(EasyUnlockPrivateGetConnectionInfoFunction);
 };
 
 }  // namespace api

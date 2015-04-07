@@ -17,9 +17,9 @@ class TestPageSet(unittest.TestCase):
     directory_path = tempfile.mkdtemp()
     try:
       ps = page_set.PageSet(serving_dirs=['a/b'], file_path=directory_path)
-      ps.AddPageWithDefaultRunNavigate('file://c/test.html')
-      ps.AddPageWithDefaultRunNavigate('file://c/test.js')
-      ps.AddPageWithDefaultRunNavigate('file://d/e/../test.html')
+      ps.AddUserStory(page.Page('file://c/test.html', ps, ps.base_dir))
+      ps.AddUserStory(page.Page('file://c/test.js', ps, ps.base_dir))
+      ps.AddUserStory(page.Page('file://d/e/../test.html', ps, ps.base_dir))
     finally:
       os.rmdir(directory_path)
 
@@ -42,25 +42,6 @@ class TestPageSet(unittest.TestCase):
     finally:
       os.rmdir(directory_path)
 
-  def testCloudBucket(self):
-    blank_ps = page_set.PageSet()
-    expected_bucket = None
-    self.assertEqual(blank_ps.bucket, expected_bucket)
-
-    public_ps = page_set.PageSet(bucket=page_set.PUBLIC_BUCKET)
-    expected_bucket = cloud_storage.PUBLIC_BUCKET
-    self.assertEqual(public_ps.bucket, expected_bucket)
-
-    partner_ps = page_set.PageSet(bucket=page_set.PARTNER_BUCKET)
-    expected_bucket = cloud_storage.PARTNER_BUCKET
-    self.assertEqual(partner_ps.bucket, expected_bucket)
-
-    internal_ps = page_set.PageSet(bucket=page_set.INTERNAL_BUCKET)
-    expected_bucket = cloud_storage.INTERNAL_BUCKET
-    self.assertEqual(internal_ps.bucket, expected_bucket)
-
-    self.assertRaises(ValueError, page_set.PageSet, bucket='garbage_bucket')
-
   def testFormingPageSetFromSubPageSet(self):
     page_set_a = page_set.PageSet()
     pages = [
@@ -68,13 +49,13 @@ class TestPageSet(unittest.TestCase):
         page.Page('http://bar.com', page_set_a),
         ]
     for p in pages:
-      page_set_a.AddPage(p)
+      page_set_a.AddUserStory(p)
 
     # Form page_set_b from sub page_set_a.
     page_set_b = page_set.PageSet()
     for p in pages:
       p.TransferToPageSet(page_set_b)
-    page_set_b.AddPage(page.Page('http://baz.com', page_set_b))
+    page_set_b.AddUserStory(page.Page('http://baz.com', page_set_b))
     self.assertEqual(0, len(page_set_a.pages))
     self.assertEqual(
         set(['http://foo.com', 'http://bar.com', 'http://baz.com']),

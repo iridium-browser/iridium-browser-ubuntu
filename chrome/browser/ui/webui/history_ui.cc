@@ -27,6 +27,7 @@
 #include "chrome/browser/history/web_history_service.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -41,6 +42,7 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/search/search.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/device_info.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -61,7 +63,7 @@
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_navigation_observer.h"
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
@@ -113,10 +115,17 @@ static const char kDeviceTypeTablet[] = "tablet";
 content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
   PrefService* prefs = profile->GetPrefs();
 
+  // Check if the profile is authenticated.  Guest profiles or incognito
+  // windows may not have a sign in manager, and are considered not
+  // authenticated.
+  SigninManagerBase* signin_manager =
+      SigninManagerFactory::GetForProfile(profile);
+  bool is_authenticated = signin_manager != nullptr &&
+      signin_manager->IsAuthenticated();
+
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIHistoryFrameHost);
-  source->AddBoolean("isUserSignedIn",
-      !prefs->GetString(prefs::kGoogleServicesUsername).empty());
+  source->AddBoolean("isUserSignedIn", is_authenticated);
   source->AddLocalizedString("collapseSessionMenuItemText",
       IDS_NEW_TAB_OTHER_SESSIONS_COLLAPSE_SESSION);
   source->AddLocalizedString("expandSessionMenuItemText",
@@ -130,6 +139,10 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
   source->AddLocalizedString("newer", IDS_HISTORY_NEWER);
   source->AddLocalizedString("older", IDS_HISTORY_OLDER);
   source->AddLocalizedString("searchResultsFor", IDS_HISTORY_SEARCHRESULTSFOR);
+  source->AddLocalizedString("searchResult", IDS_HISTORY_SEARCH_RESULT);
+  source->AddLocalizedString("searchResults", IDS_HISTORY_SEARCH_RESULTS);
+  source->AddLocalizedString("foundSearchResults",
+                             IDS_HISTORY_FOUND_SEARCH_RESULTS);
   source->AddLocalizedString("history", IDS_HISTORY_BROWSERESULTS);
   source->AddLocalizedString("cont", IDS_HISTORY_CONTINUED);
   source->AddLocalizedString("searchButton", IDS_HISTORY_SEARCH_BUTTON);
@@ -178,20 +191,23 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
   source->AddBoolean("isFullHistorySyncEnabled",
                      WebHistoryServiceFactory::GetForProfile(profile) != NULL);
   source->AddBoolean("groupByDomain",
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kHistoryEnableGroupByDomain));
-  source->AddBoolean("allowDeletingHistory",
-                     prefs->GetBoolean(prefs::kAllowDeletingBrowserHistory));
+                     profile->IsSupervised() ||
+                         base::CommandLine::ForCurrentProcess()->HasSwitch(
+                             switches::kHistoryEnableGroupByDomain));
+  bool allow_deleting_history =
+      prefs->GetBoolean(prefs::kAllowDeletingBrowserHistory);
+  source->AddBoolean("allowDeletingHistory", allow_deleting_history);
   source->AddBoolean("isInstantExtendedApiEnabled",
                      chrome::IsInstantExtendedAPIEnabled());
+  source->AddBoolean("isSupervisedProfile", profile->IsSupervised());
+  source->AddBoolean("hideDeleteVisitUI",
+                     profile->IsSupervised() && !allow_deleting_history);
 
   source->SetJsonPath(kStringsJsFile);
   source->AddResourcePath(kHistoryJsFile, IDR_HISTORY_JS);
   source->AddResourcePath(kOtherDevicesJsFile, IDR_OTHER_DEVICES_JS);
   source->SetDefaultResource(IDR_HISTORY_HTML);
   source->DisableDenyXFrameOptions();
-  source->AddBoolean("isSupervisedProfile", profile->IsSupervised());
-  source->AddBoolean("showDeleteVisitUI", !profile->IsSupervised());
 
   return source;
 }
@@ -376,7 +392,7 @@ scoped_ptr<base::DictionaryValue> BrowsingHistoryHandler::HistoryEntry::ToValue(
   result->SetString("deviceName", device_name);
   result->SetString("deviceType", device_type);
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
   if (supervised_user_service) {
     const SupervisedUserURLFilter* url_filter =
         supervised_user_service->GetURLFilterForUIThread();
@@ -723,7 +739,7 @@ void BrowsingHistoryHandler::ReturnResultsToFrontEnd() {
   Profile* profile = Profile::FromWebUI(web_ui());
   BookmarkModel* bookmark_model = BookmarkModelFactory::GetForProfile(profile);
   SupervisedUserService* supervised_user_service = NULL;
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
   if (profile->IsSupervised())
     supervised_user_service =
         SupervisedUserServiceFactory::GetForProfile(profile);

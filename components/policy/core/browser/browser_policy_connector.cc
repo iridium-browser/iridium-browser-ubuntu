@@ -53,12 +53,12 @@ const wchar_t* const kNonManagedDomainPatterns[] = {
   L"aol\\.com",
   L"googlemail\\.com",
   L"gmail\\.com",
-  L"hotmail(\\.co|\\.com|)\\.[^.]+", // hotmail.com, hotmail.it, hotmail.co.uk
+  L"hotmail(\\.co|\\.com|)\\.[^.]+",  // hotmail.com, hotmail.it, hotmail.co.uk
   L"live\\.com",
   L"mail\\.ru",
   L"msn\\.com",
   L"qq\\.com",
-  L"yahoo(\\.co|\\.com|)\\.[^.]+", // yahoo.com, yahoo.co.uk, yahoo.com.tw
+  L"yahoo(\\.co|\\.com|)\\.[^.]+",  // yahoo.com, yahoo.co.uk, yahoo.com.tw
   L"yandex\\.ru",
 };
 
@@ -234,7 +234,7 @@ bool BrowserPolicyConnector::IsNonEnterpriseUser(const std::string& username) {
 
 // static
 std::string BrowserPolicyConnector::GetDeviceManagementUrl() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kDeviceManagementUrl))
     return command_line->GetSwitchValueASCII(switches::kDeviceManagementUrl);
   else

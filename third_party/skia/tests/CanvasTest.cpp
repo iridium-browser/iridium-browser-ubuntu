@@ -73,7 +73,7 @@ static void createBitmap(SkBitmap* bm, SkColor color) {
 }
 
 static SkSurface* createSurface(SkColor color) {
-    SkSurface* surface = SkSurface::NewRasterPMColor(kWidth, kHeight);
+    SkSurface* surface = SkSurface::NewRasterN32Premul(kWidth, kHeight);
     surface->getCanvas()->clear(color);
     return surface;
 }
@@ -471,39 +471,6 @@ static void SaveRestoreTestStep(SkCanvas* canvas, const TestData& d,
 }
 TEST_STEP(SaveRestore, SaveRestoreTestStep);
 
-static void DrawLayerTestStep(SkCanvas* canvas, const TestData& d,
-                              skiatest::Reporter* reporter, CanvasTestStep* testStep) {
-    REPORTER_ASSERT_MESSAGE(reporter, !canvas->isDrawingToLayer(),
-        testStep->assertMessage());
-    canvas->save();
-    REPORTER_ASSERT_MESSAGE(reporter, !canvas->isDrawingToLayer(),
-        testStep->assertMessage());
-    canvas->restore();
-
-    const SkRect* bounds = NULL;    // null means include entire bounds
-    const SkPaint* paint = NULL;
-
-    canvas->saveLayer(bounds, paint);
-    REPORTER_ASSERT_MESSAGE(reporter, canvas->isDrawingToLayer(),
-        testStep->assertMessage());
-    canvas->restore();
-    REPORTER_ASSERT_MESSAGE(reporter, !canvas->isDrawingToLayer(),
-        testStep->assertMessage());
-
-    canvas->saveLayer(bounds, paint);
-    canvas->saveLayer(bounds, paint);
-    REPORTER_ASSERT_MESSAGE(reporter, canvas->isDrawingToLayer(),
-        testStep->assertMessage());
-    canvas->restore();
-    REPORTER_ASSERT_MESSAGE(reporter, canvas->isDrawingToLayer(),
-        testStep->assertMessage());
-    canvas->restore();
-    // now layer count should be 0
-    REPORTER_ASSERT_MESSAGE(reporter, !canvas->isDrawingToLayer(),
-        testStep->assertMessage());
-}
-TEST_STEP(DrawLayer, DrawLayerTestStep);
-
 static void NestedSaveRestoreWithSolidPaintTestStep(SkCanvas* canvas, const TestData& d,
                                                     skiatest::Reporter*, CanvasTestStep*) {
     // This test step challenges the TestDeferredCanvasStateConsistency
@@ -551,8 +518,6 @@ static void AssertCanvasStatesEqual(skiatest::Reporter* reporter, const TestData
         canvas2->getDeviceSize(), testStep->assertMessage());
     REPORTER_ASSERT_MESSAGE(reporter, canvas1->getSaveCount() ==
         canvas2->getSaveCount(), testStep->assertMessage());
-    REPORTER_ASSERT_MESSAGE(reporter, canvas1->isDrawingToLayer() ==
-        canvas2->isDrawingToLayer(), testStep->assertMessage());
 
     SkRect bounds1, bounds2;
     REPORTER_ASSERT_MESSAGE(reporter,
@@ -748,7 +713,13 @@ static void TestOverrideStateConsistency(skiatest::Reporter* reporter, const Tes
 
 static void test_newraster(skiatest::Reporter* reporter) {
     SkImageInfo info = SkImageInfo::MakeN32Premul(10, 10);
-    SkCanvas* canvas = SkCanvas::NewRaster(info);
+    const size_t minRowBytes = info.minRowBytes();
+    const size_t size = info.getSafeSize(minRowBytes);
+    SkAutoMalloc storage(size);
+    SkPMColor* baseAddr = static_cast<SkPMColor*>(storage.get());
+    sk_bzero(baseAddr, size);
+
+    SkCanvas* canvas = SkCanvas::NewRasterDirect(info, baseAddr, minRowBytes);
     REPORTER_ASSERT(reporter, canvas);
 
     SkImageInfo info2;
@@ -756,6 +727,7 @@ static void test_newraster(skiatest::Reporter* reporter) {
     const SkPMColor* addr = (const SkPMColor*)canvas->peekPixels(&info2, &rowBytes);
     REPORTER_ASSERT(reporter, addr);
     REPORTER_ASSERT(reporter, info == info2);
+    REPORTER_ASSERT(reporter, minRowBytes == rowBytes);
     for (int y = 0; y < info.height(); ++y) {
         for (int x = 0; x < info.width(); ++x) {
             REPORTER_ASSERT(reporter, 0 == addr[x]);
@@ -766,19 +738,19 @@ static void test_newraster(skiatest::Reporter* reporter) {
 
     // now try a deliberately bad info
     info = info.makeWH(-1, info.height());
-    REPORTER_ASSERT(reporter, NULL == SkCanvas::NewRaster(info));
+    REPORTER_ASSERT(reporter, NULL == SkCanvas::NewRasterDirect(info, baseAddr, minRowBytes));
 
     // too big
     info = info.makeWH(1 << 30, 1 << 30);
-    REPORTER_ASSERT(reporter, NULL == SkCanvas::NewRaster(info));
+    REPORTER_ASSERT(reporter, NULL == SkCanvas::NewRasterDirect(info, baseAddr, minRowBytes));
 
     // not a valid pixel type
     info = SkImageInfo::Make(10, 10, kUnknown_SkColorType, info.alphaType());
-    REPORTER_ASSERT(reporter, NULL == SkCanvas::NewRaster(info));
+    REPORTER_ASSERT(reporter, NULL == SkCanvas::NewRasterDirect(info, baseAddr, minRowBytes));
 
     // We should succeed with a zero-sized valid info
     info = SkImageInfo::MakeN32Premul(0, 0);
-    canvas = SkCanvas::NewRaster(info);
+    canvas = SkCanvas::NewRasterDirect(info, baseAddr, minRowBytes);
     REPORTER_ASSERT(reporter, canvas);
     SkDELETE(canvas);
 }
@@ -794,4 +766,22 @@ DEF_TEST(Canvas, reporter) {
     }
 
     test_newraster(reporter);
+}
+
+DEF_TEST(Canvas_SaveState, reporter) {
+    SkCanvas canvas(10, 10);
+    REPORTER_ASSERT(reporter, 1 == canvas.getSaveCount());
+
+    int n = canvas.save();
+    REPORTER_ASSERT(reporter, 1 == n);
+    REPORTER_ASSERT(reporter, 2 == canvas.getSaveCount());
+
+    n = canvas.saveLayer(NULL, NULL);
+    REPORTER_ASSERT(reporter, 2 == n);
+    REPORTER_ASSERT(reporter, 3 == canvas.getSaveCount());
+    
+    canvas.restore();
+    REPORTER_ASSERT(reporter, 2 == canvas.getSaveCount());
+    canvas.restore();
+    REPORTER_ASSERT(reporter, 1 == canvas.getSaveCount());
 }

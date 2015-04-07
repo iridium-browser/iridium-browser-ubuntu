@@ -56,18 +56,7 @@ CHROMEOS_EXPORT extern const char kReportDeviceBootMode[];
 CHROMEOS_EXPORT extern const char kReportDeviceLocation[];
 CHROMEOS_EXPORT extern const char kReportDeviceNetworkInterfaces[];
 CHROMEOS_EXPORT extern const char kReportDeviceUsers[];
-
-CHROMEOS_EXPORT extern const char kAppPack[];
-CHROMEOS_EXPORT extern const char kAppPackKeyExtensionId[];
-CHROMEOS_EXPORT extern const char kAppPackKeyUpdateUrl[];
-
-CHROMEOS_EXPORT extern const char kScreenSaverExtensionId[];
-CHROMEOS_EXPORT extern const char kScreenSaverTimeout[];
-
-CHROMEOS_EXPORT extern const char kIdleLogoutTimeout[];
-CHROMEOS_EXPORT extern const char kIdleLogoutWarningDuration[];
-
-CHROMEOS_EXPORT extern const char kStartUpUrls[];
+CHROMEOS_EXPORT extern const char kReportDeviceHardwareStatus[];
 
 CHROMEOS_EXPORT extern const char kPolicyMissingMitigationMode[];
 
@@ -91,6 +80,7 @@ CHROMEOS_EXPORT extern const char kServiceAccountIdentity[];
 CHROMEOS_EXPORT extern const char kDeviceDisabled[];
 CHROMEOS_EXPORT extern const char kDeviceDisabledMessage[];
 
+CHROMEOS_EXPORT extern const char kRebootOnShutdown[];
 }  // namespace chromeos
 
 #endif  // CHROMEOS_SETTINGS_CROS_SETTINGS_NAMES_H_

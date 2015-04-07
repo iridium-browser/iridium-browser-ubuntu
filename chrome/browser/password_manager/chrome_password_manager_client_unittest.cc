@@ -105,9 +105,9 @@ bool ChromePasswordManagerClientTest::WasLoggingActivationMessageSent(
       process()->sink().GetFirstMessageMatching(kMsgID);
   if (!message)
     return false;
-  Tuple1<bool> param;
+  Tuple<bool> param;
   AutofillMsg_SetLoggingState::Read(message, &param);
-  *activation_flag = param.a;
+  *activation_flag = get<0>(param);
   process()->sink().ClearMessages();
   return true;
 }
@@ -172,7 +172,8 @@ TEST_F(ChromePasswordManagerClientTest, AnswerToPingsAboutLoggingState_Active) {
 
   // Ping the client for logging activity update.
   AutofillHostMsg_PasswordAutofillAgentConstructed msg(0);
-  static_cast<IPC::Listener*>(GetClient())->OnMessageReceived(msg);
+  static_cast<content::WebContentsObserver*>(GetClient())->OnMessageReceived(
+      msg, web_contents()->GetMainFrame());
 
   bool logging_active = false;
   EXPECT_TRUE(WasLoggingActivationMessageSent(&logging_active));
@@ -187,7 +188,8 @@ TEST_F(ChromePasswordManagerClientTest,
 
   // Ping the client for logging activity update.
   AutofillHostMsg_PasswordAutofillAgentConstructed msg(0);
-  static_cast<IPC::Listener*>(GetClient())->OnMessageReceived(msg);
+  static_cast<content::WebContentsObserver*>(GetClient())->OnMessageReceived(
+      msg, web_contents()->GetMainFrame());
 
   bool logging_active = true;
   EXPECT_TRUE(WasLoggingActivationMessageSent(&logging_active));
@@ -201,7 +203,7 @@ TEST_F(ChromePasswordManagerClientTest,
 
 TEST_F(ChromePasswordManagerClientTest,
        IsAutomaticPasswordSavingEnabledWhenFlagIsSetTest) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       password_manager::switches::kEnableAutomaticPasswordSaving);
   if (chrome::VersionInfo::GetChannel() == chrome::VersionInfo::CHANNEL_UNKNOWN)
     EXPECT_TRUE(GetClient()->IsAutomaticPasswordSavingEnabled());
@@ -221,9 +223,22 @@ TEST_F(ChromePasswordManagerClientTest, LogToAReceiver) {
   EXPECT_FALSE(client->IsLoggingActive());
 }
 
+TEST_F(ChromePasswordManagerClientTest,
+       ShouldAskUserToSubmitURLDefaultBehaviour) {
+  ChromePasswordManagerClient* client = GetClient();
+  // TODO(melandory) Since "Ask user to submit URL" functionality is currently
+  // in development, so the user should not be asked to submit a URL.
+  EXPECT_FALSE(client->ShouldAskUserToSubmitURL(GURL("https://hostname.com/")));
+}
+
+TEST_F(ChromePasswordManagerClientTest, ShouldAskUserToSubmitURLEmptyURL) {
+  ChromePasswordManagerClient* client = GetClient();
+  EXPECT_FALSE(client->ShouldAskUserToSubmitURL(GURL::EmptyGURL()));
+}
+
 TEST_F(ChromePasswordManagerClientTest, ShouldFilterAutofillResult_Reauth) {
   // Make client disallow only reauth requests.
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(
       password_manager::switches::kDisallowAutofillSyncCredentialForReauth);
   scoped_ptr<TestChromePasswordManagerClient> client(
@@ -263,7 +278,7 @@ TEST_F(ChromePasswordManagerClientTest, ShouldFilterAutofillResult) {
   EXPECT_FALSE(client->ShouldFilterAutofillResult(form));
 
   // Adding disallow switch should cause sync credential to be filtered.
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(
       password_manager::switches::kDisallowAutofillSyncCredential);
   client.reset(new TestChromePasswordManagerClient(web_contents()));

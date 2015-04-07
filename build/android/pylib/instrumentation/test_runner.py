@@ -27,32 +27,13 @@ import perf_tests_results_helper # pylint: disable=F0401
 _PERF_TEST_ANNOTATION = 'PerfTest'
 
 
-def _GetDataFilesForTestSuite(suite_basename):
-  """Returns a list of data files/dirs needed by the test suite.
-
-  Args:
-    suite_basename: The test suite basename for which to return file paths.
-
-  Returns:
-    A list of test file and directory paths.
-  """
-  test_files = []
-  if suite_basename in ['ChromeTest', 'ContentShellTest']:
-    test_files += [
-        'net/data/ssl/certificates/',
-    ]
-  return test_files
-
-
 class TestRunner(base_test_runner.BaseTestRunner):
   """Responsible for running a series of tests connected to a single device."""
 
-  _DEVICE_DATA_DIR = 'chrome/test/data'
   _DEVICE_COVERAGE_DIR = 'chrome/test/coverage'
   _HOSTMACHINE_PERF_OUTPUT_FILE = '/tmp/chrome-profile'
   _DEVICE_PERF_OUTPUT_SEARCH_PREFIX = (constants.DEVICE_PERF_OUTPUT_DIR +
                                        '/chrome-profile*')
-  _DEVICE_HAS_TEST_FILES = {}
 
   def __init__(self, test_options, device, shard_index, test_pkg,
                additional_flags=None):
@@ -89,45 +70,6 @@ class TestRunner(base_test_runner.BaseTestRunner):
   def InstallTestPackage(self):
     self.test_pkg.Install(self.device)
 
-  #override
-  def PushDataDeps(self):
-    # TODO(frankf): Implement a general approach for copying/installing
-    # once across test runners.
-    if TestRunner._DEVICE_HAS_TEST_FILES.get(self.device, False):
-      logging.warning('Already copied test files to device %s, skipping.',
-                      str(self.device))
-      return
-
-    host_device_file_tuples = []
-    test_data = _GetDataFilesForTestSuite(self.test_pkg.GetApkName())
-    if test_data:
-      # Make sure SD card is ready.
-      self.device.WaitUntilFullyBooted(timeout=20)
-      host_device_file_tuples += [
-          (os.path.join(constants.DIR_SOURCE_ROOT, p),
-           os.path.join(self.device.GetExternalStoragePath(), p))
-          for p in test_data]
-
-    # TODO(frankf): Specify test data in this file as opposed to passing
-    # as command-line.
-    for dest_host_pair in self.options.test_data:
-      dst_src = dest_host_pair.split(':', 1)
-      dst_layer = dst_src[0]
-      host_src = dst_src[1]
-      host_test_files_path = os.path.join(constants.DIR_SOURCE_ROOT,
-                                          host_src)
-      if os.path.exists(host_test_files_path):
-        host_device_file_tuples += [(
-            host_test_files_path,
-            '%s/%s/%s' % (
-                self.device.GetExternalStoragePath(),
-                TestRunner._DEVICE_DATA_DIR,
-                dst_layer))]
-    if host_device_file_tuples:
-      self.device.PushChangedFiles(host_device_file_tuples)
-    self.tool.CopyFiles(self.device)
-    TestRunner._DEVICE_HAS_TEST_FILES[str(self.device)] = True
-
   def _GetInstrumentationArgs(self):
     ret = {}
     if self.options.wait_for_debugger:
@@ -151,7 +93,7 @@ class TestRunner(base_test_runner.BaseTestRunner):
       logging.warning('Unable to enable java asserts for %s, non rooted device',
                       str(self.device))
     else:
-      if self.device.SetJavaAsserts(True):
+      if self.device.SetJavaAsserts(self.options.set_asserts):
         # TODO(jbudorick) How to best do shell restart after the
         #                 android_commands refactor?
         self.device.RunShellCommand('stop')
@@ -208,8 +150,8 @@ class TestRunner(base_test_runner.BaseTestRunner):
     Returns:
       Whether the feature being tested is FirstRunExperience.
     """
-    freFeature = 'Feature:FirstRunExperience'
-    return freFeature in self.test_pkg.GetTestAnnotations(test)
+    annotations = self.test_pkg.GetTestAnnotations(test)
+    return 'FirstRunExperience' == annotations.get('Feature', None)
 
   def _IsPerfTest(self, test):
     """Determines whether a test is a performance test.
@@ -276,7 +218,8 @@ class TestRunner(base_test_runner.BaseTestRunner):
 
     # Wait and grab annotation data so we can figure out which traces to parse
     regex = self.device.old_interface.WaitForLogMatch(
-        re.compile('\*\*PERFANNOTATION\(' + raw_test_name + '\)\:(.*)'), None)
+        re.compile(r'\*\*PERFANNOTATION\(' + raw_test_name + r'\)\:(.*)'),
+        None)
 
     # If the test is set to run on a specific device type only (IE: only
     # tablet or phone) and it is being run on the wrong device, the test
@@ -329,10 +272,11 @@ class TestRunner(base_test_runner.BaseTestRunner):
     annotations = self.test_pkg.GetTestAnnotations(test)
     timeout_scale = 1
     if 'TimeoutScale' in annotations:
-      for annotation in annotations:
-        scale_match = re.match('TimeoutScale:([0-9]+)', annotation)
-        if scale_match:
-          timeout_scale = int(scale_match.group(1))
+      try:
+        timeout_scale = int(annotations['TimeoutScale'])
+      except ValueError:
+        logging.warning('Non-integer value of TimeoutScale ignored. (%s)'
+                        % annotations['TimeoutScale'])
     if self.options.wait_for_debugger:
       timeout_scale *= 100
     return timeout_scale
@@ -355,8 +299,8 @@ class TestRunner(base_test_runner.BaseTestRunner):
     if 'SmallTest' in annotations:
       return 1 * 60
 
-    logging.warn(("Test size not found in annotations for test '{0}', using " +
-                  "1 minute for timeout.").format(test))
+    logging.warn(("Test size not found in annotations for test '%s', using " +
+                  "1 minute for timeout.") % test)
     return 1 * 60
 
   def _RunTest(self, test, timeout):
@@ -369,16 +313,11 @@ class TestRunner(base_test_runner.BaseTestRunner):
     Returns:
       The raw output of am instrument as a list of lines.
     """
-    # Build the 'am instrument' command
-    instrumentation_path = (
-        '%s/%s' % (self.test_pkg.GetPackageName(), self.options.test_runner))
-
-    cmd = ['am', 'instrument', '-r']
-    for k, v in self._GetInstrumentationArgs().iteritems():
-      cmd.extend(['-e', k, v])
-    cmd.extend(['-e', 'class', test])
-    cmd.extend(['-w', instrumentation_path])
-    return self.device.RunShellCommand(cmd, timeout=timeout, retries=0)
+    extras = self._GetInstrumentationArgs()
+    extras['class'] = test
+    return self.device.StartInstrumentation(
+        '%s/%s' % (self.test_pkg.GetPackageName(), self.options.test_runner),
+        raw=True, extras=extras, timeout=timeout, retries=0)
 
   @staticmethod
   def _ParseAmInstrumentRawOutput(raw_output):
@@ -504,9 +443,9 @@ class TestRunner(base_test_runner.BaseTestRunner):
     timeout = (self._GetIndividualTestTimeoutSecs(test) *
                self._GetIndividualTestTimeoutScale(test) *
                self.tool.GetTimeoutScale())
-    if (self.device.GetProp('ro.build.version.sdk')
+    if (self.device.build_version_sdk
         < constants.ANDROID_SDK_VERSION_CODES.JELLY_BEAN):
-      timeout *= 4
+      timeout *= 10
 
     start_ms = 0
     duration_ms = 0

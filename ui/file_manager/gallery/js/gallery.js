@@ -3,178 +3,10 @@
 // found in the LICENSE file.
 
 /**
- * Called from the main frame when unloading.
- * @param {boolean=} opt_exiting True if the app is exiting.
- */
-function unload(opt_exiting) { Gallery.instance.onUnload(opt_exiting); }
-
-/**
  * Overrided metadata worker's path.
  * @type {string}
- * @const
  */
 ContentProvider.WORKER_SCRIPT = '/js/metadata_worker.js';
-
-/**
- * Data model for gallery.
- *
- * @param {MetadataCache} metadataCache Metadata cache.
- * @constructor
- * @extends {cr.ui.ArrayDataModel}
- */
-function GalleryDataModel(metadataCache) {
-  cr.ui.ArrayDataModel.call(this, []);
-
-  /**
-   * Metadata cache.
-   * @type {MetadataCache}
-   * @private
-   */
-  this.metadataCache_ = metadataCache;
-
-  /**
-   * Directory where the image is saved if the image is located in a read-only
-   * volume.
-   * @type {DirectoryEntry}
-   */
-  this.fallbackSaveDirectory = null;
-}
-
-/**
- * Maximum number of full size image cache.
- * @type {number}
- * @const
- * @private
- */
-GalleryDataModel.MAX_FULL_IMAGE_CACHE_ = 3;
-
-/**
- * Maximum number of screen size image cache.
- * @type {number}
- * @const
- * @private
- */
-GalleryDataModel.MAX_SCREEN_IMAGE_CACHE_ = 5;
-
-GalleryDataModel.prototype = {
-  __proto__: cr.ui.ArrayDataModel.prototype
-};
-
-/**
- * Saves new image.
- *
- * @param {VolumeManager} volumeManager Volume manager instance.
- * @param {Gallery.Item} item Original gallery item.
- * @param {HTMLCanvasElement} canvas Canvas containing new image.
- * @param {boolean} overwrite Whether to overwrite the image to the item or not.
- * @return {Promise} Promise to be fulfilled with when the operation completes.
- */
-GalleryDataModel.prototype.saveItem = function(
-    volumeManager, item, canvas, overwrite) {
-  var oldEntry = item.getEntry();
-  var oldMetadata = item.getMetadata();
-  var oldLocationInfo = item.getLocationInfo();
-  var metadataEncoder = ImageEncoder.encodeMetadata(
-      item.getMetadata(), canvas, 1 /* quality */);
-  var newMetadata = ContentProvider.ConvertContentMetadata(
-      metadataEncoder.getMetadata(),
-      MetadataCache.cloneMetadata(item.getMetadata()));
-  if (newMetadata.filesystem)
-    newMetadata.filesystem.modificationTime = new Date();
-  if (newMetadata.external)
-    newMetadata.external.present = true;
-
-  return new Promise(function(fulfill, reject) {
-    item.saveToFile(
-        volumeManager,
-        this.fallbackSaveDirectory,
-        overwrite,
-        canvas,
-        metadataEncoder,
-        function(success) {
-          if (!success) {
-            reject('Failed to save the image.');
-            return;
-          }
-
-          // The item's entry is updated to the latest entry. Update metadata.
-          item.setMetadata(newMetadata);
-
-          // Current entry is updated.
-          // Dispatch an event.
-          var event = new Event('content');
-          event.item = item;
-          event.oldEntry = oldEntry;
-          event.metadata = newMetadata;
-          this.dispatchEvent(event);
-
-          if (util.isSameEntry(oldEntry, item.getEntry())) {
-            // Need an update of metdataCache.
-            this.metadataCache_.set(
-                item.getEntry(),
-                Gallery.METADATA_TYPE,
-                newMetadata);
-          } else {
-            // New entry is added and the item now tracks it.
-            // Add another item for the old entry.
-            var anotherItem = new Gallery.Item(
-                oldEntry,
-                oldLocationInfo,
-                oldMetadata,
-                this.metadataCache_,
-                item.isOriginal());
-            // The item must be added behind the existing item so that it does
-            // not change the index of the existing item.
-            // TODO(hirono): Update the item index of the selection model
-            // correctly.
-            this.splice(this.indexOf(item) + 1, 0, anotherItem);
-          }
-
-          fulfill();
-        }.bind(this));
-  }.bind(this));
-};
-
-/**
- * Evicts image caches in the items.
- * @param {Gallery.Item} currentSelectedItem Current selected item.
- */
-GalleryDataModel.prototype.evictCache = function(currentSelectedItem) {
-  // Sort the item by the last accessed date.
-  var sorted = this.slice().sort(function(a, b) {
-    return b.getLastAccessedDate() - a.getLastAccessedDate();
-  });
-
-  // Evict caches.
-  var contentCacheCount = 0;
-  var screenCacheCount = 0;
-  for (var i = 0; i < sorted.length; i++) {
-    if (sorted[i].contentImage) {
-      if (++contentCacheCount > GalleryDataModel.MAX_FULL_IMAGE_CACHE_) {
-        if (sorted[i].contentImage.parentNode) {
-          console.error('The content image has a parent node.');
-        } else {
-          // Force to free the buffer of the canvas by assigning zero size.
-          sorted[i].contentImage.width = 0;
-          sorted[i].contentImage.height = 0;
-          sorted[i].contentImage = null;
-        }
-      }
-    }
-    if (sorted[i].screenImage) {
-      if (++screenCacheCount > GalleryDataModel.MAX_SCREEN_IMAGE_CACHE_) {
-        if (sorted[i].screenImage.parentNode) {
-          console.error('The screen image has a parent node.');
-        } else {
-          // Force to free the buffer of the canvas by assigning zero size.
-          sorted[i].screenImage.width = 0;
-          sorted[i].screenImage.height = 0;
-          sorted[i].screenImage = null;
-        }
-      }
-    }
-  }
-};
 
 /**
  * Gallery for viewing and editing image files.
@@ -182,11 +14,23 @@ GalleryDataModel.prototype.evictCache = function(currentSelectedItem) {
  * @param {!VolumeManager} volumeManager The VolumeManager instance of the
  *     system.
  * @constructor
+ * @struct
  */
 function Gallery(volumeManager) {
+  /**
+   * @type {{appWindow: chrome.app.window.AppWindow, onClose: function(),
+   *     onMaximize: function(), onMinimize: function(),
+   *     onAppRegionChanged: function(), metadataCache: MetadataCache,
+   *     readonlyDirName: string, displayStringFunction: function(),
+   *     loadTimeData: Object, curDirEntry: Entry, searchResults: *}}
+   * @private
+   *
+   * TODO(yawano): curDirEntry and searchResults seem not to be used.
+   *     Investigate them and remove them if possible.
+   */
   this.context_ = {
     appWindow: chrome.app.window.current(),
-    onClose: function() { close(); },
+    onClose: function() { window.close(); },
     onMaximize: function() {
       var appWindow = chrome.app.window.current();
       if (appWindow.isMaximized())
@@ -199,9 +43,11 @@ function Gallery(volumeManager) {
     metadataCache: MetadataCache.createFull(volumeManager),
     readonlyDirName: '',
     displayStringFunction: function() { return ''; },
-    loadTimeData: {}
+    loadTimeData: {},
+    curDirEntry: null,
+    searchResults: null
   };
-  this.container_ = document.querySelector('.gallery');
+  this.container_ = queryRequiredElement(document, '.gallery');
   this.document_ = document;
   this.metadataCache_ = this.context_.metadataCache;
   this.volumeManager_ = volumeManager;
@@ -221,8 +67,143 @@ function Gallery(volumeManager) {
   });
   this.selectionModel_ = new cr.ui.ListSelectionModel();
 
-  this.initDom_();
-  this.initListeners_();
+  /**
+   * @type {(SlideMode|MosaicMode)}
+   * @private
+   */
+  this.currentMode_ = null;
+
+  /**
+   * @type {boolean}
+   * @private
+   */
+  this.changingMode_ = false;
+
+  // -----------------------------------------------------------------
+  // Initializes the UI.
+
+  // Initialize the dialog label.
+  cr.ui.dialogs.BaseDialog.OK_LABEL = str('GALLERY_OK_LABEL');
+  cr.ui.dialogs.BaseDialog.CANCEL_LABEL = str('GALLERY_CANCEL_LABEL');
+
+  var content = queryRequiredElement(document, '#content');
+  content.addEventListener('click', this.onContentClick_.bind(this));
+
+  this.header_ = queryRequiredElement(document, '#header');
+  this.toolbar_ = queryRequiredElement(document, '#toolbar');
+
+  var preventDefault = function(event) { event.preventDefault(); };
+
+  var minimizeButton = util.createChild(this.header_,
+                                        'minimize-button tool dimmable',
+                                        'button');
+  minimizeButton.tabIndex = -1;
+  minimizeButton.addEventListener('click', this.onMinimize_.bind(this));
+  minimizeButton.addEventListener('mousedown', preventDefault);
+
+  var maximizeButton = util.createChild(this.header_,
+                                        'maximize-button tool dimmable',
+                                        'button');
+  maximizeButton.tabIndex = -1;
+  maximizeButton.addEventListener('click', this.onMaximize_.bind(this));
+  maximizeButton.addEventListener('mousedown', preventDefault);
+
+  var closeButton = util.createChild(this.header_,
+                                     'close-button tool dimmable',
+                                     'button');
+  closeButton.tabIndex = -1;
+  closeButton.addEventListener('click', this.onClose_.bind(this));
+  closeButton.addEventListener('mousedown', preventDefault);
+
+  this.filenameSpacer_ = queryRequiredElement(this.toolbar_,
+      '.filename-spacer');
+  this.filenameEdit_ = util.createChild(this.filenameSpacer_,
+                                        'namebox', 'input');
+
+  this.filenameEdit_.setAttribute('type', 'text');
+  this.filenameEdit_.addEventListener('blur',
+      this.onFilenameEditBlur_.bind(this));
+
+  this.filenameEdit_.addEventListener('focus',
+      this.onFilenameFocus_.bind(this));
+
+  this.filenameEdit_.addEventListener('keydown',
+      this.onFilenameEditKeydown_.bind(this));
+
+  var middleSpacer = queryRequiredElement(this.toolbar_, '.middle-spacer');
+  var buttonSpacer = queryRequiredElement(this.toolbar_, '.button-spacer');
+
+  this.prompt_ = new ImageEditor.Prompt(this.container_, strf);
+
+  this.errorBanner_ = new ErrorBanner(this.container_);
+
+  this.modeButton_ = queryRequiredElement(this.toolbar_, 'button.mode');
+  this.modeButton_.addEventListener('click',
+      this.toggleMode_.bind(this, undefined));
+
+  this.mosaicMode_ = new MosaicMode(content,
+                                    this.errorBanner_,
+                                    this.dataModel_,
+                                    this.selectionModel_,
+                                    this.volumeManager_,
+                                    this.toggleMode_.bind(this, undefined));
+
+  this.slideMode_ = new SlideMode(this.container_,
+                                  content,
+                                  this.toolbar_,
+                                  this.prompt_,
+                                  this.errorBanner_,
+                                  this.dataModel_,
+                                  this.selectionModel_,
+                                  this.context_,
+                                  this.volumeManager_,
+                                  this.toggleMode_.bind(this),
+                                  str);
+
+  this.slideMode_.addEventListener('image-displayed', function() {
+    cr.dispatchSimpleEvent(this, 'image-displayed');
+  }.bind(this));
+  this.slideMode_.addEventListener('image-saved', function() {
+    cr.dispatchSimpleEvent(this, 'image-saved');
+  }.bind(this));
+
+  this.deleteButton_ = this.initToolbarButton_('delete', 'GALLERY_DELETE');
+  this.deleteButton_.addEventListener('click', this.delete_.bind(this));
+
+  this.shareButton_ = this.initToolbarButton_('share', 'GALLERY_SHARE');
+  this.shareButton_.addEventListener(
+      'click', this.onShareButtonClick_.bind(this));
+
+  this.dataModel_.addEventListener('splice', this.onSplice_.bind(this));
+  this.dataModel_.addEventListener('content', this.onContentChange_.bind(this));
+
+  this.selectionModel_.addEventListener('change', this.onSelection_.bind(this));
+  this.slideMode_.addEventListener('useraction', this.onUserAction_.bind(this));
+
+  this.shareDialog_ = new ShareDialog(this.container_);
+
+  // -----------------------------------------------------------------
+  // Initialize listeners.
+
+  this.keyDownBound_ = this.onKeyDown_.bind(this);
+  this.document_.body.addEventListener('keydown', this.keyDownBound_);
+
+  this.inactivityWatcher_ = new MouseInactivityWatcher(
+      this.container_, Gallery.FADE_TIMEOUT, this.hasActiveTool.bind(this));
+
+  // Search results may contain files from different subdirectories so
+  // the observer is not going to work.
+  if (!this.context_.searchResults && this.context_.curDirEntry) {
+    this.metadataCacheObserverId_ = this.metadataCache_.addObserver(
+        this.context_.curDirEntry,
+        MetadataCache.CHILDREN,
+        'thumbnail',
+        this.updateThumbnails_.bind(this));
+  }
+  this.volumeManager_.addEventListener(
+      'externally-unmounted', this.onExternallyUnmountedBound_);
+  // The 'pagehide' event is called when the app window is closed.
+  window.addEventListener('pagehide', this.onPageHide_.bind(this));
 }
 
 /**
@@ -260,30 +241,6 @@ Gallery.MOSAIC_BACKGROUND_INIT_DELAY = 1000;
 Gallery.METADATA_TYPE = 'thumbnail|filesystem|media|external';
 
 /**
- * Initializes listeners.
- * @private
- */
-Gallery.prototype.initListeners_ = function() {
-  this.keyDownBound_ = this.onKeyDown_.bind(this);
-  this.document_.body.addEventListener('keydown', this.keyDownBound_);
-
-  this.inactivityWatcher_ = new MouseInactivityWatcher(
-      this.container_, Gallery.FADE_TIMEOUT, this.hasActiveTool.bind(this));
-
-  // Search results may contain files from different subdirectories so
-  // the observer is not going to work.
-  if (!this.context_.searchResults && this.context_.curDirEntry) {
-    this.metadataCacheObserverId_ = this.metadataCache_.addObserver(
-        this.context_.curDirEntry,
-        MetadataCache.CHILDREN,
-        'thumbnail',
-        this.updateThumbnails_.bind(this));
-  }
-  this.volumeManager_.addEventListener(
-      'externally-unmounted', this.onExternallyUnmountedBound_);
-};
-
-/**
  * Closes gallery when a volume containing the selected item is unmounted.
  * @param {!Event} event The unmount event.
  * @private
@@ -294,125 +251,19 @@ Gallery.prototype.onExternallyUnmounted_ = function(event) {
 
   if (this.volumeManager_.getVolumeInfo(this.selectedEntry_) ===
       event.volumeInfo) {
-    close();
+    window.close();
   }
 };
 
 /**
  * Unloads the Gallery.
- * @param {boolean} exiting True if the app is exiting.
+ * @private
  */
-Gallery.prototype.onUnload = function(exiting) {
+Gallery.prototype.onPageHide_ = function() {
   if (this.metadataCacheObserverId_ !== null)
     this.metadataCache_.removeObserver(this.metadataCacheObserverId_);
   this.volumeManager_.removeEventListener(
       'externally-unmounted', this.onExternallyUnmountedBound_);
-  this.slideMode_.onUnload(exiting);
-};
-
-/**
- * Initializes DOM UI
- * @private
- */
-Gallery.prototype.initDom_ = function() {
-  // Initialize the dialog label.
-  cr.ui.dialogs.BaseDialog.OK_LABEL = str('GALLERY_OK_LABEL');
-  cr.ui.dialogs.BaseDialog.CANCEL_LABEL = str('GALLERY_CANCEL_LABEL');
-
-  var content = document.querySelector('#content');
-  content.addEventListener('click', this.onContentClick_.bind(this));
-
-  this.header_ = document.querySelector('#header');
-  this.toolbar_ = document.querySelector('#toolbar');
-
-  var preventDefault = function(event) { event.preventDefault(); };
-
-  var minimizeButton = util.createChild(this.header_,
-                                        'minimize-button tool dimmable',
-                                        'button');
-  minimizeButton.tabIndex = -1;
-  minimizeButton.addEventListener('click', this.onMinimize_.bind(this));
-  minimizeButton.addEventListener('mousedown', preventDefault);
-
-  var maximizeButton = util.createChild(this.header_,
-                                        'maximize-button tool dimmable',
-                                        'button');
-  maximizeButton.tabIndex = -1;
-  maximizeButton.addEventListener('click', this.onMaximize_.bind(this));
-  maximizeButton.addEventListener('mousedown', preventDefault);
-
-  var closeButton = util.createChild(this.header_,
-                                     'close-button tool dimmable',
-                                     'button');
-  closeButton.tabIndex = -1;
-  closeButton.addEventListener('click', this.onClose_.bind(this));
-  closeButton.addEventListener('mousedown', preventDefault);
-
-  this.filenameSpacer_ = this.toolbar_.querySelector('.filename-spacer');
-  this.filenameEdit_ = util.createChild(this.filenameSpacer_,
-                                        'namebox', 'input');
-
-  this.filenameEdit_.setAttribute('type', 'text');
-  this.filenameEdit_.addEventListener('blur',
-      this.onFilenameEditBlur_.bind(this));
-
-  this.filenameEdit_.addEventListener('focus',
-      this.onFilenameFocus_.bind(this));
-
-  this.filenameEdit_.addEventListener('keydown',
-      this.onFilenameEditKeydown_.bind(this));
-
-  var middleSpacer = this.filenameSpacer_ =
-      this.toolbar_.querySelector('.middle-spacer');
-  var buttonSpacer = this.toolbar_.querySelector('button-spacer');
-
-  this.prompt_ = new ImageEditor.Prompt(this.container_, strf);
-
-  this.errorBanner_ = new ErrorBanner(this.container_);
-
-  this.modeButton_ = this.toolbar_.querySelector('button.mode');
-  this.modeButton_.addEventListener('click', this.toggleMode_.bind(this, null));
-
-  this.mosaicMode_ = new MosaicMode(content,
-                                    this.errorBanner_,
-                                    this.dataModel_,
-                                    this.selectionModel_,
-                                    this.volumeManager_,
-                                    this.toggleMode_.bind(this, null));
-
-  this.slideMode_ = new SlideMode(this.container_,
-                                  content,
-                                  this.toolbar_,
-                                  this.prompt_,
-                                  this.errorBanner_,
-                                  this.dataModel_,
-                                  this.selectionModel_,
-                                  this.context_,
-                                  this.volumeManager_,
-                                  this.toggleMode_.bind(this),
-                                  str);
-
-  this.slideMode_.addEventListener('image-displayed', function() {
-    cr.dispatchSimpleEvent(this, 'image-displayed');
-  }.bind(this));
-  this.slideMode_.addEventListener('image-saved', function() {
-    cr.dispatchSimpleEvent(this, 'image-saved');
-  }.bind(this));
-
-  this.deleteButton_ = this.initToolbarButton_('delete', 'GALLERY_DELETE');
-  this.deleteButton_.addEventListener('click', this.delete_.bind(this));
-
-  this.shareButton_ = this.initToolbarButton_('share', 'GALLERY_SHARE');
-  this.shareButton_.addEventListener(
-      'click', this.onShareButtonClick_.bind(this));
-
-  this.dataModel_.addEventListener('splice', this.onSplice_.bind(this));
-  this.dataModel_.addEventListener('content', this.onContentChange_.bind(this));
-
-  this.selectionModel_.addEventListener('change', this.onSelection_.bind(this));
-  this.slideMode_.addEventListener('useraction', this.onUserAction_.bind(this));
-
-  this.shareDialog_ = new ShareDialog(this.container_);
 };
 
 /**
@@ -424,7 +275,7 @@ Gallery.prototype.initDom_ = function() {
  * @private
  */
 Gallery.prototype.initToolbarButton_ = function(className, title) {
-  var button = this.toolbar_.querySelector('button.' + className);
+  var button = queryRequiredElement(this.toolbar_, 'button.' + className);
   button.title = str(title);
   return button;
 };
@@ -599,7 +450,7 @@ Gallery.prototype.executeWhenReady = function(callback) {
 };
 
 /**
- * @return {Object} File manager private API.
+ * @return {!Object} File manager private API.
  */
 Gallery.getFileManagerPrivate = function() {
   return chrome.fileManagerPrivate || window.top.chrome.fileManagerPrivate;
@@ -624,7 +475,7 @@ Gallery.prototype.onUserAction_ = function() {
 
 /**
  * Sets the current mode, update the UI.
- * @param {Object} mode Current mode.
+ * @param {!(SlideMode|MosaicMode)} mode Current mode.
  * @private
  */
 Gallery.prototype.setCurrentMode_ = function(mode) {
@@ -673,7 +524,7 @@ Gallery.prototype.toggleMode_ = function(opt_callback, opt_event) {
         tileRect,
         function() {
           // Animate back to normal position.
-          mosaic.transform();
+          mosaic.transform(null, null);
           mosaic.show();
           onModeChanged();
         }.bind(this));
@@ -743,11 +594,12 @@ Gallery.prototype.delete_ = function() {
       function() {
         // Restore the listener after a timeout so that ESC is processed.
         setTimeout(restoreListener, 0);
-      });
+      },
+      null);
 };
 
 /**
- * @return {Array.<Gallery.Item>} Current selection.
+ * @return {!Array.<Gallery.Item>} Current selection.
  */
 Gallery.prototype.getSelectedItems = function() {
   return this.selectionModel_.selectedIndexes.map(
@@ -755,7 +607,7 @@ Gallery.prototype.getSelectedItems = function() {
 };
 
 /**
- * @return {Array.<Entry>} Array of currently selected entries.
+ * @return {!Array.<Entry>} Array of currently selected entries.
  */
 Gallery.prototype.getSelectedEntries = function() {
   return this.selectionModel_.selectedIndexes.map(function(index) {
@@ -793,7 +645,7 @@ Gallery.prototype.onSplice_ = function() {
 
 /**
  * Content change event handler.
- * @param {Event} event Event.
+ * @param {!Event} event Event.
  * @private
 */
 Gallery.prototype.onContentChange_ = function(event) {
@@ -806,7 +658,7 @@ Gallery.prototype.onContentChange_ = function(event) {
 /**
  * Keydown handler.
  *
- * @param {Event} event Event.
+ * @param {!Event} event Event.
  * @private
  */
 Gallery.prototype.onKeyDown_ = function(event) {
@@ -820,7 +672,7 @@ Gallery.prototype.onKeyDown_ = function(event) {
       break;
 
     case 'U+004D':  // 'm' switches between Slide and Mosaic mode.
-      this.toggleMode_(null, event);
+      this.toggleMode_(undefined, event);
       break;
 
     case 'U+0056':  // 'v'
@@ -832,6 +684,10 @@ Gallery.prototype.onKeyDown_ = function(event) {
     case 'Shift-U+0033':  // Shift+'3' (Delete key might be missing).
     case 'U+0044':  // 'd'
       this.delete_();
+      break;
+
+    case 'U+001B':  // Escape
+      window.close();
       break;
   }
 };
@@ -914,8 +770,7 @@ Gallery.prototype.onFilenameFocus_ = function() {
 /**
  * Blur event handler on filename edit box.
  *
- * @param {Event} event Blur event.
- * @return {Promise} Promise fulfilled on renaming completed.
+ * @param {!Event} event Blur event.
  * @private
  */
 Gallery.prototype.onFilenameEditBlur_ = function(event) {
@@ -946,14 +801,15 @@ Gallery.prototype.onFilenameEditBlur_ = function(event) {
 
   ImageUtil.setAttribute(this.filenameSpacer_, 'renaming', false);
   this.onUserAction_();
-  return Promise.resolve();
 };
 
 /**
  * Keydown event handler on filename edit box
+ * @param {!Event} event A keyboard event.
  * @private
  */
-Gallery.prototype.onFilenameEditKeydown_ = function() {
+Gallery.prototype.onFilenameEditKeydown_ = function(event) {
+  event = assertInstanceof(event, KeyboardEvent);
   switch (event.keyCode) {
     case 27:  // Escape
       this.filenameEdit_.value = this.filenameEdit_.originalValue;
@@ -1030,7 +886,7 @@ var gallery = null;
 
 /**
  * Initialize the window.
- * @param {Object} backgroundComponents Background components.
+ * @param {!BackgroundComponents} backgroundComponents Background components.
  */
 window.initialize = function(backgroundComponents) {
   window.loadTimeData.data = backgroundComponents.stringData;

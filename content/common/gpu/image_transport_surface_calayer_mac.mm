@@ -8,7 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/mac/sdk_forward_declarations.h"
-#include "content/common/gpu/surface_handle_types_mac.h"
+#include "ui/accelerated_widget_mac/surface_handle_types.h"
 #include "ui/base/cocoa/animation_utils.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gl/gl_gl_api_implementation.h"
@@ -55,7 +55,7 @@ const size_t kFramesToKeepCAContextAfterDiscard = 2;
   CGLError error = CGLCreateContext(
       pixelFormat, storageProvider_->LayerShareGroupContext(), &context);
   if (error != kCGLNoError)
-    DLOG(ERROR) << "CGLCreateContext failed with CGL error: " << error;
+    LOG(ERROR) << "CGLCreateContext failed with CGL error: " << error;
   return context;
 }
 
@@ -94,16 +94,16 @@ namespace content {
 
 CALayerStorageProvider::CALayerStorageProvider(
     ImageTransportSurfaceFBO* transport_surface)
-        : transport_surface_(transport_surface),
-          gpu_vsync_disabled_(CommandLine::ForCurrentProcess()->HasSwitch(
-              switches::kDisableGpuVsync)),
-          throttling_disabled_(false),
-          has_pending_draw_(false),
-          can_draw_returned_false_count_(0),
-          fbo_texture_(0),
-          fbo_scale_factor_(1),
-          recreate_layer_after_gpu_switch_(false),
-          pending_draw_weak_factory_(this) {
+    : transport_surface_(transport_surface),
+      gpu_vsync_disabled_(base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableGpuVsync)),
+      throttling_disabled_(false),
+      has_pending_draw_(false),
+      can_draw_returned_false_count_(0),
+      fbo_texture_(0),
+      fbo_scale_factor_(1),
+      recreate_layer_after_gpu_switch_(false),
+      pending_draw_weak_factory_(this) {
   ui::GpuSwitchingManager::GetInstance()->AddObserver(this);
 }
 
@@ -121,8 +121,8 @@ bool CALayerStorageProvider::AllocateColorBufferStorage(
   // Allocate an ordinary OpenGL texture to back the FBO.
   GLenum error;
   while ((error = glGetError()) != GL_NO_ERROR) {
-    DLOG(ERROR) << "Error found (and ignored) before allocating buffer "
-                << "storage: " << error;
+    LOG(ERROR) << "OpenGL error hit but ignored before allocating buffer "
+               << "storage: " << error;
   }
   glTexImage2D(GL_TEXTURE_RECTANGLE_ARB,
                0,
@@ -133,12 +133,16 @@ bool CALayerStorageProvider::AllocateColorBufferStorage(
                GL_RGBA,
                GL_UNSIGNED_BYTE,
                NULL);
-  error = glGetError();
-  if (error != GL_NO_ERROR) {
-    DLOG(ERROR) << "glTexImage failed with GL error: " << error;
-    return false;
-  }
   glFlush();
+
+  bool hit_error = false;
+  while ((error = glGetError()) != GL_NO_ERROR) {
+    LOG(ERROR) << "OpenGL error hit while trying to allocate buffer storage: "
+               << error;
+    hit_error = true;
+  }
+  if (hit_error)
+    return false;
 
   // Set the parameters that will be used to allocate the CALayer to draw the
   // texture into.
@@ -348,6 +352,11 @@ void CALayerStorageProvider::LayerDoDraw() {
     transport_surface_->SetRendererID(current_renderer_id);
   }
 
+  GLenum error;
+  while ((error = glGetError()) != GL_NO_ERROR) {
+    LOG(ERROR) << "OpenGL error hit while drawing frame: " << error;
+  }
+
   // Allow forward progress in the context now that the swap is complete.
   UnblockBrowserIfNeeded();
 }
@@ -368,7 +377,7 @@ void CALayerStorageProvider::UnblockBrowserIfNeeded() {
   pending_draw_weak_factory_.InvalidateWeakPtrs();
   has_pending_draw_ = false;
   transport_surface_->SendSwapBuffers(
-      SurfaceHandleFromCAContextID([context_ contextId]),
+      ui::SurfaceHandleFromCAContextID([context_ contextId]),
       fbo_pixel_size_,
       fbo_scale_factor_);
 }

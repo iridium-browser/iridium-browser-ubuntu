@@ -37,7 +37,6 @@
 <translation id="3883381313049582448">Chromium tarafından oluşturulan şifreyi kullan</translation>
 <translation id="3549345495227188780">Chromium OS'yi Kullanmaya Başlayın</translation>
 <translation id="1668054258064581266">Hesabınızı Chromium'dan kaldırdıktan sonra, bu durumun etkili olması için açık sekmelerinizi yeniden yüklemeniz gerekebilir.</translation>
-<translation id="6953661834318318668">Chromium Araç Çubuğu</translation>
 <translation id="4285930937574705105">Belirlenemeyen bir hata nedeniyle yükleme başarısız oldu. Chromium şu anda çalışır durumdaysa kapatıp yeniden deneyin.</translation>
 <translation id="1396446129537741364">Chromium, şifreleri göstermeye çalışıyor.</translation>
 <translation id="8987477933582888019">Web Tarayıcı</translation>
@@ -82,7 +81,7 @@
 <translation id="3065280201209294872">Sitede kullanılan güvenlik ayarları güncel değil ve gelecekteki Chromium sürümlerinin siteye güvenli şekilde erişmesini engelleyebilir.</translation>
 <translation id="8551886023433311834">Güncelleme neredeyse tamamlandı! Güncellemenin tamamlanması için cihazınızı yeniden başlatın.</translation>
 <translation id="8353224596138547809">Chromium'un bu site için şifrenizi kaydetmesini ister misiniz?</translation>
-<translation id="8738058698779197622">Güvenli bir bağlantı kurmak için saatinizin doğru ayarlanmış olması gerekir. Bunun sebebi, web sitelerinin kendilerini tanımlamak için kullandıkları sertifikaların sadece belli süreler için geçerli olmasıdır. Cihazınızın saati yanlış olduğundan, Chromium'un bu sertifikaları doğrulayamaz.</translation>
+<translation id="8738058698779197622">Güvenli bir bağlantı kurmak için saatinizin doğru ayarlanmış olması gerekir. Bunun sebebi, web sitelerinin kendilerini tanımlamak için kullandıkları sertifikaların sadece belli süreler için geçerli olmasıdır. Cihazınızın saati yanlış olduğundan, Chromium bu sertifikaları doğrulayamaz.</translation>
 <translation id="7339898014177206373">Yeni pencere</translation>
 <translation id="7463979740390522693">Chromium - Bildirimler (<ph name="QUANTITY"/> okunmamış)</translation>
 <translation id="225614027745146050">Hoş Geldiniz</translation>
@@ -90,6 +89,7 @@
 <translation id="7473891865547856676">Hayır, Teşekkürler</translation>
 <translation id="9191268552238695869">Bir yönetici bu sistemde Chromium yükledi ve tüm kullanıcılar bunu kullanabilir. Sistem düzeyinde Chromium, kullanıcı düzeyindeki yüklemenin yerini alacak.</translation>
 <translation id="3509308970982693815">Lütfen tüm Chromium pencerelerini kapatıp tekrar deneyin.</translation>
+<translation id="8851136666856101339">main</translation>
 <translation id="4077262827416206768">Lütfen tüm Chromium pencerelerini kapatın ve bu değişikliğin geçerli olması için Chromium'u yeniden başlatın.</translation>
 <translation id="6475912303565314141">Ayrıca, Chromium'u başlattığınızda gösterilecek sayfayı da denetler.</translation>
 <translation id="1725059042853530269"><ph name="FILE_NAME"/>, göz atma deneyiminize olumsuz etki yapabileceği için Chromium tarafından engellendi.</translation>
@@ -150,7 +150,8 @@
 <translation id="275588974610408078">Chromium'da kilitlenmeyi raporlama özelliği yoktur.</translation>
 <translation id="5909170354645388250">Chromium'da kullanılmaz. Kaynak haritaları senkronize halde tutmak için yer tutucu. Bir bağımsız değişkenini beklemektedir: $ 1.</translation>
 <translation id="1144202035120576837"><ph name="SITE"/>, normal olarak bilgilerinizi korumak için şifreleme özelliğini kullanır. Chromium, <ph name="SITE"/> sitesine bu kez bağlanmaya çalıştığında,
-web sitesi alışılmışın dışında ve hatalı kimlik bilgileri gönderdi. Ya bir saldırgan, <ph name="SITE"/> gibi görünmeye çalışmaktadır ya da bir Kablosuz oturum açma ekranı bağlantıyı kesmiştir. Chromium herhangi bir veri alışverişi gerçekleştirilmeden önce bağlantıyı durdurduğundan bilgileriniz hâlâ güvencededir</translation>
+web sitesi alışılmışın dışında ve hatalı kimlik bilgileri gönderdi. Ya bir saldırgan, <ph name="SITE"/> gibi görünmeye çalışmaktadır ya da bir Kablosuz oturum açma ekranı bağlantıyı kesmiştir. Chromium herhangi bir veri alışverişi gerçekleştirilmeden önce bağlantıyı durdurduğundan bilgileriniz hâlâ güvencededir.</translation>
+<translation id="2316129865977710310">Hayır, teşekkürler</translation>
 <translation id="7937630085815544518">Chromium'da <ph name="USER_EMAIL_ADDRESS"/> olarak oturum açtınız. Tekrar oturum açmak için lütfen aynı hesabı kullanın.</translation>
 <translation id="2685838254101182273">Chromium güncellenmesi durdu ve artık işletim sisteminizin bu sürümünü desteklemiyor.</translation>
 <translation id="8684913864886094367">Chromium düzgün bir şekilde kapatılmadı.</translation>
@@ -164,6 +165,7 @@ web sitesi alışılmışın dışında ve hatalı kimlik bilgileri gönderdi. Y
 <translation id="2648074677641340862">Yükleme sırasında bir işletim sistemi hatası oluştu. Lütfen Chromium'u yeniden indirin.</translation>
 <translation id="5942520288919337908"><ph name="EXTENSION_NAME"/> Chromium'a eklendi.</translation>
 <translation id="549669000822060376">Chromium en son sistem güncellemelerini yüklerken lütfen bekleyin.</translation>
+<translation id="1240763998429950591">Chromium en son sürüme güncellenemediği için yeni özellikler ve güvenlik düzeltmeleri cihazınızda bulunmuyor. Chromium'u güncellemeniz gerekiyor.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">bir kelimeyi ve onu çevreleyen bağlamı Google Arama'ya gönderir; tanımları, resimleri, arama sonuçlarını ve diğer ayrıntıları döndürür.</translation>
 <translation id="4559775032954821361">Chromium menüsü &gt;
@@ -201,6 +203,7 @@ Bazı özellikler kullanılamayabilir. Lütfen farklı bir profil dizini belirti
 <translation id="2966088006374919794">Chromium'un, <ph name="SCHEME"/> bağlantılarını kullanabilmek için harici bir uygulamayı başlatması gerekiyor. İstenen bağlantı: <ph name="PROTOLINK"/>.</translation>
 <translation id="2558235863893655150">Chromium'un şifrenizi kaydetmesini istiyor musunuz?</translation>
 <translation id="6485906693002546646">Chromium öğelerinizi senkronize etmek için <ph name="PROFILE_EMAIL"/> adresini kullanıyorsunuz. Senkronizasyon tercihinizi güncellemek veya Chromium'u bir Google Hesabı olmadan kullanmak için şurayı ziyaret edin: <ph name="SETTINGS_LINK"/></translation>
+<translation id="705851970750939768">Chromium'u güncelle</translation>
 <translation id="5772805321386874569">(Chromium'un <ph name="BEGIN_BUTTON"/>yeniden başlatılmasını<ph name="END_BUTTON"/> gerektirir)</translation>
 <translation id="1688750314291223739">Kişiselleştirilmiş tarayıcı özelliklerinizi Web'e kaydetmek ve herhangi bir bilgisayardan Chromium ile bu özelliklere erişmek için senkronizasyonu ayarlayın.</translation>
 <translation id="8610831143142469229">Güvenlik duvarınızın veya virüsten korunma programınızın ayarlarından, Chromium'un

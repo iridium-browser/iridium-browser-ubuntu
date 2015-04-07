@@ -26,7 +26,6 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/cancelable_task_tracker.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
@@ -37,12 +36,16 @@
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/connection_tester.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
 #include "components/onc/onc_constants.h"
 #include "components/url_fixer/url_fixer.h"
 #include "content/public/browser/browser_thread.h"
@@ -74,7 +77,6 @@
 #include "chrome/browser/chromeos/file_manager/filesystem_api_util.h"
 #include "chrome/browser/chromeos/net/onc_utils.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/chromeos/system/syslogs_provider.h"
 #include "chrome/browser/chromeos/system_logs/debug_log_writer.h"
 #include "chrome/browser/net/nss_context.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -149,19 +151,6 @@ bool Base64StringToHashes(const std::string& hashes_str,
   return true;
 }
 
-// Returns a Value representing the state of a pre-existing URLRequest when
-// net-internals was opened.
-base::Value* GetRequestStateAsValue(const net::URLRequest* request,
-                                    net::NetLog::LogLevel log_level) {
-  return request->GetStateAsValue();
-}
-
-// Returns true if |request1| was created before |request2|.
-bool RequestCreatedBefore(const net::URLRequest* request1,
-                          const net::URLRequest* request2) {
-  return request1->creation_time() < request2->creation_time();
-}
-
 // Returns the http network session for |context| if there is one.
 // Otherwise, returns NULL.
 net::HttpNetworkSession* GetHttpNetworkSession(
@@ -227,9 +216,8 @@ class NetInternalsMessageHandler
   void OnGetPrerenderInfo(const base::ListValue* list);
   void OnGetHistoricNetworkStats(const base::ListValue* list);
   void OnGetExtensionInfo(const base::ListValue* list);
+  void OnGetDataReductionProxyInfo(const base::ListValue* list);
 #if defined(OS_CHROMEOS)
-  void OnRefreshSystemLogs(const base::ListValue* list);
-  void OnGetSystemLog(const base::ListValue* list);
   void OnImportONCFile(const base::ListValue* list);
   void OnStoreDebugLogs(const base::ListValue* list);
   void OnStoreDebugLogsCompleted(const base::FilePath& log_path,
@@ -256,70 +244,10 @@ class NetInternalsMessageHandler
  private:
   class IOThreadImpl;
 
-#if defined(OS_CHROMEOS)
-  // Class that is used for getting network related ChromeOS logs.
-  // Logs are fetched from ChromeOS libcros on user request, and only when we
-  // don't yet have a copy of logs. If a copy is present, we send back data from
-  // it, else we save request and answer to it when we get logs from libcros.
-  // If needed, we also send request for system logs to libcros.
-  // Logs refresh has to be done explicitly, by deleting old logs and then
-  // loading them again.
-  class SystemLogsGetter {
-   public:
-    SystemLogsGetter(NetInternalsMessageHandler* handler,
-                     chromeos::system::SyslogsProvider* syslogs_provider);
-    ~SystemLogsGetter();
-
-    // Deletes logs copy we currently have, and resets logs_requested and
-    // logs_received flags.
-    void DeleteSystemLogs();
-    // Starts log fetching. If logs copy is present, requested logs are sent
-    // back.
-    // If syslogs load request hasn't been sent to libcros yet, we do that now,
-    // and postpone sending response.
-    // Request data is specified by args:
-    //   $1 : key of the log we are interested in.
-    //   $2 : string used to identify request.
-    void RequestSystemLog(const base::ListValue* args);
-    // Requests logs from libcros, but only if we don't have a copy.
-    void LoadSystemLogs();
-    // Processes callback from libcros containing system logs. Postponed
-    // request responses are sent.
-    void OnSystemLogsLoaded(chromeos::system::LogDictionaryType* sys_info,
-                            std::string* ignored_content);
-
-   private:
-    // Struct we save postponed log request in.
-    struct SystemLogRequest {
-      std::string log_key;
-      std::string cell_id;
-    };
-
-    // Processes request.
-    void SendLogs(const SystemLogRequest& request);
-
-    NetInternalsMessageHandler* handler_;
-    chromeos::system::SyslogsProvider* syslogs_provider_;
-    // List of postponed requests.
-    std::list<SystemLogRequest> requests_;
-    scoped_ptr<chromeos::system::LogDictionaryType> logs_;
-    bool logs_received_;
-    bool logs_requested_;
-    base::CancelableTaskTracker tracker_;
-    // Libcros request task ID.
-    base::CancelableTaskTracker::TaskId syslogs_task_id_;
-  };
-#endif  // defined(OS_CHROMEOS)
-
   // This is the "real" message handler, which lives on the IO thread.
   scoped_refptr<IOThreadImpl> proxy_;
 
   base::WeakPtr<prerender::PrerenderManager> prerender_manager_;
-
-#if defined(OS_CHROMEOS)
-  // Class that handles getting and filtering system logs.
-  scoped_ptr<SystemLogsGetter> syslogs_getter_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(NetInternalsMessageHandler);
 };
@@ -499,10 +427,6 @@ void NetInternalsMessageHandler::RegisterMessages() {
                             profile->GetRequestContext());
   proxy_->AddRequestContextGetter(profile->GetMediaRequestContext());
   proxy_->AddRequestContextGetter(profile->GetRequestContextForExtensions());
-#if defined(OS_CHROMEOS)
-  syslogs_getter_.reset(new SystemLogsGetter(this,
-      chromeos::system::SyslogsProvider::GetInstance()));
-#endif
 
   prerender::PrerenderManager* prerender_manager =
       prerender::PrerenderManagerFactory::GetForProfile(profile);
@@ -591,15 +515,11 @@ void NetInternalsMessageHandler::RegisterMessages() {
       "getExtensionInfo",
       base::Bind(&NetInternalsMessageHandler::OnGetExtensionInfo,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "getDataReductionProxyInfo",
+      base::Bind(&NetInternalsMessageHandler::OnGetDataReductionProxyInfo,
+                 base::Unretained(this)));
 #if defined(OS_CHROMEOS)
-  web_ui()->RegisterMessageCallback(
-      "refreshSystemLogs",
-      base::Bind(&NetInternalsMessageHandler::OnRefreshSystemLogs,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(
-      "getSystemLog",
-      base::Bind(&NetInternalsMessageHandler::OnGetSystemLog,
-                 base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "importONCFile",
       base::Bind(&NetInternalsMessageHandler::OnImportONCFile,
@@ -665,8 +585,8 @@ void NetInternalsMessageHandler::OnGetHistoricNetworkStats(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   Profile* profile = Profile::FromWebUI(web_ui());
   base::Value* historic_network_info =
-      ChromeNetworkDelegate::HistoricNetworkStatsInfoToValue(
-          profile->GetPrefs());
+      data_reduction_proxy::DataReductionProxyNetworkDelegate::
+          HistoricNetworkStatsInfoToValue(profile->GetPrefs());
   SendJavascriptCommand("receivedHistoricNetworkStats", historic_network_info);
 }
 
@@ -697,100 +617,19 @@ void NetInternalsMessageHandler::OnGetExtensionInfo(
   SendJavascriptCommand("receivedExtensionInfo", extension_list);
 }
 
-#if defined(OS_CHROMEOS)
-////////////////////////////////////////////////////////////////////////////////
-//
-// NetInternalsMessageHandler::SystemLogsGetter
-//
-////////////////////////////////////////////////////////////////////////////////
-
-NetInternalsMessageHandler::SystemLogsGetter::SystemLogsGetter(
-    NetInternalsMessageHandler* handler,
-    chromeos::system::SyslogsProvider* syslogs_provider)
-    : handler_(handler),
-      syslogs_provider_(syslogs_provider),
-      logs_received_(false),
-      logs_requested_(false) {
-  if (!syslogs_provider_)
-    LOG(ERROR) << "System access library not loaded";
+void NetInternalsMessageHandler::OnGetDataReductionProxyInfo(
+    const base::ListValue* list) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  Profile* profile = Profile::FromWebUI(web_ui());
+  DataReductionProxyChromeSettings* data_reduction_proxy_settings =
+      DataReductionProxyChromeSettingsFactory::GetForBrowserContext(profile);
+  data_reduction_proxy::DataReductionProxyEventStore* event_store =
+      (data_reduction_proxy_settings == nullptr) ? nullptr :
+          data_reduction_proxy_settings->GetEventStore();
+  SendJavascriptCommand(
+      "receivedDataReductionProxyInfo",
+      (event_store == nullptr) ? nullptr : event_store->GetSummaryValue());
 }
-
-NetInternalsMessageHandler::SystemLogsGetter::~SystemLogsGetter() {
-  DeleteSystemLogs();
-}
-
-void NetInternalsMessageHandler::SystemLogsGetter::DeleteSystemLogs() {
-  if (syslogs_provider_ && logs_requested_ && !logs_received_) {
-    tracker_.TryCancel(syslogs_task_id_);
-  }
-  logs_requested_ = false;
-  logs_received_ = false;
-  logs_.reset();
-}
-
-void NetInternalsMessageHandler::SystemLogsGetter::RequestSystemLog(
-    const base::ListValue* args) {
-  if (!logs_requested_) {
-    DCHECK(!logs_received_);
-    LoadSystemLogs();
-  }
-  SystemLogRequest log_request;
-  args->GetString(0, &log_request.log_key);
-  args->GetString(1, &log_request.cell_id);
-
-  if (logs_received_) {
-    SendLogs(log_request);
-  } else {
-    requests_.push_back(log_request);
-  }
-}
-
-void NetInternalsMessageHandler::SystemLogsGetter::LoadSystemLogs() {
-  if (logs_requested_ || !syslogs_provider_)
-    return;
-  logs_requested_ = true;
-  syslogs_task_id_ = syslogs_provider_->RequestSyslogs(
-      false,  // compress logs.
-      chromeos::system::SyslogsProvider::SYSLOGS_NETWORK,
-      base::Bind(
-          &NetInternalsMessageHandler::SystemLogsGetter::OnSystemLogsLoaded,
-          base::Unretained(this)),
-      &tracker_);
-}
-
-void NetInternalsMessageHandler::SystemLogsGetter::OnSystemLogsLoaded(
-    chromeos::system::LogDictionaryType* sys_info,
-    std::string* ignored_content) {
-  DCHECK(!ignored_content);
-  logs_.reset(sys_info);
-  logs_received_ = true;
-  for (std::list<SystemLogRequest>::iterator request_it = requests_.begin();
-       request_it != requests_.end();
-       ++request_it) {
-    SendLogs(*request_it);
-  }
-  requests_.clear();
-}
-
-void NetInternalsMessageHandler::SystemLogsGetter::SendLogs(
-    const SystemLogRequest& request) {
-  base::DictionaryValue* result = new base::DictionaryValue();
-  chromeos::system::LogDictionaryType::iterator log_it =
-      logs_->find(request.log_key);
-  if (log_it != logs_->end()) {
-    if (!log_it->second.empty()) {
-      result->SetString("log", log_it->second);
-    } else {
-      result->SetString("log", "<no relevant lines found>");
-    }
-  } else {
-    result->SetString("log", "<invalid log name>");
-  }
-  result->SetString("cellId", request.cell_id);
-
-  handler_->SendJavascriptCommand("getSystemLogCallback", result);
-}
-#endif  // defined(OS_CHROMEOS)
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -856,21 +695,21 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
     const base::ListValue* list) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  // If we have any pending entries, go ahead and get rid of them, so they won't
-  // appear before the REQUEST_ALIVE events we add for currently active
-  // URLRequests.
-  PostPendingEntries();
+  // If currently watching the NetLog, temporarily stop watching it and flush
+  // pending events, so they won't appear before the status events created for
+  // currently active network objects below.
+  if (net_log()) {
+    net_log()->RemoveThreadSafeObserver(this);
+    PostPendingEntries();
+  }
 
   SendJavascriptCommand("receivedConstants", NetInternalsUI::GetConstants());
 
-  // Add entries for ongoing URL requests.
   PrePopulateEventList();
 
-  if (!net_log()) {
-    // Register with network stack to observe events.
-    io_thread_->net_log()->AddThreadSafeObserver(this,
-        net::NetLog::LOG_ALL_BUT_BYTES);
-  }
+  // Register with network stack to observe events.
+  io_thread_->net_log()->AddThreadSafeObserver(this,
+      net::NetLog::LOG_ALL_BUT_BYTES);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetNetInfo(
@@ -1078,8 +917,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetSessionNetworkStats(
 
   base::Value* network_info = NULL;
   if (http_network_session) {
-    ChromeNetworkDelegate* net_delegate =
-        static_cast<ChromeNetworkDelegate*>(
+    data_reduction_proxy::DataReductionProxyNetworkDelegate* net_delegate =
+        static_cast<data_reduction_proxy::DataReductionProxyNetworkDelegate*>(
             http_network_session->network_delegate());
     if (net_delegate) {
       network_info = net_delegate->SessionNetworkStatsInfoToValue();
@@ -1151,20 +990,6 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetServiceProviders(
 #endif
 
 #if defined(OS_CHROMEOS)
-void NetInternalsMessageHandler::OnRefreshSystemLogs(
-    const base::ListValue* list) {
-  DCHECK(!list);
-  DCHECK(syslogs_getter_.get());
-  syslogs_getter_->DeleteSystemLogs();
-  syslogs_getter_->LoadSystemLogs();
-}
-
-void NetInternalsMessageHandler::OnGetSystemLog(
-    const base::ListValue* list) {
-  DCHECK(syslogs_getter_.get());
-  syslogs_getter_->RequestSystemLog(list);
-}
-
 void NetInternalsMessageHandler::ImportONCFileToNSSDB(
     const std::string& onc_blob,
     const std::string& passcode,
@@ -1389,7 +1214,7 @@ void NetInternalsMessageHandler::IOThreadImpl::PostPendingEntries() {
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::PrePopulateEventList() {
-  // Use a set to prevent duplicates.
+  // Using a set removes any duplicates.
   std::set<net::URLRequestContext*> contexts;
   for (ContextGetterList::const_iterator getter = context_getters_.begin();
        getter != context_getters_.end(); ++getter) {
@@ -1398,46 +1223,8 @@ void NetInternalsMessageHandler::IOThreadImpl::PrePopulateEventList() {
   contexts.insert(io_thread_->globals()->proxy_script_fetcher_context.get());
   contexts.insert(io_thread_->globals()->system_request_context.get());
 
-  // Put together the list of all requests.
-  std::vector<const net::URLRequest*> requests;
-  for (std::set<net::URLRequestContext*>::const_iterator context =
-           contexts.begin();
-       context != contexts.end(); ++context) {
-    std::set<const net::URLRequest*>* context_requests =
-        (*context)->url_requests();
-    for (std::set<const net::URLRequest*>::const_iterator request_it =
-             context_requests->begin();
-         request_it != context_requests->end(); ++request_it) {
-      DCHECK_EQ(io_thread_->net_log(), (*request_it)->net_log().net_log());
-      requests.push_back(*request_it);
-    }
-  }
-
-  // Sort by creation time.
-  std::sort(requests.begin(), requests.end(), RequestCreatedBefore);
-
-  // Create fake events.
-  for (std::vector<const net::URLRequest*>::const_iterator request_it =
-           requests.begin();
-       request_it != requests.end(); ++request_it) {
-    const net::URLRequest* request = *request_it;
-    net::NetLog::ParametersCallback callback =
-        base::Bind(&GetRequestStateAsValue, base::Unretained(request));
-
-    // Create and add the entry directly, to avoid sending it to any other
-    // NetLog observers.
-    net::NetLog::EntryData entry_data(net::NetLog::TYPE_REQUEST_ALIVE,
-                                      request->net_log().source(),
-                                      net::NetLog::PHASE_BEGIN,
-                                      request->creation_time(),
-                                      &callback);
-    net::NetLog::Entry entry(&entry_data, request->net_log().GetLogLevel());
-
-    // Have to add |entry| to the queue synchronously, as there may already
-    // be posted tasks queued up to add other events for |request|, which we
-    // want |entry| to precede.
-    AddEntryToQueue(entry.ToValue());
-  }
+  // Add entries for ongoing network objects.
+  CreateNetLogEntriesForActiveObjects(contexts, this);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::SendNetInfo(int info_sources) {
@@ -1477,10 +1264,14 @@ base::Value* NetInternalsUI::GetConstants() {
     dict->SetString("official",
                     version_info.IsOfficialBuild() ? "official" : "unofficial");
     dict->SetString("os_type", version_info.OSType());
-    dict->SetString("command_line",
-                    CommandLine::ForCurrentProcess()->GetCommandLineString());
+    dict->SetString(
+        "command_line",
+        base::CommandLine::ForCurrentProcess()->GetCommandLineString());
 
     constants_dict->Set("clientInfo", dict);
+
+    data_reduction_proxy::DataReductionProxyEventStore::AddConstants(
+        constants_dict.get());
   }
 
   return constants_dict.release();

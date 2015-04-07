@@ -135,7 +135,6 @@ static const char DrawFrame[] = "DrawFrame";
 static const char BeginFrame[] = "BeginFrame";
 static const char DecodeImage[] = "DecodeImage";
 static const char GPUTask[] = "GPUTask";
-static const char Rasterize[] = "Rasterize";
 static const char PaintSetup[] = "PaintSetup";
 
 static const char EmbedderCallback[] = "EmbedderCallback";
@@ -234,7 +233,7 @@ private:
 struct TimelineThreadState {
     ALLOW_ONLY_INLINE_ALLOCATION();
 public:
-    TimelineThreadState() { }
+    TimelineThreadState() : TimelineThreadState(nullptr) { }
 
     TimelineThreadState(InspectorTimelineAgent* timelineAgent)
         : recordStack(timelineAgent)
@@ -260,7 +259,7 @@ struct TimelineImageInfo {
 
 static LocalFrame* frameForExecutionContext(ExecutionContext* context)
 {
-    LocalFrame* frame = 0;
+    LocalFrame* frame = nullptr;
     if (context->isDocument())
         frame = toDocument(context)->frame();
     return frame;
@@ -321,7 +320,7 @@ void InspectorTimelineAgent::clearFrontend()
     ErrorString error;
     stop(&error);
     disable(&error);
-    m_frontend = 0;
+    m_frontend = nullptr;
 }
 
 void InspectorTimelineAgent::restore()
@@ -408,8 +407,6 @@ void InspectorTimelineAgent::innerStart()
         dispatcher->addListener(InstrumentationEvents::BeginFrame, TRACE_EVENT_PHASE_INSTANT, InspectorTimelineAgentTraceEventListener::create(this, &InspectorTimelineAgent::onBeginImplSideFrame), m_client);
         dispatcher->addListener(InstrumentationEvents::PaintSetup, TRACE_EVENT_PHASE_BEGIN, InspectorTimelineAgentTraceEventListener::create(this, &InspectorTimelineAgent::onPaintSetupBegin), m_client);
         dispatcher->addListener(InstrumentationEvents::PaintSetup, TRACE_EVENT_PHASE_END, InspectorTimelineAgentTraceEventListener::create(this, &InspectorTimelineAgent::onPaintSetupEnd), m_client);
-        dispatcher->addListener(InstrumentationEvents::RasterTask, TRACE_EVENT_PHASE_BEGIN, InspectorTimelineAgentTraceEventListener::create(this, &InspectorTimelineAgent::onRasterTaskBegin), m_client);
-        dispatcher->addListener(InstrumentationEvents::RasterTask, TRACE_EVENT_PHASE_END, InspectorTimelineAgentTraceEventListener::create(this, &InspectorTimelineAgent::onRasterTaskEnd), m_client);
         dispatcher->addListener(InstrumentationEvents::Layer, TRACE_EVENT_PHASE_DELETE_OBJECT, InspectorTimelineAgentTraceEventListener::create(this, &InspectorTimelineAgent::onLayerDeleted), m_client);
         dispatcher->addListener(InstrumentationEvents::RequestMainThreadFrame, TRACE_EVENT_PHASE_INSTANT, InspectorTimelineAgentTraceEventListener::create(this, &InspectorTimelineAgent::onRequestMainThreadFrame), m_client);
         dispatcher->addListener(InstrumentationEvents::ActivateLayerTree, TRACE_EVENT_PHASE_INSTANT, InspectorTimelineAgentTraceEventListener::create(this, &InspectorTimelineAgent::onActivateLayerTree), m_client);
@@ -963,31 +960,6 @@ void InspectorTimelineAgent::onPaintSetupEnd(const TraceEventDispatcher::TraceEv
     m_paintSetupEnd = event.timestamp() * msPerSecond;
 }
 
-void InspectorTimelineAgent::onRasterTaskBegin(const TraceEventDispatcher::TraceEvent& event)
-{
-    TimelineThreadState& state = threadState(event.threadIdentifier());
-    unsigned long long layerId = event.asUInt(InstrumentationEventArguments::LayerId);
-    ASSERT(layerId);
-    if (!m_layerToNodeMap.contains(layerId))
-        return;
-    ASSERT(!state.inKnownLayerTask);
-    state.inKnownLayerTask = true;
-    double timestamp = event.timestamp() * msPerSecond;
-    RefPtr<JSONObject> data = TimelineRecordFactory::createLayerData(m_layerToNodeMap.get(layerId));
-    RefPtr<TimelineEvent> record = TimelineRecordFactory::createBackgroundRecord(timestamp, String::number(event.threadIdentifier()), TimelineRecordType::Rasterize, data);
-    state.recordStack.addScopedRecord(record, TimelineRecordType::Rasterize);
-}
-
-void InspectorTimelineAgent::onRasterTaskEnd(const TraceEventDispatcher::TraceEvent& event)
-{
-    TimelineThreadState& state = threadState(event.threadIdentifier());
-    if (!state.inKnownLayerTask)
-        return;
-    ASSERT(state.recordStack.isOpenRecordOfType(TimelineRecordType::Rasterize));
-    state.recordStack.closeScopedRecord(event.timestamp() * msPerSecond);
-    state.inKnownLayerTask = false;
-}
-
 void InspectorTimelineAgent::onImageDecodeBegin(const TraceEventDispatcher::TraceEvent& event)
 {
     TimelineThreadState& state = threadState(event.threadIdentifier());
@@ -1223,6 +1195,7 @@ InspectorTimelineAgent::InspectorTimelineAgent(InspectorPageAgent* pageAgent, In
     , m_platformInstrumentationClientInstalledAtStackDepth(0)
     , m_imageBeingPainted(0)
     , m_paintSetupStart(0)
+    , m_paintSetupEnd(0)
     , m_mayEmitFirstPaint(false)
     , m_lastProgressTimestamp(0)
 {
@@ -1314,7 +1287,7 @@ double InspectorTimelineAgent::timestamp()
 LocalFrame* InspectorTimelineAgent::mainFrame() const
 {
     if (!m_pageAgent)
-        return 0;
+        return nullptr;
     return m_pageAgent->mainFrame();
 }
 
@@ -1331,8 +1304,8 @@ void InspectorTimelineAgent::setLiveEvents(const String& liveEvents)
         return;
     Vector<String> eventList;
     liveEvents.split(',', eventList);
-    for (Vector<String>::iterator it = eventList.begin(); it != eventList.end(); ++it)
-        m_liveEvents.add(*it);
+    for (auto& event : eventList)
+        m_liveEvents.add(event);
 }
 
 TimelineRecordStack::TimelineRecordStack(InspectorTimelineAgent* timelineAgent)

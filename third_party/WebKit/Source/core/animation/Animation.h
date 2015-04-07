@@ -67,7 +67,7 @@ public:
     const AnimationEffect* effect() const { return m_effect.get(); }
     AnimationEffect* effect() { return m_effect.get(); }
     Priority priority() const { return m_priority; }
-    Element* target() { return m_target; }
+    Element* target() const { return m_target; }
 
     void notifySampledEffectRemovedFromAnimationStack();
 #if !ENABLE(OILPAN)
@@ -76,14 +76,15 @@ public:
 
     bool isCandidateForAnimationOnCompositor(double playerPlaybackRate) const;
     // Must only be called once.
-    bool maybeStartAnimationOnCompositor(double startTime, double timeOffset);
-    bool maybeStartAnimationOnCompositor(double startTime, double timeOffset, double playerPlaybackRate);
+    bool maybeStartAnimationOnCompositor(int group, double startTime, double timeOffset, double playerPlaybackRate);
     bool hasActiveAnimationsOnCompositor() const;
     bool hasActiveAnimationsOnCompositor(CSSPropertyID) const;
     void cancelAnimationOnCompositor();
     void pauseAnimationForTestingOnCompositor(double pauseTime);
 
     virtual void trace(Visitor*) override;
+
+    void downgradeToNormalAnimation() { m_priority = DefaultPriority; }
 
 protected:
     void applyEffects();

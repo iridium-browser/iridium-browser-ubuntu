@@ -70,6 +70,7 @@ test("gl_tests") {
     "command_buffer/tests/gl_bind_uniform_location_unittest.cc",
     "command_buffer/tests/gl_chromium_framebuffer_multisample_unittest.cc",
     "command_buffer/tests/gl_chromium_path_rendering_unittest.cc",
+    "command_buffer/tests/gl_clear_framebuffer_unittest.cc",
     "command_buffer/tests/gl_copy_texture_CHROMIUM_unittest.cc",
     "command_buffer/tests/gl_depth_texture_unittest.cc",
     "command_buffer/tests/gl_gpu_memory_buffer_unittest.cc",
@@ -93,14 +94,13 @@ test("gl_tests") {
     "command_buffer/tests/occlusion_query_unittest.cc",
   ]
 
-  defines = [
-    "GL_GLEXT_PROTOTYPES",
-  ]
+  defines = [ "GL_GLEXT_PROTOTYPES" ]
 
   deps = [
     ":gpu",
     ":test_support",
     "//base",
+    "//base/test:test_support",
     "//base/third_party/dynamic_annotations",
     "//testing/gmock",
     "//testing/gtest",
@@ -117,11 +117,10 @@ test("gl_tests") {
   libs = []
 
   if (is_android) {
-    deps += [
-      "//testing/android:native_test_native_code",
-    ]
+    deps += [ "//testing/android:native_test_native_code" ]
     libs += [ "android" ]
   }
+
   # TODO(GYP)
   #     ['OS == "win"', {
   #       'dependencies': [
@@ -204,6 +203,7 @@ test("gpu_unittests") {
     "command_buffer/service/program_cache_unittest.cc",
     "command_buffer/service/shader_manager_unittest.cc",
     "command_buffer/service/shader_translator_unittest.cc",
+    "command_buffer/service/shader_translator_cache_unittest.cc",
     "command_buffer/service/test_helper.cc",
     "command_buffer/service/test_helper.h",
     "command_buffer/service/texture_manager_unittest.cc",
@@ -251,6 +251,7 @@ test("angle_unittests") {
 
   deps = [
     "//base",
+    "//base/test:test_support",
     "//base/third_party/dynamic_annotations",
     "//testing/gmock",
     "//testing/gtest",

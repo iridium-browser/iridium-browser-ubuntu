@@ -12,6 +12,7 @@
 #include "base/time/time.h"
 #include "cc/base/cc_export.h"
 #include "cc/output/begin_frame_args.h"
+#include "cc/scheduler/commit_earlyout_reason.h"
 #include "cc/scheduler/draw_result.h"
 #include "cc/scheduler/scheduler_settings.h"
 
@@ -62,12 +63,21 @@ class CC_EXPORT SchedulerStateMachine {
   };
   static const char* BeginImplFrameStateToString(BeginImplFrameState state);
 
+  enum BeginImplFrameDeadlineMode {
+    BEGIN_IMPL_FRAME_DEADLINE_MODE_IMMEDIATE,
+    BEGIN_IMPL_FRAME_DEADLINE_MODE_REGULAR,
+    BEGIN_IMPL_FRAME_DEADLINE_MODE_LATE,
+  };
+  static const char* BeginImplFrameDeadlineModeToString(
+      BeginImplFrameDeadlineMode mode);
+
   enum CommitState {
     COMMIT_STATE_IDLE,
     COMMIT_STATE_BEGIN_MAIN_FRAME_SENT,
     COMMIT_STATE_BEGIN_MAIN_FRAME_STARTED,
     COMMIT_STATE_READY_TO_COMMIT,
     COMMIT_STATE_WAITING_FOR_ACTIVATION,
+    COMMIT_STATE_WAITING_FOR_DRAW,
   };
   static const char* CommitStateToString(CommitState state);
 
@@ -88,20 +98,19 @@ class CC_EXPORT SchedulerStateMachine {
   CommitState commit_state() const { return commit_state_; }
 
   bool RedrawPending() const { return needs_redraw_; }
-  bool ManageTilesPending() const { return needs_manage_tiles_; }
+  bool PrepareTilesPending() const { return needs_prepare_tiles_; }
 
   enum Action {
     ACTION_NONE,
     ACTION_ANIMATE,
     ACTION_SEND_BEGIN_MAIN_FRAME,
     ACTION_COMMIT,
-    ACTION_UPDATE_VISIBLE_TILES,
     ACTION_ACTIVATE_SYNC_TREE,
     ACTION_DRAW_AND_SWAP_IF_POSSIBLE,
     ACTION_DRAW_AND_SWAP_FORCED,
     ACTION_DRAW_AND_SWAP_ABORT,
     ACTION_BEGIN_OUTPUT_SURFACE_CREATION,
-    ACTION_MANAGE_TILES,
+    ACTION_PREPARE_TILES,
   };
   static const char* ActionToString(Action action);
 
@@ -114,6 +123,10 @@ class CC_EXPORT SchedulerStateMachine {
   // Indicates whether the impl thread needs a BeginImplFrame callback in order
   // to make progress.
   bool BeginFrameNeeded() const;
+
+  // Indicates whether the scheduler should call
+  // SetNeedsBeginFrames(BeginFrameNeeded()) on the frame source.
+  bool ShouldSetNeedsBeginFrames(bool frame_source_needs_begin_frames) const;
 
   // Indicates that we need to independently poll for new state and actions
   // because we can't expect a BeginImplFrame. This is mostly used to avoid
@@ -128,10 +141,10 @@ class CC_EXPORT SchedulerStateMachine {
   void OnBeginImplFrameDeadlinePending();
   void OnBeginImplFrameDeadline();
   void OnBeginImplFrameIdle();
-  bool ShouldTriggerBeginImplFrameDeadlineEarly() const;
   BeginImplFrameState begin_impl_frame_state() const {
     return begin_impl_frame_state_;
   }
+  BeginImplFrameDeadlineMode CurrentBeginImplFrameDeadlineMode() const;
 
   // If the main thread didn't manage to produce a new frame in time for the
   // impl thread to draw, it is in a high latency mode.
@@ -148,6 +161,7 @@ class CC_EXPORT SchedulerStateMachine {
 
   // Indicates whether the LayerTreeHostImpl is visible.
   void SetVisible(bool visible);
+  bool visible() const { return visible_; }
 
   // Indicates that a redraw is required, either due to the impl tree changing
   // or the screen being damaged and simply needing redisplay.
@@ -157,9 +171,9 @@ class CC_EXPORT SchedulerStateMachine {
   void SetNeedsAnimate();
   bool needs_animate() const { return needs_animate_; }
 
-  // Indicates that manage-tiles is required. This guarantees another
-  // ManageTiles will occur shortly (even if no redraw is required).
-  void SetNeedsManageTiles();
+  // Indicates that prepare-tiles is required. This guarantees another
+  // PrepareTiles will occur shortly (even if no redraw is required).
+  void SetNeedsPrepareTiles();
 
   // Sets how many swaps can be pending to the OutputSurface.
   void SetMaxSwapsPending(int max);
@@ -198,11 +212,12 @@ class CC_EXPORT SchedulerStateMachine {
 
   // Call this only in response to receiving an ACTION_SEND_BEGIN_MAIN_FRAME
   // from NextAction if the client rejects the BeginMainFrame message.
-  // If did_handle is false, then another commit will be retried soon.
-  void BeginMainFrameAborted(bool did_handle);
+  void BeginMainFrameAborted(CommitEarlyOutReason reason);
 
   // Set that we can create the first OutputSurface and start the scheduler.
   void SetCanStart() { can_start_ = true; }
+  // Allow access of the can_start_ state in tests.
+  bool CanStartForTesting() const { return can_start_; }
 
   void SetSkipNextBeginMainFrameToReduceLatency();
 
@@ -222,7 +237,7 @@ class CC_EXPORT SchedulerStateMachine {
     return active_tree_needs_first_draw_;
   }
 
-  void DidManageTiles();
+  void DidPrepareTiles();
   void DidLoseOutputSurface();
   void DidCreateAndInitializeOutputSurface();
   bool HasInitializedOutputSurface() const;
@@ -248,9 +263,17 @@ class CC_EXPORT SchedulerStateMachine {
   // We should remove it afterwards.
   std::string GetStatesForDebugging() const;
 
+  void SetChildrenNeedBeginFrames(bool children_need_begin_frames);
+  bool children_need_begin_frames() const {
+    return children_need_begin_frames_;
+  }
+
  protected:
   bool BeginFrameNeededToAnimateOrDraw() const;
+  bool BeginFrameNeededForChildren() const;
   bool ProactiveBeginFrameWanted() const;
+
+  bool ShouldTriggerBeginImplFrameDeadlineImmediately() const;
 
   // True if we need to force activations to make forward progress.
   bool PendingActivationsShouldBeForced() const;
@@ -260,22 +283,20 @@ class CC_EXPORT SchedulerStateMachine {
   bool ShouldDrawForced() const;
   bool ShouldDraw() const;
   bool ShouldActivatePendingTree() const;
-  bool ShouldUpdateVisibleTiles() const;
   bool ShouldSendBeginMainFrame() const;
   bool ShouldCommit() const;
-  bool ShouldManageTiles() const;
+  bool ShouldPrepareTiles() const;
 
   void AdvanceCurrentFrameNumber();
   bool HasAnimatedThisFrame() const;
   bool HasSentBeginMainFrameThisFrame() const;
-  bool HasUpdatedVisibleTilesThisFrame() const;
   bool HasRequestedSwapThisFrame() const;
   bool HasSwappedThisFrame() const;
 
-  void UpdateStateOnCommit(bool commit_was_aborted);
+  void UpdateStateOnCommit(bool commit_had_no_updates);
   void UpdateStateOnActivation();
   void UpdateStateOnDraw(bool did_request_swap);
-  void UpdateStateOnManageTiles();
+  void UpdateStateOnPrepareTiles();
 
   const SchedulerSettings settings_;
 
@@ -292,20 +313,18 @@ class CC_EXPORT SchedulerStateMachine {
   int last_frame_number_swap_performed_;
   int last_frame_number_swap_requested_;
   int last_frame_number_begin_main_frame_sent_;
-  int last_frame_number_update_visible_tiles_was_called_;
 
-  // manage_tiles_funnel_ is "filled" each time ManageTiles is called
+  // prepare_tiles_funnel_ is "filled" each time PrepareTiles is called
   // and "drained" on each BeginImplFrame. If the funnel gets too full,
-  // we start throttling ACTION_MANAGE_TILES such that we average one
-  // ManageTile per BeginImplFrame.
-  int manage_tiles_funnel_;
+  // we start throttling ACTION_PREPARE_TILES such that we average one
+  // PrepareTiles per BeginImplFrame.
+  int prepare_tiles_funnel_;
   int consecutive_checkerboard_animations_;
   int max_pending_swaps_;
   int pending_swaps_;
   bool needs_redraw_;
   bool needs_animate_;
-  bool needs_manage_tiles_;
-  bool swap_used_incomplete_tile_;
+  bool needs_prepare_tiles_;
   bool needs_commit_;
   bool inside_poll_for_anticipated_draw_triggers_;
   bool visible_;
@@ -321,6 +340,7 @@ class CC_EXPORT SchedulerStateMachine {
   bool skip_begin_main_frame_to_reduce_latency_;
   bool continuous_painting_;
   bool impl_latency_takes_priority_on_battery_;
+  bool children_need_begin_frames_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SchedulerStateMachine);

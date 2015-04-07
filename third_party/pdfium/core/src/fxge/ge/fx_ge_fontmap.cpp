@@ -287,7 +287,7 @@ extern "C" {
 }
 int _PDF_GetStandardFontName(CFX_ByteString& name)
 {
-    _AltFontName* found = (_AltFontName*)FXSYS_bsearch((FX_LPCSTR)name, g_AltFontNames,
+    _AltFontName* found = (_AltFontName*)FXSYS_bsearch(name.c_str(), g_AltFontNames,
                           sizeof g_AltFontNames / sizeof (_AltFontName), sizeof (_AltFontName), compareString);
     if (found == NULL) {
         return -1;
@@ -838,7 +838,7 @@ static CFX_ByteString _GetFontFamily(CFX_ByteString fontName, int nStyle)
         }
         return fontName;
     }
-    _AltFontFamily* found = (_AltFontFamily*)FXSYS_bsearch((FX_LPCSTR)fontName, g_AltFontFamilies,
+    _AltFontFamily* found = (_AltFontFamily*)FXSYS_bsearch(fontName.c_str(), g_AltFontFamilies,
                             sizeof g_AltFontFamilies / sizeof (_AltFontFamily), sizeof (_AltFontFamily), compareFontFamilyString);
     if (found == NULL) {
         return fontName;
@@ -1308,13 +1308,12 @@ CFontFileFaceInfo::~CFontFileFaceInfo()
     m_Face = NULL;
 }
 extern FX_BOOL _LoadFile(FXFT_Library library, FXFT_Face* Face, IFX_FileRead* pFile, FXFT_Stream* stream);
-#if defined(_FPDFAPI_MINI_) || _FX_OS_ == _FX_ANDROID_
+#if _FX_OS_ == _FX_ANDROID_
 IFX_SystemFontInfo* IFX_SystemFontInfo::CreateDefault()
 {
     return NULL;
 }
 #endif
-#if !defined(_FPDFAPI_MINI_)
 CFX_FolderFontInfo::CFX_FolderFontInfo()
 {
 }
@@ -1547,4 +1546,3 @@ FX_BOOL CFX_FolderFontInfo::GetFontCharset(void* hFont, int& charset)
 {
     return FALSE;
 }
-#endif

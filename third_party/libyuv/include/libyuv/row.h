@@ -185,40 +185,41 @@ extern "C" {
 // The code supports NaCL but requires a new compiler and validator.
 #if !defined(LIBYUV_DISABLE_X86) && (defined(VISUALC_HAS_AVX2) || \
     defined(CLANG_HAS_AVX2) || defined(GCC_HAS_AVX2))
-// Effects:
 #define HAS_COPYROW_AVX
 #define HAS_ARGBPOLYNOMIALROW_AVX2
 #define HAS_ARGBSHUFFLEROW_AVX2
 #define HAS_ARGBCOPYALPHAROW_AVX2
 #define HAS_ARGBCOPYYTOALPHAROW_AVX2
+#define HAS_I422TOBGRAROW_AVX2
+#define HAS_YUY2TOYROW_AVX2
+#define HAS_YUY2TOUV422ROW_AVX2
+#define HAS_YUY2TOUVROW_AVX2
+#define HAS_UYVYTOYROW_AVX2
+#define HAS_UYVYTOUV422ROW_AVX2
+#define HAS_UYVYTOUVROW_AVX2
+#define HAS_SPLITUVROW_AVX2
+#define HAS_MERGEUVROW_AVX2
+#define HAS_MIRRORROW_AVX2
+
+// Effects:
+#define HAS_ARGBADDROW_AVX2
+#define HAS_ARGBSUBTRACTROW_AVX2
+#define HAS_ARGBMULTIPLYROW_AVX2
+#define HAS_ARGBATTENUATEROW_AVX2
+#define HAS_ARGBUNATTENUATEROW_AVX2
 #endif
 
 // The following are require VS2012.
 // TODO(fbarchard): Port to gcc.
 #if !defined(LIBYUV_DISABLE_X86) && defined(VISUALC_HAS_AVX2)
+#define HAS_ARGBMIRRORROW_AVX2
 #define HAS_ARGBTOUVROW_AVX2
 #define HAS_ARGBTOYJROW_AVX2
 #define HAS_ARGBTOYROW_AVX2
 #define HAS_I422TOARGBROW_AVX2
-#define HAS_I422TOBGRAROW_AVX2
+#define HAS_I422TORGBAROW_AVX2
+#define HAS_I422TOABGRROW_AVX2
 #define HAS_INTERPOLATEROW_AVX2
-#define HAS_MERGEUVROW_AVX2
-#define HAS_MIRRORROW_AVX2
-#define HAS_SPLITUVROW_AVX2
-#define HAS_UYVYTOUV422ROW_AVX2
-#define HAS_UYVYTOUVROW_AVX2
-#define HAS_UYVYTOYROW_AVX2
-#define HAS_YUY2TOUV422ROW_AVX2
-#define HAS_YUY2TOUVROW_AVX2
-#define HAS_YUY2TOYROW_AVX2
-
-// Effects:
-#define HAS_ARGBADDROW_AVX2
-#define HAS_ARGBATTENUATEROW_AVX2
-#define HAS_ARGBMIRRORROW_AVX2
-#define HAS_ARGBMULTIPLYROW_AVX2
-#define HAS_ARGBSUBTRACTROW_AVX2
-#define HAS_ARGBUNATTENUATEROW_AVX2
 #endif  // defined(VISUALC_HAS_AVX2)
 
 // The following are Yasm x86 only:
@@ -468,6 +469,12 @@ typedef int8 __attribute__((vector_size(16))) vec8;
 typedef uint16 __attribute__((vector_size(16))) uvec16;
 typedef uint32 __attribute__((vector_size(16))) uvec32;
 typedef uint8 __attribute__((vector_size(16))) uvec8;
+typedef int16 __attribute__((vector_size(32))) lvec16;
+typedef int32 __attribute__((vector_size(32))) lvec32;
+typedef int8 __attribute__((vector_size(32))) lvec8;
+typedef uint16 __attribute__((vector_size(32))) ulvec16;
+typedef uint32 __attribute__((vector_size(32))) ulvec32;
+typedef uint8 __attribute__((vector_size(32))) ulvec8;
 #else
 #define SIMD_ALIGNED(var) var
 typedef int16 vec16[8];
@@ -476,6 +483,12 @@ typedef int8 vec8[16];
 typedef uint16 uvec16[8];
 typedef uint32 uvec32[4];
 typedef uint8 uvec8[16];
+typedef int16 lvec16[16];
+typedef int32 lvec32[8];
+typedef int8 lvec8[32];
+typedef uint16 ulvec16[16];
+typedef uint32 ulvec32[8];
+typedef uint8 ulvec8[32];
 #endif
 
 #if defined(__APPLE__) || defined(__x86_64__) || defined(__llvm__)
@@ -488,12 +501,11 @@ typedef uint8 uvec8[16];
 #if defined(__native_client__)
 #define LABELALIGN ".p2align 5\n"
 #else
-#define LABELALIGN ".p2align 2\n"
+#define LABELALIGN
 #endif
 #if defined(__native_client__) && defined(__x86_64__)
 #define BUNDLELOCK ".bundle_lock\n"
 #define BUNDLEUNLOCK ".bundle_unlock\n"
-#define BUNDLEALIGN "\n"
 #define MEMACCESS(base) "%%nacl:(%%r15,%q" #base ")"
 #define MEMACCESS2(offset, base) "%%nacl:" #offset "(%%r15,%q" #base ")"
 #define MEMLEA(offset, base) #offset "(%q" #base ")"
@@ -518,8 +530,18 @@ typedef uint8 uvec8[16];
     "lea " #offset "(%q" #base ",%q" #index "," #scale "),%%r14d\n" \
     #opcode " (%%r15,%%r14),%" #arg "\n" \
     BUNDLEUNLOCK
+#define VMEMOPREG(opcode, offset, base, index, scale, reg1, reg2) \
+    BUNDLELOCK \
+    "lea " #offset "(%q" #base ",%q" #index "," #scale "),%%r14d\n" \
+    #opcode " (%%r15,%%r14),%%" #reg1 ",%%" #reg2 "\n" \
+    BUNDLEUNLOCK
+#define VEXTOPMEM(opcode, reg, offset, base, index, scale) \
+    BUNDLELOCK \
+    "lea " #offset "(%q" #base ",%q" #index "," #scale "),%%r14d\n" \
+    #opcode " $0x0,%%" #reg ",(%%r15,%%r14)\n" \
+    BUNDLEUNLOCK
 #else  // defined(__native_client__) && defined(__x86_64__)
-#define BUNDLEALIGN "\n"
+#define BUNDLEALIGN
 #define MEMACCESS(base) "(%" #base ")"
 #define MEMACCESS2(offset, base) #offset "(%" #base ")"
 #define MEMLEA(offset, base) #offset "(%" #base ")"
@@ -535,14 +557,19 @@ typedef uint8 uvec8[16];
     #opcode " %%" #reg ","#offset "(%" #base ",%" #index "," #scale ")\n"
 #define MEMOPARG(opcode, offset, base, index, scale, arg) \
     #opcode " " #offset "(%" #base ",%" #index "," #scale "),%" #arg "\n"
+#define VMEMOPREG(opcode, offset, base, index, scale, reg1, reg2) \
+    #opcode " " #offset "(%" #base ",%" #index "," #scale "),%%" #reg1 ",%%" \
+    #reg2 "\n"
+#define VEXTOPMEM(opcode, reg, offset, base, index, scale) \
+    #opcode " $0x0,%%" #reg ","#offset "(%" #base ",%" #index "," #scale ")\n"
 #endif  // defined(__native_client__) && defined(__x86_64__)
 
 #if defined(__arm__) || defined(__aarch64__)
 #undef MEMACCESS
 #if defined(__native_client__)
-#define MEMACCESS(base) ".p2align   3\nbic %" #base ", #0xc0000000\n"
+#define MEMACCESS(base) ".p2align 3\nbic %" #base ", #0xc0000000\n"
 #else
-#define MEMACCESS(base) "\n"
+#define MEMACCESS(base)
 #endif
 #endif
 
@@ -795,6 +822,10 @@ void MirrorRow_SSE2(const uint8* src, uint8* dst, int width);
 void MirrorRow_NEON(const uint8* src, uint8* dst, int width);
 void MirrorRow_MIPS_DSPR2(const uint8* src, uint8* dst, int width);
 void MirrorRow_C(const uint8* src, uint8* dst, int width);
+void MirrorRow_Any_AVX2(const uint8* src, uint8* dst, int width);
+void MirrorRow_Any_SSSE3(const uint8* src, uint8* dst, int width);
+void MirrorRow_Any_SSE2(const uint8* src, uint8* dst, int width);
+void MirrorRow_Any_NEON(const uint8* src, uint8* dst, int width);
 
 void MirrorUVRow_SSSE3(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
                        int width);
@@ -1040,6 +1071,16 @@ void I422ToBGRARow_AVX2(const uint8* src_y,
                         const uint8* src_v,
                         uint8* dst_argb,
                         int width);
+void I422ToRGBARow_AVX2(const uint8* src_y,
+                        const uint8* src_u,
+                        const uint8* src_v,
+                        uint8* dst_argb,
+                        int width);
+void I422ToABGRRow_AVX2(const uint8* src_y,
+                        const uint8* src_u,
+                        const uint8* src_v,
+                        uint8* dst_argb,
+                        int width);
 void I444ToARGBRow_SSSE3(const uint8* src_y,
                          const uint8* src_u,
                          const uint8* src_v,
@@ -1123,6 +1164,16 @@ void I422ToARGBRow_Any_AVX2(const uint8* src_y,
                             uint8* dst_argb,
                             int width);
 void I422ToBGRARow_Any_AVX2(const uint8* src_y,
+                            const uint8* src_u,
+                            const uint8* src_v,
+                            uint8* dst_argb,
+                            int width);
+void I422ToRGBARow_Any_AVX2(const uint8* src_y,
+                            const uint8* src_u,
+                            const uint8* src_v,
+                            uint8* dst_argb,
+                            int width);
+void I422ToABGRRow_Any_AVX2(const uint8* src_y,
                             const uint8* src_u,
                             const uint8* src_v,
                             uint8* dst_argb,

@@ -22,7 +22,7 @@ namespace cc {
 
 scoped_ptr<DelegatingRenderer> DelegatingRenderer::Create(
     RendererClient* client,
-    const LayerTreeSettings* settings,
+    const RendererSettings* settings,
     OutputSurface* output_surface,
     ResourceProvider* resource_provider) {
   return make_scoped_ptr(new DelegatingRenderer(
@@ -30,7 +30,7 @@ scoped_ptr<DelegatingRenderer> DelegatingRenderer::Create(
 }
 
 DelegatingRenderer::DelegatingRenderer(RendererClient* client,
-                                       const LayerTreeSettings* settings,
+                                       const RendererSettings* settings,
                                        OutputSurface* output_surface,
                                        ResourceProvider* resource_provider)
     : Renderer(client, settings),
@@ -41,7 +41,8 @@ DelegatingRenderer::DelegatingRenderer(RendererClient* client,
   capabilities_.using_partial_swap = false;
   capabilities_.max_texture_size = resource_provider_->max_texture_size();
   capabilities_.best_texture_format = resource_provider_->best_texture_format();
-  capabilities_.allow_partial_texture_updates = false;
+  capabilities_.allow_partial_texture_updates =
+      output_surface->capabilities().can_force_reclaim_resources;
 
   if (!output_surface_->context_provider()) {
     capabilities_.using_shared_memory_resources = true;

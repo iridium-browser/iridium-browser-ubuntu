@@ -11,9 +11,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner_helpers.h"
+#include "content/public/renderer/render_frame.h"
 #include "ppapi/c/pp_var.h"
 #include "third_party/WebKit/public/web/WebPlugin.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 struct _NPP;
 
@@ -33,7 +34,8 @@ class PepperWebPluginImpl : public blink::WebPlugin {
  public:
   PepperWebPluginImpl(PluginModule* module,
                       const blink::WebPluginParams& params,
-                      RenderFrameImpl* render_frame);
+                      RenderFrameImpl* render_frame,
+                      RenderFrame::PluginPowerSaverMode power_saver_mode);
 
   PepperPluginInstanceImpl* instance() { return instance_.get(); }
 
@@ -68,6 +70,8 @@ class PepperWebPluginImpl : public blink::WebPlugin {
   virtual blink::WebString selectionAsText() const;
   virtual blink::WebString selectionAsMarkup() const;
   virtual blink::WebURL linkAtPosition(const blink::WebPoint& position) const;
+  virtual bool getPrintPresetOptionsFromDocument(
+      blink::WebPrintPresetOptions* preset_options);
   virtual void setZoomLevel(double level, bool text_only);
   virtual bool startFind(const blink::WebString& search_text,
                          bool case_sensitive,
@@ -95,6 +99,7 @@ class PepperWebPluginImpl : public blink::WebPlugin {
   // True if the instance represents the entire document in a frame instead of
   // being an embedded resource.
   bool full_frame_;
+  RenderFrame::PluginPowerSaverMode power_saver_mode_;
   scoped_refptr<PepperPluginInstanceImpl> instance_;
   gfx::Rect plugin_rect_;
   PP_Var instance_object_;

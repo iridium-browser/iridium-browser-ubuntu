@@ -4,9 +4,13 @@
 
 #include "components/password_manager/content/browser/content_credential_manager_dispatcher.h"
 
+#include "base/bind.h"
+#include "base/memory/scoped_vector.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/content/browser/content_password_manager_driver.h"
+#include "components/password_manager/content/browser/content_password_manager_driver_factory.h"
 #include "components/password_manager/content/browser/credential_manager_password_form_manager.h"
 #include "components/password_manager/content/common/credential_manager_messages.h"
 #include "components/password_manager/content/common/credential_manager_types.h"
@@ -18,12 +22,26 @@
 
 namespace password_manager {
 
+struct ContentCredentialManagerDispatcher::PendingRequestParameters {
+  PendingRequestParameters(int request_id,
+                           bool request_zero_click_only,
+                           GURL request_origin,
+                           const std::vector<GURL>& request_federations)
+      : id(request_id),
+        zero_click_only(request_zero_click_only),
+        origin(request_origin),
+        federations(request_federations) {}
+
+  int id;
+  bool zero_click_only;
+  GURL origin;
+  std::vector<GURL> federations;
+};
+
 ContentCredentialManagerDispatcher::ContentCredentialManagerDispatcher(
     content::WebContents* web_contents,
     PasswordManagerClient* client)
-    : WebContentsObserver(web_contents),
-      client_(client),
-      pending_request_id_(0) {
+    : WebContentsObserver(web_contents), client_(client) {
   DCHECK(web_contents);
 }
 
@@ -67,7 +85,8 @@ void ContentCredentialManagerDispatcher::OnNotifySignedIn(
   // determine whether or not the credential exists, and calling UpdateLogin
   // accordingly.
   form_manager_.reset(
-      new CredentialManagerPasswordFormManager(client_, *form, this));
+      new CredentialManagerPasswordFormManager(client_, GetDriver(), *form,
+                                               this));
 
   web_contents()->GetRenderViewHost()->Send(
       new CredentialManagerMsg_AcknowledgeSignedIn(
@@ -89,56 +108,92 @@ void ContentCredentialManagerDispatcher::OnNotifySignedOut(int request_id) {
 
 void ContentCredentialManagerDispatcher::OnRequestCredential(
     int request_id,
-    bool /* zero_click_only */,
+    bool zero_click_only,
     const std::vector<GURL>& federations) {
   DCHECK(request_id);
   PasswordStore* store = GetPasswordStore();
-  if (pending_request_id_ || !store) {
+  if (pending_request_ || !store) {
     web_contents()->GetRenderViewHost()->Send(
         new CredentialManagerMsg_RejectCredentialRequest(
-            web_contents()->GetRenderViewHost()->GetRoutingID(),
-            request_id,
-            pending_request_id_
+            web_contents()->GetRenderViewHost()->GetRoutingID(), request_id,
+            pending_request_
                 ? blink::WebCredentialManagerError::ErrorTypePendingRequest
                 : blink::WebCredentialManagerError::
                       ErrorTypePasswordStoreUnavailable));
     return;
   }
 
-  pending_request_id_ = request_id;
+  pending_request_.reset(new PendingRequestParameters(
+      request_id, zero_click_only,
+      web_contents()->GetLastCommittedURL().GetOrigin(), federations));
 
-  autofill::PasswordForm form;
-  form.scheme = autofill::PasswordForm::SCHEME_HTML;
-  form.origin = web_contents()->GetLastCommittedURL().GetOrigin();
-  form.signon_realm = form.origin.spec();
-
-  store->GetLogins(form, PasswordStore::DISALLOW_PROMPT, this);
+  store->GetAutofillableLogins(this);
 }
 
 void ContentCredentialManagerDispatcher::OnGetPasswordStoreResults(
     const std::vector<autofill::PasswordForm*>& results) {
-  DCHECK(pending_request_id_);
+  DCHECK(pending_request_);
 
-  // Take ownership of all the password form objects in the |results| vector.
-  ScopedVector<autofill::PasswordForm> entries;
-  entries.assign(results.begin(), results.end());
+  std::set<std::string> federations;
+  for (const GURL& origin : pending_request_->federations)
+    federations.insert(origin.spec());
 
-  // TODO(mkwst): This is a stub. We're just grabbing the first result and
-  // piping it down into Blink. Really, we should be kicking off some sort
-  // of UI full of magic moments and delight. Also, we should deal with
-  // federated login types.
-  CredentialInfo info = results.empty() ? CredentialInfo()
-                                        : CredentialInfo(*entries[0]);
-  web_contents()->GetRenderViewHost()->Send(
-      new CredentialManagerMsg_SendCredential(
-          web_contents()->GetRenderViewHost()->GetRoutingID(),
-          pending_request_id_,
-          info));
-  pending_request_id_ = 0;
+  // We own the PasswordForm instances, so we're responsible for cleaning
+  // up the instances we don't add to |local_results| or |federated_results|.
+  // We'll dump them into a ScopedVector and allow it to delete the
+  // PasswordForms upon destruction.
+  std::vector<autofill::PasswordForm*> local_results;
+  std::vector<autofill::PasswordForm*> federated_results;
+  ScopedVector<autofill::PasswordForm> discarded_results;
+  for (autofill::PasswordForm* form : results) {
+    // TODO(mkwst): Extend this filter to include federations.
+    if (form->origin == pending_request_->origin)
+      local_results.push_back(form);
+    else if (federations.count(form->origin.spec()) != 0)
+      federated_results.push_back(form);
+    else
+      discarded_results.push_back(form);
+  }
+
+  if ((local_results.empty() && federated_results.empty()) ||
+      web_contents()->GetLastCommittedURL().GetOrigin() !=
+          pending_request_->origin) {
+    SendCredential(pending_request_->id, CredentialInfo());
+    return;
+  }
+
+  if (!client_->PromptUserToChooseCredentials(
+          local_results,
+          federated_results,
+          base::Bind(&ContentCredentialManagerDispatcher::SendCredential,
+                     base::Unretained(this), pending_request_->id))) {
+    SendCredential(pending_request_->id, CredentialInfo());
+  }
 }
 
 PasswordStore* ContentCredentialManagerDispatcher::GetPasswordStore() {
   return client_ ? client_->GetPasswordStore() : nullptr;
+}
+
+base::WeakPtr<PasswordManagerDriver>
+ContentCredentialManagerDispatcher::GetDriver() {
+  ContentPasswordManagerDriverFactory* driver_factory =
+        ContentPasswordManagerDriverFactory::FromWebContents(web_contents());
+  DCHECK(driver_factory);
+  PasswordManagerDriver* driver =
+      driver_factory->GetDriverForFrame(web_contents()->GetMainFrame());
+  return driver->AsWeakPtr();
+}
+
+void ContentCredentialManagerDispatcher::SendCredential(
+    int request_id, const CredentialInfo& info) {
+  DCHECK(pending_request_);
+  DCHECK_EQ(pending_request_->id, request_id);
+  web_contents()->GetRenderViewHost()->Send(
+      new CredentialManagerMsg_SendCredential(
+          web_contents()->GetRenderViewHost()->GetRoutingID(),
+          pending_request_->id, info));
+  pending_request_.reset();
 }
 
 }  // namespace password_manager

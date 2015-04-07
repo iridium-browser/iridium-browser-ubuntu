@@ -157,10 +157,9 @@ v8::Local<v8::Value> ScriptController::callFunction(v8::Handle<v8::Function> fun
 v8::Local<v8::Value> ScriptController::callFunction(ExecutionContext* context, v8::Handle<v8::Function> function, v8::Handle<v8::Value> receiver, int argc, v8::Handle<v8::Value> info[], v8::Isolate* isolate)
 {
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "FunctionCall", "data", devToolsTraceEventData(isolate, context, function));
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.stack"), "CallStack", "stack", InspectorCallStackEvent::currentCallStack());
     // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
     InspectorInstrumentationCookie cookie;
-    if (InspectorInstrumentation::timelineAgentEnabled(context)) {
+    if (InspectorInstrumentation::hasFrontends()) {
         int scriptId = 0;
         String resourceName;
         int lineNumber = 1;
@@ -177,13 +176,12 @@ v8::Local<v8::Value> ScriptController::callFunction(ExecutionContext* context, v
 v8::Local<v8::Value> ScriptController::executeScriptAndReturnValue(v8::Handle<v8::Context> context, const ScriptSourceCode& source, AccessControlStatus corsStatus, double* compilationFinishTime)
 {
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "EvaluateScript", "data", InspectorEvaluateScriptEvent::data(m_frame, source.url().string(), source.startLine()));
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.stack"), "CallStack", "stack", InspectorCallStackEvent::currentCallStack());
     // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
     InspectorInstrumentationCookie cookie = InspectorInstrumentation::willEvaluateScript(m_frame, source.url().string(), source.startLine());
 
     v8::Local<v8::Value> result;
     {
-        V8CacheOptions v8CacheOptions(V8CacheOptionsOff);
+        V8CacheOptions v8CacheOptions(V8CacheOptionsDefault);
         if (m_frame->settings())
             v8CacheOptions = m_frame->settings()->v8CacheOptions();
 
@@ -384,7 +382,7 @@ static NPObject* createScriptObject(LocalFrame* frame, v8::Isolate* isolate)
         return createNoScriptObject();
 
     ScriptState::Scope scope(scriptState);
-    LocalDOMWindow* window = frame->domWindow();
+    LocalDOMWindow* window = frame->localDOMWindow();
     v8::Handle<v8::Value> global = toV8(window, scriptState->context()->Global(), scriptState->isolate());
     ASSERT(global->IsObject());
     return npCreateV8ScriptObject(isolate, 0, v8::Handle<v8::Object>::Cast(global), window);
@@ -420,7 +418,7 @@ NPObject* ScriptController::createScriptObjectForPluginElement(HTMLPlugInElement
         return createNoScriptObject();
 
     ScriptState::Scope scope(scriptState);
-    LocalDOMWindow* window = m_frame->domWindow();
+    LocalDOMWindow* window = m_frame->localDOMWindow();
     v8::Handle<v8::Value> v8plugin = toV8(plugin, scriptState->context()->Global(), scriptState->isolate());
     if (!v8plugin->IsObject())
         return createNoScriptObject();
@@ -453,8 +451,6 @@ void ScriptController::collectIsolatedContexts(Vector<std::pair<ScriptState*, Se
     for (IsolatedWorldMap::iterator it = m_isolatedWorlds.begin(); it != m_isolatedWorlds.end(); ++it) {
         WindowProxy* isolatedWorldWindowProxy = it->value.get();
         SecurityOrigin* origin = isolatedWorldWindowProxy->world().isolatedWorldSecurityOrigin();
-        if (!origin)
-            continue;
         if (!isolatedWorldWindowProxy->isContextInitialized())
             continue;
         result.append(std::pair<ScriptState*, SecurityOrigin*>(isolatedWorldWindowProxy->scriptState(), origin));
@@ -539,8 +535,9 @@ bool ScriptController::executeScriptIfJavaScriptURL(const KURL& url)
     if (!protocolIsJavaScript(url))
         return false;
 
+    bool shouldBypassMainWorldContentSecurityPolicy = ContentSecurityPolicy::shouldBypassMainWorld(m_frame->document());
     if (!m_frame->page()
-        || !m_frame->document()->contentSecurityPolicy()->allowJavaScriptURLs(m_frame->document()->url(), eventHandlerPosition().m_line))
+        || (!shouldBypassMainWorldContentSecurityPolicy && !m_frame->document()->contentSecurityPolicy()->allowJavaScriptURLs(m_frame->document()->url(), eventHandlerPosition().m_line)))
         return true;
 
     if (m_frame->loader().stateMachine()->isDisplayingInitialEmptyDocument())
@@ -631,14 +628,13 @@ void ScriptController::executeScriptInIsolatedWorld(int worldID, const Vector<Sc
 {
     ASSERT(worldID > 0);
 
-    RefPtr<DOMWrapperWorld> world = DOMWrapperWorld::ensureIsolatedWorld(worldID, extensionGroup);
+    RefPtr<DOMWrapperWorld> world = DOMWrapperWorld::ensureIsolatedWorld(m_isolate, worldID, extensionGroup);
     WindowProxy* isolatedWorldWindowProxy = windowProxy(*world);
     if (!isolatedWorldWindowProxy->isContextInitialized())
         return;
 
     ScriptState* scriptState = isolatedWorldWindowProxy->scriptState();
-    v8::EscapableHandleScope handleScope(scriptState->isolate());
-    ScriptState::Scope scope(scriptState);
+    v8::Context::Scope scope(scriptState->context());
     v8::Local<v8::Array> resultArray = v8::Array::New(m_isolate, sources.size());
 
     for (size_t i = 0; i < sources.size(); ++i) {
@@ -650,7 +646,7 @@ void ScriptController::executeScriptInIsolatedWorld(int worldID, const Vector<Sc
 
     if (results) {
         for (size_t i = 0; i < resultArray->Length(); ++i)
-            results->append(handleScope.Escape(resultArray->Get(i)));
+            results->append(resultArray->Get(i));
     }
 }
 

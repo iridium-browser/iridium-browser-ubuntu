@@ -248,7 +248,7 @@ static bool areRectsMoreThanFullScreenApart(FocusType type, const LayoutRect& cu
 static inline bool below(const LayoutRect& a, const LayoutRect& b)
 {
     return a.y() >= b.maxY()
-        || (a.y() >= b.y() && a.maxY() > b.maxY());
+        || (a.y() >= b.y() && a.maxY() > b.maxY() && a.x() < b.maxX() && a.maxX() > b.x());
 }
 
 // Return true if rect |a| is on the right of |b|. False otherwise.
@@ -257,7 +257,7 @@ static inline bool below(const LayoutRect& a, const LayoutRect& b)
 static inline bool rightOf(const LayoutRect& a, const LayoutRect& b)
 {
     return a.x() >= b.maxX()
-        || (a.x() >= b.x() && a.maxX() > b.maxX());
+        || (a.x() >= b.x() && a.maxX() > b.maxX() && a.y() < b.maxY() && a.maxY() > b.y());
 }
 
 static bool isRectInDirection(FocusType type, const LayoutRect& curRect, const LayoutRect& targetRect)
@@ -474,9 +474,9 @@ bool canScrollInDirection(const LocalFrame* frame, FocusType type)
         return false;
     if ((type == FocusTypeUp || type == FocusTypeDown) &&  ScrollbarAlwaysOff == verticalMode)
         return false;
-    LayoutSize size = frame->view()->contentsSize();
-    LayoutSize offset = frame->view()->scrollOffset();
-    LayoutRect rect = frame->view()->visibleContentRect(IncludeScrollbars);
+    LayoutSize size(frame->view()->contentsSize());
+    LayoutSize offset(frame->view()->scrollOffset());
+    LayoutRect rect(frame->view()->visibleContentRect(IncludeScrollbars));
 
     switch (type) {
     case FocusTypeLeft:
@@ -689,7 +689,7 @@ void distanceDataForNode(FocusType type, const FocusCandidate& current, FocusCan
     // Distance calculation is based on http://www.w3.org/TR/WICD/#focus-handling
     candidate.distance = sqrt(euclidianDistancePow2) + navigationAxisDistance+ orthogonalAxisDistance * 2 - sqrt(overlap);
 
-    LayoutSize viewSize = candidate.visibleNode->document().page()->deprecatedLocalMainFrame()->view()->visibleContentRect().size();
+    LayoutSize viewSize = LayoutSize(candidate.visibleNode->document().page()->deprecatedLocalMainFrame()->view()->visibleContentRect().size());
     candidate.alignment = alignmentForRects(type, currentRect, nodeRect, viewSize);
 }
 

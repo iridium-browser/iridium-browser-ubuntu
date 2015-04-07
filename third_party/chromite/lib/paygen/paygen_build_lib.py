@@ -26,7 +26,9 @@ import fixup_path
 fixup_path.FixupPath()
 
 from chromite.cbuildbot import commands
+from chromite.cbuildbot import constants
 from chromite.cbuildbot import cbuildbot_config
+from chromite.cbuildbot import failures_lib
 from chromite.lib import cros_build_lib
 from chromite.lib import parallel
 from chromite.lib import retry_util
@@ -46,10 +48,10 @@ try:
   from crostools.config import config
   from crostools.omaha import query
 
-  # pylint: disable-msg=F0401
+  # pylint: disable=F0401
   from site_utils.autoupdate.lib import test_params
   from site_utils.autoupdate.lib import test_control
-  # pylint: enable-msg=F0401
+  # pylint: enable=F0401
 
 except ImportError:
   config = None
@@ -168,7 +170,7 @@ def _FilterForMp(artifacts):
   Returns:
     List of MP images.
   """
-  return [i for i in _FilterForImages(artifacts) if i.key.startswith('mp')]
+  return [i for i in _FilterForImages(artifacts) if 'mp' in i.key.split('-')]
 
 
 def _FilterForPremp(artifacts):
@@ -183,7 +185,7 @@ def _FilterForPremp(artifacts):
   Returns:
     List of PreMP images.
   """
-  return [i for i in _FilterForImages(artifacts) if i.key == 'premp']
+  return [i for i in _FilterForImages(artifacts) if 'premp' in i.key.split('-')]
 
 
 def _FilterForBasic(artifacts):
@@ -926,6 +928,18 @@ class _PaygenBuild(object):
     Args:
       suite_name: The name of the test suite.
     """
+    # Because of crbug.com/383481, if we run delta updates against
+    # a source payload earlier than R38, the DUTs assigned to the
+    # test may fail when rebooting.  The failed devices can be hard
+    # to recover.  The bug affects spring and skate, but as of this
+    # writing, only spring is still losing devices.
+    #
+    # So, until it's all sorted, we're going to skip testing on
+    # spring devices.
+    if self._archive_board == 'daisy_spring':
+      logging.info('Skipping payload autotest for board %s',
+                   self._archive_board)
+      return
     timeout_mins = cbuildbot_config.HWTestConfig.DEFAULT_HW_TEST_TIMEOUT / 60
     if self._run_on_builder:
       try:
@@ -934,11 +948,12 @@ class _PaygenBuild(object):
                                 suite=suite_name,
                                 file_bugs=True,
                                 pool='bvt',
+                                priority=constants.HWTEST_BUILD_PRIORITY,
                                 retry=True,
                                 wait_for_results=True,
                                 timeout_mins=timeout_mins,
                                 debug=bool(self._drm))
-      except commands.TestWarning as e:
+      except failures_lib.TestWarning as e:
         logging.warning('Warning running test suite; error output:\n%s', e)
     else:
       cmd = [
@@ -1213,10 +1228,10 @@ def _FindControlFileDir(work_dir):
   """Decide the directory for emitting control files.
 
   If a working directory is passed in, we create a unique directory inside
-  it; other use /tmp (Python's default).
+  it; otherwise we use Python's default tempdir.
 
   Args:
-    work_dir: Create the control file directory here (None for /tmp).
+    work_dir: Create the control file directory here (None for the default).
 
   Returns:
     Path to a unique directory that the caller is responsible for cleaning up.

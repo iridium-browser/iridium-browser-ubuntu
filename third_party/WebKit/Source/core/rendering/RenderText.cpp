@@ -25,9 +25,10 @@
 #include "config.h"
 #include "core/rendering/RenderText.h"
 
-#include "core/accessibility/AXObjectCache.h"
+#include "core/dom/AXObjectCache.h"
 #include "core/dom/Text.h"
 #include "core/editing/TextIterator.h"
+#include "core/editing/VisiblePosition.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/Settings.h"
 #include "core/html/parser/TextResourceDecoder.h"
@@ -62,7 +63,7 @@ struct SameSizeAsRenderText : public RenderObject {
     void* pointers[2];
 };
 
-COMPILE_ASSERT(sizeof(RenderText) == sizeof(SameSizeAsRenderText), RenderText_should_stay_small);
+static_assert(sizeof(RenderText) == sizeof(SameSizeAsRenderText), "RenderText should stay small");
 
 class SecureTextTimer;
 typedef HashMap<RenderText*, SecureTextTimer*> SecureTextTimerMap;
@@ -326,7 +327,7 @@ String RenderText::plainText() const
 void RenderText::absoluteRects(Vector<IntRect>& rects, const LayoutPoint& accumulatedOffset) const
 {
     for (InlineTextBox* box = firstTextBox(); box; box = box->nextTextBox())
-        rects.append(enclosingIntRect(FloatRect(accumulatedOffset + box->topLeft(), box->size())));
+        rects.append(enclosingIntRect(FloatRect(FloatPoint(accumulatedOffset) + box->topLeft(), box->size())));
 }
 
 static FloatRect localQuadForTextBox(InlineTextBox* box, unsigned start, unsigned end, bool useSelectionHeight)
@@ -603,7 +604,7 @@ PositionWithAffinity RenderText::positionForPoint(const LayoutPoint& point)
 
     LayoutUnit pointLineDirection = firstTextBox()->isHorizontal() ? point.x() : point.y();
     LayoutUnit pointBlockDirection = firstTextBox()->isHorizontal() ? point.y() : point.x();
-    bool blocksAreFlipped = style()->slowIsFlippedBlocksWritingMode();
+    bool blocksAreFlipped = style()->isFlippedBlocksWritingMode();
 
     InlineTextBox* lastBox = 0;
     for (InlineTextBox* box = firstTextBox(); box; box = box->nextTextBox()) {
@@ -720,23 +721,31 @@ ALWAYS_INLINE float RenderText::widthFromCache(const Font& f, int start, int len
     }
 
     if (f.isFixedPitch() && f.fontDescription().variant() == FontVariantNormal && m_isAllASCII && (!glyphOverflow || !glyphOverflow->computeBounds)) {
+        bool missingGlyph = false;
         float monospaceCharacterWidth = f.spaceWidth();
         float w = 0;
         bool isSpace;
         ASSERT(m_text);
         StringImpl& text = *m_text.impl();
+        RenderStyle* renderStyle = style();
         for (int i = start; i < start + len; i++) {
             char c = text[i];
+            // If glyph is not present in primary font then we cannot calculate width based on primary
+            // font property, we need to call "width" method of Font Object.
+            if (!f.primaryFontHasGlyphForCharacter(text[i])) {
+                missingGlyph = true;
+                break;
+            }
             if (c <= space) {
                 if (c == space || c == newlineCharacter) {
                     w += monospaceCharacterWidth;
                     isSpace = true;
                 } else if (c == characterTabulation) {
-                    if (style()->collapseWhiteSpace()) {
+                    if (renderStyle->collapseWhiteSpace()) {
                         w += monospaceCharacterWidth;
                         isSpace = true;
                     } else {
-                        w += f.tabWidth(style()->tabSize(), xPos + w);
+                        w += f.tabWidth(renderStyle->tabSize(), xPos + w);
                         isSpace = false;
                     }
                 } else
@@ -748,7 +757,8 @@ ALWAYS_INLINE float RenderText::widthFromCache(const Font& f, int start, int len
             if (isSpace && i > start)
                 w += f.fontDescription().wordSpacing();
         }
-        return w;
+        if (!missingGlyph)
+            return w;
     }
 
     TextRun run = constructTextRun(const_cast<RenderText*>(this), f, this, start, len, style(), textDirection);
@@ -759,7 +769,6 @@ ALWAYS_INLINE float RenderText::widthFromCache(const Font& f, int start, int len
     run.setUseComplexCodePath(!canUseSimpleFontCodePath());
     run.setTabSize(!style()->collapseWhiteSpace(), style()->tabSize());
     run.setXPos(xPos);
-    FontCachePurgePreventer fontCachePurgePreventer;
     return f.width(run, fallbackFonts, glyphOverflow);
 }
 
@@ -1007,7 +1016,7 @@ void RenderText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
             continue;
         }
 
-        bool hasBreak = breakAll || isBreakable(breakIterator, i, nextBreakable);
+        bool hasBreak = isBreakable(breakIterator, i, nextBreakable, breakAll ? LineBreakType::BreakAll : LineBreakType::Normal);
         bool betweenWords = true;
         int j = i;
         while (c != newlineCharacter && c != space && c != characterTabulation && (c != softHyphen)) {
@@ -1181,12 +1190,12 @@ FloatPoint RenderText::firstRunOrigin() const
 
 float RenderText::firstRunX() const
 {
-    return m_firstTextBox ? m_firstTextBox->x() : 0;
+    return m_firstTextBox ? m_firstTextBox->x().toFloat() : 0;
 }
 
 float RenderText::firstRunY() const
 {
-    return m_firstTextBox ? m_firstTextBox->y() : 0;
+    return m_firstTextBox ? m_firstTextBox->y().toFloat() : 0;
 }
 
 void RenderText::setSelectionState(SelectionState state)
@@ -1428,14 +1437,19 @@ void RenderText::setText(PassRefPtr<StringImpl> text, bool force)
         cache->textChanged(this);
 }
 
-void RenderText::dirtyLineBoxes(bool fullLayout)
+void RenderText::dirtyOrDeleteLineBoxesIfNeeded(bool fullLayout)
 {
     if (fullLayout)
         deleteTextBoxes();
-    else if (!m_linesDirty) {
-        for (InlineTextBox* box = firstTextBox(); box; box = box->nextTextBox())
-            box->dirtyLineBoxes();
-    }
+    else if (!m_linesDirty)
+        dirtyLineBoxes();
+    m_linesDirty = false;
+}
+
+void RenderText::dirtyLineBoxes()
+{
+    for (InlineTextBox* box = firstTextBox(); box; box = box->nextTextBox())
+        box->dirtyLineBoxes();
     m_linesDirty = false;
 }
 
@@ -1549,8 +1563,8 @@ IntRect RenderText::linesBoundingBox() const
 
         bool isHorizontal = style()->isHorizontalWritingMode();
 
-        float x = isHorizontal ? logicalLeftSide : firstTextBox()->x();
-        float y = isHorizontal ? firstTextBox()->y() : logicalLeftSide;
+        float x = isHorizontal ? logicalLeftSide : firstTextBox()->x().toFloat();
+        float y = isHorizontal ? firstTextBox()->y().toFloat() : logicalLeftSide;
         float width = isHorizontal ? logicalRightSide - logicalLeftSide : lastTextBox()->logicalBottom() - x;
         float height = isHorizontal ? lastTextBox()->logicalBottom() - y : logicalRightSide - logicalLeftSide;
         result = enclosingIntRect(FloatRect(x, y, width, height));
@@ -1628,6 +1642,9 @@ LayoutRect RenderText::selectionRectForPaintInvalidation(const RenderLayerModelO
     }
 
     mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, 0);
+    // FIXME: groupedMapping() leaks the squashing abstraction.
+    if (paintInvalidationContainer->layer()->groupedMapping())
+        RenderLayer::mapRectToPaintBackingCoordinates(paintInvalidationContainer, rect);
     return rect;
 }
 

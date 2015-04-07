@@ -23,14 +23,13 @@ namespace shell {
 class CastDevToolsDelegate : public content::DevToolsHttpHandlerDelegate {
  public:
   CastDevToolsDelegate();
-  virtual ~CastDevToolsDelegate();
+  ~CastDevToolsDelegate() override;
 
   // DevToolsHttpHandlerDelegate implementation.
-  virtual std::string GetDiscoveryPageHTML() override;
-  virtual bool BundlesFrontendResources() override;
-  virtual base::FilePath GetDebugFrontendDir() override;
-  virtual scoped_ptr<net::StreamListenSocket> CreateSocketForTethering(
-      net::StreamListenSocket::Delegate* delegate,
+  std::string GetDiscoveryPageHTML() override;
+  bool BundlesFrontendResources() override;
+  base::FilePath GetDebugFrontendDir() override;
+  scoped_ptr<net::ServerSocket> CreateSocketForTethering(
       std::string* name) override;
 
  private:
@@ -40,22 +39,21 @@ class CastDevToolsDelegate : public content::DevToolsHttpHandlerDelegate {
 class CastDevToolsManagerDelegate : public content::DevToolsManagerDelegate {
  public:
   CastDevToolsManagerDelegate();
-  virtual ~CastDevToolsManagerDelegate();
+  ~CastDevToolsManagerDelegate() override;
 
   // DevToolsManagerDelegate implementation.
-  virtual void Inspect(
+  void Inspect(
       content::BrowserContext* browser_context,
       content::DevToolsAgentHost* agent_host) override {}
-  virtual void DevToolsAgentStateChanged(
+  void DevToolsAgentStateChanged(
       content::DevToolsAgentHost* agent_host,
       bool attached) override {}
-  virtual base::DictionaryValue* HandleCommand(
+  base::DictionaryValue* HandleCommand(
       content::DevToolsAgentHost* agent_host,
       base::DictionaryValue* command) override;
-  virtual scoped_ptr<content::DevToolsTarget> CreateNewTarget(
-      const GURL& url) override;
-  virtual void EnumerateTargets(TargetCallback callback) override;
-  virtual std::string GetPageThumbnailData(const GURL& url) override;
+  scoped_ptr<content::DevToolsTarget> CreateNewTarget(const GURL& url) override;
+  void EnumerateTargets(TargetCallback callback) override;
+  std::string GetPageThumbnailData(const GURL& url) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CastDevToolsManagerDelegate);

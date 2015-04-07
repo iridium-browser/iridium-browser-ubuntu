@@ -211,7 +211,7 @@ static void FollowDeferredRedirect(JNIEnv* env,
 static void PopulateResponseHeaders(JNIEnv* env,
                                     jobject jurl_request,
                                     jlong jurl_request_adapter,
-                                    jobject jheaders_map) {
+                                    jobject jheaders_list) {
   DCHECK(jurl_request_adapter);
   CronetURLRequestAdapter* request_adapter =
       reinterpret_cast<CronetURLRequestAdapter*>(jurl_request_adapter);
@@ -231,7 +231,7 @@ static void PopulateResponseHeaders(JNIEnv* env,
     ScopedJavaLocalRef<jstring> value =
         ConvertUTF8ToJavaString(env, header_value);
     Java_CronetUrlRequest_onAppendResponseHeader(
-        env, jurl_request, jheaders_map, name.obj(), value.obj());
+        env, jurl_request, jheaders_list, name.obj(), value.obj());
   }
 }
 
@@ -264,6 +264,18 @@ static jlong GetTotalReceivedBytes(JNIEnv* env,
       reinterpret_cast<CronetURLRequestAdapter*>(jurl_request_adapter);
   DCHECK(request_adapter->IsOnNetworkThread());
   return request_adapter->GetTotalReceivedBytes();
+}
+
+static jstring GetHttpStatusText(JNIEnv* env,
+                                 jobject jurl_request,
+                                 jlong jurl_request_adapter) {
+  DCHECK(jurl_request_adapter);
+  CronetURLRequestAdapter* request_adapter =
+      reinterpret_cast<CronetURLRequestAdapter*>(jurl_request_adapter);
+  DCHECK(request_adapter->IsOnNetworkThread());
+  const net::HttpResponseHeaders* headers =
+      request_adapter->GetResponseHeaders();
+  return ConvertUTF8ToJavaString(env, headers->GetStatusText()).Release();
 }
 
 }  // namespace cronet

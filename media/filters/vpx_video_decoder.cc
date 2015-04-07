@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
@@ -50,7 +51,7 @@ static int GetThreadCount(const VideoDecoderConfig& config) {
   // Refer to http://crbug.com/93932 for tsan suppressions on decoding.
   int decode_threads = kDecodeThreads;
 
-  const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
+  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
   std::string threads(cmd_line->GetSwitchValueASCII(switches::kVideoThreads));
   if (threads.empty() || !base::StringToInt(threads, &decode_threads)) {
     if (config.codec() == kCodecVP9) {
@@ -367,14 +368,18 @@ bool VpxVideoDecoder::VpxDecode(const scoped_refptr<DecoderBuffer>& buffer,
   // Pass |buffer| to libvpx.
   int64 timestamp = buffer->timestamp().InMicroseconds();
   void* user_priv = reinterpret_cast<void*>(&timestamp);
-  vpx_codec_err_t status = vpx_codec_decode(vpx_codec_,
-                                            buffer->data(),
-                                            buffer->data_size(),
-                                            user_priv,
-                                            0);
-  if (status != VPX_CODEC_OK) {
-    LOG(ERROR) << "vpx_codec_decode() failed, status=" << status;
-    return false;
+
+  {
+    TRACE_EVENT1("video", "vpx_codec_decode", "timestamp", timestamp);
+    vpx_codec_err_t status = vpx_codec_decode(vpx_codec_,
+                                              buffer->data(),
+                                              buffer->data_size(),
+                                              user_priv,
+                                              0);
+    if (status != VPX_CODEC_OK) {
+      LOG(ERROR) << "vpx_codec_decode() failed, status=" << status;
+      return false;
+    }
   }
 
   // Gets pointer to decoded data.
@@ -400,15 +405,18 @@ bool VpxVideoDecoder::VpxDecode(const scoped_refptr<DecoderBuffer>& buffer,
     const uint64 side_data_id = base::NetToHost64(
         *(reinterpret_cast<const uint64*>(buffer->side_data())));
     if (side_data_id == 1) {
-      status = vpx_codec_decode(vpx_codec_alpha_,
-                                buffer->side_data() + 8,
-                                buffer->side_data_size() - 8,
-                                user_priv_alpha,
-                                0);
-
-      if (status != VPX_CODEC_OK) {
-        LOG(ERROR) << "vpx_codec_decode() failed on alpha, status=" << status;
-        return false;
+      {
+        TRACE_EVENT1("video", "vpx_codec_decode_alpha",
+                     "timestamp_alpha", timestamp_alpha);
+        vpx_codec_err_t status = vpx_codec_decode(vpx_codec_alpha_,
+                                                  buffer->side_data() + 8,
+                                                  buffer->side_data_size() - 8,
+                                                  user_priv_alpha,
+                                                  0);
+        if (status != VPX_CODEC_OK) {
+          LOG(ERROR) << "vpx_codec_decode() failed on alpha, status=" << status;
+          return false;
+        }
       }
 
       // Gets pointer to decoded data.
@@ -422,6 +430,13 @@ bool VpxVideoDecoder::VpxDecode(const scoped_refptr<DecoderBuffer>& buffer,
       if (vpx_image_alpha->user_priv !=
           reinterpret_cast<void*>(&timestamp_alpha)) {
         LOG(ERROR) << "Invalid output timestamp on alpha.";
+        return false;
+      }
+
+      if (vpx_image_alpha->d_h != vpx_image->d_h ||
+          vpx_image_alpha->d_w != vpx_image->d_w) {
+        LOG(ERROR) << "The alpha plane dimensions are not the same as the "
+                      "image dimensions.";
         return false;
       }
     }
@@ -495,8 +510,8 @@ void VpxVideoDecoder::CopyVpxImageTo(const vpx_image* vpx_image,
     return;
   }
   CopyAPlane(vpx_image_alpha->planes[VPX_PLANE_Y],
-             vpx_image->stride[VPX_PLANE_Y],
-             vpx_image->d_h,
+             vpx_image_alpha->stride[VPX_PLANE_Y],
+             vpx_image_alpha->d_h,
              video_frame->get());
 }
 

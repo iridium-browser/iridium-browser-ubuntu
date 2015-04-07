@@ -40,6 +40,7 @@
 #include "core/animation/Interpolation.h"
 #include "core/animation/KeyframeEffectModel.h"
 #include "core/dom/Element.h"
+#include "core/dom/NodeRenderStyle.h"
 #include "core/frame/UseCounter.h"
 #include "core/rendering/RenderLayer.h"
 
@@ -149,11 +150,12 @@ void Animation::applyEffects()
 
     double iteration = currentIteration();
     ASSERT(iteration >= 0);
+    OwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation> > > interpolations = m_sampledEffect ? m_sampledEffect->mutableInterpolations() : nullptr;
     // FIXME: Handle iteration values which overflow int.
-    OwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation> > > interpolations = m_effect->sample(static_cast<int>(iteration), timeFraction(), iterationDuration());
+    m_effect->sample(static_cast<int>(iteration), timeFraction(), iterationDuration(), interpolations);
     if (m_sampledEffect) {
         m_sampledEffect->setInterpolations(interpolations.release());
-    } else if (!interpolations->isEmpty()) {
+    } else if (interpolations && !interpolations->isEmpty()) {
         OwnPtrWillBeRawPtr<SampledEffect> sampledEffect = SampledEffect::create(this, interpolations.release());
         m_sampledEffect = sampledEffect.get();
         ensureAnimationStack(m_target).add(sampledEffect.release());
@@ -200,14 +202,13 @@ double Animation::calculateTimeToEffectChange(bool forwards, double localTime, d
             ? start - localTime
             : std::numeric_limits<double>::infinity();
     case PhaseActive:
-        if (forwards && hasActiveAnimationsOnCompositor()) {
+        if (forwards) {
             // Need service to apply fill / fire events.
             const double timeToEnd = end - localTime;
-            if (hasEvents()) {
+            if (requiresIterationEvents()) {
                 return std::min(timeToEnd, timeToNextIteration);
-            } else {
-                return timeToEnd;
             }
+            return timeToEnd;
         }
         return 0;
     case PhaseAfter:
@@ -247,24 +248,22 @@ void Animation::notifyElementDestroyed()
 
 bool Animation::isCandidateForAnimationOnCompositor(double playerPlaybackRate) const
 {
-    if (!effect() || !m_target)
+    if (!effect()
+        || !m_target
+        || (m_target->renderStyle() && m_target->renderStyle()->hasMotionPath()))
         return false;
+
     return CompositorAnimations::instance()->isCandidateForAnimationOnCompositor(specifiedTiming(), *effect(), playerPlaybackRate);
 }
 
-bool Animation::maybeStartAnimationOnCompositor(double startTime, double currentTime)
-{
-    return maybeStartAnimationOnCompositor(startTime, currentTime, 1);
-}
-
-bool Animation::maybeStartAnimationOnCompositor(double startTime, double currentTime, double playerPlaybackRate)
+bool Animation::maybeStartAnimationOnCompositor(int group, double startTime, double currentTime, double playerPlaybackRate)
 {
     ASSERT(!hasActiveAnimationsOnCompositor());
     if (!isCandidateForAnimationOnCompositor(playerPlaybackRate))
         return false;
     if (!CompositorAnimations::instance()->canStartAnimationOnCompositor(*m_target))
         return false;
-    if (!CompositorAnimations::instance()->startAnimationOnCompositor(*m_target, startTime, currentTime, specifiedTiming(), *effect(), m_compositorAnimationIds, playerPlaybackRate))
+    if (!CompositorAnimations::instance()->startAnimationOnCompositor(*m_target, group, startTime, currentTime, specifiedTiming(), *effect(), m_compositorAnimationIds, playerPlaybackRate))
         return false;
     ASSERT(!m_compositorAnimationIds.isEmpty());
     return true;
@@ -295,8 +294,8 @@ void Animation::cancelAnimationOnCompositor()
         return;
     if (!m_target || !m_target->renderer())
         return;
-    for (size_t i = 0; i < m_compositorAnimationIds.size(); ++i)
-        CompositorAnimations::instance()->cancelAnimationOnCompositor(*m_target, m_compositorAnimationIds[i]);
+    for (const auto& compositorAnimationId : m_compositorAnimationIds)
+        CompositorAnimations::instance()->cancelAnimationOnCompositor(*m_target, compositorAnimationId);
     m_compositorAnimationIds.clear();
     player()->setCompositorPending(true);
 }
@@ -306,8 +305,8 @@ void Animation::pauseAnimationForTestingOnCompositor(double pauseTime)
     ASSERT(hasActiveAnimationsOnCompositor());
     if (!m_target || !m_target->renderer())
         return;
-    for (size_t i = 0; i < m_compositorAnimationIds.size(); ++i)
-        CompositorAnimations::instance()->pauseAnimationForTestingOnCompositor(*m_target, m_compositorAnimationIds[i], pauseTime);
+    for (const auto& compositorAnimationId : m_compositorAnimationIds)
+        CompositorAnimations::instance()->pauseAnimationForTestingOnCompositor(*m_target, compositorAnimationId, pauseTime);
 }
 
 void Animation::trace(Visitor* visitor)

@@ -285,7 +285,7 @@ public:
             if (m_constructRetainedObjectInfos)
                 m_groupsWhichNeedRetainerInfo.append(root);
         } else if (classId == WrapperTypeInfo::ObjectClassId) {
-            type->visitDOMWrapper(m_isolate, toScriptWrappableBase(*wrapper), v8::Persistent<v8::Object>::Cast(*value));
+            type->visitDOMWrapper(m_isolate, toScriptWrappable(*wrapper), v8::Persistent<v8::Object>::Cast(*value));
         } else {
             ASSERT_NOT_REACHED();
         }
@@ -395,6 +395,7 @@ void V8GCController::gcEpilogue(v8::GCType type, v8::GCCallbackFlags flags)
         minorGCEpilogue(isolate);
     else if (type == v8::kGCTypeMarkSweepCompact)
         majorGCEpilogue(isolate);
+    ThreadState::current()->didV8GC();
 
     // Forces a Blink heap garbage collection when a garbage collection
     // was forced from V8. This is used for tests that force GCs from
@@ -410,10 +411,10 @@ void V8GCController::gcEpilogue(v8::GCType type, v8::GCCallbackFlags flags)
         // to collect all garbage, you need to wait until the next event loop.
         // Regarding (2), it would be OK in practice to trigger only one GC per gcEpilogue, because
         // GCController.collectAll() forces 7 V8's GC.
-        Heap::collectGarbage(ThreadState::HeapPointersOnStack, ThreadState::ForcedGC);
+        Heap::collectGarbage(ThreadState::HeapPointersOnStack);
 
         // Forces a precise GC at the end of the current event loop.
-        Heap::setForcePreciseGCForTesting();
+        ThreadState::current()->setGCState(ThreadState::GCScheduledForTesting);
     }
 
     TRACE_EVENT_END1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "GCEvent", "usedHeapSizeAfter", usedHeapSize(isolate));
@@ -450,14 +451,14 @@ void V8GCController::majorGCEpilogue(v8::Isolate* isolate)
         //     the DOM objects are not collected forever. (Note that
         //     Oilpan's GC is not triggered unless Oilpan's heap gets full.)
         // (6) V8 hits OOM.
-        ThreadState::current()->setGCRequested();
+        ThreadState::current()->scheduleGC();
     }
 }
 
 void V8GCController::collectGarbage(v8::Isolate* isolate)
 {
     v8::HandleScope handleScope(isolate);
-    RefPtr<ScriptState> scriptState = ScriptState::create(v8::Context::New(isolate), DOMWrapperWorld::create());
+    RefPtr<ScriptState> scriptState = ScriptState::create(v8::Context::New(isolate), DOMWrapperWorld::create(isolate));
     ScriptState::Scope scope(scriptState.get());
     V8ScriptRunner::compileAndRunInternalScript(v8String(isolate, "if (gc) gc();"), isolate);
     scriptState->disposePerContextData();
@@ -495,7 +496,7 @@ public:
         v8::Handle<v8::Object>* wrapper = reinterpret_cast<v8::Handle<v8::Object>*>(value);
         ASSERT(V8DOMWrapper::isDOMWrapper(*wrapper));
         if (m_visitor)
-            toWrapperTypeInfo(*wrapper)->trace(m_visitor, toScriptWrappableBase(*wrapper));
+            toWrapperTypeInfo(*wrapper)->trace(m_visitor, toScriptWrappable(*wrapper));
     }
 
 private:

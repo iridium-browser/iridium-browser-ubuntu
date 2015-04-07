@@ -25,6 +25,10 @@ class MessageLoopProxy;
 class WaitableEvent;
 }
 
+namespace cc {
+class SharedBitmapManager;
+}
+
 namespace IPC {
 class MessageFilter;
 class SyncChannel;
@@ -50,7 +54,7 @@ class CONTENT_EXPORT RenderThread : public IPC::Sender {
   RenderThread();
   ~RenderThread() override;
 
-  virtual base::MessageLoop* GetMessageLoop() = 0;
+  virtual scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() = 0;
   virtual IPC::SyncChannel* GetChannel() = 0;
   virtual std::string GetLocale() = 0;
   virtual IPC::SyncMessageFilter* GetSyncMessageFilter() = 0;
@@ -101,6 +105,8 @@ class CONTENT_EXPORT RenderThread : public IPC::Sender {
   // The shared memory allocated by the host is returned back.
   virtual scoped_ptr<base::SharedMemory> HostAllocateSharedMemoryBuffer(
       size_t buffer_size) = 0;
+
+  virtual cc::SharedBitmapManager* GetSharedBitmapManager() = 0;
 
   // Registers the given V8 extension with WebKit.
   virtual void RegisterExtension(v8::Extension* extension) = 0;

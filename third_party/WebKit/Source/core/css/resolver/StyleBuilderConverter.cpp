@@ -73,7 +73,7 @@ PassRefPtr<StyleReflection> StyleBuilderConverter::convertBoxReflect(StyleResolv
         reflection->setOffset(reflectValue->offset()->convertToLength<FixedConversion | PercentConversion>(state.cssToLengthConversionData()));
     NinePieceImage mask;
     mask.setMaskDefaults();
-    state.styleMap().mapNinePieceImage(state.style(), CSSPropertyWebkitBoxReflect, reflectValue->mask(), mask);
+    CSSToStyleMap::mapNinePieceImage(state, CSSPropertyWebkitBoxReflect, reflectValue->mask(), mask);
     reflection->setMask(mask);
 
     return reflection.release();
@@ -189,29 +189,14 @@ PassRefPtr<FontFeatureSettings> StyleBuilderConverter::convertFontFeatureSetting
     return settings;
 }
 
-class RedirectSetHasViewportUnits {
-public:
-    RedirectSetHasViewportUnits(RenderStyle* from, RenderStyle* to)
-        : m_from(from), m_to(to), m_hadViewportUnits(from->hasViewportUnits())
-    {
-        from->setHasViewportUnits(false);
-    }
-    ~RedirectSetHasViewportUnits()
-    {
-        m_to->setHasViewportUnits(m_from->hasViewportUnits());
-        m_from->setHasViewportUnits(m_hadViewportUnits);
-    }
-private:
-    RenderStyle* m_from;
-    RenderStyle* m_to;
-    bool m_hadViewportUnits;
-};
-
 static float computeFontSize(StyleResolverState& state, CSSPrimitiveValue* primitiveValue, const FontDescription::Size& parentSize)
 {
-    RedirectSetHasViewportUnits redirect(state.parentStyle(), state.style());
+    float em = state.parentStyle()->specifiedFontSize();
+    float rem = state.rootElementStyle() ? state.rootElementStyle()->specifiedFontSize() : 1.0f;
+    CSSToLengthConversionData::FontSizes fontSizes(em, rem, &state.parentStyle()->font());
+    CSSToLengthConversionData::ViewportSize viewportSize(state.document().renderView());
 
-    CSSToLengthConversionData conversionData(state.parentStyle(), state.rootElementStyle(), state.document().renderView(), 1.0f, true);
+    CSSToLengthConversionData conversionData(state.style(), fontSizes, viewportSize, 1.0f);
     if (primitiveValue->isLength())
         return primitiveValue->computeLength<float>(conversionData);
     if (primitiveValue->isCalculatedPercentageWithLength())
@@ -481,6 +466,26 @@ bool StyleBuilderConverter::convertGridTrackList(CSSValue* value, Vector<GridTra
     return true;
 }
 
+void StyleBuilderConverter::convertOrderedNamedGridLinesMapToNamedGridLinesMap(const OrderedNamedGridLines& orderedNamedGridLines, NamedGridLinesMap& namedGridLines)
+{
+    ASSERT(namedGridLines.size() == 0);
+
+    if (orderedNamedGridLines.size() == 0)
+        return;
+
+    for (auto& orderedNamedGridLine : orderedNamedGridLines) {
+        for (auto& lineName : orderedNamedGridLine.value) {
+            NamedGridLinesMap::AddResult startResult = namedGridLines.add(lineName, Vector<size_t>());
+            startResult.storedValue->value.append(orderedNamedGridLine.key);
+        }
+    }
+
+    for (auto& namedGridLine : namedGridLines) {
+        Vector<size_t> gridLineIndexes = namedGridLine.value;
+        std::sort(gridLineIndexes.begin(), gridLineIndexes.end());
+    }
+}
+
 void StyleBuilderConverter::createImplicitNamedGridLinesFromGridArea(const NamedGridAreaMap& namedGridAreas, NamedGridLinesMap& namedGridLines, GridTrackSizingDirection direction)
 {
     for (const auto& namedGridAreaEntry : namedGridAreas) {
@@ -565,6 +570,33 @@ LineBoxContain StyleBuilderConverter::convertLineBoxContain(StyleResolverState&,
     }
 
     return toCSSLineBoxContainValue(value)->value();
+}
+
+static CSSToLengthConversionData lineHeightToLengthConversionData(StyleResolverState& state)
+{
+    float multiplier = state.style()->effectiveZoom();
+    if (LocalFrame* frame = state.document().frame())
+        multiplier *= frame->textZoomFactor();
+    return state.cssToLengthConversionData().copyWithAdjustedZoom(multiplier);
+}
+
+Length StyleBuilderConverter::convertLineHeight(StyleResolverState& state, CSSValue* value)
+{
+    CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(value);
+
+    if (primitiveValue->isLength())
+        return primitiveValue->computeLength<Length>(lineHeightToLengthConversionData(state));
+    if (primitiveValue->isPercentage())
+        return Length((state.style()->computedFontSize() * primitiveValue->getIntValue()) / 100.0, Fixed);
+    if (primitiveValue->isNumber())
+        return Length(primitiveValue->getDoubleValue() * 100.0, Percent);
+    if (primitiveValue->isCalculated()) {
+        Length zoomedLength = Length(primitiveValue->cssCalcValue()->toCalcValue(lineHeightToLengthConversionData(state)));
+        return Length(valueForLength(zoomedLength, state.style()->fontSize()), Fixed);
+    }
+
+    ASSERT(primitiveValue->getValueID() == CSSValueNormal);
+    return RenderStyle::initialLineHeight();
 }
 
 float StyleBuilderConverter::convertNumberOrPercentage(StyleResolverState& state, CSSValue* value)
@@ -755,15 +787,14 @@ float StyleBuilderConverter::convertSpacing(StyleResolverState& state, CSSValue*
     return primitiveValue->computeLength<float>(state.cssToLengthConversionData());
 }
 
-PassRefPtr<SVGLengthList> StyleBuilderConverter::convertStrokeDasharray(StyleResolverState&, CSSValue* value)
+PassRefPtrWillBeRawPtr<SVGLengthList> StyleBuilderConverter::convertStrokeDasharray(StyleResolverState&, CSSValue* value)
 {
-    if (!value->isValueList()) {
+    if (!value->isValueList())
         return SVGRenderStyle::initialStrokeDashArray();
-    }
 
     CSSValueList* dashes = toCSSValueList(value);
 
-    RefPtr<SVGLengthList> array = SVGLengthList::create();
+    RefPtrWillBeRawPtr<SVGLengthList> array = SVGLengthList::create();
     size_t length = dashes->length();
     for (size_t i = 0; i < length; ++i) {
         CSSValue* currValue = dashes->item(i);
@@ -794,7 +825,7 @@ Color StyleBuilderConverter::convertSVGColor(StyleResolverState& state, CSSValue
     return state.style()->color();
 }
 
-PassRefPtr<SVGLength> StyleBuilderConverter::convertSVGLength(StyleResolverState&, CSSValue* value)
+PassRefPtrWillBeRawPtr<SVGLength> StyleBuilderConverter::convertSVGLength(StyleResolverState&, CSSValue* value)
 {
     return SVGLength::fromCSSPrimitiveValue(toCSSPrimitiveValue(value));
 }

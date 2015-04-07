@@ -6,6 +6,7 @@ package org.chromium.cronet_test_apk;
 
 import android.test.suitebuilder.annotation.SmallTest;
 
+import org.chromium.base.PathUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.net.HttpUrlRequest;
 import org.chromium.net.HttpUrlRequestFactoryConfig;
@@ -25,11 +26,6 @@ public class CronetUrlTest extends CronetTestBase {
     public void testLoadUrl() throws Exception {
         CronetTestActivity activity = launchCronetTestAppWithUrl(URL);
 
-        // Make sure the activity was created as expected.
-        assertNotNull(activity);
-
-        waitForActiveShellToBeDoneLoading();
-
         // Make sure that the URL is set as expected.
         assertEquals(URL, activity.getUrl());
         assertEquals(200, activity.getHttpStatusCode());
@@ -40,11 +36,6 @@ public class CronetUrlTest extends CronetTestBase {
     public void testInvalidUrl() throws Exception {
         CronetTestActivity activity = launchCronetTestAppWithUrl(
                 "127.0.0.1:8000");
-
-        // Make sure the activity was created as expected.
-        assertNotNull(activity);
-
-        waitForActiveShellToBeDoneLoading();
 
         // The load should fail.
         assertEquals(0, activity.getHttpStatusCode());
@@ -59,11 +50,6 @@ public class CronetUrlTest extends CronetTestBase {
                 launchCronetTestAppWithUrlAndCommandLineArgs(URL,
                                                              commandLineArgs);
 
-        // Make sure the activity was created as expected.
-        assertNotNull(activity);
-
-        waitForActiveShellToBeDoneLoading();
-
         // Make sure that the URL is set as expected.
         assertEquals(URL, activity.getUrl());
         assertEquals(200, activity.getHttpStatusCode());
@@ -72,15 +58,12 @@ public class CronetUrlTest extends CronetTestBase {
     @SmallTest
     @Feature({"Cronet"})
     public void testNetLog() throws Exception {
-        CronetTestActivity activity = launchCronetTestAppWithUrl(
-                "127.0.0.1:8000");
-
-        // Make sure the activity was created as expected.
-        assertNotNull(activity);
-
-        waitForActiveShellToBeDoneLoading();
-        File file = File.createTempFile("cronet", "json");
+        CronetTestActivity activity = launchCronetTestApp();
+        File directory = new File(PathUtils.getDataDirectory(
+                getInstrumentation().getTargetContext()));
+        File file = File.createTempFile("cronet", "json", directory);
         activity.mRequestFactory.startNetLogToFile(file.getPath());
+        // Starts a request.
         activity.startWithURL(URL);
         Thread.sleep(5000);
         activity.mRequestFactory.stopNetLog();
@@ -90,7 +73,7 @@ public class CronetUrlTest extends CronetTestBase {
         assertTrue(!file.exists());
     }
 
-    class BadHttpUrlRequestListener extends TestHttpUrlRequestListener {
+    static class BadHttpUrlRequestListener extends TestHttpUrlRequestListener {
         static final String THROW_TAG = "BadListener";
 
         public BadHttpUrlRequestListener() {
@@ -106,11 +89,6 @@ public class CronetUrlTest extends CronetTestBase {
     @Feature({"Cronet"})
     public void testCalledByNativeException() throws Exception {
         CronetTestActivity activity = launchCronetTestAppWithUrl(URL);
-
-        // Make sure the activity was created as expected.
-        assertNotNull(activity);
-
-        waitForActiveShellToBeDoneLoading();
 
         HashMap<String, String> headers = new HashMap<String, String>();
         BadHttpUrlRequestListener listener = new BadHttpUrlRequestListener();
@@ -130,11 +108,6 @@ public class CronetUrlTest extends CronetTestBase {
     @Feature({"Cronet"})
     public void testSetUploadDataWithNullContentType() throws Exception {
         CronetTestActivity activity = launchCronetTestAppWithUrl(URL);
-
-        // Make sure the activity was created as expected.
-        assertNotNull(activity);
-
-        waitForActiveShellToBeDoneLoading();
 
         HashMap<String, String> headers = new HashMap<String, String>();
         BadHttpUrlRequestListener listener = new BadHttpUrlRequestListener();
@@ -160,16 +133,14 @@ public class CronetUrlTest extends CronetTestBase {
         String quicNegotiatedProtocol = "quic/1+spdy/3";
         config.enableQUIC(true);
         config.addQuicHint("www.google.com", 443, 443);
+        config.setExperimentalQuicConnectionOptions("PACE,IW10,FOO,DEADBEEF");
 
         String[] commandLineArgs = {
                 CronetTestActivity.CONFIG_KEY, config.toString() };
         CronetTestActivity activity =
-                launchCronetTestAppWithUrlAndCommandLineArgs(quicURL,
+                launchCronetTestAppWithUrlAndCommandLineArgs(null,
                                                              commandLineArgs);
-
-        // Make sure the activity was created as expected.
-        assertNotNull(activity);
-        waitForActiveShellToBeDoneLoading();
+        activity.startNetLog();
 
         HashMap<String, String> headers = new HashMap<String, String>();
         TestHttpUrlRequestListener listener = new TestHttpUrlRequestListener();
@@ -194,6 +165,7 @@ public class CronetUrlTest extends CronetTestBase {
         }
 
         assertEquals(quicNegotiatedProtocol, listener.mNegotiatedProtocol);
+        activity.stopNetLog();
     }
 
     @SmallTest
@@ -210,11 +182,6 @@ public class CronetUrlTest extends CronetTestBase {
                 launchCronetTestAppWithUrlAndCommandLineArgs(URL,
                                                              commandLineArgs);
 
-        // Make sure the activity was created as expected.
-        assertNotNull(activity);
-
-        waitForActiveShellToBeDoneLoading();
-
         // Make sure that the URL is set as expected.
         assertEquals(URL, activity.getUrl());
         assertEquals(200, activity.getHttpStatusCode());
@@ -224,9 +191,6 @@ public class CronetUrlTest extends CronetTestBase {
     @Feature({"Cronet"})
     public void testRequestHead() throws Exception {
         CronetTestActivity activity = launchCronetTestAppWithUrl(URL);
-
-        // Make sure the activity was created as expected.
-        waitForActiveShellToBeDoneLoading();
 
         HashMap<String, String> headers = new HashMap<String, String>();
         TestHttpUrlRequestListener listener = new TestHttpUrlRequestListener();

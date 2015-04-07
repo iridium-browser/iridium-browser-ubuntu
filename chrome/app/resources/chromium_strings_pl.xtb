@@ -39,7 +39,6 @@
 <translation id="3883381313049582448">Użyj hasła wygenerowanego przez Chromium</translation>
 <translation id="3549345495227188780">Pierwsze kroki z systemem operacyjnym Chromium</translation>
 <translation id="1668054258064581266">Aby po usunięciu konta z Chromium zmiany zostały zastosowane, może być konieczne ponowne załadowanie otwartych kart.</translation>
-<translation id="6953661834318318668">Pasek narzędzi Chromium</translation>
 <translation id="4285930937574705105">Instalacja nie powiodła się z powodu nieokreślonego błędu. Jeśli Chromium jest aktualnie uruchomiony, zamknij go i spróbuj ponownie.</translation>
 <translation id="1396446129537741364">Chromium próbuje pokazać hasła.</translation>
 <translation id="8987477933582888019">Przeglądarka</translation>
@@ -94,6 +93,7 @@
 <translation id="7473891865547856676">Nie, dziękuję</translation>
 <translation id="9191268552238695869">Administrator zainstalował Chromium w tym systemie i jest on dostępny dla wszystkich użytkowników. Chromium zainstalowany na poziomie systemu zastąpi Twoją instalację.</translation>
 <translation id="3509308970982693815">Zamknij wszystkie okna Chromium i spróbuj ponownie.</translation>
+<translation id="8851136666856101339">główny</translation>
 <translation id="4077262827416206768">Zamknij wszystkie okna Chromium i uruchom go ponownie, by zmiany zostały wprowadzone.</translation>
 <translation id="6475912303565314141">Kontroluje także to, jaka strona wyświetla się po uruchomieniu Chromium.</translation>
 <translation id="1725059042853530269">Plik <ph name="FILE_NAME"/> może wpływać na działanie Chromium, więc został zablokowany.</translation>
@@ -154,6 +154,7 @@
 <translation id="275588974610408078">Zgłaszanie awarii nie jest dostępne w Chromium.</translation>
 <translation id="5909170354645388250">Nie używany w Chromium. Symbol zastępczy umożliwiający synchronizację map zasobów. Oczekuje jednego argumentu: $1.</translation>
 <translation id="1144202035120576837"><ph name="SITE"/> normalnie używa szyfrowania do ochrony Twoich informacji. Tym razem gdy Chrome próbował połączyć się ze stroną <ph name="SITE"/>, odesłała ona nietypowe i nieprawidłowe dane logowania. Oznacza to, że osoba atakująca próbuje podszyć się pod stronę <ph name="SITE"/> albo ekran logowania Wi-Fi przerwał połączenie. Twoje informacje są nadal bezpieczne, bo Chromium zatrzymał połączenie przed wymianą jakichkolwiek danych.</translation>
+<translation id="2316129865977710310">Nie, dziękuję</translation>
 <translation id="7937630085815544518">Byłeś zalogowany w Chromium jako <ph name="USER_EMAIL_ADDRESS"/>. Zaloguj się ponownie, korzystając z tego samego konta.</translation>
 <translation id="2685838254101182273">Chromium nie jest już aktualizowany ani nie obsługuje tej wersji systemu operacyjnego.</translation>
 <translation id="8684913864886094367">Chromium nie został poprawnie zamknięty.</translation>
@@ -167,6 +168,7 @@
 <translation id="2648074677641340862">Podczas instalacji wystąpił błąd systemu operacyjnego. Pobierz Chromium ponownie.</translation>
 <translation id="5942520288919337908">Rozszerzenie <ph name="EXTENSION_NAME"/> zostało dodane do Chromium.</translation>
 <translation id="549669000822060376">Poczekaj, aż Chromium zainstaluje najnowsze aktualizacje systemu.</translation>
+<translation id="1240763998429950591">Chromium nie mógł zaktualizować się do najnowszej wersji, więc nie masz dostępu do najnowszych funkcji i poprawek zabezpieczeń. Musisz zaktualizować Chromium.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">przesyła słowo i jego kontekst do wyszukiwarki Google, by wyświetlić definicje, zdjęcia, wyniki wyszukiwania i inne szczegółowe informacje.</translation>
 <translation id="4559775032954821361">Wybierz
@@ -206,6 +208,7 @@ Niektóre funkcje mogą być niedostępne. Podaj inny katalog z profilem lub uż
 <translation id="2966088006374919794">Chromium musi uruchomić zewnętrzną aplikację do obsługi linków <ph name="SCHEME"/>. Żądany link to <ph name="PROTOLINK"/>.</translation>
 <translation id="2558235863893655150">Czy chcesz, by Chromium zapisał hasło?</translation>
 <translation id="6485906693002546646">Używasz adresu <ph name="PROFILE_EMAIL"/> do synchronizowania danych w Chromium. Aby zaktualizować ustawienia synchronizacji lub używać Chromium bez konta Google, wejdź na stronę <ph name="SETTINGS_LINK"/>.</translation>
+<translation id="705851970750939768">Zaktualizuj Chromium</translation>
 <translation id="5772805321386874569">(wymaga <ph name="BEGIN_BUTTON"/>ponownego uruchomienia<ph name="END_BUTTON"/> Chromium)</translation>
 <translation id="1688750314291223739">Skonfiguruj synchronizację, by zapisać w internecie własne funkcje przeglądarki i mieć do nich dostęp w Chromium na każdym komputerze.</translation>
 <translation id="8610831143142469229">Zezwalaj Chromium na korzystanie z sieci w ustawieniach zapory sieciowej

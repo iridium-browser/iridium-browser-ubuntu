@@ -49,13 +49,16 @@ void ExportLayoutTestSpecificPreferences(const TestPreferences& from,
       from.java_script_can_open_windows_automatically;
   to->web_security_enabled =
       from.web_security_enabled;
+  to->strict_mixed_content_checking =
+      from.strict_mixed_content_checking;
 }
 
 // Applies settings that differ between layout tests and regular mode. Some
 // of the defaults are controlled via command line flags which are
 // automatically set for layout tests.
 void ApplyLayoutTestDefaultPreferences(WebPreferences* prefs) {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   prefs->allow_universal_access_from_file_urls = true;
   prefs->dom_paste_enabled = true;
   prefs->javascript_can_access_clipboard = true;
@@ -72,6 +75,7 @@ void ApplyLayoutTestDefaultPreferences(WebPreferences* prefs) {
   prefs->hyperlink_auditing_enabled = false;
   prefs->allow_displaying_insecure_content = true;
   prefs->allow_running_insecure_content = true;
+  prefs->strict_mixed_content_checking = false;
   prefs->webgl_errors_to_console_enabled = false;
   base::string16 serif;
 #if defined(OS_MACOSX)
@@ -111,7 +115,8 @@ base::FilePath GetWebKitRootDirFilePath() {
 
 std::vector<std::string> GetSideloadFontFiles() {
   std::vector<std::string> files;
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kRegisterFontFiles)) {
     base::SplitString(
         command_line.GetSwitchValueASCII(switches::kRegisterFontFiles),

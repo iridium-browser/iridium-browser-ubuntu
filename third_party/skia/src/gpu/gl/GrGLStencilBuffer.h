@@ -24,20 +24,15 @@ public:
     };
 
     GrGLStencilBuffer(GrGpu* gpu,
-                      bool isWrapped,
                       GrGLint rbid,
                       int width, int height,
                       int sampleCnt,
                       const Format& format)
-        : GrStencilBuffer(gpu, isWrapped, width, height, format.fStencilBits, sampleCnt)
+        : GrStencilBuffer(gpu, width, height, format.fStencilBits, sampleCnt)
         , fFormat(format)
         , fRenderbufferID(rbid) {
         this->registerWithCache();
     }
-
-    virtual ~GrGLStencilBuffer();
-
-    virtual size_t gpuMemorySize() const SK_OVERRIDE;
 
     GrGLuint renderbufferID() const {
         return fRenderbufferID;
@@ -51,6 +46,8 @@ protected:
     virtual void onAbandon() SK_OVERRIDE;
 
 private:
+    virtual size_t onGpuMemorySize() const SK_OVERRIDE;
+
     Format fFormat;
     // may be zero for external SBs associated with external RTs
     // (we don't require the client to give us the id, just tell

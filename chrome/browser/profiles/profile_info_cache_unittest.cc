@@ -538,13 +538,15 @@ TEST_F(ProfileInfoCacheTest, AddStubProfile) {
 // High res avatar downloading is only supported on desktop.
 #if !defined(OS_ANDROID) && !defined(OS_IOS) && !defined(OS_CHROMEOS)
 TEST_F(ProfileInfoCacheTest, DownloadHighResAvatarTest) {
-  switches::EnableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
+  switches::EnableNewAvatarMenuForTesting(
+      base::CommandLine::ForCurrentProcess());
 
   EXPECT_EQ(0U, GetCache()->GetNumberOfProfiles());
   base::FilePath path_1 = GetProfilePath("path_1");
   GetCache()->AddProfileToCache(path_1, ASCIIToUTF16("name_1"),
                                 base::string16(), 0, std::string());
   EXPECT_EQ(1U, GetCache()->GetNumberOfProfiles());
+  base::RunLoop().RunUntilIdle();
 
   // We haven't downloaded any high-res avatars yet.
   EXPECT_EQ(0U, GetCache()->cached_avatar_images_.size());
@@ -569,11 +571,13 @@ TEST_F(ProfileInfoCacheTest, DownloadHighResAvatarTest) {
   avatar_downloader.OnFetchComplete(
       GURL("http://www.google.com/avatar.png"), &bitmap);
 
+  // Now the download should not be in progress anymore.
+  EXPECT_EQ(0U, GetCache()->avatar_images_downloads_in_progress_.size());
+
   std::string file_name =
       profiles::GetDefaultAvatarIconFileNameAtIndex(kIconIndex);
 
   // The file should have been cached and saved.
-  EXPECT_EQ(1U, GetCache()->avatar_images_downloads_in_progress_.size());
   EXPECT_EQ(1U, GetCache()->cached_avatar_images_.size());
   EXPECT_TRUE(GetCache()->GetHighResAvatarOfProfileAtIndex(0));
   EXPECT_EQ(GetCache()->cached_avatar_images_[file_name],
@@ -592,7 +596,8 @@ TEST_F(ProfileInfoCacheTest, DownloadHighResAvatarTest) {
 }
 
 TEST_F(ProfileInfoCacheTest, MigrateLegacyProfileNamesWithNewAvatarMenu) {
-  switches::EnableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
+  switches::EnableNewAvatarMenuForTesting(
+      base::CommandLine::ForCurrentProcess());
   EXPECT_EQ(0U, GetCache()->GetNumberOfProfiles());
 
   base::FilePath path_1 = GetProfilePath("path_1");
@@ -639,7 +644,8 @@ TEST_F(ProfileInfoCacheTest, MigrateLegacyProfileNamesWithNewAvatarMenu) {
 
 TEST_F(ProfileInfoCacheTest,
        DontMigrateLegacyProfileNamesWithoutNewAvatarMenu) {
-  switches::DisableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
+  switches::DisableNewAvatarMenuForTesting(
+      base::CommandLine::ForCurrentProcess());
 
   EXPECT_EQ(0U, GetCache()->GetNumberOfProfiles());
 
@@ -673,4 +679,3 @@ TEST_F(ProfileInfoCacheTest,
   EXPECT_EQ(name_4, GetCache()->GetNameOfProfileAtIndex(
       GetCache()->GetIndexOfProfileWithPath(path_4)));
 }
-

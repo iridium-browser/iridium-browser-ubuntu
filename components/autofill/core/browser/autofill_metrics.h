@@ -195,6 +195,17 @@ class AutofillMetrics {
     NUM_SERVER_QUERY_METRICS,
   };
 
+  // Logs usage of "Scan card" control item.
+  enum ScanCreditCardPromptMetric {
+    // "Scan card" was presented to the user.
+    SCAN_CARD_ITEM_SHOWN,
+    // "Scan card" was selected by the user.
+    SCAN_CARD_ITEM_SELECTED,
+    // The user selected something in the dropdown besides "scan card".
+    SCAN_CARD_OTHER_ITEM_SELECTED,
+    NUM_SCAN_CREDIT_CARD_PROMPT_METRICS,
+  };
+
   // Each of these metrics is logged only for potentially autofillable forms,
   // i.e. forms with at least three fields, etc.
   // These are used to derive certain "user happiness" metrics.  For example, we
@@ -307,112 +318,105 @@ class AutofillMetrics {
     NUM_WALLET_REQUIRED_ACTIONS
   };
 
-  AutofillMetrics();
-  virtual ~AutofillMetrics();
+  static void LogCreditCardInfoBarMetric(InfoBarMetric metric);
+  static void LogScanCreditCardPromptMetric(ScanCreditCardPromptMetric metric);
 
-  virtual void LogCreditCardInfoBarMetric(InfoBarMetric metric) const;
+  static void LogDeveloperEngagementMetric(DeveloperEngagementMetric metric);
 
-  virtual void LogDeveloperEngagementMetric(
-      DeveloperEngagementMetric metric) const;
+  static void LogHeuristicTypePrediction(FieldTypeQualityMetric metric,
+                                         ServerFieldType field_type);
+  static void LogOverallTypePrediction(FieldTypeQualityMetric metric,
+                                       ServerFieldType field_type);
+  static void LogServerTypePrediction(FieldTypeQualityMetric metric,
+                                      ServerFieldType field_type);
 
-  virtual void LogHeuristicTypePrediction(FieldTypeQualityMetric metric,
-                                          ServerFieldType field_type) const;
-  virtual void LogOverallTypePrediction(FieldTypeQualityMetric metric,
-                                        ServerFieldType field_type) const;
-  virtual void LogServerTypePrediction(FieldTypeQualityMetric metric,
-                                       ServerFieldType field_type) const;
+  static void LogServerQueryMetric(ServerQueryMetric metric);
 
-  virtual void LogServerQueryMetric(ServerQueryMetric metric) const;
-
-  virtual void LogUserHappinessMetric(UserHappinessMetric metric) const;
+  static void LogUserHappinessMetric(UserHappinessMetric metric);
 
   // Logs |state| to the dismissal states histogram.
-  virtual void LogDialogDismissalState(DialogDismissalState state) const;
+  static void LogDialogDismissalState(DialogDismissalState state);
 
   // This should be called as soon as the user's signed-in status and Wallet
   // item count is known.  Records that a user starting out in |user_state| is
   // interacting with a dialog.
-  virtual void LogDialogInitialUserState(
-      DialogInitialUserStateMetric user_type) const;
+  static void LogDialogInitialUserState(DialogInitialUserStateMetric user_type);
 
   // Logs the time elapsed between the dialog being shown and when it is ready
   // for user interaction.
-  virtual void LogDialogLatencyToShow(const base::TimeDelta& duration) const;
+  static void LogDialogLatencyToShow(const base::TimeDelta& duration);
 
   // Logs |event| to the popup events histogram.
-  virtual void LogDialogPopupEvent(DialogPopupEvent event) const;
+  static void LogDialogPopupEvent(DialogPopupEvent event);
 
   // Logs |metric| to the security metrics histogram.
-  virtual void LogDialogSecurityMetric(DialogSecurityMetric metric) const;
+  static void LogDialogSecurityMetric(DialogSecurityMetric metric);
 
   // This should be called when the Autofill dialog is closed.  |duration|
   // should be the time elapsed between the dialog being shown and it being
   // closed.  |dismissal_action| should indicate whether the user dismissed
   // the dialog by submitting the form data or by canceling.
-  virtual void LogDialogUiDuration(
-      const base::TimeDelta& duration,
-      DialogDismissalAction dismissal_action) const;
+  static void LogDialogUiDuration(const base::TimeDelta& duration,
+                                  DialogDismissalAction dismissal_action);
 
   // Logs |event| to the UI events histogram.
-  virtual void LogDialogUiEvent(DialogUiEvent event) const;
+  static void LogDialogUiEvent(DialogUiEvent event);
 
   // Logs |metric| to the Wallet errors histogram.
-  virtual void LogWalletErrorMetric(WalletErrorMetric metric) const;
+  static void LogWalletErrorMetric(WalletErrorMetric metric);
 
   // Logs the network request time of Wallet API calls.
-  virtual void LogWalletApiCallDuration(
-      WalletApiCallMetric metric,
-      const base::TimeDelta& duration) const;
+  static void LogWalletApiCallDuration(WalletApiCallMetric metric,
+                                       const base::TimeDelta& duration);
 
   // Logs that the Wallet API call corresponding to |metric| was malformed.
-  virtual void LogWalletMalformedResponseMetric(
-      WalletApiCallMetric metric) const;
+  static void LogWalletMalformedResponseMetric(WalletApiCallMetric metric);
 
   // Logs |required_action| to the required actions histogram.
-  virtual void LogWalletRequiredActionMetric(
-      WalletRequiredActionMetric required_action) const;
+  static void LogWalletRequiredActionMetric(
+      WalletRequiredActionMetric required_action);
 
   // Logs HTTP response codes recieved by wallet client.
-  virtual void LogWalletResponseCode(int response_code) const;
+  static void LogWalletResponseCode(int response_code);
 
   // This should be called when a form that has been Autofilled is submitted.
   // |duration| should be the time elapsed between form load and submission.
-  virtual void LogFormFillDurationFromLoadWithAutofill(
-      const base::TimeDelta& duration) const;
+  static void LogFormFillDurationFromLoadWithAutofill(
+      const base::TimeDelta& duration);
 
   // This should be called when a fillable form that has not been Autofilled is
   // submitted.  |duration| should be the time elapsed between form load and
   // submission.
-  virtual void LogFormFillDurationFromLoadWithoutAutofill(
-      const base::TimeDelta& duration) const;
+  static void LogFormFillDurationFromLoadWithoutAutofill(
+      const base::TimeDelta& duration);
 
   // This should be called when a form that has been Autofilled is submitted.
   // |duration| should be the time elapsed between the initial form interaction
   // and submission.
-  virtual void LogFormFillDurationFromInteractionWithAutofill(
-      const base::TimeDelta& duration) const;
+  static void LogFormFillDurationFromInteractionWithAutofill(
+      const base::TimeDelta& duration);
 
   // This should be called when a fillable form that has not been Autofilled is
   // submitted.  |duration| should be the time elapsed between the initial form
   // interaction and submission.
-  virtual void LogFormFillDurationFromInteractionWithoutAutofill(
-      const base::TimeDelta& duration) const;
+  static void LogFormFillDurationFromInteractionWithoutAutofill(
+      const base::TimeDelta& duration);
 
   // This should be called each time a page containing forms is loaded.
-  virtual void LogIsAutofillEnabledAtPageLoad(bool enabled) const;
+  static void LogIsAutofillEnabledAtPageLoad(bool enabled);
 
   // This should be called each time a new profile is launched.
-  virtual void LogIsAutofillEnabledAtStartup(bool enabled) const;
+  static void LogIsAutofillEnabledAtStartup(bool enabled);
 
   // This should be called each time a new profile is launched.
-  virtual void LogStoredProfileCount(size_t num_profiles) const;
+  static void LogStoredProfileCount(size_t num_profiles);
 
   // Log the number of Autofill suggestions presented to the user when filling a
   // form.
-  virtual void LogAddressSuggestionsCount(size_t num_suggestions) const;
+  static void LogAddressSuggestionsCount(size_t num_suggestions);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(AutofillMetrics);
+  DISALLOW_IMPLICIT_CONSTRUCTORS(AutofillMetrics);
 };
 
 }  // namespace autofill

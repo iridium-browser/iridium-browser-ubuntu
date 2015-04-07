@@ -11,18 +11,23 @@
 
     <!-- Website Settings Popup Dimensions -->
     <dimen name="website_settings_popup_padding_sides">16dp</dimen>
-    <dimen name="website_settings_popup_button_text_size">14dp</dimen>
+    <dimen name="website_settings_popup_button_text_size">14sp</dimen>
     <dimen name="website_settings_popup_button_height">36dp</dimen>
     <dimen name="website_settings_popup_button_padding_sides">8dp</dimen>
     <dimen name="website_settings_popup_button_margin_sides">4dp</dimen>
     <dimen name="website_settings_popup_permission_icon_size">24dp</dimen>
-    <dimen name="website_settings_popup_permission_spinner_text_size">16dp</dimen>
+    <dimen name="website_settings_popup_permission_spinner_text_size">16sp</dimen>
 
     <!-- Accessibility tab switcher -->
     <dimen name="accessibility_tab_height">65dp</dimen>
 
     <!-- TabSwitcher - The minimum distance from the edge to commit a side swap. -->
     <dimen name="swipe_commit_distance">120dp</dimen>
+    
+    <!-- Tab title -->
+    <dimen name="border_texture_title_fade">24dp</dimen>                    <!-- 40px hdpi -->
+    <dimen name="tab_title_favicon_start_padding">10dp</dimen>
+    <dimen name="tab_title_favicon_end_padding">7dp</dimen>
 
     <!-- Custom Menu dimensions -->
     <dimen name="menu_width">258dp</dimen>
@@ -84,4 +89,28 @@
     <dimen name="password_generation_text_size">14sp</dimen>
     <dimen name="password_generation_horizontal_margin">10dp</dimen>
     <dimen name="password_generation_text_vertical_margin">12dp</dimen>
+
+    <!--  Preferences button dimensions -->
+    <!-- TODO(twellington): Remove/update the following dimens after we switch the PreferencesTheme
+                                parent to AppCompat. -->
+    <dimen name="pref_button_margin_start">0dp</dimen>
+    <dimen name="pref_button_corner_radius">2dp</dimen>
+    <dimen name="pref_button_horizontal_padding">16dp</dimen>
+    <dimen name="pref_button_vertical_padding">10dp</dimen>
+
+    <!-- Minimum height/width for a touchable item -->
+    <dimen name="min_touch_target_size">48dp</dimen>
+
+    <!-- Text bubble dimensions -->
+    <!-- Tooltip min distance from the edge of the screen. -->
+    <dimen name="tooltip_min_edge_margin">3dp</dimen>
+    <!-- Tooltip margin above click target. -->
+    <dimen name="tooltip_top_margin">2dp</dimen>
+    <!-- Tooltip border width around the main content bubble. -->
+    <dimen name="tooltip_border_width">1dp</dimen>
+    <!-- Padding for tooltip content -->
+    <dimen name="tooltip_content_padding">5dp</dimen>
+    <!-- Tooltip x margin for text bubble -->
+    <dimen name="bubble_tip_margin">8dp</dimen>
+
 </resources>

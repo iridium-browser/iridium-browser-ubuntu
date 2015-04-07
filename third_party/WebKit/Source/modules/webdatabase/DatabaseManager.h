@@ -46,6 +46,7 @@ class DatabaseManager {
     WTF_MAKE_NONCOPYABLE(DatabaseManager); WTF_MAKE_FAST_ALLOCATED;
 public:
     static DatabaseManager& manager();
+    static void terminateDatabaseThread();
 
     // These 2 methods are for DatabaseContext (un)registration, and should only
     // be called by the DatabaseContext constructor and destructor.
@@ -83,6 +84,9 @@ private:
 
     static void logErrorMessage(ExecutionContext*, const String& message);
 
+    // m_contextMap can have two or more entries even though we don't support
+    // Web SQL on workers because single Blink process can have multiple main
+    // contexts.
     typedef PersistentHeapHashMap<ExecutionContext*, Member<DatabaseContext> > ContextMap;
     ContextMap m_contextMap;
 #if ENABLE(ASSERT)

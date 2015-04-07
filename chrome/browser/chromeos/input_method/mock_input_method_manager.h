@@ -6,11 +6,11 @@
 #define CHROME_BROWSER_CHROMEOS_INPUT_METHOD_MOCK_INPUT_METHOD_MANAGER_H_
 
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
-#include "chromeos/ime/component_extension_ime_manager.h"
-#include "chromeos/ime/fake_ime_keyboard.h"
-#include "chromeos/ime/fake_input_method_delegate.h"
-#include "chromeos/ime/input_method_manager.h"
-#include "chromeos/ime/input_method_whitelist.h"
+#include "ui/base/ime/chromeos/component_extension_ime_manager.h"
+#include "ui/base/ime/chromeos/fake_ime_keyboard.h"
+#include "ui/base/ime/chromeos/fake_input_method_delegate.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/base/ime/chromeos/input_method_whitelist.h"
 
 namespace chromeos {
 namespace input_method {
@@ -52,10 +52,12 @@ class MockInputMethodManager : public InputMethodManager {
     virtual void SetInputMethodLoginDefaultFromVPD(
         const std::string& locale,
         const std::string& layout) override;
-    virtual bool SwitchToNextInputMethod() override;
-    virtual bool SwitchToPreviousInputMethod(
+    virtual bool CanCycleInputMethod() override;
+    virtual void SwitchToNextInputMethod() override;
+    virtual void SwitchToPreviousInputMethod() override;
+    virtual bool CanSwitchInputMethod(
         const ui::Accelerator& accelerator) override;
-    virtual bool SwitchInputMethod(const ui::Accelerator& accelerator) override;
+    virtual void SwitchInputMethod(const ui::Accelerator& accelerator) override;
     virtual InputMethodDescriptor GetCurrentInputMethod() const override;
     virtual bool ReplaceEnabledInputMethods(
         const std::vector<std::string>& new_active_input_method_ids) override;

@@ -5,8 +5,12 @@
 
 """Test paygen_payload_lib library."""
 
+# pylint: disable=bad-continuation
+# pylint: disable=bad-whitespace
+
 from __future__ import print_function
 
+import mock
 import mox
 import os
 import shutil
@@ -27,16 +31,13 @@ from chromite.lib.paygen import urilib
 
 
 # We access a lot of protected members during testing.
-# pylint: disable-msg=W0212
+# pylint: disable=protected-access
 
 
-class PaygenPayloadLibTest(mox.MoxTestBase):
+class PaygenPayloadLibTest(cros_test_lib.MoxTempDirTestCase):
   """PaygenPayloadLib tests base class."""
 
-  def __init__(self, test_case_names):
-    mox.MoxTestBase.__init__(self, test_case_names)
-    self.tempdir = ''
-
+  def setUp(self):
     self.old_image = gspaths.Image(
         channel='dev-channel',
         board='x86-alex',
@@ -229,7 +230,6 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
     self.assertEqual(gen._GeneratorUri(), override)
 
   @cros_test_lib.NetworkTest()
-  @osutils.TempDirDecorator
   def testPrepareGenerator(self):
     """Validate that we can download an unzip a generator artifact."""
     gen = self._GetStdGenerator()
@@ -467,7 +467,6 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
     self.mox.ReplayAll()
     gen._GenerateUnsignedPayload()
 
-  @osutils.TempDirDecorator
   def testGenPayloadHashes(self):
     """Test _GenPayloadHash via mox."""
     gen = self._GetStdGenerator()
@@ -478,16 +477,15 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
 
     # Record the expected function calls.
     cmd = ['delta_generator',
-           '-in_file', gen.payload_file,
-           '-out_hash_file', mox.IsA(str),
-           '-signature_size', '256']
+           '-in_file=' + gen.payload_file,
+           mox.IsA(str),
+           '-signature_size=256']
     gen._RunGeneratorCmd(cmd)
 
     # Run the test.
     self.mox.ReplayAll()
     self.assertEqual(gen._GenPayloadHash(), '')
 
-  @osutils.TempDirDecorator
   def testGenMetadataHashes(self):
     """Test _GenPayloadHash via mox."""
     gen = self._GetStdGenerator()
@@ -498,9 +496,9 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
 
     # Record the expected function calls.
     cmd = ['delta_generator',
-           '-in_file', gen.payload_file,
-           '-out_metadata_hash_file', mox.IsA(str),
-           '-signature_size', '256']
+           '-in_file=' + gen.payload_file,
+           mox.IsA(str),
+           '-signature_size=256']
     gen._RunGeneratorCmd(cmd)
 
     # Run the test.
@@ -528,7 +526,6 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
     self.assertEqual(gen._SignHashes(hashes),
                      signatures)
 
-  @osutils.TempDirDecorator
   def testInsertPayloadSignatures(self):
     """Test inserting payload signatures."""
     gen = self._GetStdGenerator(payload=self.delta_payload)
@@ -540,16 +537,15 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
 
     # Record the expected function calls.
     cmd = ['delta_generator',
-           '-in_file', gen.payload_file,
-           '-signature_file', mox.IsA(str),
-           '-out_file', gen.signed_payload_file]
+           '-in_file=' + gen.payload_file,
+           mox.IsA(str),
+           '-out_file=' + gen.signed_payload_file]
     gen._RunGeneratorCmd(cmd)
 
     # Run the test.
     self.mox.ReplayAll()
     gen._InsertPayloadSignatures(payload_signatures)
 
-  @osutils.TempDirDecorator
   def testStoreMetadataSignatures(self):
     """Test how we store metadata signatures."""
     gen = self._GetStdGenerator(payload=self.delta_payload)
@@ -567,7 +563,6 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
     with file(gen.metadata_signature_file, 'rb') as f:
       self.assertEqual(f.read(), encoded_metadata_signature)
 
-  @osutils.TempDirDecorator
   def testPayloadJson(self):
     """Test how we store the payload description in json."""
     gen = self._GetStdGenerator(payload=self.delta_payload)
@@ -576,11 +571,16 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
     metadata_signatures = ('1',)
 
     expected_json = (
-        '{"metadata_signature": "MQ==", "sha1_hex": "FDwoNOUO+kNwrQJMSLnLDY7i'
-        'Z/E=", "sha256_hex": "gkm9207E7xbqpNRBFjEPO43nxyp/MNGQfyH3IYrq2kE=",'
+        '{"md5_hex": "75218643432e5f621386d4ffcbedf9ba",'
+        ' "metadata_signature": "MQ==",'
+        ' "metadata_size": 10,'
+        ' "sha1_hex": "FDwoNOUO+kNwrQJMSLnLDY7iZ/E=",'
+        ' "sha256_hex": "gkm9207E7xbqpNRBFjEPO43nxyp/MNGQfyH3IYrq2kE=",'
         ' "version": 1}')
 
-    gen._StorePayloadJson(metadata_signatures)
+    # To really look up the metadata size, we'd need a real payload for parsing.
+    with mock.patch.object(gen, '_MetadataSize', return_value=10):
+      gen._StorePayloadJson(metadata_signatures)
 
     # Validate the results.
     self.assertEqual(osutils.ReadFile(gen.description_file), expected_json)
@@ -767,7 +767,6 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
         paygen_payload_lib.FindExistingPayloads(self.full_payload),
         ['foo_result'])
 
-
   def testFindCacheDir(self):
     """Test calculating the location of the cache directory."""
     # Test default dir in /tmp.
@@ -786,6 +785,7 @@ class PaygenPayloadLibEndToEndTest(PaygenPayloadLibTest):
     """Helper test function for validating end to end payload generation."""
     output_uri = os.path.join(self.tempdir, 'expected_payload_out')
     output_metadata_uri = output_uri + '.metadata-signature'
+    output_metadata_json = output_uri + '.json'
 
     payload = gspaths.Payload(tgt_image=tgt_image,
                               src_image=src_image,
@@ -799,15 +799,14 @@ class PaygenPayloadLibEndToEndTest(PaygenPayloadLibTest):
 
     self.assertTrue(os.path.exists(output_uri))
     self.assertEqual(os.path.exists(output_metadata_uri), sign)
+    self.assertTrue(os.path.exists(output_metadata_json))
 
   @cros_test_lib.NetworkTest()
-  @osutils.TempDirDecorator
   def testEndToEndIntegrationFull(self):
     """Integration test to generate a full payload for old_image."""
     self._EndToEndIntegrationTest(self.old_image, None, sign=True)
 
   @cros_test_lib.NetworkTest()
-  @osutils.TempDirDecorator
   def testEndToEndIntegrationDelta(self):
     """Integration test to generate a delta payload for new_image -> NPO."""
     self._EndToEndIntegrationTest(self.new_nplusone_image,

@@ -14,8 +14,10 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_initializer.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_validator.h"
+#include "chrome/browser/chromeos/policy/enrollment_config.h"
 #include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
 #include "policy/proto/device_management_backend.pb.h"
@@ -26,6 +28,7 @@ class SequencedTaskRunner;
 
 namespace chromeos {
 class DeviceSettingsService;
+class OwnerSettingsServiceChromeOS;
 }
 
 namespace policy {
@@ -64,14 +67,15 @@ class EnrollmentHandlerChromeOS : public CloudPolicyClient::Observer,
       EnterpriseInstallAttributes* install_attributes,
       ServerBackedStateKeysBroker* state_keys_broker,
       chromeos::DeviceSettingsService* device_settings_service,
+      chromeos::OwnerSettingsServiceChromeOS* owner_settings_service,
       scoped_ptr<CloudPolicyClient> client,
       scoped_refptr<base::SequencedTaskRunner> background_task_runner,
+      const EnrollmentConfig& enrollment_config,
       const std::string& auth_token,
       const std::string& client_id,
-      bool is_auto_enrollment,
       const std::string& requisition,
       const AllowedDeviceModes& allowed_device_modes,
-      enterprise_management::PolicyData::ManagementMode management_mode,
+      ManagementMode management_mode,
       const EnrollmentCallback& completion_callback);
   virtual ~EnrollmentHandlerChromeOS();
 
@@ -135,9 +139,9 @@ class EnrollmentHandlerChromeOS : public CloudPolicyClient::Observer,
   // enrollment.
   void StartLockDevice();
 
-  // Checks the status after SetManagementSettings() is done. Proceeds to
-  // robot auth code storing if successful.
-  void HandleSetManagementSettingsDone();
+  // Called after SetManagementSettings() is done. Proceeds to robot
+  // auth code storing if successful.
+  void HandleSetManagementSettingsDone(bool success);
 
   // Handle callback from InstallAttributes::LockDevice() and retry on failure.
   void HandleLockDeviceResult(
@@ -159,18 +163,19 @@ class EnrollmentHandlerChromeOS : public CloudPolicyClient::Observer,
   EnterpriseInstallAttributes* install_attributes_;
   ServerBackedStateKeysBroker* state_keys_broker_;
   chromeos::DeviceSettingsService* device_settings_service_;
+  chromeos::OwnerSettingsServiceChromeOS* owner_settings_service_;
   scoped_ptr<CloudPolicyClient> client_;
   scoped_refptr<base::SequencedTaskRunner> background_task_runner_;
   scoped_ptr<gaia::GaiaOAuthClient> gaia_oauth_client_;
 
+  EnrollmentConfig enrollment_config_;
   std::string auth_token_;
   std::string client_id_;
-  bool is_auto_enrollment_;
   std::string requisition_;
   std::string current_state_key_;
   std::string refresh_token_;
   AllowedDeviceModes allowed_device_modes_;
-  enterprise_management::PolicyData::ManagementMode management_mode_;
+  ManagementMode management_mode_;
   EnrollmentCallback completion_callback_;
 
   // The device mode as received in the registration request.

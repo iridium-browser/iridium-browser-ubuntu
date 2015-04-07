@@ -6,16 +6,16 @@
 
 #include <Cocoa/Cocoa.h>
 
+#include "base/logging.h"
 #import "base/mac/mac_util.h"
 #import "base/mac/sdk_forward_declarations.h"
-#include "base/logging.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "ui/events/cocoa/cocoa_event_utils.h"
 #include "ui/events/event_utils.h"
 #import "ui/events/keycodes/keyboard_code_conversion_mac.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/vector2d.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/vector2d.h"
 
 namespace ui {
 
@@ -217,7 +217,7 @@ KeyboardCode KeyboardCodeFromNative(const base::NativeEvent& native_event) {
   return KeyboardCodeFromNSEvent(native_event);
 }
 
-const char* CodeFromNative(const base::NativeEvent& native_event) {
+DomCode CodeFromNative(const base::NativeEvent& native_event) {
   return CodeFromNSEvent(native_event);
 }
 

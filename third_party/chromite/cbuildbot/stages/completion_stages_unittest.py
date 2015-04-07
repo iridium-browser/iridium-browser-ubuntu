@@ -7,7 +7,6 @@
 
 from __future__ import print_function
 
-import mox
 import os
 import sys
 
@@ -17,59 +16,64 @@ from chromite.cbuildbot import constants
 from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot import results_lib
-from chromite.cbuildbot import validation_pool
 from chromite.cbuildbot.stages import completion_stages
 from chromite.cbuildbot.stages import generic_stages_unittest
 from chromite.cbuildbot.stages import sync_stages_unittest
 from chromite.cbuildbot.stages import sync_stages
 from chromite.lib import alerts
+from chromite.lib import clactions
 from chromite.lib import cros_test_lib
+from chromite.lib import patch_unittest
+
+# TODO(build): Finish test wrapper (http://crosbug.com/37517).
+# Until then, this has to be after the chromite imports.
+import mock
 
 
-# pylint: disable=R0901,W0212
+# pylint: disable=protected-access
+
+
 class ManifestVersionedSyncCompletionStageTest(
     sync_stages_unittest.ManifestVersionedSyncStageTest):
   """Tests the ManifestVersionedSyncCompletion stage."""
-  # pylint: disable=W0223
+
+  # pylint: disable=abstract-method
+
   BOT_ID = 'x86-mario-release'
 
   def testManifestVersionedSyncCompletedSuccess(self):
     """Tests basic ManifestVersionedSyncStageCompleted on success"""
-    self.mox.StubOutWithMock(manifest_version.BuildSpecsManager, 'UpdateStatus')
-
     board_runattrs = self._run.GetBoardRunAttrs('x86-mario')
     board_runattrs.SetParallel('success', True)
-    self.manager.UpdateStatus(message=None, success_map={self.BOT_ID: True},
-                              dashboard_url=mox.IgnoreArg())
+    update_status_mock = self.PatchObject(
+        manifest_version.BuildSpecsManager, 'UpdateStatus')
 
-    self.mox.ReplayAll()
     stage = completion_stages.ManifestVersionedSyncCompletionStage(
         self._run, self.sync_stage, success=True)
+
     stage.Run()
-    self.mox.VerifyAll()
+    update_status_mock.assert_called_once_with(
+        message=None, success_map={self.BOT_ID: True}, dashboard_url=mock.ANY)
 
   def testManifestVersionedSyncCompletedFailure(self):
     """Tests basic ManifestVersionedSyncStageCompleted on failure"""
     stage = completion_stages.ManifestVersionedSyncCompletionStage(
         self._run, self.sync_stage, success=False)
-    self.mox.StubOutWithMock(manifest_version.BuildSpecsManager, 'UpdateStatus')
-    self.mox.StubOutWithMock(stage, 'GetBuildFailureMessage')
+    message = 'foo'
+    self.PatchObject(stage, 'GetBuildFailureMessage', return_value=message)
+    update_status_mock = self.PatchObject(
+        manifest_version.BuildSpecsManager, 'UpdateStatus')
 
-    self.manager.UpdateStatus(message=None, success_map={self.BOT_ID: False},
-                              dashboard_url=mox.IgnoreArg())
-    stage.GetBuildFailureMessage()
-
-    self.mox.ReplayAll()
     stage.Run()
-    self.mox.VerifyAll()
+    update_status_mock.assert_called_once_with(
+        message='foo', success_map={self.BOT_ID: False},
+        dashboard_url=mock.ANY)
 
   def testManifestVersionedSyncCompletedIncomplete(self):
     """Tests basic ManifestVersionedSyncStageCompleted on incomplete build."""
-    self.mox.ReplayAll()
     stage = completion_stages.ManifestVersionedSyncCompletionStage(
         self._run, self.sync_stage, success=False)
     stage.Run()
-    self.mox.VerifyAll()
 
   def testMeaningfulMessage(self):
     """Tests that all essential components are in the message."""
@@ -90,6 +94,15 @@ class ManifestVersionedSyncCompletionStageTest(
 
     self.assertTrue('TacoStage' in msg.reason)
     self.assertTrue(str(exception) in msg.reason)
+
+  def testGetBuilderSuccessMap(self):
+    """Tests that the builder success map is properly created."""
+    board_runattrs = self._run.GetBoardRunAttrs('x86-mario')
+    board_runattrs.SetParallel('success', True)
+    builder_success_map = completion_stages.GetBuilderSuccessMap(
+        self._run, True)
+    expected_map = {self.BOT_ID: True}
+    self.assertEqual(expected_map, builder_success_map)
 
 
 class MasterSlaveSyncCompletionStageTest(
@@ -177,13 +190,9 @@ class MasterSlaveSyncCompletionStageTest(
     try:
       test_config = self._GetTestConfig()
       completion_stages.cbuildbot_config.config = test_config
-
-      self.mox.ReplayAll()
-
       stage = self.ConstructStage()
-      p = stage._GetSlaveConfigs()
-      self.mox.VerifyAll()
 
+      p = stage._GetSlaveConfigs()
       self.assertTrue(test_config['test3'] in p)
       self.assertTrue(test_config['test5'] in p)
       self.assertFalse(test_config['test1'] in p)
@@ -256,7 +265,6 @@ class CanaryCompletionStageTest(
   """Tests how canary master handles failures in CanaryCompletionStage."""
   BOT_ID = 'master-release'
 
-  # pylint: disable=E1120
   def _Prepare(self, bot_id=BOT_ID, **kwargs):
     super(CanaryCompletionStageTest, self)._Prepare(bot_id, **kwargs)
 
@@ -282,11 +290,10 @@ class CanaryCompletionStageTest(
 
 
 class CommitQueueCompletionStageTest(
-    generic_stages_unittest.AbstractStageTest):
+    generic_stages_unittest.AbstractStageTest, patch_unittest.MockPatchBase):
   """Tests how CQ master handles changes in CommitQueueCompletionStage."""
   BOT_ID = 'master-paladin'
 
-  # pylint: disable=E1120
   def _Prepare(self, bot_id=BOT_ID, **kwargs):
     super(CommitQueueCompletionStageTest, self)._Prepare(bot_id, **kwargs)
     self.assertTrue(self._run.config['master'])
@@ -298,35 +305,45 @@ class CommitQueueCompletionStageTest(
     self.partial_submit_changes = ['C', 'D']
     self.other_changes = ['A', 'B']
     self.changes = self.other_changes + self.partial_submit_changes
+    self.tot_sanity_mock = self.PatchObject(
+        completion_stages.CommitQueueCompletionStage,
+        '_ToTSanity',
+        return_value=True)
 
-    self.mox.StubOutWithMock(completion_stages.MasterSlaveSyncCompletionStage,
-                             'HandleFailure')
-    self.mox.StubOutWithMock(completion_stages.CommitQueueCompletionStage,
-                             'SubmitPartialPool')
-    self.mox.StubOutWithMock(completion_stages.CommitQueueCompletionStage,
-                             '_ToTSanity')
-    self.mox.StubOutWithMock(alerts, '_SendEmailHelper')
-
+    self.alert_email_mock = self.PatchObject(alerts, '_SendEmailHelper')
+    self.PatchObject(completion_stages.MasterSlaveSyncCompletionStage,
+                     'HandleFailure')
     self.PatchObject(completion_stages.CommitQueueCompletionStage,
                      '_GetFailedMessages')
     self.PatchObject(completion_stages.CommitQueueCompletionStage,
                      'ShouldDisableAlerts', return_value=False)
+    self.PatchObject(completion_stages.CommitQueueCompletionStage,
+                     '_GetSlaveMappingAndCLActions',
+                     return_value=(dict(), []))
+    self.PatchObject(clactions, 'GetRelevantChangesForBuilds')
 
-  def ConstructStage(self):
-    """Returns a CommitQueueCompletionStage object."""
+  # pylint: disable=W0221
+  def ConstructStage(self, tree_was_open=True):
+    """Returns a CommitQueueCompletionStage object.
+
+    Args:
+      tree_was_open: If not true, tree was not open when we acquired changes.
+    """
     sync_stage = sync_stages.CommitQueueSyncStage(self._run)
-    sync_stage.pool = mox.MockObject(validation_pool.ValidationPool)
+    sync_stage.pool = mock.MagicMock()
     sync_stage.pool.changes = self.changes
-    self.mox.StubOutWithMock(sync_stage.pool,
-                             'HandleValidationFailure')
-    self.mox.StubOutWithMock(sync_stage.pool,
-                             'HandleValidationTimeout')
+    sync_stage.pool.tree_was_open = tree_was_open
 
+    sync_stage.pool.handle_failure_mock = self.PatchObject(
+        sync_stage.pool, 'HandleValidationFailure')
+    sync_stage.pool.handle_timeout_mock = self.PatchObject(
+        sync_stage.pool, 'HandleValidationTimeout')
     return completion_stages.CommitQueueCompletionStage(
         self._run, sync_stage, success=True)
 
   def VerifyStage(self, failing, inflight, handle_failure=True,
-                  handle_timeout=False, submit_partial=False, alert=False):
+                  handle_timeout=False, sane_tot=True, submit_partial=False,
+                  alert=False, stage=None):
     """Runs and Verifies CQMasterHandleFailure.
 
     Args:
@@ -334,34 +351,36 @@ class CommitQueueCompletionStageTest(
       inflight: The names of the buiders that timed out.
       handle_failure: If True, calls HandleValidationFailure.
       handle_timeout: If True, calls HandleValidationTimeout.
-      submit_partial: If True, submit parital pool.
+      sane_tot: If not true, assumes TOT is not sane.
+      submit_partial: If True, submit partial pool.
       alert: If True, sends out an alert email for infra failures.
+      stage: If set, use this constructed stage, otherwise create own.
     """
-    stage = self.ConstructStage()
+    if not stage:
+      stage = self.ConstructStage()
 
     if submit_partial:
-      completion_stages.CommitQueueCompletionStage.SubmitPartialPool(
-          mox.IgnoreArg()).AndReturn(self.other_changes)
+      self.PatchObject(stage.sync_stage.pool, 'SubmitPartialPool',
+                       return_value=self.other_changes)
+    else:
+      self.PatchObject(stage.sync_stage.pool, 'SubmitPartialPool',
+                       return_value=self.changes)
 
+    stage.CQMasterHandleFailure(failing, inflight, [])
+
+    # Verify the calls.
+    self.tot_sanity_mock.assert_called_once_with(mock.ANY, mock.ANY)
     if alert:
-      alerts._SendEmailHelper(mox.IgnoreArg(), mox.IgnoreArg(), mox.IgnoreArg(),
-                              mox.IgnoreArg())
-
-    completion_stages.CommitQueueCompletionStage._ToTSanity(
-        mox.IgnoreArg(), mox.IgnoreArg())
+      self.alert_email_mock.called_once_with(
+          mock.ANY, mock.ANY, mock.ANY, mock.ANY)
 
     if handle_failure:
-      stage.sync_stage.pool.HandleValidationFailure(
-        mox.IgnoreArg(), no_stat=[], sanity=mox.IgnoreArg(),
-        changes=self.other_changes)
+      stage.sync_stage.pool.handle_failure_mock.assert_called_once_with(
+          mock.ANY, no_stat=[], sanity=sane_tot, changes=self.other_changes)
 
     if handle_timeout:
-      stage.sync_stage.pool.HandleValidationTimeout(
-          sanity=mox.IgnoreArg(), changes=self.changes)
-
-    self.mox.ReplayAll()
-    stage.CQMasterHandleFailure(failing, inflight, [])
-    self.mox.VerifyAll()
+      stage.sync_stage.pool.handle_timeout_mock.assert_called_once_with(
+          sanity=mock.ANY, changes=self.changes)
 
   def testNoInflightBuildersNoInfraFail(self):
     """Test case where there are no inflight builders and no infra failures."""
@@ -412,19 +431,57 @@ class CommitQueueCompletionStageTest(
     self.VerifyStage(failing, inflight, handle_failure=False,
                      handle_timeout=True, alert=True)
 
+  def testGetRelevantChangesForSlave(self):
+    """Tests the logic of GetRelevantChangesForSlaves()."""
+    change_set1 = set(self.GetPatches(how_many=2))
+    change_set2 = set(self.GetPatches(how_many=3))
+    changes = set.union(change_set1, change_set2)
+    no_stat = ['no_stat-paladin']
+    config_map = {'123': 'foo-paladin',
+                  '124': 'bar-paladin',
+                  '125': 'no_stat-paladin'}
+    changes_by_build_id = {'123': change_set1,
+                           '124': change_set2}
+    # If a slave did not report status (no_stat), assume all changes
+    # are relevant.
+    expected = {'foo-paladin': change_set1,
+                'bar-paladin': change_set2,
+                'no_stat-paladin': changes}
+    self.PatchObject(completion_stages.CommitQueueCompletionStage,
+                     '_GetSlaveMappingAndCLActions',
+                     return_value=(config_map, []))
+    self.PatchObject(clactions, 'GetRelevantChangesForBuilds',
+                     return_value=changes_by_build_id)
+
+    stage = self.ConstructStage()
+    results = stage.GetRelevantChangesForSlaves(changes, no_stat)
+    self.assertEqual(results, expected)
+
+  def testWithExponentialFallbackApplied(self):
+    """Tests that we don't treat TOT as sane when it isn't."""
+    failing = ['foo', 'bar']
+    inflight = ['inflight']
+    stage = self.ConstructStage(tree_was_open=False)
+    self.PatchObject(completion_stages.CommitQueueCompletionStage,
+                     '_GetInfraFailMessages', return_value=[])
+    self.PatchObject(completion_stages.CommitQueueCompletionStage,
+                     '_GetBuildersWithNoneMessages', return_value=['foo'])
+
+    # An alert is sent, since we have an inflight build still.
+    self.VerifyStage(failing, inflight, handle_failure=False,
+                     handle_timeout=False, sane_tot=False, alert=True,
+                     stage=stage)
+
 
 class PublishUprevChangesStageTest(generic_stages_unittest.AbstractStageTest):
   """Tests for the PublishUprevChanges stage."""
 
   def setUp(self):
-    # pylint: disable=E1120
-    self.mox.StubOutWithMock(completion_stages.PublishUprevChangesStage,
-                             '_GetPortageEnvVar')
-    self.mox.StubOutWithMock(commands, 'UprevPush')
-    self.mox.StubOutWithMock(completion_stages.PublishUprevChangesStage,
-                             '_ExtractOverlays')
-    completion_stages.PublishUprevChangesStage._ExtractOverlays().AndReturn(
-        [['foo'], ['bar']])
+    self.PatchObject(completion_stages.PublishUprevChangesStage,
+                     '_GetPortageEnvVar')
+    self.PatchObject(completion_stages.PublishUprevChangesStage,
+                     '_ExtractOverlays', return_value=[['foo'], ['bar']])
+    self.push_mock = self.PatchObject(commands, 'UprevPush')
 
   def ConstructStage(self):
     return completion_stages.PublishUprevChangesStage(self._run, success=True)
@@ -436,11 +493,8 @@ class PublishUprevChangesStageTest(generic_stages_unittest.AbstractStageTest):
                                 'master': True},
                   extra_cmd_args=['--chrome_rev', constants.CHROME_REV_TOT])
     self._run.options.prebuilts = True
-    completion_stages.commands.UprevPush(self.build_root, ['bar'], False)
-
-    self.mox.ReplayAll()
     self.RunStage()
-    self.mox.VerifyAll()
+    self.push_mock.assert_called_once_with(self.build_root, ['bar'], False)
 
 
 if __name__ == '__main__':

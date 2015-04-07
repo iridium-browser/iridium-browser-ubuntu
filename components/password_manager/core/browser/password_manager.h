@@ -21,10 +21,6 @@
 
 class PrefRegistrySimple;
 
-namespace content {
-class WebContents;
-}
-
 namespace user_prefs {
 class PrefRegistrySyncable;
 }
@@ -34,7 +30,6 @@ namespace password_manager {
 class BrowserSavePasswordProgressLogger;
 class PasswordManagerClient;
 class PasswordManagerDriver;
-class PasswordManagerTest;
 class PasswordFormManager;
 
 // Per-tab password manager. Handles creation and management of UI elements,
@@ -68,7 +63,8 @@ class PasswordManager : public LoginModel {
 
   // Called by a PasswordFormManager when it decides a form can be autofilled
   // on the page.
-  virtual void Autofill(const autofill::PasswordForm& form_for_autofill,
+  virtual void Autofill(password_manager::PasswordManagerDriver* driver,
+                        const autofill::PasswordForm& form_for_autofill,
                         const autofill::PasswordFormMap& best_matches,
                         const autofill::PasswordForm& preferred_match,
                         bool wait_for_username) const;
@@ -78,7 +74,9 @@ class PasswordManager : public LoginModel {
   void RemoveObserver(LoginModelObserver* observer) override;
 
   // Mark this form as having a generated password.
-  void SetFormHasGeneratedPassword(const autofill::PasswordForm& form);
+  void SetFormHasGeneratedPassword(
+      password_manager::PasswordManagerDriver* driver,
+      const autofill::PasswordForm& form);
 
   // TODO(isherman): This should not be public, but is currently being used by
   // the LoginPrompt code.
@@ -87,21 +85,30 @@ class PasswordManager : public LoginModel {
   // of 2 (see SavePassword).
   void ProvisionallySavePassword(const autofill::PasswordForm& form);
 
-  // Should be called when the user navigates the main frame.
-  void DidNavigateMainFrame(bool is_in_page);
+  // Should be called when the user navigates the main frame. Not called for
+  // in-page navigation.
+  void DidNavigateMainFrame();
 
   // Handles password forms being parsed.
-  void OnPasswordFormsParsed(
-      const std::vector<autofill::PasswordForm>& forms);
+  void OnPasswordFormsParsed(password_manager::PasswordManagerDriver* driver,
+                             const std::vector<autofill::PasswordForm>& forms);
 
   // Handles password forms being rendered.
   void OnPasswordFormsRendered(
+      password_manager::PasswordManagerDriver* driver,
       const std::vector<autofill::PasswordForm>& visible_forms,
       bool did_stop_loading);
 
   // Handles a password form being submitted.
   virtual void OnPasswordFormSubmitted(
+      password_manager::PasswordManagerDriver* driver,
       const autofill::PasswordForm& password_form);
+
+  // Called if |password_form| was filled upon in-page navigation. This often
+  // means history.pushState being called from JavaScript. If this causes false
+  // positive in password saving, update http://crbug.com/357696.
+  void OnInPageNavigation(password_manager::PasswordManagerDriver* driver,
+                          const autofill::PasswordForm& password_form);
 
   PasswordManagerClient* client() { return client_; }
 
@@ -127,7 +134,7 @@ class PasswordManager : public LoginModel {
   // values of |failure| also sends logs to the internals page through |logger|,
   // it |logger| is not NULL.
   void RecordFailure(ProvisionalSaveFailure failure,
-                     const std::string& form_origin,
+                     const GURL& form_origin,
                      BrowserSavePasswordProgressLogger* logger);
 
   // Possibly set up FieldTrial for testing other possible usernames. This only
@@ -149,9 +156,14 @@ class PasswordManager : public LoginModel {
   // |provisional_save_manager_|.
   bool ShouldPromptUserToSavePassword() const;
 
+  // Called when we already decided that login was correct and we want to save
+  // password.
+  void AskUserOrSavePassword();
+
   // Checks for every from in |forms| whether |pending_login_managers_| already
   // contain a manager for that form. If not, adds a manager for each such form.
   void CreatePendingLoginManagers(
+      password_manager::PasswordManagerDriver* driver,
       const std::vector<autofill::PasswordForm>& forms);
 
   // Note about how a PasswordFormManager can transition from
@@ -181,9 +193,6 @@ class PasswordManager : public LoginModel {
   // The embedder-level client. Must outlive this class.
   PasswordManagerClient* const client_;
 
-  // The platform-level driver. Must outlive this class.
-  PasswordManagerDriver* const driver_;
-
   // Set to false to disable password saving (will no longer ask if you
   // want to save passwords but will continue to fill passwords).
   BooleanPrefMember saving_passwords_enabled_;
@@ -200,6 +209,9 @@ class PasswordManager : public LoginModel {
   // the recorded forms matches the login form from the previous page
   // (to see if the login was a failure), and clears the vector.
   std::vector<autofill::PasswordForm> all_visible_forms_;
+
+  // The user-visible URL from the last time a password was provisionally saved.
+  GURL main_frame_url_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordManager);
 };

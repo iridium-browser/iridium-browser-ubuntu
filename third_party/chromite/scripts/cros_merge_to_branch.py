@@ -2,7 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""This simple program takes changes from gerrit/gerrit-int and creates new
+"""Developer helper tool for merging CLs from ToT to branches.
+
+This simple program takes changes from gerrit/gerrit-int and creates new
 changes for them on the desired branch using your gerrit/ssh credentials. To
 specify a change on gerrit-int, you must prefix the change with a *.
 
@@ -117,9 +119,7 @@ def _UploadChangeToBranch(work_dir, patch, branch, draft, dryrun):
         reviewers.add('@'.join(ele[-3:-1]))
       continue
     msg.append(line)
-  msg += [
-    '(cherry picked from commit %s)' % patch.sha1,
-  ]
+  msg += ['(cherry picked from commit %s)' % patch.sha1]
   git.RunGit(work_dir, ['commit', '--amend', '-F', '-'],
              input='\n'.join(msg).encode('utf8'))
 

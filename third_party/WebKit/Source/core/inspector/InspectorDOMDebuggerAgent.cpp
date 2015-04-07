@@ -67,7 +67,6 @@ static const char newPromiseEventName[] = "newPromise";
 static const char promiseResolvedEventName[] = "promiseResolved";
 static const char promiseRejectedEventName[] = "promiseRejected";
 static const char windowCloseEventName[] = "close";
-static const char customElementCallbackName[] = "customElementCallback";
 static const char webglErrorFiredEventName[] = "webglErrorFired";
 static const char webglWarningFiredEventName[] = "webglWarningFired";
 static const char webglErrorNameProperty[] = "webglErrorName";
@@ -88,7 +87,6 @@ InspectorDOMDebuggerAgent::InspectorDOMDebuggerAgent(InspectorDOMAgent* domAgent
     : InspectorBaseAgent<InspectorDOMDebuggerAgent>("DOMDebugger")
     , m_domAgent(domAgent)
     , m_debuggerAgent(debuggerAgent)
-    , m_pauseInNextEventListener(false)
 {
     m_debuggerAgent->setListener(this);
     m_domAgent->setListener(this);
@@ -135,28 +133,9 @@ void InspectorDOMDebuggerAgent::domAgentWasDisabled()
     disable();
 }
 
-void InspectorDOMDebuggerAgent::stepInto()
-{
-    m_pauseInNextEventListener = true;
-}
-
-void InspectorDOMDebuggerAgent::didPause()
-{
-    m_pauseInNextEventListener = false;
-}
-
-void InspectorDOMDebuggerAgent::didProcessTask()
-{
-    if (!m_pauseInNextEventListener)
-        return;
-    if (m_debuggerAgent && m_debuggerAgent->runningNestedMessageLoop())
-        return;
-    m_pauseInNextEventListener = false;
-}
-
 void InspectorDOMDebuggerAgent::disable()
 {
-    m_instrumentingAgents->setInspectorDOMDebuggerAgent(0);
+    m_instrumentingAgents->setInspectorDOMDebuggerAgent(nullptr);
     clear();
 }
 
@@ -167,7 +146,7 @@ void InspectorDOMDebuggerAgent::clearFrontend()
 
 void InspectorDOMDebuggerAgent::discardAgent()
 {
-    m_debuggerAgent->setListener(0);
+    m_debuggerAgent->setListener(nullptr);
     m_debuggerAgent = nullptr;
 }
 
@@ -445,21 +424,17 @@ void InspectorDOMDebuggerAgent::pauseOnNativeEventIfNeeded(PassRefPtr<JSONObject
 PassRefPtr<JSONObject> InspectorDOMDebuggerAgent::preparePauseOnNativeEventData(const String& eventName, const String* targetName)
 {
     String fullEventName = (targetName ? listenerEventCategoryType : instrumentationEventCategoryType) + eventName;
-    if (m_pauseInNextEventListener) {
-        m_pauseInNextEventListener = false;
-    } else {
-        RefPtr<JSONObject> eventListenerBreakpoints = m_state->getObject(DOMDebuggerAgentState::eventListenerBreakpoints);
-        JSONObject::iterator it = eventListenerBreakpoints->find(fullEventName);
-        if (it == eventListenerBreakpoints->end())
-            return nullptr;
-        bool match = false;
-        RefPtr<JSONObject> breakpointsByTarget = it->value->asObject();
-        breakpointsByTarget->getBoolean(DOMDebuggerAgentState::eventTargetAny, &match);
-        if (!match && targetName)
-            breakpointsByTarget->getBoolean(targetName->lower(), &match);
-        if (!match)
-            return nullptr;
-    }
+    RefPtr<JSONObject> eventListenerBreakpoints = m_state->getObject(DOMDebuggerAgentState::eventListenerBreakpoints);
+    JSONObject::iterator it = eventListenerBreakpoints->find(fullEventName);
+    if (it == eventListenerBreakpoints->end())
+        return nullptr;
+    bool match = false;
+    RefPtr<JSONObject> breakpointsByTarget = it->value->asObject();
+    breakpointsByTarget->getBoolean(DOMDebuggerAgentState::eventTargetAny, &match);
+    if (!match && targetName)
+        breakpointsByTarget->getBoolean(targetName->lower(), &match);
+    if (!match)
+        return nullptr;
 
     RefPtr<JSONObject> eventData = JSONObject::create();
     eventData->setString("eventName", fullEventName);
@@ -485,8 +460,6 @@ void InspectorDOMDebuggerAgent::willFireTimer(ExecutionContext*, int)
 
 bool InspectorDOMDebuggerAgent::canPauseOnPromiseEvent()
 {
-    if (m_pauseInNextEventListener)
-        return true;
     RefPtr<JSONObject> eventListenerBreakpoints = m_state->getObject(DOMDebuggerAgentState::eventListenerBreakpoints);
     JSONObject::iterator end = eventListenerBreakpoints->end();
     return eventListenerBreakpoints->find(String(instrumentationEventCategoryType) + newPromiseEventName) != end
@@ -534,11 +507,6 @@ void InspectorDOMDebuggerAgent::willHandleEvent(EventTarget* target, Event* even
 void InspectorDOMDebuggerAgent::willCloseWindow()
 {
     pauseOnNativeEventIfNeeded(preparePauseOnNativeEventData(windowCloseEventName, 0), true);
-}
-
-void InspectorDOMDebuggerAgent::willExecuteCustomElementCallback(Element*)
-{
-    pauseOnNativeEventIfNeeded(preparePauseOnNativeEventData(customElementCallbackName, 0), false);
 }
 
 void InspectorDOMDebuggerAgent::didFireWebGLError(const String& errorName)
@@ -595,9 +563,9 @@ void InspectorDOMDebuggerAgent::willSendXMLHttpRequest(const String& url)
         breakpointURL = "";
     else {
         RefPtr<JSONObject> xhrBreakpoints = m_state->getObject(DOMDebuggerAgentState::xhrBreakpoints);
-        for (JSONObject::iterator it = xhrBreakpoints->begin(); it != xhrBreakpoints->end(); ++it) {
-            if (url.contains(it->key)) {
-                breakpointURL = it->key;
+        for (auto& breakpoint : *xhrBreakpoints) {
+            if (url.contains(breakpoint.key)) {
+                breakpointURL = breakpoint.key;
                 break;
             }
         }
@@ -615,8 +583,6 @@ void InspectorDOMDebuggerAgent::willSendXMLHttpRequest(const String& url)
 void InspectorDOMDebuggerAgent::clear()
 {
     m_domBreakpoints.clear();
-    m_pauseInNextEventListener = false;
 }
 
 } // namespace blink
-

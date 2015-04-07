@@ -11,7 +11,7 @@ for more details about the presubmit API built into depot_tools.
 import re
 import string
 
-CC_SOURCE_FILES=(r'^cc/.*\.(cc|h)$',)
+CC_SOURCE_FILES=(r'^cc/.*\.(cc|h)$', r'^cc\\.*\.(cc|h)$')
 
 def CheckChangeLintsClean(input_api, output_api):
   input_api.cpplint._cpplint_state.ResetErrorCounts()  # reset global state
@@ -20,10 +20,6 @@ def CheckChangeLintsClean(input_api, output_api):
   files = [f.AbsoluteLocalPath() for f in
            input_api.AffectedSourceFiles(source_filter)]
   level = 1  # strict, but just warn
-
-  # TODO(danakj): Temporary, while the OVERRIDE and FINAL fixup is in progress.
-  # crbug.com/422353
-  input_api.cpplint._SetFilters('-readability/inheritance')
 
   for file_name in files:
     input_api.cpplint.ProcessFile(file_name, level)

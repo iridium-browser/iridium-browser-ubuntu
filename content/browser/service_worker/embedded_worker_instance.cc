@@ -9,7 +9,8 @@
 
 #include "base/bind_helpers.h"
 #include "base/debug/trace_event.h"
-#include "content/browser/devtools/embedded_worker_devtools_manager.h"
+#include "base/threading/non_thread_safe.h"
+#include "content/browser/devtools/service_worker_devtools_manager.h"
 #include "content/browser/service_worker/embedded_worker_registry.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/common/service_worker/embedded_worker_messages.h"
@@ -31,62 +32,44 @@ struct SecondGreater {
   }
 };
 
-void NotifyWorkerReadyForInspection(int worker_process_id,
-                                    int worker_route_id) {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(BrowserThread::UI,
-                            FROM_HERE,
-                            base::Bind(NotifyWorkerReadyForInspection,
-                                       worker_process_id,
-                                       worker_route_id));
-    return;
-  }
-  EmbeddedWorkerDevToolsManager::GetInstance()->WorkerReadyForInspection(
+void NotifyWorkerReadyForInspectionOnUI(int worker_process_id,
+                                        int worker_route_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  ServiceWorkerDevToolsManager::GetInstance()->WorkerReadyForInspection(
       worker_process_id, worker_route_id);
 }
 
-void NotifyWorkerDestroyed(int worker_process_id, int worker_route_id) {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(NotifyWorkerDestroyed, worker_process_id, worker_route_id));
-    return;
-  }
-  EmbeddedWorkerDevToolsManager::GetInstance()->WorkerDestroyed(
+void NotifyWorkerDestroyedOnUI(int worker_process_id, int worker_route_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  ServiceWorkerDevToolsManager::GetInstance()->WorkerDestroyed(
       worker_process_id, worker_route_id);
 }
 
-void RegisterToWorkerDevToolsManager(
+void NotifyWorkerStopIgnoredOnUI(int worker_process_id, int worker_route_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  ServiceWorkerDevToolsManager::GetInstance()->WorkerStopIgnored(
+      worker_process_id, worker_route_id);
+}
+
+void RegisterToWorkerDevToolsManagerOnUI(
     int process_id,
     const ServiceWorkerContextCore* service_worker_context,
-    base::WeakPtr<ServiceWorkerContextCore> service_worker_context_weak,
+    const base::WeakPtr<ServiceWorkerContextCore>& service_worker_context_weak,
     int64 service_worker_version_id,
     const GURL& url,
     const base::Callback<void(int worker_devtools_agent_route_id,
                               bool wait_for_debugger)>& callback) {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(BrowserThread::UI,
-                            FROM_HERE,
-                            base::Bind(RegisterToWorkerDevToolsManager,
-                                       process_id,
-                                       service_worker_context,
-                                       service_worker_context_weak,
-                                       service_worker_version_id,
-                                       url,
-                                       callback));
-    return;
-  }
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   int worker_devtools_agent_route_id = MSG_ROUTING_NONE;
   bool wait_for_debugger = false;
   if (RenderProcessHost* rph = RenderProcessHost::FromID(process_id)) {
     // |rph| may be NULL in unit tests.
     worker_devtools_agent_route_id = rph->GetNextRoutingID();
     wait_for_debugger =
-        EmbeddedWorkerDevToolsManager::GetInstance()->ServiceWorkerCreated(
+        ServiceWorkerDevToolsManager::GetInstance()->WorkerCreated(
             process_id,
             worker_devtools_agent_route_id,
-            EmbeddedWorkerDevToolsManager::ServiceWorkerIdentifier(
+            ServiceWorkerDevToolsManager::ServiceWorkerIdentifier(
                 service_worker_context,
                 service_worker_context_weak,
                 service_worker_version_id,
@@ -100,11 +83,49 @@ void RegisterToWorkerDevToolsManager(
 
 }  // namespace
 
+// Lives on IO thread, proxies notifications to DevToolsManager that lives on
+// UI thread. Owned by EmbeddedWorkerInstance.
+class EmbeddedWorkerInstance::DevToolsProxy : public base::NonThreadSafe {
+ public:
+  DevToolsProxy(int process_id, int agent_route_id)
+      : process_id_(process_id),
+        agent_route_id_(agent_route_id) {}
+
+  ~DevToolsProxy() {
+    BrowserThread::PostTask(
+        BrowserThread::UI,
+        FROM_HERE,
+        base::Bind(NotifyWorkerDestroyedOnUI,
+                   process_id_, agent_route_id_));
+  }
+
+  void NotifyWorkerReadyForInspection() {
+    DCHECK(CalledOnValidThread());
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(NotifyWorkerReadyForInspectionOnUI,
+                                       process_id_, agent_route_id_));
+  }
+
+  void NotifyWorkerStopIgnored() {
+    DCHECK(CalledOnValidThread());
+    BrowserThread::PostTask(BrowserThread::UI,
+                            FROM_HERE,
+                            base::Bind(NotifyWorkerStopIgnoredOnUI,
+                                       process_id_, agent_route_id_));
+  }
+
+  int agent_route_id() const { return agent_route_id_; }
+
+ private:
+  const int process_id_;
+  const int agent_route_id_;
+  DISALLOW_COPY_AND_ASSIGN(DevToolsProxy);
+};
+
 EmbeddedWorkerInstance::~EmbeddedWorkerInstance() {
   if (status_ == STARTING || status_ == RUNNING)
     Stop();
-  if (worker_devtools_agent_route_id_ != MSG_ROUTING_NONE)
-    NotifyWorkerDestroyed(process_id_, worker_devtools_agent_route_id_);
+  devtools_proxy_.reset();
   if (context_ && process_id_ != -1)
     context_->process_manager()->ReleaseWorkerProcess(embedded_worker_id_);
   registry_->RemoveWorker(process_id_, embedded_worker_id_);
@@ -147,12 +168,21 @@ void EmbeddedWorkerInstance::Start(int64 service_worker_version_id,
 }
 
 ServiceWorkerStatusCode EmbeddedWorkerInstance::Stop() {
-  DCHECK(status_ == STARTING || status_ == RUNNING);
+  DCHECK(status_ == STARTING || status_ == RUNNING) << status_;
   ServiceWorkerStatusCode status =
       registry_->StopWorker(process_id_, embedded_worker_id_);
   if (status == SERVICE_WORKER_OK)
     status_ = STOPPING;
   return status;
+}
+
+void EmbeddedWorkerInstance::StopIfIdle() {
+  if (devtools_attached_) {
+    if (devtools_proxy_)
+      devtools_proxy_->NotifyWorkerStopIgnored();
+    return;
+  }
+  Stop();
 }
 
 void EmbeddedWorkerInstance::ResumeAfterDownload() {
@@ -181,7 +211,7 @@ EmbeddedWorkerInstance::EmbeddedWorkerInstance(
       status_(STOPPED),
       process_id_(-1),
       thread_id_(kInvalidEmbeddedWorkerThreadId),
-      worker_devtools_agent_route_id_(MSG_ROUTING_NONE),
+      devtools_attached_(false),
       weak_factory_(this) {
 }
 
@@ -227,16 +257,22 @@ void EmbeddedWorkerInstance::ProcessAllocated(
   const int64 service_worker_version_id = params->service_worker_version_id;
   process_id_ = process_id;
   GURL script_url(params->script_url);
-  RegisterToWorkerDevToolsManager(
-      process_id,
-      context_.get(),
-      context_,
-      service_worker_version_id,
-      script_url,
-      base::Bind(&EmbeddedWorkerInstance::SendStartWorker,
-                 weak_factory_.GetWeakPtr(),
-                 base::Passed(&params),
-                 callback));
+
+  // Register this worker to DevToolsManager on UI thread, then continue to
+  // call SendStartWorker on IO thread.
+  BrowserThread::PostTask(
+      BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(RegisterToWorkerDevToolsManagerOnUI,
+                 process_id_,
+                 context_.get(),
+                 context_,
+                 service_worker_version_id,
+                 script_url,
+                 base::Bind(&EmbeddedWorkerInstance::SendStartWorker,
+                            weak_factory_.GetWeakPtr(),
+                            base::Passed(&params),
+                            callback)));
 }
 
 void EmbeddedWorkerInstance::SendStartWorker(
@@ -244,7 +280,11 @@ void EmbeddedWorkerInstance::SendStartWorker(
     const StatusCallback& callback,
     int worker_devtools_agent_route_id,
     bool wait_for_debugger) {
-  worker_devtools_agent_route_id_ = worker_devtools_agent_route_id;
+  if (worker_devtools_agent_route_id != MSG_ROUTING_NONE) {
+    DCHECK(!devtools_proxy_);
+    devtools_proxy_.reset(new DevToolsProxy(process_id_,
+                                            worker_devtools_agent_route_id));
+  }
   params->worker_devtools_agent_route_id = worker_devtools_agent_route_id;
   params->wait_for_debugger = wait_for_debugger;
   ServiceWorkerStatusCode status =
@@ -258,9 +298,8 @@ void EmbeddedWorkerInstance::SendStartWorker(
 }
 
 void EmbeddedWorkerInstance::OnReadyForInspection() {
-  if (worker_devtools_agent_route_id_ != MSG_ROUTING_NONE)
-    NotifyWorkerReadyForInspection(process_id_,
-                                   worker_devtools_agent_route_id_);
+  if (devtools_proxy_)
+    devtools_proxy_->NotifyWorkerReadyForInspection();
 }
 
 void EmbeddedWorkerInstance::OnScriptLoaded(int thread_id) {
@@ -287,16 +326,15 @@ void EmbeddedWorkerInstance::OnStarted() {
 }
 
 void EmbeddedWorkerInstance::OnStopped() {
-  if (worker_devtools_agent_route_id_ != MSG_ROUTING_NONE)
-    NotifyWorkerDestroyed(process_id_, worker_devtools_agent_route_id_);
+  devtools_proxy_.reset();
   if (context_)
     context_->process_manager()->ReleaseWorkerProcess(embedded_worker_id_);
+  Status old_status = status_;
   status_ = STOPPED;
   process_id_ = -1;
   thread_id_ = -1;
-  worker_devtools_agent_route_id_ = MSG_ROUTING_NONE;
   start_callback_.Reset();
-  FOR_EACH_OBSERVER(Listener, listener_list_, OnStopped());
+  FOR_EACH_OBSERVER(Listener, listener_list_, OnStopped(old_status));
 }
 
 void EmbeddedWorkerInstance::OnPausedAfterDownload() {
@@ -338,6 +376,17 @@ void EmbeddedWorkerInstance::OnReportConsoleMessage(
       listener_list_,
       OnReportConsoleMessage(
           source_identifier, message_level, message, line_number, source_url));
+}
+
+int EmbeddedWorkerInstance::worker_devtools_agent_route_id() const {
+  if (devtools_proxy_)
+    return devtools_proxy_->agent_route_id();
+  return MSG_ROUTING_NONE;
+}
+
+MessagePortMessageFilter* EmbeddedWorkerInstance::message_port_message_filter()
+    const {
+  return registry_->MessagePortMessageFilterForProcess(process_id_);
 }
 
 void EmbeddedWorkerInstance::AddListener(Listener* listener) {

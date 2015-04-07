@@ -96,7 +96,6 @@ class NET_EXPORT_PRIVATE QuicClientSession : public QuicClientSessionBase {
                     TransportSecurityState* transport_security_state,
                     scoped_ptr<QuicServerInfo> server_info,
                     const QuicConfig& config,
-                    bool is_secure,
                     base::TaskRunner* task_runner,
                     NetLog* net_log);
   ~QuicClientSession() override;
@@ -176,7 +175,9 @@ class NET_EXPORT_PRIVATE QuicClientSession : public QuicClientSessionBase {
   // Returns true if |hostname| may be pooled onto this session.  If this
   // is a secure QUIC session, then |hostname| must match the certificate
   // presented during the handshake.
-  bool CanPool(const std::string& hostname) const;
+  bool CanPool(const std::string& hostname, PrivacyMode privacy_mode) const;
+
+  const QuicServerId& server_id() const { return server_id_; }
 
  protected:
   // QuicSession methods:
@@ -220,7 +221,7 @@ class NET_EXPORT_PRIVATE QuicClientSession : public QuicClientSessionBase {
 
   void OnConnectTimeout();
 
-  HostPortPair server_host_port_;
+  QuicServerId server_id_;
   bool require_confirmation_;
   scoped_ptr<QuicCryptoClientStream> crypto_stream_;
   QuicStreamFactory* stream_factory_;

@@ -61,12 +61,12 @@ class Simulator {
      : current_sim_(NULL),
        output_path_(output_path),
        seconds_per_test_(seconds_per_test),
-       weak_factory_(this),
        display_(NULL),
        window_(0),
        gl_context_(NULL),
        window_width_(WINDOW_WIDTH),
-       window_height_(WINDOW_HEIGHT) {
+       window_height_(WINDOW_HEIGHT),
+       weak_factory_(this) {
   }
 
   ~Simulator() {
@@ -344,17 +344,17 @@ class Simulator {
   // Amount of time to run each simulation
   int seconds_per_test_;
   // GUI data
-  base::WeakPtrFactory<Simulator> weak_factory_;
   Display* display_;
   Window window_;
   GLXContext gl_context_;
   int window_width_;
   int window_height_;
+  base::WeakPtrFactory<Simulator> weak_factory_;
 };
 
 int main(int argc, char* argv[]) {
-  CommandLine::Init(argc, argv);
-  const CommandLine* cl = CommandLine::ForCurrentProcess();
+  base::CommandLine::Init(argc, argv);
+  const base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
 
   if (argc != 3 && argc != 4) {
     LOG(INFO) << "Usage: \n" <<

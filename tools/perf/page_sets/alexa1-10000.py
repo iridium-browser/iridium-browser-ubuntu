@@ -9,9 +9,8 @@ class Alexa1To10000Page(Page):
 
   def __init__(self, url, page_set):
     super(Alexa1To10000Page, self).__init__(url=url, page_set=page_set)
-    self.make_javascript_deterministic = True
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'ScrollAction', is_smooth=True)
     action_runner.ScrollPage()
@@ -25,9 +24,7 @@ class Alexa1To10000PageSet(PageSet):
   """
 
   def __init__(self):
-    super(Alexa1To10000PageSet, self).__init__(
-        make_javascript_deterministic=True,
-        user_agent_type='desktop')
+    super(Alexa1To10000PageSet, self).__init__(user_agent_type='desktop')
 
     urls_list = [
       # Why: #1 in Alexa global
@@ -19377,4 +19374,4 @@ class Alexa1To10000PageSet(PageSet):
       # Why: #9999 in Alexa global
       'http://www.busuk.org/']
     for url in urls_list:
-      self.AddPage(Alexa1To10000Page(url, self))
+      self.AddUserStory(Alexa1To10000Page(url, self))

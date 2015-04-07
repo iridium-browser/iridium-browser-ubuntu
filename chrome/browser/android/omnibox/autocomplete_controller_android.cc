@@ -64,7 +64,7 @@ const int kAndroidAutocompleteProviders =
 
 /**
  * A prefetcher class responsible for triggering zero suggest prefetch.
- * The prefetch occurs as a side-effect of calling StartZeroSuggest() on
+ * The prefetch occurs as a side-effect of calling OnOmniboxFocused() on
  * the AutocompleteController object.
  */
 class ZeroSuggestPrefetcher : public AutocompleteControllerDelegate {
@@ -90,7 +90,7 @@ ZeroSuggestPrefetcher::ZeroSuggestPrefetcher(Profile* profile)
   // AutocompleteInput object.
   base::string16 fake_request_source(base::ASCIIToUTF16(
       "http://www.foobarbazblah.com"));
-  controller_->StartZeroSuggest(AutocompleteInput(
+  controller_->OnOmniboxFocused(AutocompleteInput(
       fake_request_source, base::string16::npos, std::string(),
       GURL(fake_request_source), OmniboxEventProto::INVALID_SPEC, false, false,
       true, true, ChromeAutocompleteSchemeClassifier(profile)));
@@ -127,6 +127,7 @@ AutocompleteControllerAndroid::AutocompleteControllerAndroid(Profile* profile)
 void AutocompleteControllerAndroid::Start(JNIEnv* env,
                                           jobject obj,
                                           jstring j_text,
+                                          jint j_cursor_pos,
                                           jstring j_desired_tld,
                                           jstring j_current_url,
                                           bool prevent_inline_autocomplete,
@@ -145,8 +146,9 @@ void AutocompleteControllerAndroid::Start(JNIEnv* env,
   base::string16 text = ConvertJavaStringToUTF16(env, j_text);
   OmniboxEventProto::PageClassification page_classification =
       OmniboxEventProto::OTHER;
+  size_t cursor_pos = j_cursor_pos == -1 ? base::string16::npos : j_cursor_pos;
   input_ = AutocompleteInput(
-      text, base::string16::npos, desired_tld, current_url, page_classification,
+      text, cursor_pos, desired_tld, current_url, page_classification,
       prevent_inline_autocomplete, prefer_keyword, allow_exact_keyword_match,
       want_asynchronous_matches, ChromeAutocompleteSchemeClassifier(profile_));
   autocomplete_controller_->Start(input_);
@@ -159,7 +161,7 @@ ScopedJavaLocalRef<jobject> AutocompleteControllerAndroid::Classify(
   return GetTopSynchronousResult(env, obj, j_text, true);
 }
 
-void AutocompleteControllerAndroid::StartZeroSuggest(
+void AutocompleteControllerAndroid::OnOmniboxFocused(
     JNIEnv* env,
     jobject obj,
     jstring j_omnibox_text,
@@ -182,7 +184,7 @@ void AutocompleteControllerAndroid::StartZeroSuggest(
       omnibox_text, base::string16::npos, std::string(), current_url,
       ClassifyPage(current_url, is_query_in_omnibox, focused_from_fakebox),
       false, false, true, true, ChromeAutocompleteSchemeClassifier(profile_));
-  autocomplete_controller_->StartZeroSuggest(input_);
+  autocomplete_controller_->OnOmniboxFocused(input_);
 }
 
 void AutocompleteControllerAndroid::Stop(JNIEnv* env,
@@ -491,6 +493,7 @@ AutocompleteControllerAndroid::GetTopSynchronousResult(
   Start(env,
         obj,
         j_text,
+        -1,
         NULL,
         NULL,
         prevent_inline_autocomplete,

@@ -9,19 +9,12 @@
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/public/tooltip_client.h"
 
 namespace views {
-
-// static
-int TooltipManager::GetTooltipHeight() {
-  // Not used for linux and chromeos.
-  NOTIMPLEMENTED();
-  return 0;
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 // TooltipManagerAura public:

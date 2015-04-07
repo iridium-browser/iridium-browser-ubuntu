@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #include "base/command_line.h"
+#include "base/scoped_observer.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -34,6 +35,7 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "components/omnibox/autocomplete_input.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "components/search_engines/template_url.h"
@@ -45,7 +47,7 @@
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/gfx/point.h"
+#include "ui/gfx/geometry/point.h"
 
 using base::ASCIIToUTF16;
 using base::UTF16ToUTF8;
@@ -137,7 +139,16 @@ const int kCtrlOrCmdMask = ui::EF_CONTROL_DOWN;
 }  // namespace
 
 class OmniboxViewTest : public InProcessBrowserTest,
-                        public content::NotificationObserver {
+                        public content::NotificationObserver,
+                        public history::HistoryServiceObserver {
+ public:
+  OmniboxViewTest() : observer_(this) {}
+
+  // history::HisoryServiceObserver
+  void OnHistoryServiceLoaded(HistoryService* history_service) override {
+    base::MessageLoop::current()->Quit();
+  }
+
  protected:
   void SetUpOnMainThread() override {
     ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
@@ -282,9 +293,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_TRUE(history_service);
 
     if (!history_service->BackendLoaded()) {
-      content::NotificationRegistrar registrar;
-      registrar.Add(this, chrome::NOTIFICATION_HISTORY_LOADED,
-                    content::Source<Profile>(profile));
+      observer_.Add(history_service);
       content::RunMessageLoop();
     }
 
@@ -304,9 +313,9 @@ class OmniboxViewTest : public InProcessBrowserTest,
       bookmarks::AddIfNotBookmarked(bookmark_model, url, base::string16());
     // Wait at least for the AddPageWithDetails() call to finish.
     {
-      content::NotificationRegistrar registrar;
-      registrar.Add(this, chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
-                    content::Source<Profile>(profile));
+      ScopedObserver<HistoryService, history::HistoryServiceObserver> observer(
+          this);
+      observer.Add(history_service);
       content::RunMessageLoop();
       // We don't want to return until all observers have processed this
       // notification, because some (e.g. the in-memory history database) may do
@@ -346,14 +355,22 @@ class OmniboxViewTest : public InProcessBrowserTest,
       case content::NOTIFICATION_WEB_CONTENTS_DESTROYED:
       case chrome::NOTIFICATION_TAB_PARENTED:
       case chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY:
-      case chrome::NOTIFICATION_HISTORY_LOADED:
-      case chrome::NOTIFICATION_HISTORY_URLS_MODIFIED:
         break;
       default:
         FAIL() << "Unexpected notification type";
     }
     base::MessageLoop::current()->Quit();
   }
+
+  void OnURLsModified(HistoryService* history_service,
+                      const history::URLRows& changed_urls) override {
+    base::MessageLoop::current()->Quit();
+  }
+
+ private:
+  ScopedObserver<HistoryService, OmniboxViewTest> observer_;
+
+  DISALLOW_COPY_AND_ASSIGN(OmniboxViewTest);
 };
 
 // Test if ctrl-* accelerators are workable in omnibox.
@@ -567,7 +584,13 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_Escape) {
 }
 #undef MAYBE_ESCAPE
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DesiredTLD) {
+#if defined(OS_LINUX)
+#define MAYBE_DesiredTLD DISABLED_DesiredTLD
+#else
+#define MAYBE_DesiredTLD DesiredTLD
+#endif
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_DesiredTLD) {
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
   OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
@@ -593,7 +616,13 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DesiredTLD) {
   EXPECT_EQ("/", url.path());
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DesiredTLDWithTemporaryText) {
+#if defined(OS_LINUX)
+#define MAYBE_DesiredTLDWithTemporaryText DISABLED_DesiredTLDWithTemporaryText
+#else
+#define MAYBE_DesiredTLDWithTemporaryText DesiredTLDWithTemporaryText
+#endif
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_DesiredTLDWithTemporaryText) {
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
   OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
@@ -641,6 +670,36 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DesiredTLDWithTemporaryText) {
   GURL url(browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
   EXPECT_EQ("www.abc.com", url.host());
   EXPECT_EQ("/", url.path());
+}
+
+// See http://crbug.com/431575.
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, ClearUserTextAfterBackgroundCommit) {
+  OmniboxView* omnibox_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
+
+  // Navigate in first tab and enter text into the omnibox.
+  GURL url1("data:text/html,page1");
+  ui_test_utils::NavigateToURL(browser(), url1);
+  omnibox_view->SetUserText(ASCIIToUTF16("foo"));
+  content::WebContents* contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  // Create another tab in the foreground.
+  AddTabAtIndex(1, url1, ui::PAGE_TRANSITION_TYPED);
+  EXPECT_EQ(2, browser()->tab_strip_model()->count());
+  EXPECT_EQ(1, browser()->tab_strip_model()->active_index());
+
+  // Navigate in the first tab, currently in the background.
+  GURL url2("data:text/html,page2");
+  chrome::NavigateParams params(browser(), url2, ui::PAGE_TRANSITION_LINK);
+  params.source_contents = contents;
+  params.disposition = CURRENT_TAB;
+  ui_test_utils::NavigateToURL(&params);
+
+  // Switch back to the first tab.  The user text should be cleared, and the
+  // omnibox should have the new URL.
+  browser()->tab_strip_model()->ActivateTabAt(0, true);
+  EXPECT_EQ(ASCIIToUTF16(url2.spec()), omnibox_view->GetText());
 }
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, AltEnter) {

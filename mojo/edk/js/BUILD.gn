@@ -2,7 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-source_set("js") {
+import("../mojo_edk.gni")
+
+mojo_edk_source_set("js") {
   sources = [
     "core.cc",
     "core.h",
@@ -11,8 +13,12 @@ source_set("js") {
     "handle.cc",
     "handle.h",
     "handle_close_observer.h",
+    "mojo_runner_delegate.cc",
+    "mojo_runner_delegate.h",
     "support.cc",
     "support.h",
+    "threading.cc",
+    "threading.h",
     "waiting_callback.cc",
     "waiting_callback.h",
   ]
@@ -22,15 +28,29 @@ source_set("js") {
     "//gin",
     "//v8",
   ]
+
+  mojo_sdk_deps = [
+    "mojo/public/cpp/environment",
+    "mojo/public/cpp/system",
+  ]
 }
 
-source_set("js_unittests") {
+mojo_edk_source_set("js_unittests") {
   testonly = true
-  deps = [
-    "//mojo/edk/test:test_support",
-  ]
-
   sources = [
     "handle_unittest.cc",
+  ]
+
+  deps = [
+    "//testing/gtest",
+  ]
+
+  mojo_edk_deps = [
+    "mojo/edk/js",
+    "mojo/edk/test:test_support",
+  ]
+
+  mojo_sdk_deps = [
+    "mojo/public/cpp/system",
   ]
 }

@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2007 The Android Open Source Project
  *
@@ -10,8 +9,6 @@
 #ifndef SkPicture_DEFINED
 #define SkPicture_DEFINED
 
-#include "SkBitmap.h"
-#include "SkDrawPictureCallback.h"
 #include "SkImageDecoder.h"
 #include "SkRefCnt.h"
 #include "SkTDArray.h"
@@ -20,12 +17,12 @@
 class GrContext;
 #endif
 
-class GrReplacements;
+class SkBitmap;
 class SkBBoxHierarchy;
 class SkCanvas;
 class SkData;
 class SkPictureData;
-class SkPictureRecord;
+class SkPixelSerializer;
 class SkStream;
 class SkWStream;
 
@@ -42,13 +39,10 @@ namespace SkRecords {
     The SkPicture class records the drawing commands made to a canvas, to
     be played back at a later time.
 */
-class SK_API SkPicture : public SkRefCnt {
+class SK_API SkPicture : public SkNVRefCnt<SkPicture> {
 public:
-    SK_DECLARE_INST_COUNT(SkPicture)
-
     // AccelData provides a base class for device-specific acceleration
-    // data. It is added to the picture via a call to a device's optimize
-    // method.
+    // data. It is added to the picture via EXPERIMENTAL_addAccelData.
     class AccelData : public SkRefCnt {
     public:
         typedef uint8_t Domain;
@@ -63,8 +57,6 @@ public:
         static Domain GenerateDomain();
     private:
         Key fKey;
-
-        typedef SkRefCnt INHERITED;
     };
 
     /**  PRIVATE / EXPERIMENTAL -- do not call */
@@ -107,7 +99,25 @@ public:
      */
     static SkPicture* CreateFromBuffer(SkReadBuffer&);
 
-    virtual ~SkPicture();
+    ~SkPicture();
+
+    /**
+    *  Subclasses of this can be passed to playback(). During the playback
+    *  of the picture, this callback will periodically be invoked. If its
+    *  abort() returns true, then picture playback will be interrupted.
+    *
+    *  The resulting drawing is undefined, as there is no guarantee how often the
+    *  callback will be invoked. If the abort happens inside some level of nested
+    *  calls to save(), restore will automatically be called to return the state
+    *  to the same level it was before the playback call was made.
+    */
+    class SK_API AbortCallback {
+    public:
+        AbortCallback() {}
+        virtual ~AbortCallback() {}
+
+        virtual bool abort() = 0;
+    };
 
     /** Replays the drawing commands on the specified canvas. Note that
         this has the effect of unfurling this picture into the destination
@@ -116,31 +126,17 @@ public:
         @param canvas the canvas receiving the drawing commands.
         @param callback a callback that allows interruption of playback
     */
-    void playback(SkCanvas* canvas, SkDrawPictureCallback* = NULL) const;
-
-#ifdef SK_LEGACY_PICTURE_DRAW_API
-    void draw(SkCanvas* canvas, SkDrawPictureCallback* callback = NULL) const {
-        this->playback(canvas, callback);
-    }
-#endif
-
-#ifdef SK_LEGACY_PICTURE_SIZE_API
-    int width() const  { return SkScalarCeilToInt(fCullWidth); }
-    int height() const { return SkScalarCeilToInt(fCullHeight); }
-#endif
+    void playback(SkCanvas* canvas, AbortCallback* = NULL) const;
 
     /** Return the cull rect used when creating this picture: { 0, 0, cullWidth, cullHeight }.
         It does not necessarily reflect the bounds of what has been recorded into the picture.
         @return the cull rect used to create this picture
     */
-    const SkRect cullRect() const { return SkRect::MakeWH(fCullWidth, fCullHeight); }
+    SkRect cullRect() const { return fCullRect; }
 
-    /** Return a non-zero, unique value representing the picture. This call is
-        only valid when not recording. Between a beginRecording/endRecording
-        pair it will just return 0 (the invalid ID). Each beginRecording/
-        endRecording pair will cause a different generation ID to be returned.
-    */
-    uint32_t uniqueID() const;
+    /** Return a non-zero, unique value representing the picture.
+     */
+    uint32_t uniqueID() const { return fUniqueID; }
 
     /**
      *  Function to encode an SkBitmap to an SkData. A function with this
@@ -151,15 +147,18 @@ public:
      *  @param pixelRefOffset DEPRECATED -- caller assumes it will return 0.
      *  @return SkData If non-NULL, holds encoded data representing the passed
      *      in bitmap. The caller is responsible for calling unref().
+     *
+     *  TODO: No longer used by SkPicture. Still used by PDF though. Move into PDF.
      */
     typedef SkData* (*EncodeBitmap)(size_t* pixelRefOffset, const SkBitmap& bm);
 
     /**
-     *  Serialize to a stream. If non NULL, encoder will be used to encode
+     *  Serialize to a stream. If non NULL, serializer will be used to serialize
      *  any bitmaps in the picture.
-     *  encoder will never be called with a NULL pixelRefOffset.
+     *
+     *  TODO: Use serializer to serialize SkImages as well.
      */
-    void serialize(SkWStream*, EncodeBitmap encoder = NULL) const;
+    void serialize(SkWStream*, SkPixelSerializer* serializer = NULL) const;
 
     /**
      *  Serialize to a buffer.
@@ -190,14 +189,6 @@ public:
     bool suitableForGpuRasterization(GrContext*, const char ** = NULL) const;
 #endif
 
-    class DeletionListener : public SkRefCnt {
-    public:
-        virtual void onDeletion(uint32_t pictureID) = 0;
-    };
-
-    // Takes ref on listener.
-    void addDeletionListener(DeletionListener* listener) const;
-
     /** Return the approximate number of operations in this picture.  This
      *  number may be greater or less than the number of SkCanvas calls
      *  recorded: some calls may be recorded as more than one operation, or some
@@ -208,6 +199,22 @@ public:
     /** Return true if this picture contains text.
      */
     bool hasText() const;
+
+    // An array of refcounted const SkPicture pointers.
+    class SnapshotArray : ::SkNoncopyable {
+    public:
+        SnapshotArray(const SkPicture* pics[], int count) : fPics(pics), fCount(count) {}
+        ~SnapshotArray() { for (int i = 0; i < fCount; i++) { fPics[i]->unref(); } }
+
+        const SkPicture* const* begin() const { return fPics; }
+        int count() const { return fCount; }
+    private:
+        SkAutoTMalloc<const SkPicture*> fPics;
+        int fCount;
+    };
+
+    // Sent via SkMessageBus from destructor.
+    struct DeletionMessage { int32_t fUniqueID; };
 
 private:
     // V2 : adds SkPixelRef's generation ID.
@@ -247,54 +254,39 @@ private:
     // V34: Add SkTextBlob serialization.
     // V35: Store SkRect (rather then width & height) in header
     // V36: Remove (obsolete) alphatype from SkColorTable
-    // V37: Added shadow only option to SkDropShadowImageFilter
+    // V37: Added shadow only option to SkDropShadowImageFilter (last version to record CLEAR)
+    // V38: Added PictureResolution option to SkPictureImageFilter
+    // V39: Added FilterLevel option to SkPictureImageFilter
 
     // Note: If the picture version needs to be increased then please follow the
     // steps to generate new SKPs in (only accessible to Googlers): http://goo.gl/qATVcw
 
     // Only SKPs within the min/current picture version range (inclusive) can be read.
-    static const uint32_t MIN_PICTURE_VERSION = 19;
-    static const uint32_t CURRENT_PICTURE_VERSION = 37;
-
-    mutable uint32_t      fUniqueID;
-
-    SkAutoTDelete<const SkPictureData>    fData;
-    const SkScalar                        fCullWidth;
-    const SkScalar                        fCullHeight;
-    mutable SkAutoTUnref<const AccelData> fAccelData;
-
-    mutable SkTDArray<DeletionListener*> fDeletionListeners;  // pointers are refed
-
-    void needsNewGenID() { fUniqueID = SK_InvalidGenID; }
-    void callDeletionListeners();
-
-    // Create a new SkPicture from an existing SkPictureData. The new picture
-    // takes ownership of 'data'.
-    SkPicture(SkPictureData* data, SkScalar width, SkScalar height);
-
-    SkPicture(SkScalar width, SkScalar height, const SkPictureRecord& record, bool deepCopyOps);
+    static const uint32_t MIN_PICTURE_VERSION = 35;     // Produced by Chrome M39.
+    static const uint32_t CURRENT_PICTURE_VERSION = 39;
 
     void createHeader(SkPictInfo* info) const;
     static bool IsValidPictInfo(const SkPictInfo& info);
 
-    friend class SkPictureRecorder;            // SkRecord-based constructor.
-    friend class SkGpuDevice;                  // for fData access
-    friend class GrLayerHoister;               // access to fRecord
-    friend class SkRecords::CollectLayers;     // access to fRecord
-    friend class SkPicturePlayback;            // to get fData
-    friend class ReplaceDraw;
+    // Takes ownership of the SkRecord and (optional) SnapshotArray, refs the (optional) BBH.
+    SkPicture(const SkRect& cullRect, SkRecord*, SnapshotArray*, SkBBoxHierarchy*);
 
-    typedef SkRefCnt INHERITED;
+    static SkPicture* Forwardport(const SkPictInfo&, const SkPictureData*);
+    static SkPictureData* Backport(const SkRecord&, const SkPictInfo&,
+                                   SkPicture const* const drawablePics[], int drawableCount);
 
-    // Takes ownership of the SkRecord, refs the (optional) BBH.
-    SkPicture(SkScalar width, SkScalar height, SkRecord*, SkBBoxHierarchy*);
-    // Return as a new SkPicture that's backed by SkRecord.
-    static SkPicture* Forwardport(const SkPicture&);
-    // Return as a new SkPicture that's backed by the old backend.
-    static SkPicture* Backport(const SkRecord& src, const SkRect& cullRect);
+    // uint32_t fRefCnt; from SkNVRefCnt<SkPicture>
+    const uint32_t                        fUniqueID;
+    const SkRect                          fCullRect;
+    mutable SkAutoTUnref<const AccelData> fAccelData;
+    SkAutoTUnref<const SkRecord>          fRecord;
+    SkAutoTUnref<const SkBBoxHierarchy>   fBBH;
+    SkAutoTDelete<const SnapshotArray>    fDrawablePicts;
 
-    SkAutoTDelete<SkRecord>       fRecord;
-    SkAutoTUnref<SkBBoxHierarchy> fBBH;
+    // helpers for fDrawablePicts
+    int drawableCount() const;
+    // will return NULL if drawableCount() returns 0
+    SkPicture const* const* drawablePicts() const;
 
     struct PathCounter;
 
@@ -312,6 +304,13 @@ private:
         int         fNumAAHairlineConcavePaths;
         int         fNumAADFEligibleConcavePaths;
     } fAnalysis;
+
+    friend class SkPictureRecorder;            // SkRecord-based constructor.
+    friend class GrLayerHoister;               // access to fRecord
+    friend class ReplaceDraw;
+    friend class SkPictureUtils;
+    friend class SkRecordedDrawable;
 };
+SK_COMPILE_ASSERT(sizeof(SkPicture) <= 96, SkPictureSize);
 
 #endif

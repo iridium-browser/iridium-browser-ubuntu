@@ -6,14 +6,15 @@
 
 #include "base/base64.h"
 #include "crypto/secure_hash.h"
+#include "net/quic/crypto/cached_network_parameters.h"
 #include "net/quic/crypto/crypto_protocol.h"
 #include "net/quic/crypto/crypto_utils.h"
 #include "net/quic/crypto/quic_crypto_server_config.h"
-#include "net/quic/crypto/source_address_token.h"
 #include "net/quic/quic_config.h"
-#include "net/quic/quic_flags.h"
 #include "net/quic/quic_protocol.h"
 #include "net/quic/quic_session.h"
+
+using std::string;
 
 namespace net {
 
@@ -140,10 +141,6 @@ void QuicCryptoServerStream::FinishProcessingHandshakeMessage(
   session()->connection()->SetEncrypter(
       ENCRYPTION_FORWARD_SECURE,
       crypto_negotiated_params_.forward_secure_crypters.encrypter.release());
-  if (!FLAGS_enable_quic_delay_forward_security) {
-    session()->connection()->SetDefaultEncryptionLevel(
-        ENCRYPTION_FORWARD_SECURE);
-  }
   session()->connection()->SetAlternativeDecrypter(
       crypto_negotiated_params_.forward_secure_crypters.decrypter.release(),
       ENCRYPTION_FORWARD_SECURE, false /* don't latch */);
@@ -162,11 +159,12 @@ void QuicCryptoServerStream::SendServerConfigUpdate(
 
   CryptoHandshakeMessage server_config_update_message;
   if (!crypto_config_.BuildServerConfigUpdateMessage(
+          previous_source_address_tokens_,
+          session()->connection()->self_address(),
           session()->connection()->peer_address(),
           session()->connection()->clock(),
           session()->connection()->random_generator(),
-          crypto_negotiated_params_,
-          cached_network_params,
+          crypto_negotiated_params_, cached_network_params,
           &server_config_update_message)) {
     DVLOG(1) << "Server: Failed to build server config update (SCUP)!";
     return;
@@ -230,23 +228,24 @@ QuicErrorCode QuicCryptoServerStream::ProcessClientHello(
     previous_cached_network_params_.reset(
         new CachedNetworkParameters(result.cached_network_params));
   }
+  previous_source_address_tokens_ = result.info.source_address_tokens;
 
   return crypto_config_.ProcessClientHello(
-      result,
-      session()->connection()->connection_id(),
+      result, session()->connection()->connection_id(),
+      session()->connection()->self_address(),
       session()->connection()->peer_address(),
       session()->connection()->version(),
       session()->connection()->supported_versions(),
       session()->connection()->clock(),
-      session()->connection()->random_generator(),
-      &crypto_negotiated_params_, reply, error_details);
+      session()->connection()->random_generator(), &crypto_negotiated_params_,
+      reply, error_details);
 }
 
 void QuicCryptoServerStream::OverrideQuicConfigDefaults(QuicConfig* config) {
 }
 
-CachedNetworkParameters*
-QuicCryptoServerStream::get_previous_cached_network_params() {
+const CachedNetworkParameters*
+QuicCryptoServerStream::previous_cached_network_params() const {
   return previous_cached_network_params_.get();
 }
 

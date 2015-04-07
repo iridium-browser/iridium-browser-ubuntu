@@ -7,6 +7,7 @@
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/common/service_worker/service_worker_messages.h"
+#include "content/common/service_worker/service_worker_types.h"
 #include "ipc/ipc_sender.h"
 
 namespace content {
@@ -39,28 +40,22 @@ GetWebServiceWorkerState(ServiceWorkerVersion* version) {
 scoped_ptr<ServiceWorkerHandle> ServiceWorkerHandle::Create(
     base::WeakPtr<ServiceWorkerContextCore> context,
     IPC::Sender* sender,
-    int thread_id,
-    int provider_id,
     ServiceWorkerVersion* version) {
   if (!context || !version)
     return scoped_ptr<ServiceWorkerHandle>();
   ServiceWorkerRegistration* registration =
       context->GetLiveRegistration(version->registration_id());
   return make_scoped_ptr(new ServiceWorkerHandle(
-      context, sender, thread_id, provider_id, registration, version));
+      context, sender, registration, version));
 }
 
 ServiceWorkerHandle::ServiceWorkerHandle(
     base::WeakPtr<ServiceWorkerContextCore> context,
     IPC::Sender* sender,
-    int thread_id,
-    int provider_id,
     ServiceWorkerRegistration* registration,
     ServiceWorkerVersion* version)
     : context_(context),
       sender_(sender),
-      thread_id_(thread_id),
-      provider_id_(provider_id),
       handle_id_(context.get() ? context->GetNewServiceWorkerHandleId() : -1),
       ref_count_(1),
       registration_(registration),
@@ -77,30 +72,9 @@ ServiceWorkerHandle::~ServiceWorkerHandle() {
   // need to re-load the same registration from disk over and over.
 }
 
-void ServiceWorkerHandle::OnWorkerStarted(ServiceWorkerVersion* version) {
-}
-
-void ServiceWorkerHandle::OnWorkerStopped(ServiceWorkerVersion* version) {
-}
-
-void ServiceWorkerHandle::OnErrorReported(ServiceWorkerVersion* version,
-                                          const base::string16& error_message,
-                                          int line_number,
-                                          int column_number,
-                                          const GURL& source_url) {
-}
-
-void ServiceWorkerHandle::OnReportConsoleMessage(ServiceWorkerVersion* version,
-                                                 int source_identifier,
-                                                 int message_level,
-                                                 const base::string16& message,
-                                                 int line_number,
-                                                 const GURL& source_url) {
-}
-
 void ServiceWorkerHandle::OnVersionStateChanged(ServiceWorkerVersion* version) {
   sender_->Send(new ServiceWorkerMsg_ServiceWorkerStateChanged(
-      thread_id_, handle_id_, GetWebServiceWorkerState(version)));
+      kDocumentMainThreadId, handle_id_, GetWebServiceWorkerState(version)));
 }
 
 ServiceWorkerObjectInfo ServiceWorkerHandle::GetObjectInfo() {

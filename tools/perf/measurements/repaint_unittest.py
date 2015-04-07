@@ -3,11 +3,11 @@
 # found in the LICENSE file.
 
 from measurements import repaint
+from telemetry import decorators
 from telemetry.core import wpr_modes
 from telemetry.page import page as page_module
-from telemetry.unittest import options_for_unittests
-from telemetry.unittest import page_test_test_case
-from telemetry.unittest import test
+from telemetry.unittest_util import options_for_unittests
+from telemetry.unittest_util import page_test_test_case
 
 
 class TestRepaintPage(page_module.Page):
@@ -15,7 +15,7 @@ class TestRepaintPage(page_module.Page):
     super(TestRepaintPage, self).__init__('file://blank.html',
                                           page_set, base_dir)
 
-  def RunRepaint(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     action_runner.RepaintContinuously(seconds=2)
 
 
@@ -33,7 +33,7 @@ class RepaintUnitTest(page_test_test_case.PageTestTestCase):
 
   def testRepaint(self):
     ps = self.CreateEmptyPageSet()
-    ps.AddPage(TestRepaintPage(ps, ps.base_dir))
+    ps.AddUserStory(TestRepaintPage(ps, ps.base_dir))
     measurement = repaint.Repaint()
     results = self.RunMeasurement(measurement, ps, options=self._options)
     self.assertEquals(0, len(results.failures))
@@ -56,6 +56,6 @@ class RepaintUnitTest(page_test_test_case.PageTestTestCase):
     self.assertEquals(len(percentage_smooth), 1)
     self.assertGreaterEqual(percentage_smooth[0].GetRepresentativeNumber(), 0)
 
-  @test.Disabled('android')
+  @decorators.Disabled('android')
   def testCleanUpTrace(self):
     self.TestTracingCleanedUp(repaint.Repaint, self._options)

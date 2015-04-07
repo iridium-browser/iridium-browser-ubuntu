@@ -3,7 +3,10 @@
 # found in the LICENSE file.
 
 config("tools_config") {
-  include_dirs = [ "src", "src/third_party" ]
+  include_dirs = [
+    "src",
+    "src/third_party",
+  ]
   if (is_android) {
     defines = [ "__ANDROID__" ]
   }
@@ -32,15 +35,14 @@ config("client_config") {
 }
 
 config("handler_config") {
-  include_dirs = [
-    "src",
-  ]
+  include_dirs = [ "src" ]
 }
 
-# minidump_stackwalk and minidump_dump are tool-type executables that do
+# {micro,mini}dump_stackwalk and minidump_dump are tool-type executables that do
 # not build on iOS.
 if (current_toolchain == host_toolchain && !is_win) {
-  executable("minidump_stackwalk") {
+  # Contains the code shared by both {micro,mini}dump_stackwalk.
+  static_library("stackwalk_common") {
     sources = [
       "src/processor/basic_code_module.h",
       "src/processor/basic_code_modules.cc",
@@ -55,12 +57,8 @@ if (current_toolchain == host_toolchain && !is_win) {
       "src/processor/disassembler_x86.h",
       "src/processor/dump_context.cc",
       "src/processor/dump_object.cc",
-      "src/processor/exploitability.cc",
       "src/processor/logging.cc",
       "src/processor/logging.h",
-      "src/processor/minidump.cc",
-      "src/processor/minidump_processor.cc",
-      "src/processor/minidump_stackwalk.cc",
       "src/processor/pathname_stripper.cc",
       "src/processor/pathname_stripper.h",
       "src/processor/process_state.cc",
@@ -69,6 +67,7 @@ if (current_toolchain == host_toolchain && !is_win) {
       "src/processor/source_line_resolver_base.cc",
       "src/processor/stack_frame_cpu.cc",
       "src/processor/stack_frame_symbolizer.cc",
+      "src/processor/stackwalk_common.cc",
       "src/processor/stackwalker.cc",
       "src/processor/stackwalker_amd64.cc",
       "src/processor/stackwalker_amd64.h",
@@ -88,6 +87,7 @@ if (current_toolchain == host_toolchain && !is_win) {
       "src/processor/stackwalker_x86.h",
       "src/processor/tokenize.cc",
       "src/processor/tokenize.h",
+
       # libdisasm
       "src/third_party/libdisasm/ia32_implicit.c",
       "src/third_party/libdisasm/ia32_implicit.h",
@@ -115,6 +115,43 @@ if (current_toolchain == host_toolchain && !is_win) {
       "src/third_party/libdisasm/x86_misc.c",
       "src/third_party/libdisasm/x86_operand_list.c",
       "src/third_party/libdisasm/x86_operand_list.h",
+    ]
+
+    defines = [ "BPLOG_MINIMUM_SEVERITY=SEVERITY_ERROR" ]
+
+    configs -= [ "//build/config/compiler:chromium_code" ]
+    configs += [ "//build/config/compiler:no_chromium_code" ]
+    configs += [ ":tools_config" ]
+  }
+
+  executable("microdump_stackwalk") {
+    sources = [
+      "src/processor/microdump.cc",
+      "src/processor/microdump_processor.cc",
+      "src/processor/microdump_stackwalk.cc",
+    ]
+
+    deps = [
+      ":stackwalk_common",
+    ]
+
+    defines = [ "BPLOG_MINIMUM_SEVERITY=SEVERITY_ERROR" ]
+
+    configs -= [ "//build/config/compiler:chromium_code" ]
+    configs += [ "//build/config/compiler:no_chromium_code" ]
+    configs += [ ":tools_config" ]
+  }
+
+  executable("minidump_stackwalk") {
+    sources = [
+      "src/processor/exploitability.cc",
+      "src/processor/minidump.cc",
+      "src/processor/minidump_processor.cc",
+      "src/processor/minidump_stackwalk.cc",
+    ]
+
+    deps = [
+      ":stackwalk_common",
     ]
 
     defines = [ "BPLOG_MINIMUM_SEVERITY=SEVERITY_ERROR" ]
@@ -222,7 +259,12 @@ if (current_toolchain == host_toolchain && is_mac) {
       "src/tools/mac/symupload/symupload.m",
     ]
 
-    libs = [ "Foundaction.framework" ]
+    include_dirs = [ "src/common/mac" ]
+
+    libs = [ "Foundation.framework" ]
+
+    configs -= [ "//build/config/compiler:chromium_code" ]
+    configs += [ "//build/config/compiler:no_chromium_code" ]
   }
 }
 
@@ -250,6 +292,10 @@ if (is_mac) {
     ]
 
     configs += [ ":internal_config" ]
+
+    # There are some warnings in this code.
+    configs -= [ "//build/config/compiler:chromium_code" ]
+    configs += [ "//build/config/compiler:no_chromium_code" ]
   }
 
   executable("crash_inspector") {
@@ -271,12 +317,14 @@ if (is_mac) {
     ]
 
     deps = [
-      ":utilities"
+      ":utilities",
     ]
   }
 
-  executable("crash_report_sender") {
-    # TODO(GYP) this target has some mac_bundle_resources stuff.
+  # TODO(GYP) this target has some mac_bundle_resources stuff.
+  # executable("crash_report_sender") {
+  # }
+  group("crash_report_sender") {
   }
 
   config("breakpad_config") {
@@ -297,15 +345,12 @@ if (is_mac) {
     public_configs = [ ":breakpad_config" ]
 
     defines = [ "USE_PROTECTED_ALLOCATIONS=1" ]
-    include_dirs = [
-      "src/client/apple/Framework",
-    ]
+    include_dirs = [ "src/client/apple/Framework" ]
 
     deps = [
       ":utilities",
       ":crash_inspector",
-      # TODO(GYP): Make this link
-      #":crash_report_sender",
+      ":crash_report_sender",
     ]
   }
 
@@ -412,6 +457,8 @@ if (is_linux || is_android) {
       "src/client/linux/handler/minidump_descriptor.h",
       "src/client/linux/log/log.cc",
       "src/client/linux/log/log.h",
+      "src/client/linux/microdump_writer/microdump_writer.cc",
+      "src/client/linux/microdump_writer/microdump_writer.h",
       "src/client/linux/minidump_writer/cpu_set.h",
       "src/client/linux/minidump_writer/directory_reader.h",
       "src/client/linux/minidump_writer/line_reader.h",
@@ -559,7 +606,6 @@ if (is_linux) {
       cflags = [ "-Wno-unused-value" ]
     }
 
-
     if (is_android) {
       sources += [ "src/common/android/breakpad_getcontext_unittest.cc" ]
       libs = [ "log" ]
@@ -576,15 +622,12 @@ if (is_linux) {
       ":processor_support",
     ]
 
-    include_dirs = [
-      "src",
-    ]
+    include_dirs = [ "src" ]
 
     if (cpu_arch == "mipsel" && is_android) {
       include_dirs += [ "src/common/android/include" ]
     }
   }
-
 
   executable("generate_test_dump") {
     testonly = true
@@ -596,7 +639,9 @@ if (is_linux) {
     configs -= [ "//build/config/compiler:chromium_code" ]
     configs += [ "//build/config/compiler:no_chromium_code" ]
 
-    deps = [ ":client" ]
+    deps = [
+      ":client",
+    ]
 
     include_dirs = [ "src" ]
 
@@ -607,11 +652,15 @@ if (is_linux) {
   }
 
   executable("minidump-2-core") {
-    sources = [ "src/tools/linux/md2core/minidump-2-core.cc" ]
+    sources = [
+      "src/tools/linux/md2core/minidump-2-core.cc",
+    ]
 
     include_dirs = [ "src" ]
 
-    deps = [ ":client" ]
+    deps = [
+      ":client",
+    ]
   }
 
   executable("core-2-minidump") {
@@ -681,7 +730,6 @@ if (is_ios) {
       "src/common/mac",
     ]
   }
-
   # TODO(GYP) There is some XCode-only targets like ninja-breakpad.
 }
 

@@ -19,7 +19,7 @@
 #include "base/values.h"
 #include "cc/base/switches.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/boot_times_loader.h"
+#include "chrome/browser/chromeos/boot_times_recorder.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -66,13 +66,14 @@ const char kSwitchFormatString[] = " --%s=\"%s\"";
 // - Set start url if given;
 // - Append/override switches using |new_switches|;
 std::string DeriveCommandLine(const GURL& start_url,
-                              const CommandLine& base_command_line,
+                              const base::CommandLine& base_command_line,
                               const base::DictionaryValue& new_switches,
-                              CommandLine* command_line) {
+                              base::CommandLine* command_line) {
   DCHECK_NE(&base_command_line, command_line);
 
   static const char* const kForwardSwitches[] = {
     ::switches::kDisableAccelerated2dCanvas,
+    ::switches::kDisableAcceleratedJpegDecoding,
     ::switches::kDisableAcceleratedVideoDecode,
     ::switches::kDisableCastStreamingHWEncoding,
     ::switches::kDisableDelegatedRenderer,
@@ -91,28 +92,27 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kDisablePanelFitting,
     ::switches::kDisableSeccompFilterSandbox,
     ::switches::kDisableSetuidSandbox,
+    ::switches::kDisableTextBlobs,
     ::switches::kDisableThreadedScrolling,
     ::switches::kDisableTouchDragDrop,
     ::switches::kDisableTouchEditing,
-    ::switches::kEnableAcceleratedJpegDecoding,
     ::switches::kEnableBeginFrameScheduling,
     ::switches::kEnablePreferCompositingToLCDText,
     ::switches::kEnableDelegatedRenderer,
     ::switches::kDisableDisplayList2dCanvas,
     ::switches::kEnableDisplayList2dCanvas,
+    ::switches::kForceDisplayList2dCanvas,
     ::switches::kEnableEncryptedMedia,
     ::switches::kDisableGpuSandbox,
-    ::switches::kEnableContainerCulling,
-    ::switches::kEnableTextBlobs,
     ::switches::kEnableDistanceFieldText,
     ::switches::kEnableGpuRasterization,
     ::switches::kEnableImageColorProfiles,
-    ::switches::kEnableImplSidePainting,
     ::switches::kEnableLogging,
     ::switches::kEnableLowResTiling,
     ::switches::kEnableOneCopy,
     ::switches::kEnablePinch,
     ::switches::kEnablePluginPlaceholderShadowDom,
+    ::switches::kEnableSlimmingPaint,
     ::switches::kEnableTouchDragDrop,
     ::switches::kEnableTouchEditing,
     ::switches::kEnableViewport,
@@ -137,7 +137,7 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kEnableShareGroupAsyncTextureUpload,
     ::switches::kTabCaptureUpscaleQuality,
     ::switches::kTabCaptureDownscaleQuality,
-#if defined(USE_XI2_MT) || defined(USE_OZONE)
+#if defined(USE_X11) || defined(USE_OZONE)
     ::switches::kTouchCalibration,
 #endif
     ::switches::kTouchDevices,
@@ -149,33 +149,34 @@ std::string DeriveCommandLine(const GURL& start_url,
 #endif
     ::switches::kUseDiscardableMemory,
     ::switches::kUseGL,
+    ::switches::kUseNormalPriorityForTileTaskWorkerThreads,
     ::switches::kUserDataDir,
     ::switches::kV,
     ::switches::kVModule,
     ::switches::kEnableWebGLDraftExtensions,
     ::switches::kEnableWebGLImageChromium,
 #if defined(ENABLE_WEBRTC)
-    ::switches::kDisableAudioTrackProcessing,
     ::switches::kDisableWebRtcHWDecoding,
     ::switches::kDisableWebRtcHWEncoding,
-    ::switches::kEnableWebRtcHWVp8Encoding,
     ::switches::kEnableWebRtcHWH264Encoding,
 #endif
     ::switches::kDisableVaapiAcceleratedVideoEncode,
 #if defined(USE_OZONE)
+    ::switches::kOzoneInitialDisplayBounds,
+    ::switches::kOzoneInitialDisplayPhysicalSizeMm,
     ::switches::kOzonePlatform,
     ::switches::kOzoneUseSurfaceless,
 #endif
     app_list::switches::kDisableSyncAppList,
     app_list::switches::kEnableSyncAppList,
 #if !defined(USE_ATHENA)
-    ash::switches::kAshDefaultWallpaperLarge,
-    ash::switches::kAshDefaultWallpaperSmall,
-    ash::switches::kAshGuestWallpaperLarge,
-    ash::switches::kAshGuestWallpaperSmall,
     ash::switches::kAshHostWindowBounds,
     ash::switches::kAshTouchHud,
     ash::switches::kAuraLegacyPowerButton,
+    chromeos::switches::kDefaultWallpaperLarge,
+    chromeos::switches::kDefaultWallpaperSmall,
+    chromeos::switches::kGuestWallpaperLarge,
+    chromeos::switches::kGuestWallpaperSmall,
 #endif
     // Please keep these in alphabetical order. Non-UI Compositor switches
     // here should also be added to
@@ -255,7 +256,7 @@ void ReLaunch(const std::string& command_line) {
   // This is not a proper way to get |argv| but it's good enough for debugging.
   base::SplitString(command_line, ' ', &argv);
 
-  base::LaunchProcess(argv, base::LaunchOptions(), NULL);
+  base::LaunchProcess(argv, base::LaunchOptions());
   chrome::AttemptUserExit();
 }
 
@@ -340,8 +341,8 @@ void ChromeRestartRequest::RestartJob() {
 std::string GetOffTheRecordCommandLine(
     const GURL& start_url,
     bool is_oobe_completed,
-    const CommandLine& base_command_line,
-    CommandLine* command_line) {
+    const base::CommandLine& base_command_line,
+    base::CommandLine* command_line) {
   base::DictionaryValue otr_switches;
   otr_switches.SetString(switches::kGuestSession, std::string());
   otr_switches.SetString(::switches::kIncognito, std::string());
@@ -366,7 +367,7 @@ std::string GetOffTheRecordCommandLine(
 
 void RestartChrome(const std::string& command_line) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  BootTimesLoader::Get()->set_restart_requested();
+  BootTimesRecorder::Get()->set_restart_requested();
 
   static bool restart_requested = false;
   if (restart_requested) {

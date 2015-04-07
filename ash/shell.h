@@ -23,9 +23,9 @@
 #include "ui/aura/window.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/events/event_target.h"
-#include "ui/gfx/insets.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/screen.h"
-#include "ui/gfx/size.h"
 #include "ui/wm/core/cursor_manager.h"
 #include "ui/wm/public/activation_change_observer.h"
 
@@ -42,6 +42,12 @@ class FocusClient;
 }
 }
 
+#if defined(OS_CHROMEOS)
+namespace chromeos {
+class AccelerometerReader;
+}
+#endif
+
 namespace gfx {
 class ImageSkia;
 class Point;
@@ -51,6 +57,7 @@ class Rect;
 namespace ui {
 class DisplayConfigurator;
 class Layer;
+class UserActivityDetector;
 class UserActivityPowerManagerNotifier;
 }
 namespace views {
@@ -68,14 +75,12 @@ class InputMethodEventFilter;
 class NestedAcceleratorController;
 class ShadowController;
 class VisibilityController;
-class UserActivityDetector;
 class WindowModalityController;
 }
 
 namespace ash {
 
 class AcceleratorController;
-class AccelerometerController;
 class AccessibilityDelegate;
 class AppListController;
 class AshNativeCursorManager;
@@ -118,6 +123,7 @@ class ResolutionNotificationController;
 class RootWindowController;
 class ScopedTargetRootWindow;
 class ScreenAsh;
+class ScreenOrientationDelegate;
 class ScreenPositionController;
 class SessionStateDelegate;
 class Shelf;
@@ -139,7 +145,6 @@ class SystemTrayNotifier;
 class ToplevelWindowEventHandler;
 class TouchTransformerController;
 class TouchObserverHUD;
-class UserActivityDetector;
 class UserWallpaperDelegate;
 class VirtualKeyboardController;
 class VideoActivityNotifier;
@@ -507,15 +512,15 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   // Starts the animation that occurs on first login.
   void DoInitialWorkspaceAnimation();
 
-  AccelerometerController* accelerometer_controller() {
-    return accelerometer_controller_.get();
-  }
-
   MaximizeModeController* maximize_mode_controller() {
     return maximize_mode_controller_.get();
   }
 
 #if defined(OS_CHROMEOS)
+  chromeos::AccelerometerReader* accelerometer_reader() {
+    return accelerometer_reader_.get();
+  }
+
   // TODO(oshima): Move these objects to DisplayController.
   ui::DisplayConfigurator* display_configurator() {
     return display_configurator_.get();
@@ -533,6 +538,10 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
 
   LogoutConfirmationController* logout_confirmation_controller() {
     return logout_confirmation_controller_.get();
+  }
+
+  ScreenOrientationDelegate* screen_orientation_delegate() {
+    return screen_orientation_delegate_.get();
   }
 
   VirtualKeyboardController* virtual_keyboard_controller() {
@@ -662,7 +671,7 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   scoped_ptr<PowerButtonController> power_button_controller_;
   scoped_ptr<LockStateController> lock_state_controller_;
   scoped_ptr<MruWindowTracker> mru_window_tracker_;
-  scoped_ptr< ::wm::UserActivityDetector> user_activity_detector_;
+  scoped_ptr<ui::UserActivityDetector> user_activity_detector_;
   scoped_ptr<VideoDetector> video_detector_;
   scoped_ptr<WindowCycleController> window_cycle_controller_;
   scoped_ptr<WindowSelectorController> window_selector_controller_;
@@ -701,14 +710,11 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   scoped_ptr< ::wm::InputMethodEventFilter> input_method_filter_;
 
   scoped_ptr<DisplayManager> display_manager_;
-  scoped_ptr<base::WeakPtrFactory<DisplayManager> >
-      weak_display_manager_factory_;
 
   scoped_ptr<LocaleNotificationController> locale_notification_controller_;
 
-  scoped_ptr<AccelerometerController> accelerometer_controller_;
-
 #if defined(OS_CHROMEOS)
+  scoped_ptr<chromeos::AccelerometerReader> accelerometer_reader_;
   scoped_ptr<PowerEventObserver> power_event_observer_;
   scoped_ptr<ui::UserActivityPowerManagerNotifier> user_activity_notifier_;
   scoped_ptr<VideoActivityNotifier> video_activity_notifier_;
@@ -730,12 +736,13 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   // Listens for output changes and updates the display manager.
   scoped_ptr<DisplayChangeObserver> display_change_observer_;
 
+  // Implements content::ScreenOrientationDelegate for ChromeOS
+  scoped_ptr<ScreenOrientationDelegate> screen_orientation_delegate_;
+
   scoped_ptr<TouchTransformerController> touch_transformer_controller_;
 
-#if defined(USE_X11)
   scoped_ptr<ui::EventHandler> magnifier_key_scroll_handler_;
   scoped_ptr<ui::EventHandler> speech_feedback_handler_;
-#endif  // defined(USE_X11)
 #endif  // defined(OS_CHROMEOS)
 
   scoped_ptr<MaximizeModeController> maximize_mode_controller_;

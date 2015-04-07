@@ -8,6 +8,7 @@ component("blink") {
     "//base",
     "//cc",
     "//cc/blink",
+    "//gpu/blink",
     "//media",
     "//media:shared_memory_support",
     "//net",
@@ -33,18 +34,26 @@ component("blink") {
     "cdm_result_promise.h",
     "cdm_result_promise_helper.cc",
     "cdm_result_promise_helper.h",
+    "cdm_session_adapter.cc",
+    "cdm_session_adapter.h",
     "encrypted_media_player_support.cc",
     "encrypted_media_player_support.h",
     "new_session_cdm_result_promise.cc",
     "new_session_cdm_result_promise.h",
-    "null_encrypted_media_player_support.cc",
-    "null_encrypted_media_player_support.h",
     "texttrack_impl.cc",
     "texttrack_impl.h",
     "video_frame_compositor.cc",
     "video_frame_compositor.h",
     "webaudiosourceprovider_impl.cc",
     "webaudiosourceprovider_impl.h",
+    "webcontentdecryptionmodule_impl.cc",
+    "webcontentdecryptionmodule_impl.h",
+    "webcontentdecryptionmoduleaccess_impl.cc",
+    "webcontentdecryptionmoduleaccess_impl.h",
+    "webcontentdecryptionmodulesession_impl.cc",
+    "webcontentdecryptionmodulesession_impl.h",
+    "webencryptedmediaclient_impl.cc",
+    "webencryptedmediaclient_impl.h",
     "webinbandtexttrack_impl.cc",
     "webinbandtexttrack_impl.h",
     "webmediaplayer_delegate.h",
@@ -62,43 +71,48 @@ component("blink") {
 
   if (is_android) {
     sources -= [
+      "encrypted_media_player_support.cc",
+      "encrypted_media_player_support.h",
       "webmediaplayer_impl.cc",
       "webmediaplayer_impl.h",
     ]
   }
 }
 
-test("media_blink_unittests") {
-  deps = [
-    ":blink",
-    "//base",
-    "//base/test:test_support",
-    "//cc",
-    "//cc/blink",
-    "//media",
-    "//media:shared_memory_support",
-    "//media/base:test_support",
-    "//net",
-    "//testing/gmock",
-    "//testing/gtest",
-    "//third_party/WebKit/public:blink",
-    "//ui/gfx/geometry",
-    "//ui/gfx:test_support",
-    "//url",
-  ]
+if (!is_mac) {
+  # TODO(GYP): Make linking this work on the mac.
+  test("media_blink_unittests") {
+    deps = [
+      ":blink",
+      "//base",
+      "//base/test:test_support",
+      "//cc",
+      "//cc/blink",
+      "//media",
+      "//media:shared_memory_support",
+      "//media/base:test_support",
+      "//net",
+      "//testing/gmock",
+      "//testing/gtest",
+      "//third_party/WebKit/public:blink",
+      "//ui/gfx/geometry",
+      "//ui/gfx:test_support",
+      "//url",
+    ]
 
-  sources = [
-    "buffered_data_source_host_impl_unittest.cc",
-    "buffered_data_source_unittest.cc",
-    "buffered_resource_loader_unittest.cc",
-    "cache_util_unittest.cc",
-    "mock_webframeclient.h",
-    "mock_weburlloader.cc",
-    "mock_weburlloader.h",
-    "run_all_unittests.cc",
-    "test_response_generator.cc",
-    "test_response_generator.h",
-    "video_frame_compositor_unittest.cc",
-    "webaudiosourceprovider_impl_unittest.cc",
-  ]
+    sources = [
+      "buffered_data_source_host_impl_unittest.cc",
+      "buffered_data_source_unittest.cc",
+      "buffered_resource_loader_unittest.cc",
+      "cache_util_unittest.cc",
+      "mock_webframeclient.h",
+      "mock_weburlloader.cc",
+      "mock_weburlloader.h",
+      "run_all_unittests.cc",
+      "test_response_generator.cc",
+      "test_response_generator.h",
+      "video_frame_compositor_unittest.cc",
+      "webaudiosourceprovider_impl_unittest.cc",
+    ]
+  }
 }

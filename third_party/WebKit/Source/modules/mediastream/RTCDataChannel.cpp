@@ -89,6 +89,11 @@ RTCDataChannel::~RTCDataChannel()
         m_handler->setClient(0);
 }
 
+RTCDataChannel::ReadyState RTCDataChannel::getHandlerState() const
+{
+    return m_handler->state();
+}
+
 String RTCDataChannel::label() const
 {
     return m_handler->label();
@@ -146,7 +151,7 @@ String RTCDataChannel::readyState() const
     return String();
 }
 
-unsigned long RTCDataChannel::bufferedAmount() const
+unsigned RTCDataChannel::bufferedAmount() const
 {
     return m_handler->bufferedAmount();
 }
@@ -331,7 +336,7 @@ void RTCDataChannel::trace(Visitor* visitor)
 {
     visitor->trace(m_scheduledEvents);
     visitor->registerWeakMembers<RTCDataChannel, &RTCDataChannel::clearWeakMembers>(this);
-    EventTargetWithInlineData::trace(visitor);
+    RefCountedGarbageCollectedEventTargetWithInlineData<RTCDataChannel>::trace(visitor);
 }
 
 } // namespace blink

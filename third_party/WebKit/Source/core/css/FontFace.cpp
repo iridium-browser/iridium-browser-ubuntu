@@ -59,7 +59,6 @@
 #include "core/frame/UseCounter.h"
 #include "platform/FontFamilyNames.h"
 #include "platform/SharedBuffer.h"
-#include "wtf/ArrayBufferView.h"
 
 namespace blink {
 
@@ -574,6 +573,7 @@ void FontFace::trace(Visitor* visitor)
     visitor->trace(m_loadedProperty);
     visitor->trace(m_cssFontFace);
     visitor->trace(m_callbacks);
+    ActiveDOMObject::trace(visitor);
 }
 
 bool FontFace::hadBlankText() const

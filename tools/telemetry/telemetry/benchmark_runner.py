@@ -24,15 +24,6 @@ from telemetry.core import util
 from telemetry.util import find_dependencies
 
 
-class Deps(find_dependencies.FindDependenciesCommand):
-  """Prints all dependencies"""
-
-  def Run(self, args):
-    main_module = sys.modules['__main__']
-    args.positional_args.append(os.path.realpath(main_module.__file__))
-    return super(Deps, self).Run(args)
-
-
 class Help(command_line.OptparseCommand):
   """Display help information about a command"""
 
@@ -85,20 +76,20 @@ class List(command_line.OptparseCommand):
       parser.error('Must provide at most one benchmark name.')
 
   def Run(self, args):
+    possible_browser = browser_finder.FindBrowser(args)
+    if args.browser_type in (
+        'exact', 'release', 'release_x64', 'debug', 'debug_x64', 'canary'):
+      args.browser_type = 'reference'
+      possible_reference_browser = browser_finder.FindBrowser(args)
+    else:
+      possible_reference_browser = None
     if args.json_output_file:
-      possible_browser = browser_finder.FindBrowser(args)
-      if args.browser_type in (
-          'exact', 'release', 'release_x64', 'debug', 'debug_x64', 'canary'):
-        args.browser_type = 'reference'
-        possible_reference_browser = browser_finder.FindBrowser(args)
-      else:
-        possible_reference_browser = None
       with open(args.json_output_file, 'w') as f:
         f.write(_GetJsonBenchmarkList(possible_browser,
                                       possible_reference_browser,
                                       args.benchmarks, args.num_shards))
     else:
-      _PrintBenchmarkList(args.benchmarks)
+      _PrintBenchmarkList(args.benchmarks, possible_browser)
     return 0
 
 
@@ -134,7 +125,9 @@ class Run(command_line.OptparseCommand):
   @classmethod
   def ProcessCommandLineArgs(cls, parser, args):
     if not args.positional_args:
-      _PrintBenchmarkList(_Benchmarks())
+      possible_browser = (
+          browser_finder.FindBrowser(args) if args.browser_type else None)
+      _PrintBenchmarkList(_Benchmarks(), possible_browser)
       sys.exit(-1)
 
     input_benchmark_name = args.positional_args[0]
@@ -142,7 +135,7 @@ class Run(command_line.OptparseCommand):
     if not matching_benchmarks:
       print >> sys.stderr, 'No benchmark named "%s".' % input_benchmark_name
       print >> sys.stderr
-      _PrintBenchmarkList(_Benchmarks())
+      _PrintBenchmarkList(_Benchmarks(), None)
       sys.exit(-1)
 
     if len(matching_benchmarks) > 1:
@@ -150,7 +143,7 @@ class Run(command_line.OptparseCommand):
                             input_benchmark_name)
       print >> sys.stderr, 'Did you mean one of these?'
       print >> sys.stderr
-      _PrintBenchmarkList(matching_benchmarks)
+      _PrintBenchmarkList(matching_benchmarks, None)
       sys.exit(-1)
 
     benchmark_class = matching_benchmarks.pop()
@@ -247,12 +240,14 @@ def _GetJsonBenchmarkList(possible_browser, possible_reference_browser,
   for benchmark_class in benchmark_classes:
     if not issubclass(benchmark_class, benchmark.Benchmark):
       continue
-    if not decorators.IsEnabled(benchmark_class, possible_browser):
+    enabled, _ = decorators.IsEnabled(benchmark_class, possible_browser)
+    if not enabled:
       continue
 
     base_name = benchmark_class.Name()
     base_cmd = [sys.executable, os.path.realpath(sys.argv[0]),
-                '-v', '--output-format=buildbot', base_name]
+                '-v', '--output-format=chartjson', '--upload-results',
+                base_name]
     perf_dashboard_id = base_name
     # TODO(tonyg): Currently we set the device affinity to a stable hash of the
     # benchmark name. This somewhat evenly distributes benchmarks among the
@@ -267,19 +262,21 @@ def _GetJsonBenchmarkList(possible_browser, possible_reference_browser,
       'device_affinity': device_affinity,
       'perf_dashboard_id': perf_dashboard_id,
     }
-    if (possible_reference_browser and
-        decorators.IsEnabled(benchmark_class, possible_reference_browser)):
-      output['steps'][base_name + '.reference'] = {
-        'cmd': ' '.join(base_cmd + [
-              '--browser=reference', '--output-trace-tag=_ref']),
-        'device_affinity': device_affinity,
-        'perf_dashboard_id': perf_dashboard_id,
-      }
+    if possible_reference_browser:
+      enabled, _ = decorators.IsEnabled(
+          benchmark_class, possible_reference_browser)
+      if enabled:
+        output['steps'][base_name + '.reference'] = {
+          'cmd': ' '.join(base_cmd + [
+                '--browser=reference', '--output-trace-tag=_ref']),
+          'device_affinity': device_affinity,
+          'perf_dashboard_id': perf_dashboard_id,
+        }
 
   return json.dumps(output, indent=2, sort_keys=True)
 
 
-def _PrintBenchmarkList(benchmarks):
+def _PrintBenchmarkList(benchmarks, possible_browser):
   if not benchmarks:
     print >> sys.stderr, 'No benchmarks found!'
     return
@@ -288,12 +285,28 @@ def _PrintBenchmarkList(benchmarks):
   format_string = '  %%-%ds %%s' % max(len(b.Name()) for b in benchmarks)
 
   filtered_benchmarks = [benchmark_class for benchmark_class in benchmarks
-                    if issubclass(benchmark_class, benchmark.Benchmark)]
+                         if issubclass(benchmark_class, benchmark.Benchmark)]
+  disabled_benchmarks = []
   if filtered_benchmarks:
-    print >> sys.stderr, 'Available benchmarks are:'
+    print >> sys.stderr, 'Available benchmarks %sare:' % (
+        'for %s ' %possible_browser.browser_type if possible_browser else '')
     for benchmark_class in sorted(filtered_benchmarks, key=lambda b: b.Name()):
+      if possible_browser and not decorators.IsEnabled(benchmark_class,
+                                                       possible_browser):
+        disabled_benchmarks.append(benchmark_class)
+        continue
       print >> sys.stderr, format_string % (
           benchmark_class.Name(), benchmark_class.Description())
+
+    if disabled_benchmarks:
+      print >> sys.stderr, (
+          'Disabled benchmarks for %s are (force run with -d): ' %
+          possible_browser.browser_type)
+      for benchmark_class in disabled_benchmarks:
+        print >> sys.stderr, format_string % (
+            benchmark_class.Name(), benchmark_class.Description())
+    print >> sys.stderr, (
+        'Pass --browser to list benchmarks for another browser.')
     print >> sys.stderr
 
 

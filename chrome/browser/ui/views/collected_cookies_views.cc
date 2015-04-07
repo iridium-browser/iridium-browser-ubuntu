@@ -44,16 +44,6 @@
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 
-namespace chrome {
-
-// Declared in browser_dialogs.h so others don't have to depend on our header.
-void ShowCollectedCookiesDialog(content::WebContents* web_contents) {
-  // Deletes itself on close.
-  new CollectedCookiesViews(web_contents);
-}
-
-}  // namespace chrome
-
 namespace {
 
 // Spacing between the infobar frame and its contents.
@@ -196,7 +186,7 @@ CollectedCookiesViews::CollectedCookiesViews(content::WebContents* web_contents)
       TabSpecificContentSettings::FromWebContents(web_contents);
   registrar_.Add(this, chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN,
                  content::Source<TabSpecificContentSettings>(content_settings));
-  ShowWebModalDialogViews(this, web_contents);
+  constrained_window::ShowWebModalDialogViews(this, web_contents);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

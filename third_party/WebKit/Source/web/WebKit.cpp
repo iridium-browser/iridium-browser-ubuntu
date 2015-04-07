@@ -31,6 +31,7 @@
 #include "config.h"
 #include "public/web/WebKit.h"
 
+#include "bindings/core/v8/ScriptStreamerThread.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8GCController.h"
 #include "bindings/core/v8/V8Initializer.h"
@@ -204,6 +205,10 @@ void shutdown()
         s_messageLoopInterruptor = 0;
     }
 
+    // Shutdown V8-related background threads before V8 is ramped down. Note
+    // that this will wait the thread to stop its operations.
+    ScriptStreamerThread::shutdown();
+
     v8::Isolate* isolate = V8PerIsolateData::mainThreadIsolate();
     V8PerIsolateData::willBeDestroyed(isolate);
 
@@ -211,6 +216,8 @@ void shutdown()
     // and later shutdown steps starts freeing up resources needed during
     // worker termination.
     WorkerThread::terminateAndWaitForAllWorkers();
+
+    ModulesInitializer::terminateThreads();
 
     // Detach the main thread before starting the shutdown sequence
     // so that the main thread won't get involved in a GC during the shutdown.
@@ -263,7 +270,8 @@ void enableLogChannel(const char* name)
 
 void resetPluginCache(bool reloadPages)
 {
-    Page::refreshPlugins(reloadPages);
+    ASSERT(!reloadPages);
+    Page::refreshPlugins();
 }
 
 } // namespace blink

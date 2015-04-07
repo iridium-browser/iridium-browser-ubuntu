@@ -50,19 +50,28 @@ import android.widget.ImageButton;
 import android.widget.ListView;
 import android.widget.TextView;
 
-import java.util.ArrayList;
-
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.webrtc.MediaCodecVideoEncoder;
 
+import java.util.ArrayList;
+import java.util.Random;
 
 /**
  * Handles the initial setup where the user selects which room to join.
  */
 public class ConnectActivity extends Activity {
 
+  public static final String EXTRA_ROOMNAME = "org.appspot.apprtc.ROOMNAME";
+  public static final String EXTRA_LOOPBACK = "org.appspot.apprtc.LOOPBACK";
+  public static final String EXTRA_CMDLINE = "org.appspot.apprtc.CMDLINE";
+  public static final String EXTRA_RUNTIME = "org.appspot.apprtc.RUNTIME";
+  public static final String EXTRA_BITRATE = "org.appspot.apprtc.BITRATE";
+  public static final String EXTRA_HWCODEC = "org.appspot.apprtc.HWCODEC";
   private static final String TAG = "ConnectActivity";
+  private static final int CONNECTION_REQUEST = 1;
+  private static boolean commandLineRun = false;
+
   private ImageButton addRoomButton;
   private ImageButton removeRoomButton;
   private ImageButton connectButton;
@@ -70,9 +79,13 @@ public class ConnectActivity extends Activity {
   private EditText roomEditText;
   private ListView roomListView;
   private SharedPreferences sharedPref;
-  private String keyprefUrl;
   private String keyprefResolution;
   private String keyprefFps;
+  private String keyprefBitrateType;
+  private String keyprefBitrateValue;
+  private String keyprefHwCodec;
+  private String keyprefCpuUsageDetection;
+  private String keyprefRoomServerUrl;
   private String keyprefRoom;
   private String keyprefRoomList;
   private ArrayList<String> roomList;
@@ -85,33 +98,30 @@ public class ConnectActivity extends Activity {
     // Get setting keys.
     PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
     sharedPref = PreferenceManager.getDefaultSharedPreferences(this);
-    keyprefUrl = getString(R.string.pref_url_key);
     keyprefResolution = getString(R.string.pref_resolution_key);
     keyprefFps = getString(R.string.pref_fps_key);
+    keyprefBitrateType = getString(R.string.pref_startbitrate_key);
+    keyprefBitrateValue = getString(R.string.pref_startbitratevalue_key);
+    keyprefHwCodec = getString(R.string.pref_hwcodec_key);
+    keyprefCpuUsageDetection = getString(R.string.pref_cpu_usage_detection_key);
+    keyprefRoomServerUrl = getString(R.string.pref_room_server_url_key);
     keyprefRoom = getString(R.string.pref_room_key);
     keyprefRoomList = getString(R.string.pref_room_list_key);
-
-    // If an implicit VIEW intent is launching the app, go directly to that URL.
-    final Intent intent = getIntent();
-    if ("android.intent.action.VIEW".equals(intent.getAction())) {
-      connectToRoom(intent.getData().toString());
-      return;
-    }
 
     setContentView(R.layout.activity_connect);
 
     roomEditText = (EditText) findViewById(R.id.room_edittext);
     roomEditText.setOnEditorActionListener(
-        new TextView.OnEditorActionListener() {
-          @Override
-          public boolean onEditorAction(
-              TextView textView, int i, KeyEvent keyEvent) {
-            if (i == EditorInfo.IME_ACTION_DONE) {
-              addRoomButton.performClick();
-              return true;
-            }
-            return false;
+      new TextView.OnEditorActionListener() {
+        @Override
+        public boolean onEditorAction(
+            TextView textView, int i, KeyEvent keyEvent) {
+          if (i == EditorInfo.IME_ACTION_DONE) {
+            addRoomButton.performClick();
+            return true;
           }
+          return false;
+        }
     });
     roomEditText.requestFocus();
 
@@ -127,6 +137,19 @@ public class ConnectActivity extends Activity {
     connectLoopbackButton =
         (ImageButton) findViewById(R.id.connect_loopback_button);
     connectLoopbackButton.setOnClickListener(connectListener);
+
+    // If an implicit VIEW intent is launching the app, go directly to that URL.
+    final Intent intent = getIntent();
+    if ("android.intent.action.VIEW".equals(intent.getAction())
+        && !commandLineRun) {
+      commandLineRun = true;
+      boolean loopback = intent.getBooleanExtra(EXTRA_LOOPBACK, false);
+      int runTimeMs = intent.getIntExtra(EXTRA_RUNTIME, 0);
+      String room = sharedPref.getString(keyprefRoom, "");
+      roomEditText.setText(room);
+      connectToRoom(loopback, runTimeMs);
+      return;
+    }
   }
 
   @Override
@@ -184,6 +207,16 @@ public class ConnectActivity extends Activity {
     }
   }
 
+  @Override
+  protected void onActivityResult(
+      int requestCode, int resultCode, Intent data) {
+    if (requestCode == CONNECTION_REQUEST && commandLineRun) {
+      Log.d(TAG, "Return: " + resultCode);
+      setResult(resultCode);
+      finish();
+    }
+  }
+
   private final OnClickListener connectListener = new OnClickListener() {
     @Override
     public void onClick(View view) {
@@ -191,84 +224,136 @@ public class ConnectActivity extends Activity {
       if (view.getId() == R.id.connect_loopback_button) {
         loopback = true;
       }
-      String url = sharedPref.getString(keyprefUrl,
-          getString(R.string.pref_url_default));
-      if (loopback) {
-        url += "/?debug=loopback";
-      } else {
-        String roomName = getSelectedItem();
-        if (roomName == null) {
-          roomName = roomEditText.getText().toString();
-        }
-        url += "/?r=" + roomName;
-      }
-      String parametersResolution = null;
-      String parametersFps = null;
-      // Add video resolution constraints.
-      String resolution = sharedPref.getString(keyprefResolution,
-          getString(R.string.pref_resolution_default));
-      String[] dimensions = resolution.split("[ x]+");
-      if (dimensions.length == 2) {
-        try {
-          int maxWidth = Integer.parseInt(dimensions[0]);
-          int maxHeight = Integer.parseInt(dimensions[1]);
-          if (maxWidth > 0 && maxHeight > 0) {
-            parametersResolution = "minHeight=" + maxHeight + ",maxHeight=" +
-                maxHeight + ",minWidth=" + maxWidth + ",maxWidth=" + maxWidth;
-          }
-        } catch (NumberFormatException e) {
-          Log.e(TAG, "Wrong video resolution setting: " + resolution);
-        }
-      }
-      // Add camera fps constraints.
-      String fps = sharedPref.getString(keyprefFps,
-          getString(R.string.pref_fps_default));
-      String[] fpsValues = fps.split("[ x]+");
-      if (fpsValues.length == 2) {
-        try {
-          int cameraFps = Integer.parseInt(fpsValues[0]);
-          if (cameraFps > 0) {
-            parametersFps = "minFrameRate=" + cameraFps +
-                ",maxFrameRate=" + cameraFps;
-          }
-        } catch (NumberFormatException e) {
-          Log.e(TAG, "Wrong camera fps setting: " + fps);
-        }
-      }
-      // Modify connection URL.
-      if (parametersResolution != null || parametersFps != null) {
-        url += "&video=";
-        if (parametersResolution != null) {
-          url += parametersResolution;
-          if (parametersFps != null) {
-            url += ",";
-          }
-        }
-        if (parametersFps != null) {
-          url += parametersFps;
-        }
-      } else {
-        if (MediaCodecVideoEncoder.isPlatformSupported()) {
-          url += "&hd=true";
-        }
-      }
-      // TODO(kjellander): Add support for custom parameters to the URL.
-      connectToRoom(url);
+      commandLineRun = false;
+      connectToRoom(loopback, 0);
     }
   };
 
-  private void connectToRoom(String roomUrl) {
-    if (validateUrl(roomUrl)) {
-      Uri url = Uri.parse(roomUrl);
+  private String appendQueryParameter(String url, String parameter) {
+    String newUrl = url;
+    if (newUrl.contains("?")) {
+      newUrl += "&" + parameter;
+    } else {
+      newUrl += "?" + parameter;
+    }
+    return newUrl;
+  }
+
+  private void connectToRoom(boolean loopback, int runTimeMs) {
+    // Get room name (random for loopback).
+    String roomName;
+    if (loopback) {
+      roomName = Integer.toString((new Random()).nextInt(100000000));
+    } else {
+      roomName = getSelectedItem();
+      if (roomName == null) {
+        roomName = roomEditText.getText().toString();
+      }
+    }
+
+    String url = sharedPref.getString(
+        keyprefRoomServerUrl,
+        getString(R.string.pref_room_server_url_default));
+    url = url + "/register/" + roomName;
+
+    // Check HW codec flag.
+    boolean hwCodec = sharedPref.getBoolean(keyprefHwCodec,
+        Boolean.valueOf(getString(R.string.pref_hwcodec_default)));
+
+    // Add video resolution constraints.
+    String parametersResolution = null;
+    String parametersFps = null;
+    String resolution = sharedPref.getString(keyprefResolution,
+        getString(R.string.pref_resolution_default));
+    String[] dimensions = resolution.split("[ x]+");
+    if (dimensions.length == 2) {
+      try {
+        int maxWidth = Integer.parseInt(dimensions[0]);
+        int maxHeight = Integer.parseInt(dimensions[1]);
+        if (maxWidth > 0 && maxHeight > 0) {
+          parametersResolution = "minHeight=" + maxHeight + ",maxHeight="
+              + maxHeight + ",minWidth=" + maxWidth + ",maxWidth=" + maxWidth;
+        }
+      } catch (NumberFormatException e) {
+        Log.e(TAG, "Wrong video resolution setting: " + resolution);
+      }
+    }
+
+    // Add camera fps constraints.
+    String fps = sharedPref.getString(keyprefFps,
+        getString(R.string.pref_fps_default));
+    String[] fpsValues = fps.split("[ x]+");
+    if (fpsValues.length == 2) {
+      try {
+        int cameraFps = Integer.parseInt(fpsValues[0]);
+        if (cameraFps > 0) {
+          parametersFps = "minFrameRate=" + cameraFps
+              + ",maxFrameRate=" + cameraFps;
+        }
+      } catch (NumberFormatException e) {
+        Log.e(TAG, "Wrong camera fps setting: " + fps);
+      }
+    }
+
+    // Modify connection URL.
+    if (parametersResolution != null || parametersFps != null) {
+      String urlVideoParameters = "video=";
+      if (parametersResolution != null) {
+        urlVideoParameters += parametersResolution;
+        if (parametersFps != null) {
+          urlVideoParameters += ",";
+        }
+      }
+      if (parametersFps != null) {
+        urlVideoParameters += parametersFps;
+      }
+      url = appendQueryParameter(url, urlVideoParameters);
+    } else {
+      if (hwCodec && MediaCodecVideoEncoder.isPlatformSupported()) {
+        url = appendQueryParameter(url, "hd=true");
+      }
+    }
+
+    // Get start bitrate.
+    int startBitrate = 0;
+    String bitrateTypeDefault = getString(R.string.pref_startbitrate_default);
+    String bitrateType = sharedPref.getString(
+        keyprefBitrateType, bitrateTypeDefault);
+    if (!bitrateType.equals(bitrateTypeDefault)) {
+      String bitrateValue = sharedPref.getString(keyprefBitrateValue,
+          getString(R.string.pref_startbitratevalue_default));
+      startBitrate = Integer.parseInt(bitrateValue);
+    }
+
+    // Test if CpuOveruseDetection should be disabled. By default is on.
+    boolean cpuOveruseDetection = sharedPref.getBoolean(
+        keyprefCpuUsageDetection,
+        Boolean.valueOf(
+            getString(R.string.pref_cpu_usage_detection_default)));
+    if (!cpuOveruseDetection) {
+      url = appendQueryParameter(url, "googCpuOveruseDetection=false");
+    }
+
+    // Start AppRTCDemo activity.
+    Log.d(TAG, "Connecting to room " + roomName + " at URL " + url);
+    if (validateUrl(url)) {
+      Uri uri = Uri.parse(url);
       Intent intent = new Intent(this, AppRTCDemoActivity.class);
-      intent.setData(url);
-      startActivity(intent);
+      intent.setData(uri);
+      intent.putExtra(EXTRA_ROOMNAME, roomName);
+      intent.putExtra(EXTRA_LOOPBACK, loopback);
+      intent.putExtra(EXTRA_CMDLINE, commandLineRun);
+      intent.putExtra(EXTRA_RUNTIME, runTimeMs);
+      intent.putExtra(EXTRA_BITRATE, startBitrate);
+      intent.putExtra(EXTRA_HWCODEC, hwCodec);
+      startActivityForResult(intent, CONNECTION_REQUEST);
     }
   }
 
   private boolean validateUrl(String url) {
-    if (URLUtil.isHttpsUrl(url) || URLUtil.isHttpUrl(url))
+    if (URLUtil.isHttpsUrl(url) || URLUtil.isHttpUrl(url)) {
       return true;
+    }
 
     new AlertDialog.Builder(this)
         .setTitle(getText(R.string.invalid_url_title))

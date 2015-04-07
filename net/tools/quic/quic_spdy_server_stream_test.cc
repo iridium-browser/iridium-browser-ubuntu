@@ -84,8 +84,6 @@ class QuicSpdyServerStreamTest : public ::testing::TestWithParam<QuicVersion> {
 
     // New streams rely on having the peer's flow control receive window
     // negotiated in the config.
-    session_.config()->SetInitialFlowControlWindowToSend(
-        kInitialSessionFlowControlWindowForTest);
     session_.config()->SetInitialStreamFlowControlWindowToSend(
         kInitialStreamFlowControlWindowForTest);
     session_.config()->SetInitialSessionFlowControlWindowToSend(
@@ -97,7 +95,7 @@ class QuicSpdyServerStreamTest : public ::testing::TestWithParam<QuicVersion> {
     QuicInMemoryCachePeer::ResetForTests();
   }
 
-  virtual void SetUp() override {
+  void SetUp() override {
     QuicInMemoryCache* cache = QuicInMemoryCache::GetInstance();
 
     BalsaHeaders request_headers, response_headers;

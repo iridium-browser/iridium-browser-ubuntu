@@ -62,6 +62,7 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   std::string Description();
   std::string HelpText();
   std::string StringValue();
+  std::string Language();
   int X();
   int Y();
   int Width();
@@ -95,8 +96,12 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   int32_t RowCount();
   int32_t ColumnCount();
   bool IsClickable();
+  bool IsButtonStateMixed();
 
   // Bound methods.
+  v8::Handle<v8::Object> AriaControlsElementAtIndex(unsigned index);
+  v8::Handle<v8::Object> AriaFlowToElementAtIndex(unsigned index);
+  v8::Handle<v8::Object> AriaOwnsElementAtIndex(unsigned index);
   std::string AllAttributes();
   std::string AttributesOfChildren();
   int LineForIndex(int index);
@@ -104,6 +109,8 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   v8::Handle<v8::Object> ChildAtIndex(int index);
   v8::Handle<v8::Object> ElementAtPoint(int x, int y);
   v8::Handle<v8::Object> TableHeader();
+  v8::Handle<v8::Object> RowHeaderAtIndex(unsigned index);
+  v8::Handle<v8::Object> ColumnHeaderAtIndex(unsigned index);
   std::string RowIndexRange();
   std::string ColumnIndexRange();
   v8::Handle<v8::Object> CellForColumnAndRow(int column, int row);

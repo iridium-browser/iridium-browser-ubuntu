@@ -31,10 +31,10 @@
 #include "extensions/test/result_catcher.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
 #include "ui/gfx/skia_util.h"
 
 using content::WebContents;
@@ -50,7 +50,7 @@ const char kEmptyPathError[] = "The path property must not be empty.";
 // Views implementation of browser action button will return icon whose
 // background will be set.
 gfx::ImageSkia AddBackgroundForViews(const gfx::ImageSkia& icon) {
-#if defined(TOOLKIT_VIEWS)
+#if !defined(OS_MACOSX)
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   gfx::ImageSkia bg = *rb.GetImageSkiaNamed(IDR_BROWSER_ACTION);
   return gfx::ImageSkiaOperations::CreateSuperimposedImage(bg, icon);

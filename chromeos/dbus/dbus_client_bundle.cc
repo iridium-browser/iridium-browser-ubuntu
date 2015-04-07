@@ -16,6 +16,8 @@
 #include "chromeos/dbus/bluetooth_gatt_manager_client.h"
 #include "chromeos/dbus/bluetooth_gatt_service_client.h"
 #include "chromeos/dbus/bluetooth_input_client.h"
+#include "chromeos/dbus/bluetooth_media_client.h"
+#include "chromeos/dbus/bluetooth_media_transport_client.h"
 #include "chromeos/dbus/bluetooth_profile_manager_client.h"
 #include "chromeos/dbus/cras_audio_client.h"
 #include "chromeos/dbus/cros_disks_client.h"
@@ -30,6 +32,8 @@
 #include "chromeos/dbus/fake_bluetooth_gatt_manager_client.h"
 #include "chromeos/dbus/fake_bluetooth_gatt_service_client.h"
 #include "chromeos/dbus/fake_bluetooth_input_client.h"
+#include "chromeos/dbus/fake_bluetooth_media_client.h"
+#include "chromeos/dbus/fake_bluetooth_media_transport_client.h"
 #include "chromeos/dbus/fake_bluetooth_profile_manager_client.h"
 #include "chromeos/dbus/fake_cras_audio_client.h"
 #include "chromeos/dbus/fake_cryptohome_client.h"
@@ -45,12 +49,15 @@
 #include "chromeos/dbus/fake_nfc_manager_client.h"
 #include "chromeos/dbus/fake_nfc_record_client.h"
 #include "chromeos/dbus/fake_nfc_tag_client.h"
+#include "chromeos/dbus/fake_peer_daemon_manager_client.h"
 #include "chromeos/dbus/fake_permission_broker_client.h"
+#include "chromeos/dbus/fake_privet_daemon_client.h"
 #include "chromeos/dbus/fake_shill_device_client.h"
 #include "chromeos/dbus/fake_shill_ipconfig_client.h"
 #include "chromeos/dbus/fake_shill_manager_client.h"
 #include "chromeos/dbus/fake_shill_profile_client.h"
 #include "chromeos/dbus/fake_shill_service_client.h"
+#include "chromeos/dbus/fake_shill_third_party_vpn_driver_client.h"
 #include "chromeos/dbus/fake_sms_client.h"
 #include "chromeos/dbus/fake_system_clock_client.h"
 #include "chromeos/dbus/gsm_sms_client.h"
@@ -63,15 +70,18 @@
 #include "chromeos/dbus/nfc_manager_client.h"
 #include "chromeos/dbus/nfc_record_client.h"
 #include "chromeos/dbus/nfc_tag_client.h"
+#include "chromeos/dbus/peer_daemon_manager_client.h"
 #include "chromeos/dbus/permission_broker_client.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/dbus/power_policy_controller.h"
+#include "chromeos/dbus/privet_daemon_client.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/dbus/shill_device_client.h"
 #include "chromeos/dbus/shill_ipconfig_client.h"
 #include "chromeos/dbus/shill_manager_client.h"
 #include "chromeos/dbus/shill_profile_client.h"
 #include "chromeos/dbus/shill_service_client.h"
+#include "chromeos/dbus/shill_third_party_vpn_driver_client.h"
 #include "chromeos/dbus/sms_client.h"
 #include "chromeos/dbus/system_clock_client.h"
 #include "chromeos/dbus/update_engine_client.h"
@@ -98,8 +108,10 @@ const struct {
     { "introspectable",  DBusClientBundle::INTROSPECTABLE },
     { "modem_messaging",  DBusClientBundle::MODEM_MESSAGING },
     { "nfc",  DBusClientBundle::NFC },
+    { "peer_daemon",  DBusClientBundle::PEER_DAEMON },
     { "permission_broker",  DBusClientBundle::PERMISSION_BROKER },
     { "power_manager",  DBusClientBundle::POWER_MANAGER },
+    { "privet_daemon",  DBusClientBundle::PRIVET_DAEMON },
     { "session_manager",  DBusClientBundle::SESSION_MANAGER },
     { "sms",  DBusClientBundle::SMS },
     { "system_clock",  DBusClientBundle::SYSTEM_CLOCK },
@@ -127,6 +139,9 @@ DBusClientBundle::DBusClientBundle(DBusClientTypeMask unstub_client_mask)
         BluetoothAgentManagerClient::Create());
     bluetooth_device_client_.reset(BluetoothDeviceClient::Create());
     bluetooth_input_client_.reset(BluetoothInputClient::Create());
+    bluetooth_media_client_.reset(BluetoothMediaClient::Create());
+    bluetooth_media_transport_client_.reset(
+        BluetoothMediaTransportClient::Create());
     bluetooth_profile_manager_client_.reset(
         BluetoothProfileManagerClient::Create());
     bluetooth_gatt_characteristic_client_.reset(
@@ -142,6 +157,9 @@ DBusClientBundle::DBusClientBundle(DBusClientTypeMask unstub_client_mask)
     bluetooth_agent_manager_client_.reset(new FakeBluetoothAgentManagerClient);
     bluetooth_device_client_.reset(new FakeBluetoothDeviceClient);
     bluetooth_input_client_.reset(new FakeBluetoothInputClient);
+    bluetooth_media_client_.reset(new FakeBluetoothMediaClient);
+    bluetooth_media_transport_client_.reset(
+        new FakeBluetoothMediaTransportClient);
     bluetooth_profile_manager_client_.reset(
         new FakeBluetoothProfileManagerClient);
     bluetooth_gatt_characteristic_client_.reset(
@@ -187,12 +205,16 @@ DBusClientBundle::DBusClientBundle(DBusClientTypeMask unstub_client_mask)
     shill_ipconfig_client_.reset(ShillIPConfigClient::Create());
     shill_service_client_.reset(ShillServiceClient::Create());
     shill_profile_client_.reset(ShillProfileClient::Create());
+    shill_third_party_vpn_driver_client_.reset(
+        ShillThirdPartyVpnDriverClient::Create());
   } else {
     shill_manager_client_.reset(new FakeShillManagerClient);
     shill_device_client_.reset(new FakeShillDeviceClient);
     shill_ipconfig_client_.reset(new FakeShillIPConfigClient);
     shill_service_client_.reset(new FakeShillServiceClient);
     shill_profile_client_.reset(new FakeShillProfileClient);
+    shill_third_party_vpn_driver_client_.reset(
+        new FakeShillThirdPartyVpnDriverClient);
   }
 
   if (!IsUsingStub(GSM_SMS)) {
@@ -200,7 +222,7 @@ DBusClientBundle::DBusClientBundle(DBusClientTypeMask unstub_client_mask)
   } else {
     FakeGsmSMSClient* gsm_sms_client = new FakeGsmSMSClient();
     gsm_sms_client->set_sms_test_message_switch_present(
-        CommandLine::ForCurrentProcess()->HasSwitch(
+        base::CommandLine::ForCurrentProcess()->HasSwitch(
             chromeos::switches::kSmsTestMessages));
     gsm_sms_client_.reset(gsm_sms_client);
   }
@@ -238,10 +260,20 @@ DBusClientBundle::DBusClientBundle(DBusClientTypeMask unstub_client_mask)
     nfc_record_client_.reset(new FakeNfcRecordClient);
   }
 
+  if (!IsUsingStub(PEER_DAEMON))
+    peer_daemon_manager_client_.reset(PeerDaemonManagerClient::Create());
+  else
+    peer_daemon_manager_client_.reset(new FakePeerDaemonManagerClient);
+
   if (!IsUsingStub(PERMISSION_BROKER))
     permission_broker_client_.reset(PermissionBrokerClient::Create());
   else
     permission_broker_client_.reset(new FakePermissionBrokerClient);
+
+  if (!IsUsingStub(PRIVET_DAEMON))
+    privet_daemon_client_.reset(PrivetDaemonClient::Create());
+  else
+    privet_daemon_client_.reset(new FakePrivetDaemonClient);
 
   power_manager_client_.reset(PowerManagerClient::Create(
       IsUsingStub(POWER_MANAGER) ? STUB_DBUS_CLIENT_IMPLEMENTATION

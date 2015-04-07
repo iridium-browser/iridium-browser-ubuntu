@@ -222,8 +222,13 @@ void AboutSigninInternals::Shutdown() {
 }
 
 void AboutSigninInternals::NotifyObservers() {
+  if (!signin_observers_.might_have_observers())
+    return;
+
+  const std::string product_version = client_->GetProductVersion();
   scoped_ptr<base::DictionaryValue> signin_status_value =
-      signin_status_.ToValue(client_->GetProductVersion());
+      signin_status_.ToValue(product_version);
+
   FOR_EACH_OBSERVER(AboutSigninInternals::Observer,
                     signin_observers_,
                     OnSigninStateChanged(signin_status_value.get()));
@@ -359,7 +364,8 @@ AboutSigninInternals::TokenInfo::~TokenInfo() {}
 
 bool AboutSigninInternals::TokenInfo::LessThan(const TokenInfo* a,
                                                const TokenInfo* b) {
-  return a->consumer_id < b->consumer_id || a->scopes < b->scopes;
+  return a->consumer_id < b->consumer_id ||
+      (a->consumer_id == b->consumer_id && a->scopes < b->scopes);
 }
 
 void AboutSigninInternals::TokenInfo::Invalidate() { removed_ = true; }
@@ -482,9 +488,9 @@ scoped_ptr<base::DictionaryValue> AboutSigninInternals::SigninStatus::ToValue(
        it != token_info_map.end();
        ++it) {
     base::ListValue* token_details = AddSection(token_info, it->first);
-
     std::sort(it->second.begin(), it->second.end(), TokenInfo::LessThan);
     const std::vector<TokenInfo*>& tokens = it->second;
+
     for (size_t i = 0; i < tokens.size(); ++i) {
       base::DictionaryValue* token_info = tokens[i]->ToValue();
       token_details->Append(token_info);

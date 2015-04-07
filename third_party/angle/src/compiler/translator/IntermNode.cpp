@@ -157,39 +157,11 @@ bool TIntermLoop::replaceChildNode(
     return false;
 }
 
-void TIntermLoop::enqueueChildren(std::queue<TIntermNode *> *nodeQueue) const
-{
-    if (mInit)
-    {
-        nodeQueue->push(mInit);
-    }
-    if (mCond)
-    {
-        nodeQueue->push(mCond);
-    }
-    if (mExpr)
-    {
-        nodeQueue->push(mExpr);
-    }
-    if (mBody)
-    {
-        nodeQueue->push(mBody);
-    }
-}
-
 bool TIntermBranch::replaceChildNode(
     TIntermNode *original, TIntermNode *replacement)
 {
     REPLACE_IF_IS(mExpression, TIntermTyped, original, replacement);
     return false;
-}
-
-void TIntermBranch::enqueueChildren(std::queue<TIntermNode *> *nodeQueue) const
-{
-    if (mExpression)
-    {
-        nodeQueue->push(mExpression);
-    }
 }
 
 bool TIntermBinary::replaceChildNode(
@@ -200,31 +172,11 @@ bool TIntermBinary::replaceChildNode(
     return false;
 }
 
-void TIntermBinary::enqueueChildren(std::queue<TIntermNode *> *nodeQueue) const
-{
-    if (mLeft)
-    {
-        nodeQueue->push(mLeft);
-    }
-    if (mRight)
-    {
-        nodeQueue->push(mRight);
-    }
-}
-
 bool TIntermUnary::replaceChildNode(
     TIntermNode *original, TIntermNode *replacement)
 {
     REPLACE_IF_IS(mOperand, TIntermTyped, original, replacement);
     return false;
-}
-
-void TIntermUnary::enqueueChildren(std::queue<TIntermNode *> *nodeQueue) const
-{
-    if (mOperand)
-    {
-        nodeQueue->push(mOperand);
-    }
 }
 
 bool TIntermAggregate::replaceChildNode(
@@ -235,14 +187,6 @@ bool TIntermAggregate::replaceChildNode(
         REPLACE_IF_IS(mSequence[ii], TIntermNode, original, replacement);
     }
     return false;
-}
-
-void TIntermAggregate::enqueueChildren(std::queue<TIntermNode *> *nodeQueue) const
-{
-    for (size_t childIndex = 0; childIndex < mSequence.size(); childIndex++)
-    {
-        nodeQueue->push(mSequence[childIndex]);
-    }
 }
 
 void TIntermAggregate::setPrecisionFromChildren()
@@ -300,22 +244,6 @@ bool TIntermSelection::replaceChildNode(
     return false;
 }
 
-void TIntermSelection::enqueueChildren(std::queue<TIntermNode *> *nodeQueue) const
-{
-    if (mCondition)
-    {
-        nodeQueue->push(mCondition);
-    }
-    if (mTrueBlock)
-    {
-        nodeQueue->push(mTrueBlock);
-    }
-    if (mFalseBlock)
-    {
-        nodeQueue->push(mFalseBlock);
-    }
-}
-
 //
 // Say whether or not an operation node changes the value of a variable.
 //
@@ -336,6 +264,7 @@ bool TIntermOperator::isAssignment() const
       case EOpMatrixTimesScalarAssign:
       case EOpMatrixTimesMatrixAssign:
       case EOpDivAssign:
+      case EOpModAssign:
         return true;
       default:
         return false;
@@ -403,6 +332,8 @@ bool TIntermUnary::promote(TInfoSink &)
       case EOpAny:
       case EOpAll:
       case EOpVectorLogicalNot:
+      case EOpIntBitsToFloat:
+      case EOpUintBitsToFloat:
         return true;
 
       default:
@@ -628,9 +559,11 @@ bool TIntermBinary::promote(TInfoSink &infoSink)
       case EOpAdd:
       case EOpSub:
       case EOpDiv:
+      case EOpMod:
       case EOpAddAssign:
       case EOpSubAssign:
       case EOpDivAssign:
+      case EOpModAssign:
         if ((mLeft->isMatrix() && mRight->isVector()) ||
             (mLeft->isVector() && mRight->isMatrix()))
         {
@@ -641,9 +574,17 @@ bool TIntermBinary::promote(TInfoSink &infoSink)
         if (mLeft->getNominalSize() != mRight->getNominalSize() ||
             mLeft->getSecondarySize() != mRight->getSecondarySize())
         {
-            // If the nominal size of operands do not match:
-            // One of them must be scalar.
+            // If the nominal sizes of operands do not match:
+            // One of them must be a scalar.
             if (!mLeft->isScalar() && !mRight->isScalar())
+                return false;
+
+            // In the case of compound assignment, the right side needs to be a
+            // scalar. Otherwise a vector/matrix would be assigned to a scalar.
+            if (!mRight->isScalar() &&
+                (mOp == EOpAddAssign ||
+                mOp == EOpSubAssign ||
+                mOp == EOpDivAssign))
                 return false;
 
             // Operator cannot be of type pure assignment.
@@ -793,6 +734,7 @@ TIntermTyped *TIntermConstantUnion::fold(
             break;
 
           case EOpDiv:
+          case EOpMod:
             {
                 tempConstArray = new ConstantUnion[objectSize];
                 for (size_t i = 0; i < objectSize; i++)
@@ -1180,4 +1122,30 @@ TString TIntermTraverser::hash(const TString &name, ShHashFunction64 hashFunctio
     stream << HASHED_NAME_PREFIX << std::hex << number;
     TString hashedName = stream.str();
     return hashedName;
+}
+
+void TIntermTraverser::updateTree()
+{
+    for (size_t ii = 0; ii < mReplacements.size(); ++ii)
+    {
+        const NodeUpdateEntry& entry = mReplacements[ii];
+        ASSERT(entry.parent);
+        bool replaced = entry.parent->replaceChildNode(
+            entry.original, entry.replacement);
+        ASSERT(replaced);
+
+        if (!entry.originalBecomesChildOfReplacement)
+        {
+            // In AST traversing, a parent is visited before its children.
+            // After we replace a node, if an immediate child is to
+            // be replaced, we need to make sure we don't update the replaced
+            // node; instead, we update the replacement node.
+            for (size_t jj = ii + 1; jj < mReplacements.size(); ++jj)
+            {
+                NodeUpdateEntry& entry2 = mReplacements[jj];
+                if (entry2.parent == entry.original)
+                    entry2.parent = entry.replacement;
+            }
+        }
+    }
 }

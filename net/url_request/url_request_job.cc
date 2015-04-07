@@ -11,6 +11,7 @@
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/values.h"
 #include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
@@ -19,7 +20,18 @@
 #include "net/base/network_delegate.h"
 #include "net/filter/filter.h"
 #include "net/http/http_response_headers.h"
-#include "net/url_request/url_request.h"
+
+namespace {
+
+// Callback for TYPE_URL_REQUEST_FILTERS_SET net-internals event.
+base::Value* FiltersSetCallback(net::Filter* filter,
+                                enum net::NetLog::LogLevel /* log_level */) {
+  base::DictionaryValue* event_params = new base::DictionaryValue();
+  event_params->SetString("filters", filter->OrderedFilterList());
+  return event_params;
+}
+
+}  // namespace
 
 namespace net {
 
@@ -85,18 +97,32 @@ bool URLRequestJob::Read(IOBuffer* buf, int buf_size, int *bytes_read) {
     filtered_read_buffer_ = buf;
     filtered_read_buffer_len_ = buf_size;
 
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile2(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("423948 URLRequestJob::Read2"));
+
     if (ReadFilteredData(bytes_read)) {
       rv = true;   // We have data to return.
 
       // It is fine to call DoneReading even if ReadFilteredData receives 0
       // bytes from the net, but we avoid making that call if we know for
       // sure that's the case (ReadRawDataHelper path).
+      // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is
+      // fixed.
+      tracked_objects::ScopedTracker tracking_profile3(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION("423948 URLRequestJob::Read3"));
+
       if (*bytes_read == 0)
         DoneReading();
     } else {
       rv = false;  // Error, or a new IO is pending.
     }
   }
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile4(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("423948 URLRequestJob::Read4"));
+
   if (rv && *bytes_read == 0)
     NotifyDone(URLRequestStatus());
   return rv;
@@ -240,6 +266,42 @@ void URLRequestJob::OnSuspend() {
 }
 
 void URLRequestJob::NotifyURLRequestDestroyed() {
+}
+
+// static
+GURL URLRequestJob::ComputeReferrerForRedirect(
+    URLRequest::ReferrerPolicy policy,
+    const std::string& referrer,
+    const GURL& redirect_destination) {
+  GURL original_referrer(referrer);
+  bool secure_referrer_but_insecure_destination =
+      original_referrer.SchemeIsSecure() &&
+      !redirect_destination.SchemeIsSecure();
+  bool same_origin =
+      original_referrer.GetOrigin() == redirect_destination.GetOrigin();
+  switch (policy) {
+    case URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE:
+      return secure_referrer_but_insecure_destination ? GURL()
+                                                      : original_referrer;
+
+    case URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN:
+      if (same_origin) {
+        return original_referrer;
+      } else if (secure_referrer_but_insecure_destination) {
+        return GURL();
+      } else {
+        return original_referrer.GetOrigin();
+      }
+
+    case URLRequest::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN:
+      return same_origin ? original_referrer : original_referrer.GetOrigin();
+
+    case URLRequest::NEVER_CLEAR_REFERRER:
+      return original_referrer;
+  }
+
+  NOTREACHED();
+  return GURL();
 }
 
 URLRequestJob::~URLRequestJob() {
@@ -424,6 +486,10 @@ void URLRequestJob::NotifyHeadersComplete() {
     request_->GetResponseHeaderByName("content-length", &content_length);
     if (!content_length.empty())
       base::StringToInt64(content_length, &expected_content_size_);
+  } else {
+    request_->net_log().AddEvent(
+        NetLog::TYPE_URL_REQUEST_FILTERS_SET,
+        base::Bind(&FiltersSetCallback, base::Unretained(filter_.get())));
   }
 
   // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
@@ -435,6 +501,10 @@ void URLRequestJob::NotifyHeadersComplete() {
 }
 
 void URLRequestJob::NotifyReadComplete(int bytes_read) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("URLRequestJob::NotifyReadComplete"));
+
   if (!request_ || !request_->has_delegate())
     return;  // The request was destroyed, so there is no more work to do.
 
@@ -749,6 +819,11 @@ bool URLRequestJob::ReadRawDataForFilter(int* bytes_read) {
 
 bool URLRequestJob::ReadRawDataHelper(IOBuffer* buf, int buf_size,
                                       int* bytes_read) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 URLRequestJob::ReadRawDataHelper"));
+
   DCHECK(!request_->status().is_io_pending());
   DCHECK(raw_read_buffer_.get() == NULL);
 
@@ -759,6 +834,11 @@ bool URLRequestJob::ReadRawDataHelper(IOBuffer* buf, int buf_size,
   bool rv = ReadRawData(buf, buf_size, bytes_read);
 
   if (!request_->status().is_io_pending()) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile1(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 URLRequestJob::ReadRawDataHelper1"));
+
     // If the read completes synchronously, either success or failure,
     // invoke the OnRawReadComplete callback so we can account for the
     // completed read.
@@ -800,8 +880,14 @@ void URLRequestJob::RecordBytesRead(int bytes_read) {
            << " pre total = " << prefilter_bytes_read_
            << " post total = " << postfilter_bytes_read_;
   UpdatePacketReadTimes();  // Facilitate stats recording if it is active.
-  if (network_delegate_)
+  if (network_delegate_) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 URLRequestJob::RecordBytesRead NotifyRawBytesRead"));
+
     network_delegate_->NotifyRawBytesRead(*request_, bytes_read);
+  }
 }
 
 bool URLRequestJob::FilterHasData() {
@@ -846,15 +932,11 @@ RedirectInfo URLRequestJob::ComputeRedirectInfo(const GURL& location,
         request_->first_party_for_cookies();
   }
 
-  // Suppress the referrer if we're redirecting out of https.
-  if (request_->referrer_policy() ==
-          URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE &&
-      GURL(request_->referrer()).SchemeIsSecure() &&
-      !redirect_info.new_url.SchemeIsSecure()) {
-    redirect_info.new_referrer.clear();
-  } else {
-    redirect_info.new_referrer = request_->referrer();
-  }
+  // Alter the referrer if redirecting cross-origin (especially HTTP->HTTPS).
+  redirect_info.new_referrer =
+      ComputeReferrerForRedirect(request_->referrer_policy(),
+                                 request_->referrer(),
+                                 redirect_info.new_url).spec();
 
   return redirect_info;
 }

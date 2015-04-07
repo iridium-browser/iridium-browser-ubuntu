@@ -38,6 +38,8 @@ group("root") {
     "//chrome/common",
     "//chrome/plugin",
     "//chrome/renderer",
+    "//chrome/test",
+    "//chrome/tools",
     "//chrome/utility",
     "//components:all_components",
     "//content",
@@ -47,6 +49,7 @@ group("root") {
     "//device/battery",
     "//device/bluetooth",
     "//device/nfc",
+    "//device/vibration",
     "//extensions/browser",
     "//extensions/common",
     "//extensions/common/api",
@@ -92,7 +95,6 @@ group("root") {
     "//third_party/libpng",
     "//third_party/libsrtp",
     "//third_party/libusb",
-    "//third_party/libwebm",
     "//third_party/libwebp",
     "//third_party/libxslt",
     "//third_party/libvpx",
@@ -130,12 +132,14 @@ group("root") {
     "//ui/snapshot",
     "//ui/strings",
     "//ui/surface",
+    "//ui/touch_selection",
     "//ui/views",
     "//ui/views/controls/webview",
     "//ui/web_dialogs",
     "//url",
     "//v8:v8",
-  ] + root_extra_deps
+  ]
+  deps += root_extra_deps
 
   if (!is_win) {
     deps += [ "//breakpad:symupload" ]
@@ -158,16 +162,12 @@ group("root") {
   }
 
   if (is_win) {
-    deps += [
-      "//ui/metro_viewer",
-    ]
+    deps += [ "//ui/metro_viewer" ]
   }
 
   if (is_win || is_mac || is_chromeos) {
     # RLZ works on these platforms.
-    deps += [
-      "//rlz:rlz_lib",
-    ]
+    deps += [ "//rlz:rlz_lib" ]
   }
 
   if (cpu_arch == "x86" || cpu_arch == "x64") {
@@ -178,10 +178,12 @@ group("root") {
   if (is_android) {
     deps += [
       "//base/android/linker:chromium_android_linker",
+      "//build/android/gyp/test:hello_world",
       "//build/android/rezip",
       "//third_party/openmax_dl/dl",
       "//content/shell/android:content_shell_apk",
       "//chrome/android:chrome_shell_apk",
+      "//chrome/test:test_support_unit",
       "//chrome/test/chromedriver/test/webview_shell:chromedriver_webview_shell_apk",
       "//ui/android:ui_java",
       "//third_party/android_tools:android_gcm_java",
@@ -189,14 +191,18 @@ group("root") {
       "//third_party/android_tools:android_support_v13_java",
       "//third_party/android_tools:android_support_v7_appcompat_java",
       "//third_party/android_tools:android_support_v7_mediarouter_java",
-      "//third_party/eyesfree:eyesfree_java",
+      "//third_party/mockito:mockito_java",
     ]
 
     if (has_chrome_android_internal) {
-      deps += [
-        "//clank",
-      ]
+      deps += [ "//clank" ]
     }
+
+    # TODO(GYP): Move the targets in the rest of this block that still
+    # need to be made to work in the GN build to the bottom of the file
+    # so that all the remaining work is located in one place in the file.
+    # This block should contain only the targets that aren't actually
+    # needed on Android.
 
     deps -= [
       "//apps",  # Needs testing.
@@ -205,6 +211,8 @@ group("root") {
       "//chrome/common",
       "//chrome/plugin",
       "//chrome/renderer",
+      "//chrome/test",
+      "//chrome/tools",
       "//chrome/utility",
       "//content/shell:content_shell",
       "//extensions/browser",
@@ -253,6 +261,104 @@ group("root") {
   if (!is_android && !is_ios) {
     deps += [
       "//device/usb",
+      "//third_party/pdfium/samples",
+    ]
+  }
+
+  #
+  # TODO(GYP): Make everything below this work in the GN build.
+  #
+
+  if (is_mac) {
+    # TODO(dpranke): These are as-yet untriaged but need at least the above.
+    deps -= [
+      "//apps",
+      "//ash",
+      "//chrome/browser",
+      "//chrome/browser/devtools",
+      "//chrome/common",
+      "//chrome/plugin",
+      "//chrome/renderer",
+      "//chrome/test",
+      "//chrome/utility",
+      "//components:all_components",
+      "//content/shell:content_shell",
+      "//extensions/browser",
+      "//extensions/common",
+      "//extensions/common/api",
+      "//extensions/renderer",
+      "//remoting/client/plugin",
+      "//third_party/usrsctp",
+      "//ui/app_list",
+      "//ui/aura",
+      "//ui/keyboard",
+      "//ui/views",
+      "//ui/views/controls/webview",
+      "//ui/web_dialogs",
+    ]
+  }
+
+  if (is_mac || is_ios) {
+    deps -= [
+      "//ui/touch_selection",
+    ]
+  }
+
+  if (is_win) {
+    deps -= [
+      "//apps",
+      "//ash",
+      "//chrome/browser",
+      "//chrome/browser/devtools",
+      "//chrome/common",
+      "//chrome/plugin",
+      "//chrome/renderer",
+      "//chrome/test",
+      "//chrome/utility",
+      "//components:all_components",
+      "//cc",
+      "//cc/blink",
+      "//content",
+      "//content/shell:content_shell",
+      "//content/test:test_support",
+      "//device/bluetooth",
+      "//extensions/browser",
+      "//extensions/common",
+      "//extensions/common/api",
+      "//extensions/renderer",
+      "//google_apis",
+      "//google_apis/gcm",
+      "//jingle:notifier",
+      "//media",
+      "//media/blink",
+      "//media/cast",
+      "//media/mojo",
+      "//mojo",
+      "//pdf",
+      "//ppapi:ppapi_c",
+      "//printing",
+      "//remoting/client/plugin",
+      "//storage/browser",
+      "//sync",
+      "//third_party/WebKit/public:all_blink",
+      "//third_party/angle:translator",
+      "//third_party/ffmpeg",
+      "//third_party/leveldatabase",
+      "//third_party/libjingle",
+      "//third_party/usrsctp",
+      "//third_party/webrtc",
+      "//ui/accessibility",
+      "//ui/app_list",
+      "//ui/aura",
+      "//ui/keyboard",
+      "//ui/native_theme",
+      "//ui/snapshot",
+      "//ui/surface",
+      "//ui/touch_selection",
+      "//ui/views",
+      "//ui/views/controls/webview",
+      "//ui/web_dialogs",
+      "//ui/wm",
     ]
   }
 }

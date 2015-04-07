@@ -12,6 +12,15 @@ import android.view.ContextMenu;
 public class EmptyTabObserver implements TabObserver {
 
     @Override
+    public void onShown(Tab tab) { }
+
+    @Override
+    public void onHidden(Tab tab) { }
+
+    @Override
+    public void onClosingStateChanged(Tab tab, boolean closing) { }
+
+    @Override
     public void onDestroyed(Tab tab) { }
 
     @Override
@@ -19,6 +28,15 @@ public class EmptyTabObserver implements TabObserver {
 
     @Override
     public void onLoadUrl(Tab tab, String url, int loadType) { }
+
+    @Override
+    public void onPageLoadStarted(Tab tab) { }
+
+    @Override
+    public void onPageLoadFinished(Tab tab) { }
+
+    @Override
+    public void onPageLoadFailed(Tab tab, int errorCode) { }
 
     @Override
     public void onFaviconUpdated(Tab tab) { }
@@ -33,10 +51,16 @@ public class EmptyTabObserver implements TabObserver {
     public void onSSLStateUpdated(Tab tab) { }
 
     @Override
+    public void onCrash(Tab tab, boolean sadTabShown) { }
+
+    @Override
     public void onWebContentsSwapped(Tab tab, boolean didStartLoad, boolean didFinishLoad) { }
 
     @Override
     public void onContextMenuShown(Tab tab, ContextMenu menu) { }
+
+    @Override
+    public void onContextualActionBarVisibilityChanged(Tab tab, boolean visible) { }
 
     @Override
     public void onWebContentsInstantSupportDisabled() { }
@@ -81,4 +105,14 @@ public class EmptyTabObserver implements TabObserver {
 
     @Override
     public void onDidDetachInterstitialPage(Tab tab) { }
+
+    @Override
+    public void onDidStartNavigationToPendingEntry(Tab tab, String url) { }
+
+    @Override
+    public void onBackgroundColorChanged(Tab tab, int color) { }
+
+    @Override
+    public void webContentsCreated(Tab tab, long sourceWebContents, long openerRenderFrameId,
+            String frameName, String targetUrl, long newWebContents) { }
 }

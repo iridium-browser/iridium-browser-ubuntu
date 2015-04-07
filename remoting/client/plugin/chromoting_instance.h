@@ -20,9 +20,11 @@
 #include "remoting/client/client_context.h"
 #include "remoting/client/client_user_interface.h"
 #include "remoting/client/key_event_mapper.h"
-#include "remoting/client/plugin/media_source_video_renderer.h"
+#include "remoting/client/plugin/empty_cursor_filter.h"
+#include "remoting/client/plugin/pepper_cursor_setter.h"
 #include "remoting/client/plugin/pepper_input_handler.h"
 #include "remoting/client/plugin/pepper_plugin_thread_delegate.h"
+#include "remoting/client/plugin/pepper_video_renderer.h"
 #include "remoting/proto/event.pb.h"
 #include "remoting/protocol/client_stub.h"
 #include "remoting/protocol/clipboard_stub.h"
@@ -56,26 +58,17 @@ class DesktopVector;
 namespace remoting {
 
 class ChromotingClient;
-class ChromotingStats;
 class ClientContext;
 class DelegatingSignalStrategy;
-class FrameConsumer;
-class FrameConsumerProxy;
 class PepperAudioPlayer;
+class PepperMouseLocker;
 class TokenFetcherProxy;
-class PepperView;
-class RectangleUpdateDecoder;
-class SignalStrategy;
-class VideoRenderer;
 
-struct ClientConfig;
-
-class ChromotingInstance :
-      public ClientUserInterface,
-      public MediaSourceVideoRenderer::Delegate,
-      public protocol::ClipboardStub,
-      public protocol::CursorShapeStub,
-      public pp::Instance {
+class ChromotingInstance : public ClientUserInterface,
+                           public PepperVideoRenderer::EventHandler,
+                           public protocol::ClipboardStub,
+                           public protocol::CursorShapeStub,
+                           public pp::Instance {
  public:
   // Plugin API version. This should be incremented whenever the API
   // interface changes.
@@ -132,15 +125,12 @@ class ChromotingInstance :
   // protocol::CursorShapeStub interface.
   void SetCursorShape(const protocol::CursorShapeInfo& cursor_shape) override;
 
-  // Called by PepperView.
-  void SetDesktopSize(const webrtc::DesktopSize& size,
-                      const webrtc::DesktopVector& dpi);
-  void SetDesktopShape(const webrtc::DesktopRegion& shape);
-  void OnFirstFrameReceived();
-
-  // Return statistics record by ChromotingClient.
-  // If no connection is currently active then NULL will be returned.
-  ChromotingStats* GetStats();
+  // PepperVideoRenderer::EventHandler interface.
+  void OnVideoDecodeError() override;
+  void OnVideoFirstFrameReceived() override;
+  void OnVideoSize(const webrtc::DesktopSize& size,
+                      const webrtc::DesktopVector& dpi) override;
+  void OnVideoShape(const webrtc::DesktopRegion& shape) override;
 
   // Registers a global log message handler that redirects the log output to
   // our plugin instance.
@@ -200,9 +190,10 @@ class ChromotingInstance :
   void HandleRequestPairing(const base::DictionaryValue& data);
   void HandleExtensionMessage(const base::DictionaryValue& data);
   void HandleAllowMouseLockMessage();
-  void HandleEnableMediaSourceRendering();
   void HandleSendMouseInputWhenUnfocused();
   void HandleDelegateLargeCursors();
+
+  void Disconnect();
 
   // Helper method to post messages to the webapp.
   void PostChromotingMessage(const std::string& method,
@@ -239,15 +230,6 @@ class ChromotingInstance :
       bool pairing_supported,
       const protocol::SecretFetchedCallback& secret_fetched_callback);
 
-  // MediaSourceVideoRenderer::Delegate implementation.
-  void OnMediaSourceSize(const webrtc::DesktopSize& size,
-                         const webrtc::DesktopVector& dpi) override;
-  void OnMediaSourceShape(const webrtc::DesktopRegion& shape) override;
-  void OnMediaSourceReset(const std::string& format) override;
-  void OnMediaSourceData(uint8_t* buffer,
-                         size_t buffer_size,
-                         bool keyframe) override;
-
   bool initialized_;
 
   PepperPluginThreadDelegate plugin_thread_delegate_;
@@ -255,9 +237,7 @@ class ChromotingInstance :
   scoped_ptr<base::ThreadTaskRunnerHandle> thread_task_runner_handle_;
   scoped_ptr<jingle_glue::JingleThreadWrapper> thread_wrapper_;
   ClientContext context_;
-  scoped_ptr<VideoRenderer> video_renderer_;
-  scoped_ptr<PepperView> view_;
-  scoped_ptr<base::WeakPtrFactory<FrameConsumer> > view_weak_factory_;
+  scoped_ptr<PepperVideoRenderer> video_renderer_;
   pp::View plugin_view_;
 
   // Contains the most-recently-reported desktop shape, if any.
@@ -274,21 +254,19 @@ class ChromotingInstance :
   scoped_ptr<protocol::InputFilter> normalizing_input_filter_;
   PepperInputHandler input_handler_;
 
+  // Cursor shape handling components, in reverse order to that in which they
+  // process cursor shape events. Note that |mouse_locker_| appears in the
+  // cursor pipeline since it is triggered by receipt of an empty cursor.
+  PepperCursorSetter cursor_setter_;
+  scoped_ptr<PepperMouseLocker> mouse_locker_;
+  EmptyCursorFilter empty_cursor_filter_;
+
   // Used to control text input settings, such as whether to show the IME.
   pp::TextInputController text_input_controller_;
 
   // PIN Fetcher.
   bool use_async_pin_dialog_;
   protocol::SecretFetchedCallback secret_fetched_callback_;
-
-  // Set to true if the webapp has requested to use MediaSource API for
-  // rendering. In that case all the encoded video will be passed to the
-  // webapp for decoding.
-  bool use_media_source_rendering_;
-
-  // Set to true if the web-app can handle large cursors. If false, then large
-  // cursors will be cropped to the maximum size supported by Pepper.
-  bool delegate_large_cursors_;
 
   base::WeakPtr<TokenFetcherProxy> token_fetcher_proxy_;
 

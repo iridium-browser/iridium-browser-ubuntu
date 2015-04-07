@@ -336,7 +336,7 @@ FX_BOOL Document::exportAsFDF(OBJ_METHOD_PARAMS)
 	if (!bWhole)
 		arrayFileds.Attach(params[2]);
 	//FX_BOOL bFlags = params.size() > 3 ? (FX_BOOL)params[3] : FALSE;
-	CFX_WideString swFilePath = params.size() > 4 ? (FX_LPCWSTR)params[4].operator CFX_WideString() : (FX_LPCWSTR)L"";
+	CFX_WideString swFilePath = params.size() > 4 ? (FX_LPCWSTR)params[4].operator CFX_WideString() : L"";
 
 	if (swFilePath.IsEmpty())
 	{
@@ -584,11 +584,11 @@ FX_BOOL Document::mailForm(OBJ_METHOD_PARAMS)
 	int iLength = params.size();
 
 	FX_BOOL bUI = iLength > 0 ? (FX_BOOL)params[0] : TRUE;
-	CFX_WideString cTo = iLength > 1 ? (FX_LPCWSTR)params[1].operator CFX_WideString() : (FX_LPCWSTR)L"";
-	CFX_WideString cCc = iLength > 2 ? (FX_LPCWSTR)params[2].operator CFX_WideString() : (FX_LPCWSTR)L"";
-	CFX_WideString cBcc = iLength > 3 ? (FX_LPCWSTR)params[3].operator CFX_WideString() : (FX_LPCWSTR)L"";
-	CFX_WideString cSubject = iLength > 4 ? (FX_LPCWSTR)params[4].operator CFX_WideString() : (FX_LPCWSTR)L"";
-	CFX_WideString cMsg = iLength > 5 ? (FX_LPCWSTR)params[5].operator CFX_WideString() : (FX_LPCWSTR)L"";
+	CFX_WideString cTo = iLength > 1 ? (FX_LPCWSTR)params[1].operator CFX_WideString() : L"";
+	CFX_WideString cCc = iLength > 2 ? (FX_LPCWSTR)params[2].operator CFX_WideString() : L"";
+	CFX_WideString cBcc = iLength > 3 ? (FX_LPCWSTR)params[3].operator CFX_WideString() : L"";
+	CFX_WideString cSubject = iLength > 4 ? (FX_LPCWSTR)params[4].operator CFX_WideString() : L"";
+	CFX_WideString cMsg = iLength > 5 ? (FX_LPCWSTR)params[5].operator CFX_WideString() : L"";
 
 	CPDFSDK_InterForm* pInterForm = (CPDFSDK_InterForm*)m_pDocument->GetInterForm();
 	ASSERT(pInterForm != NULL);
@@ -605,7 +605,7 @@ FX_BOOL Document::mailForm(OBJ_METHOD_PARAMS)
 	ASSERT(pRuntime != NULL);
 
 	pRuntime->BeginBlock();
-	pEnv->JS_docmailForm(textBuf.GetBuffer(), textBuf.GetLength(), bUI, (FX_LPCWSTR)cTo, (FX_LPCWSTR)cSubject, (FX_LPCWSTR)cCc, (FX_LPCWSTR)cBcc, (FX_LPCWSTR)cMsg);
+	pEnv->JS_docmailForm(textBuf.GetBuffer(), textBuf.GetLength(), bUI, cTo.c_str(), cSubject.c_str(), cCc.c_str(), cBcc.c_str(), cMsg.c_str());
 	pRuntime->EndBlock();
 	return TRUE;
 }
@@ -999,7 +999,7 @@ FX_BOOL Document::mailDoc(OBJ_METHOD_PARAMS)
 
 	pRuntime->BeginBlock();
 	CPDFDoc_Environment* pEnv = pRuntime->GetReaderApp();
-	pEnv->JS_docmailForm(NULL, 0, bUI, (FX_LPCWSTR)cTo, (FX_LPCWSTR)cSubject, (FX_LPCWSTR)cCc, (FX_LPCWSTR)cBcc, (FX_LPCWSTR)cMsg);
+	pEnv->JS_docmailForm(NULL, 0, bUI, cTo.c_str(), cSubject.c_str(), cCc.c_str(), cBcc.c_str(), cMsg.c_str());
 	pRuntime->EndBlock();
 
 	return TRUE;
@@ -1763,9 +1763,6 @@ FX_BOOL Document::removeIcon(OBJ_METHOD_PARAMS)
 	if(!m_pIconTree)
 		return FALSE;
 	CFX_WideString swIconName = params[0].operator CFX_WideString();
-#ifndef FOXIT_CHROME_BUILD
-	m_pIconTree->DeleteIconElement(swIconName);
-#endif
 	return TRUE;
 }
 
@@ -2155,11 +2152,7 @@ FX_BOOL Document::deletePages(OBJ_METHOD_PARAMS)
 
 	
 
-#ifndef FOXIT_CHROME_BUILD
-	return m_pDocument->DeletePages(nStart, nEnd - nStart + 1);
-#else
 	return TRUE;
-#endif
 }
 
 FX_BOOL Document::extractPages(OBJ_METHOD_PARAMS)

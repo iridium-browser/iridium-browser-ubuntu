@@ -6,20 +6,22 @@
 
 #include <cmath>
 
+#include "ash/ash_switches.h"
 #include "ash/display/display_info.h"
 #include "ash/display/display_manager.h"
 #include "ash/host/root_window_transformer.h"
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/shell.h"
 #include "base/basictypes.h"
+#include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "third_party/skia/include/utils/SkMatrix44.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_property.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/gfx/display.h"
-#include "ui/gfx/insets.h"
-#include "ui/gfx/size_conversions.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/transform.h"
 #include "ui/gfx/transform.h"
 
@@ -122,6 +124,15 @@ gfx::Transform CreateInsetsAndScaleTransform(const gfx::Insets& insets,
   return transform;
 }
 
+gfx::Transform CreateMirrorTransform(const gfx::Display& display) {
+  gfx::Transform transform;
+  transform.matrix().set3x3(-1, 0, 0,
+                            0, 1, 0,
+                            0, 0, 1);
+  transform.Translate(-display.size().width(), 0);
+  return transform;
+}
+
 // RootWindowTransformer for ash environment.
 class AshRootWindowTransformer : public RootWindowTransformer {
  public:
@@ -137,7 +148,15 @@ class AshRootWindowTransformer : public RootWindowTransformer {
                                       display.device_scale_factor(),
                                       root_window_ui_scale_) *
         CreateRotationTransform(root, display);
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kAshEnableMirroredScreen)) {
+      // Apply the tranform that flips the screen image horizontally so that
+      // the screen looks normal when reflected on a mirror.
+      root_window_bounds_transform_ =
+          root_window_bounds_transform_ * CreateMirrorTransform(display);
+    }
     transform_ = root_window_bounds_transform_ * CreateMagnifierTransform(root);
+
     CHECK(transform_.GetInverse(&invert_transform_));
   }
 

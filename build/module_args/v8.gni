@@ -1,0 +1,10 @@
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+if (is_android) {
+  import("//build/config/android/config.gni")
+}
+
+v8_use_external_startup_data =
+    !((is_android && is_android_webview_build) || is_chromeos || is_win)

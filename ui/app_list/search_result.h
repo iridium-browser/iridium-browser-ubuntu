@@ -5,6 +5,7 @@
 #ifndef UI_APP_LIST_SEARCH_RESULT_H_
 #define UI_APP_LIST_SEARCH_RESULT_H_
 
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -31,6 +32,8 @@ class APP_LIST_EXPORT SearchResult {
   enum DisplayType {
     DISPLAY_LIST,
     DISPLAY_TILE,
+    DISPLAY_RECOMMENDATION,
+    DISPLAY_NONE,
   };
 
   // A tagged range in search result text.
@@ -103,6 +106,11 @@ class APP_LIST_EXPORT SearchResult {
   }
   void SetActions(const Actions& sets);
 
+  // Whether the result can be automatically selected by a voice query.
+  // (Non-voice results can still appear in the results list to be manually
+  // selected.)
+  bool voice_result() const { return voice_result_; }
+
   bool is_installing() const { return is_installing_; }
   void SetIsInstalling(bool is_installing);
 
@@ -113,7 +121,6 @@ class APP_LIST_EXPORT SearchResult {
   int GetPreferredIconDimension() const;
 
   void NotifyItemInstalled();
-  void NotifyItemUninstalled();
 
   void AddObserver(SearchResultObserver* observer);
   void RemoveObserver(SearchResultObserver* observer);
@@ -139,6 +146,7 @@ class APP_LIST_EXPORT SearchResult {
   void set_display_type(DisplayType display_type) {
     display_type_ = display_type;
   }
+  void set_voice_result(bool voice_result) { voice_result_ = voice_result; }
 
  private:
   gfx::ImageSkia icon_;
@@ -154,6 +162,7 @@ class APP_LIST_EXPORT SearchResult {
   DisplayType display_type_;
 
   Actions actions_;
+  bool voice_result_;
 
   bool is_installing_;
   int percent_downloaded_;

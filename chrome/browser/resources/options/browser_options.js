@@ -6,6 +6,7 @@ cr.exportPath('options');
 
 /**
  * @typedef {{actionLinkText: (string|undefined),
+ *            childUser: (boolean|undefined),
  *            hasError: (boolean|undefined),
  *            hasUnrecoverableError: (boolean|undefined),
  *            managed: (boolean|undefined),
@@ -15,6 +16,7 @@ cr.exportPath('options');
  *            signinAllowed: (boolean|undefined),
  *            signoutAllowed: (boolean|undefined),
  *            statusText: (string|undefined),
+ *            supervisedUser: (boolean|undefined),
  *            syncSystemEnabled: (boolean|undefined)}}
  * @see chrome/browser/ui/webui/options/browser_options_handler.cc
  */
@@ -116,7 +118,7 @@ cr.define('options', function() {
       window.addEventListener('message', this.handleWindowMessage_.bind(this));
 
       if (loadTimeData.getBoolean('allowAdvancedSettings')) {
-        $('advanced-settings-expander').onclick = function() {
+        $('advanced-settings-expander').onclick = function(e) {
           var showAdvanced =
               BrowserOptions.shouldShowSection_($('advanced-settings'));
           if (showAdvanced) {
@@ -127,11 +129,10 @@ cr.define('options', function() {
               $('advanced-settings'),
               $('advanced-settings-container'));
 
-          // If the link was focused (i.e., it was activated using the keyboard)
-          // and it was used to show the section (rather than hiding it), focus
-          // the first element in the container.
-          if (document.activeElement === $('advanced-settings-expander') &&
-              showAdvanced) {
+          // If the click was triggered using the keyboard and it showed the
+          // section (rather than hiding it), focus the first element in the
+          // container.
+          if (e.detail == 0 && showAdvanced) {
             var focusElement = $('advanced-settings-container').querySelector(
                 'button, input, list, select, a[href]');
             if (focusElement)
@@ -228,8 +229,10 @@ cr.define('options', function() {
           $('hotword-search-setting-indicator'));
       HotwordSearchSettingIndicator.decorate(
           $('hotword-no-dsp-search-setting-indicator'));
-      HotwordSearchSettingIndicator.decorate(
-          $('hotword-always-on-search-setting-indicator'));
+      var hotwordIndicator = $('hotword-always-on-search-setting-indicator');
+      HotwordSearchSettingIndicator.decorate(hotwordIndicator);
+      hotwordIndicator.disabledOnErrorSection =
+          $('hotword-always-on-search-checkbox');
       chrome.send('requestHotwordAvailable');
 
       if ($('set-wallpaper')) {
@@ -347,6 +350,8 @@ cr.define('options', function() {
         };
         if (loadTimeData.getBoolean('profileIsSupervised')) {
           $('profiles-create').disabled = true;
+        }
+        if (!loadTimeData.getBoolean('allowProfileDeletion')) {
           $('profiles-delete').disabled = true;
           $('profiles-list').canDeleteItems = false;
         }
@@ -460,6 +465,10 @@ cr.define('options', function() {
             true,
             metric);
       };
+      if (loadTimeData.valueExists('showWakeOnWifi') &&
+          loadTimeData.getBoolean('showWakeOnWifi')) {
+        $('wake-on-wifi').hidden = false;
+      }
 
       // Bluetooth (CrOS only).
       if (cr.isChromeOS) {
@@ -475,6 +484,8 @@ cr.define('options', function() {
         };
 
         $('bluetooth-reconnect-device').onclick = function(event) {
+          chrome.send('coreOptionsUserMetricsAction',
+                      ['Options_BluetoothConnectPairedDevice']);
           var device = $('bluetooth-paired-devices-list').selectedItem;
           var address = device.address;
           chrome.send('updateBluetoothDevice', [address, 'connect']);
@@ -563,7 +574,8 @@ cr.define('options', function() {
       // Web Content section.
       $('fontSettingsCustomizeFontsButton').onclick = function(event) {
         PageManager.showPageByName('fonts');
-        chrome.send('coreOptionsUserMetricsAction', ['Options_FontSettings']);
+        chrome.send('coreOptionsUserMetricsAction',
+                    ['Options_ShowFontSettings']);
       };
       $('defaultFontSize').onchange = function(event) {
         var value = event.target.options[event.target.selectedIndex].value;
@@ -637,19 +649,9 @@ cr.define('options', function() {
         $('accessibility-settings-button').onclick = function(unused_event) {
           window.open(loadTimeData.getString('accessibilitySettingsURL'));
         };
-        $('accessibility-spoken-feedback-check').onchange = function(
-            unused_event) {
-          chrome.send('spokenFeedbackChange',
-                      [$('accessibility-spoken-feedback-check').checked]);
-          updateAccessibilitySettingsButton();
-        };
+        $('accessibility-spoken-feedback-check').onchange =
+            updateAccessibilitySettingsButton;
         updateAccessibilitySettingsButton();
-
-        $('accessibility-high-contrast-check').onchange = function(
-            unused_event) {
-          chrome.send('highContrastChange',
-                      [$('accessibility-high-contrast-check').checked]);
-        };
 
         var updateDelayDropdown = function() {
           $('accessibility-autoclick-dropdown').disabled =
@@ -981,7 +983,7 @@ cr.define('options', function() {
       $('sync-section').hidden = false;
       this.maybeShowUserSection_();
 
-      if (cr.isChromeOS && syncData.supervisedUser) {
+      if (cr.isChromeOS && syncData.supervisedUser && !syncData.childUser) {
         var subSection = $('sync-section').firstChild;
         while (subSection) {
           if (subSection.nodeType == Node.ELEMENT_NODE)
@@ -1167,7 +1169,7 @@ cr.define('options', function() {
     },
 
     /**
-     * Activates the Audio History and Always-On Hotword sections from the
+     * Activates the Always-On Hotword sections from the
      * System settings page.
      * @param {string=} opt_error The error message to display.
      * @private
@@ -1177,7 +1179,6 @@ cr.define('options', function() {
           'hotword-always-on-search',
           'hotword-always-on-search-setting-indicator',
           opt_error);
-      $('audio-logging').hidden = false;
     },
 
     /**
@@ -1191,6 +1192,18 @@ cr.define('options', function() {
           'hotword-no-dsp-search',
           'hotword-no-dsp-search-setting-indicator',
           opt_error);
+    },
+
+    /**
+     * Controls the visibility of all the hotword sections.
+     * @param {boolean} visible Whether to show hotword sections.
+     * @private
+     */
+    setAllHotwordSectionsVisible_: function(visible) {
+      $('hotword-search').hidden = !visible;
+      $('hotword-always-on-search').hidden = !visible;
+      $('hotword-no-dsp-search').hidden = !visible;
+      $('audio-history').hidden = !visible;
     },
 
     /**
@@ -1210,6 +1223,17 @@ cr.define('options', function() {
      */
     onHotwordAlwaysOnChanged_: function(event) {
       this.setHotwordRetrainLinkVisible_(event.value.value);
+    },
+
+    /**
+     * Activates the Audio History section of the Settings page.
+     * @param {boolean} visible Whether the audio history section is visible.
+     * @param {string} labelText Text describing current audio history state.
+     * @private
+     */
+    setAudioHistorySectionVisible_: function(visible, labelText) {
+      $('audio-history').hidden = !visible;
+      $('audio-history-label').textContent = labelText;
     },
 
     /**
@@ -1382,14 +1406,13 @@ cr.define('options', function() {
       var selectedProfile = profilesList.selectedItem;
       var hasSelection = selectedProfile != null;
       var hasSingleProfile = profilesList.dataModel.length == 1;
-      var isSupervised = loadTimeData.getBoolean('profileIsSupervised');
       $('profiles-manage').disabled = !hasSelection ||
           !selectedProfile.isCurrentProfile;
       if (hasSelection && !selectedProfile.isCurrentProfile)
         $('profiles-manage').title = loadTimeData.getString('currentUserOnly');
       else
         $('profiles-manage').title = '';
-      $('profiles-delete').disabled = isSupervised ||
+      $('profiles-delete').disabled = !profilesList.canDeleteItems ||
                                       (!hasSelection && !hasSingleProfile);
       if (OptionsPage.isSettingsApp()) {
         $('profiles-app-list-switch').disabled = !hasSelection ||
@@ -1593,6 +1616,8 @@ cr.define('options', function() {
      * @private
      */
     handleAddBluetoothDevice_: function() {
+      chrome.send('coreOptionsUserMetricsAction',
+                  ['Options_BluetoothShowAddDevice']);
       chrome.send('findBluetoothDevices');
       PageManager.showPageByName('bluetooth', false);
     },
@@ -2099,6 +2124,7 @@ cr.define('options', function() {
     'setNativeThemeButtonEnabled',
     'setNetworkPredictionValue',
     'setHighContrastCheckboxState',
+    'setAllHotwordSectionsVisible',
     'setMetricsReportingCheckboxState',
     'setMetricsReportingSettingVisibility',
     'setProfilesInfo',
@@ -2107,6 +2133,7 @@ cr.define('options', function() {
     'setVirtualKeyboardCheckboxState',
     'setupPageZoomSelector',
     'setupProxySettingsButton',
+    'setAudioHistorySectionVisible',
     'showBluetoothSettings',
     'showCreateProfileError',
     'showCreateProfileSuccess',

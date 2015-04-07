@@ -64,14 +64,9 @@ PassOwnPtr<Chrome> Chrome::create(Page* page, ChromeClient* client)
     return adoptPtr(new Chrome(page, client));
 }
 
-void Chrome::invalidateContentsAndRootView(const IntRect& updateRect)
+void Chrome::invalidateRect(const IntRect& updateRect)
 {
-    m_client->invalidateContentsAndRootView(updateRect);
-}
-
-void Chrome::invalidateContentsForSlowScroll(const IntRect& updateRect)
-{
-    m_client->invalidateContentsForSlowScroll(updateRect);
+    m_client->invalidateRect(updateRect);
 }
 
 IntRect Chrome::rootViewToScreen(const IntRect& rect) const
@@ -277,13 +272,13 @@ IntRect Chrome::windowResizerRect() const
     return m_client->windowResizerRect();
 }
 
-void Chrome::mouseDidMoveOverElement(const HitTestResult& result, unsigned modifierFlags)
+void Chrome::mouseDidMoveOverElement(const HitTestResult& result)
 {
     if (result.innerNode()) {
         if (result.innerNode()->document().isDNSPrefetchEnabled())
             prefetchDNS(result.absoluteLinkURL().host());
     }
-    m_client->mouseDidMoveOverElement(result, modifierFlags);
+    m_client->mouseDidMoveOverElement(result);
 }
 
 void Chrome::setToolTip(const HitTestResult& result)
@@ -372,12 +367,18 @@ void Chrome::scheduleAnimation()
 
 // --------
 
+void Chrome::scheduleAnimationForFrame(LocalFrame* localRoot)
+{
+    m_page->animator().setAnimationFramePending();
+    m_client->scheduleAnimationForFrame(localRoot);
+}
+
 bool Chrome::hasOpenedPopup() const
 {
     return m_client->hasOpenedPopup();
 }
 
-PassRefPtrWillBeRawPtr<PopupMenu> Chrome::createPopupMenu(LocalFrame& frame, PopupMenuClient* client) const
+PassRefPtrWillBeRawPtr<PopupMenu> Chrome::createPopupMenu(LocalFrame& frame, PopupMenuClient* client)
 {
     notifyPopupOpeningObservers();
     return m_client->createPopupMenu(frame, client);
@@ -401,6 +402,11 @@ void Chrome::notifyPopupOpeningObservers() const
     const Vector<PopupOpeningObserver*> observers(m_popupOpeningObservers);
     for (size_t i = 0; i < observers.size(); ++i)
         observers[i]->willOpenPopup();
+}
+
+void Chrome::registerViewportLayers() const
+{
+    m_client->registerViewportLayers();
 }
 
 void Chrome::willBeDestroyed()

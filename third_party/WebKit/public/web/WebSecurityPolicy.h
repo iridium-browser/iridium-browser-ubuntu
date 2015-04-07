@@ -57,8 +57,12 @@ public:
     // hyperlinks to URLs with the scheme.
     BLINK_EXPORT static void registerURLSchemeAsDisplayIsolated(const WebString&);
 
+    // Registers a URL scheme to generate mixed content warnings when resources whose
+    // schemes are not registered as "secure" are embedded.
+    BLINK_EXPORT static void registerURLSchemeAsRestrictingMixedContent(const WebString&);
+
     // Registers a URL scheme to not generate mixed content warnings when
-    // included by an HTTPS page.
+    // included by page whose scheme is registed as restricting mixed content.
     BLINK_EXPORT static void registerURLSchemeAsSecure(const WebString&);
 
     // Registers a non-HTTP URL scheme which can be sent CORS requests.
@@ -66,6 +70,18 @@ public:
 
     // Registers a URL scheme whose resources can be loaded regardless of a page's Content Security Policy.
     BLINK_EXPORT static void registerURLSchemeAsBypassingContentSecurityPolicy(const WebString&);
+
+    // Registers a URL scheme for which some kinds of resources bypass Content Security Policy.
+    // This enum should be kept in sync with Source/platform/weborigin/SchemeRegistry.h.
+    // Enforced in AssertMatchingEnums.cpp.
+    enum PolicyAreas : uint32_t {
+        PolicyAreaNone = 0,
+        PolicyAreaImage = 1 << 0,
+        PolicyAreaStyle = 1 << 1,
+        // Add more policy areas as needed by clients.
+        PolicyAreaAll = ~static_cast<uint32_t>(0),
+    };
+    BLINK_EXPORT static void registerURLSchemeAsBypassingContentSecurityPolicy(const WebString& scheme, PolicyAreas);
 
     // Registers a URL scheme as strictly empty documents, allowing them to
     // commit synchronously.

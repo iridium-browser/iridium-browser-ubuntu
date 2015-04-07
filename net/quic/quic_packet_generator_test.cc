@@ -10,11 +10,13 @@
 #include "net/quic/crypto/null_encrypter.h"
 #include "net/quic/crypto/quic_decrypter.h"
 #include "net/quic/crypto/quic_encrypter.h"
+#include "net/quic/quic_flags.h"
 #include "net/quic/quic_utils.h"
 #include "net/quic/test_tools/quic_packet_creator_peer.h"
 #include "net/quic/test_tools/quic_packet_generator_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/quic/test_tools/simple_quic_framer.h"
+#include "net/test/gtest_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -33,7 +35,7 @@ namespace {
 class MockDelegate : public QuicPacketGenerator::DelegateInterface {
  public:
   MockDelegate() {}
-  virtual ~MockDelegate() override {}
+  ~MockDelegate() override {}
 
   MOCK_METHOD3(ShouldGeneratePacket,
                bool(TransmissionType transmission_type,
@@ -116,7 +118,7 @@ class QuicPacketGeneratorTest : public ::testing::Test {
         packet6_(0, PACKET_1BYTE_SEQUENCE_NUMBER, nullptr, 0, nullptr),
         packet7_(0, PACKET_1BYTE_SEQUENCE_NUMBER, nullptr, 0, nullptr) {}
 
-  virtual ~QuicPacketGeneratorTest() override {
+  ~QuicPacketGeneratorTest() override {
     delete packet_.packet;
     delete packet_.retransmittable_frames;
     delete packet2_.packet;
@@ -315,6 +317,30 @@ TEST_F(QuicPacketGeneratorTest,
   CheckPacketContains(contents, packet_);
 }
 
+TEST_F(QuicPacketGeneratorTest, ShouldSendAck_MultipleCalls) {
+  ValueRestore<bool> old_flag(&FLAGS_quic_disallow_multiple_pending_ack_frames,
+                              true);
+
+  // Make sure that calling SetShouldSendAck multiple times does not result in a
+  // crash. Previously this would result in multiple QuicFrames queued in the
+  // packet generator, with all but the last with internal pointers to freed
+  // memory.
+  delegate_.SetCanWriteAnything();
+
+  // Only one AckFrame should be created.
+  EXPECT_CALL(delegate_, CreateAckFrame())
+      .Times(1)
+      .WillOnce(Return(CreateAckFrame()));
+  EXPECT_CALL(delegate_, OnSerializedPacket(_))
+      .Times(1)
+      .WillOnce(SaveArg<0>(&packet_));
+
+  generator_.StartBatchOperations();
+  generator_.SetShouldSendAck(false, false);
+  generator_.SetShouldSendAck(false, false);
+  generator_.FinishBatchOperations();
+}
+
 TEST_F(QuicPacketGeneratorTest, AddControlFrame_NotWritable) {
   delegate_.SetCanNotWrite();
 
@@ -402,6 +428,13 @@ TEST_F(QuicPacketGeneratorTest, ConsumeData_WritableAndShouldFlush) {
   PacketContents contents;
   contents.num_stream_frames = 1;
   CheckPacketContains(contents, packet_);
+}
+
+TEST_F(QuicPacketGeneratorTest, ConsumeData_EmptyData) {
+  ValueRestore<bool> old_flag(&FLAGS_quic_empty_data_no_fin_early_return, true);
+  EXPECT_DFATAL(generator_.ConsumeData(kHeadersStreamId, MakeIOVector(""), 0,
+                                       false, MAY_FEC_PROTECT, nullptr),
+                "Attempt to consume empty data without FIN.");
 }
 
 TEST_F(QuicPacketGeneratorTest,
@@ -551,6 +584,12 @@ TEST_F(QuicPacketGeneratorTest, ConsumeData_FramesPreviouslyQueued) {
   contents.num_stream_frames = 1;
   CheckPacketContains(contents, packet_);
   CheckPacketContains(contents, packet2_);
+}
+
+TEST_F(QuicPacketGeneratorTest, FecTimeoutOnRttChange) {
+  EXPECT_EQ(QuicTime::Delta::Zero(), generator_.fec_timeout());
+  generator_.OnRttChange(QuicTime::Delta::FromMilliseconds(300));
+  EXPECT_EQ(QuicTime::Delta::FromMilliseconds(150), generator_.fec_timeout());
 }
 
 TEST_F(QuicPacketGeneratorTest, FecGroupSizeOnCongestionWindowChange) {

@@ -6,7 +6,9 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
+#include "net/quic/quic_ack_notifier.h"
 #include "net/quic/quic_fec_group.h"
+#include "net/quic/quic_flags.h"
 #include "net/quic/quic_utils.h"
 
 using base::StringPiece;
@@ -23,6 +25,7 @@ namespace {
 // protected packet. Since we don't want to delay an FEC packet past half an
 // RTT, we set the max FEC group size to be half the current congestion window.
 const float kMaxPacketsInFlightMultiplierForFecGroupSize = 0.5;
+const float kRttMultiplierForFecTimeout = 0.5;
 
 }  // namespace
 
@@ -36,10 +39,12 @@ QuicPacketGenerator::QuicPacketGenerator(QuicConnectionId connection_id,
       debug_delegate_(nullptr),
       packet_creator_(connection_id, framer, random_generator),
       batch_mode_(false),
+      fec_timeout_(QuicTime::Delta::Zero()),
       should_fec_protect_(false),
       should_send_ack_(false),
       should_send_feedback_(false),
-      should_send_stop_waiting_(false) {}
+      should_send_stop_waiting_(false) {
+}
 
 QuicPacketGenerator::~QuicPacketGenerator() {
   for (QuicFrames::iterator it = queued_control_frames_.begin();
@@ -91,8 +96,29 @@ void QuicPacketGenerator::OnCongestionWindowChange(
                           max_packets_in_flight));
 }
 
+void QuicPacketGenerator::OnRttChange(QuicTime::Delta rtt) {
+  fec_timeout_ = rtt.Multiply(kRttMultiplierForFecTimeout);
+}
+
 void QuicPacketGenerator::SetShouldSendAck(bool also_send_feedback,
                                            bool also_send_stop_waiting) {
+  if (FLAGS_quic_disallow_multiple_pending_ack_frames) {
+    if (pending_ack_frame_ != nullptr) {
+      // Ack already queued, nothing to do.
+      return;
+    }
+
+    if (also_send_feedback && pending_feedback_frame_ != nullptr) {
+      LOG(DFATAL) << "Should only ever be one pending feedback frame.";
+      return;
+    }
+
+    if (also_send_stop_waiting && pending_stop_waiting_frame_ != nullptr) {
+      LOG(DFATAL) << "Should only ever be one pending stop waiting frame.";
+      return;
+    }
+  }
+
   should_send_ack_ = true;
   should_send_feedback_ = also_send_feedback;
   should_send_stop_waiting_ = also_send_stop_waiting;
@@ -109,12 +135,13 @@ void QuicPacketGenerator::AddControlFrame(const QuicFrame& frame) {
   SendQueuedFrames(false);
 }
 
-QuicConsumedData QuicPacketGenerator::ConsumeData(QuicStreamId id,
-                                                  const IOVector& data_to_write,
-                                                  QuicStreamOffset offset,
-                                                  bool fin,
-                                                  FecProtection fec_protection,
-                                                  QuicAckNotifier* notifier) {
+QuicConsumedData QuicPacketGenerator::ConsumeData(
+    QuicStreamId id,
+    const IOVector& data_to_write,
+    QuicStreamOffset offset,
+    bool fin,
+    FecProtection fec_protection,
+    QuicAckNotifier::DelegateInterface* delegate) {
   IsHandshake handshake = id == kCryptoStreamId ? IS_HANDSHAKE : NOT_HANDSHAKE;
   // To make reasoning about crypto frames easier, we don't combine them with
   // other retransmittable frames in a single packet.
@@ -133,25 +160,37 @@ QuicConsumedData QuicPacketGenerator::ConsumeData(QuicStreamId id,
     MaybeStartFecProtection();
   }
 
+  // This notifier will be owned by the AckNotifierManager (or deleted below) if
+  // not attached to a packet.
+  QuicAckNotifier* notifier = nullptr;
+  if (delegate != nullptr) {
+    notifier = new QuicAckNotifier(delegate);
+  }
+
   IOVector data = data_to_write;
   size_t data_size = data.TotalBufferSize();
+  if (FLAGS_quic_empty_data_no_fin_early_return && !fin && (data_size == 0)) {
+    LOG(DFATAL) << "Attempt to consume empty data without FIN.";
+    return QuicConsumedData(0, false);
+  }
+
+  int frames_created = 0;
   while (delegate_->ShouldGeneratePacket(NOT_RETRANSMISSION,
                                          HAS_RETRANSMITTABLE_DATA, handshake)) {
     QuicFrame frame;
-    size_t bytes_consumed;
-    if (notifier != nullptr) {
-      // We want to track which packet this stream frame ends up in.
-      bytes_consumed = packet_creator_.CreateStreamFrameWithNotifier(
-          id, data, offset + total_bytes_consumed, fin, notifier, &frame);
-    } else {
-      bytes_consumed = packet_creator_.CreateStreamFrame(
-          id, data, offset + total_bytes_consumed, fin, &frame);
-    }
+    size_t bytes_consumed = packet_creator_.CreateStreamFrame(
+        id, data, offset + total_bytes_consumed, fin, &frame);
+    ++frames_created;
+
+    // We want to track which packet this stream frame ends up in.
+    frame.stream_frame->notifier = notifier;
+
     if (!AddFrame(frame)) {
       LOG(DFATAL) << "Failed to add stream frame.";
       // Inability to add a STREAM frame creates an unrecoverable hole in a
       // the stream, so it's best to close the connection.
       delegate_->CloseConnection(QUIC_INTERNAL_ERROR, false);
+      delete notifier;
       return QuicConsumedData(0, false);
     }
 
@@ -176,6 +215,11 @@ QuicConsumedData QuicPacketGenerator::ConsumeData(QuicStreamId id,
       }
       break;
     }
+  }
+
+  if (notifier != nullptr && frames_created == 0) {
+    // Safe to delete the AckNotifer as it was never attached to a packet.
+    delete notifier;
   }
 
   // Don't allow the handshake to be bundled with other retransmittable frames.
@@ -347,6 +391,13 @@ void QuicPacketGenerator::SerializeAndSendPacket() {
   DCHECK(serialized_packet.packet);
   delegate_->OnSerializedPacket(serialized_packet);
   MaybeSendFecPacketAndCloseGroup(false);
+
+  // The packet has now been serialized, safe to delete pending frames.
+  if (FLAGS_quic_disallow_multiple_pending_ack_frames) {
+    pending_ack_frame_.reset();
+    pending_feedback_frame_.reset();
+    pending_stop_waiting_frame_.reset();
+  }
 }
 
 void QuicPacketGenerator::StopSendingVersion() {
@@ -357,11 +408,11 @@ QuicPacketSequenceNumber QuicPacketGenerator::sequence_number() const {
   return packet_creator_.sequence_number();
 }
 
-size_t QuicPacketGenerator::max_packet_length() const {
+QuicByteCount QuicPacketGenerator::max_packet_length() const {
   return packet_creator_.max_packet_length();
 }
 
-void QuicPacketGenerator::set_max_packet_length(size_t length) {
+void QuicPacketGenerator::set_max_packet_length(QuicByteCount length) {
   packet_creator_.set_max_packet_length(length);
 }
 

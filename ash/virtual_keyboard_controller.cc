@@ -19,6 +19,15 @@
 #include "ui/keyboard/keyboard_util.h"
 
 namespace ash {
+namespace {
+
+// Checks whether smart deployment is enabled.
+bool IsSmartVirtualKeyboardEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      keyboard::switches::kEnableAutoVirtualKeyboard);
+}
+
+}  // namespace
 
 VirtualKeyboardController::VirtualKeyboardController()
     : has_external_keyboard_(false),
@@ -36,17 +45,13 @@ VirtualKeyboardController::~VirtualKeyboardController() {
 }
 
 void VirtualKeyboardController::OnMaximizeModeStarted() {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          keyboard::switches::kAutoVirtualKeyboard)) {
+  if (!IsSmartVirtualKeyboardEnabled())
     SetKeyboardEnabled(true);
-  }
 }
 
 void VirtualKeyboardController::OnMaximizeModeEnded() {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          keyboard::switches::kAutoVirtualKeyboard)) {
+  if (!IsSmartVirtualKeyboardEnabled())
     SetKeyboardEnabled(false);
-  }
 }
 
 void VirtualKeyboardController::OnTouchscreenDeviceConfigurationChanged() {
@@ -55,6 +60,12 @@ void VirtualKeyboardController::OnTouchscreenDeviceConfigurationChanged() {
 
 void VirtualKeyboardController::OnKeyboardDeviceConfigurationChanged() {
   UpdateDevices();
+}
+
+void VirtualKeyboardController::OnMouseDeviceConfigurationChanged() {
+}
+
+void VirtualKeyboardController::OnTouchpadDeviceConfigurationChanged() {
 }
 
 void VirtualKeyboardController::ToggleIgnoreExternalKeyboard() {
@@ -87,8 +98,7 @@ void VirtualKeyboardController::UpdateDevices() {
 }
 
 void VirtualKeyboardController::UpdateKeyboardEnabled() {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          keyboard::switches::kAutoVirtualKeyboard)) {
+  if (!IsSmartVirtualKeyboardEnabled()) {
     SetKeyboardEnabled(Shell::GetInstance()
                            ->maximize_mode_controller()
                            ->IsMaximizeModeWindowManagerEnabled());

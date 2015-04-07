@@ -19,8 +19,8 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "extensions/browser/extension_icon_image.h"
 #include "ui/base/ui_base_types.h"  // WindowShowState
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/rect.h"
 
 class GURL;
 class SkRegion;
@@ -336,6 +336,10 @@ class AppWindow : public content::NotificationObserver,
   // may be false if the bit is silently switched off for security reasons.
   bool IsAlwaysOnTop() const;
 
+  // Set whether the window should get even reserved keys (modulo platform
+  // restrictions).
+  void SetInterceptAllKeys(bool want_all_keys);
+
   // Retrieve the current state of the app window as a dictionary, to pass to
   // the renderer.
   void GetSerializedState(base::DictionaryValue* properties) const;
@@ -360,7 +364,7 @@ class AppWindow : public content::NotificationObserver,
 
   // content::WebContentsDelegate implementation.
   void CloseContents(content::WebContents* contents) override;
-  bool ShouldSuppressDialogs() override;
+  bool ShouldSuppressDialogs(content::WebContents* source) override;
   content::ColorChooser* OpenColorChooser(
       content::WebContents* web_contents,
       SkColor color,
@@ -370,7 +374,7 @@ class AppWindow : public content::NotificationObserver,
   bool IsPopupOrPanel(const content::WebContents* source) const override;
   void MoveContents(content::WebContents* source,
                     const gfx::Rect& pos) override;
-  void NavigationStateChanged(const content::WebContents* source,
+  void NavigationStateChanged(content::WebContents* source,
                               content::InvalidateTypes changed_flags) override;
   void ToggleFullscreenModeForTab(content::WebContents* source,
                                   bool enter_fullscreen) override;
@@ -509,8 +513,6 @@ class AppWindow : public content::NotificationObserver,
   // app window.
   scoped_ptr<web_modal::PopupManager> popup_manager_;
 
-  base::WeakPtrFactory<AppWindow> image_loader_ptr_factory_;
-
   // Bit field of FullscreenType.
   int fullscreen_types_;
 
@@ -547,6 +549,8 @@ class AppWindow : public content::NotificationObserver,
 
   // Whether |alpha_enabled| was set in the CreateParams.
   bool requested_alpha_enabled_;
+
+  base::WeakPtrFactory<AppWindow> image_loader_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AppWindow);
 };

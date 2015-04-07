@@ -6,8 +6,8 @@
 #include "core/paint/ListMarkerPainter.h"
 
 #include "core/paint/BlockPainter.h"
-#include "core/paint/DrawingRecorder.h"
-#include "core/rendering/GraphicsContextAnnotator.h"
+#include "core/paint/GraphicsContextAnnotator.h"
+#include "core/paint/RenderDrawingRecorder.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderListItem.h"
 #include "core/rendering/RenderListMarker.h"
@@ -18,7 +18,7 @@
 
 namespace blink {
 
-void ListMarkerPainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void ListMarkerPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     ANNOTATE_GRAPHICS_CONTEXT(paintInfo, &m_renderListMarker);
 
@@ -36,7 +36,10 @@ void ListMarkerPainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffs
     if (!paintInfo.rect.intersects(pixelSnappedOverflowRect))
         return;
 
-    DrawingRecorder recorder(paintInfo.context, &m_renderListMarker, paintInfo.phase, pixelSnappedOverflowRect);
+    RenderDrawingRecorder recorder(paintInfo.context, m_renderListMarker, paintInfo.phase, pixelSnappedOverflowRect);
+    if (recorder.canUseCachedDrawing())
+        return;
+
     LayoutRect box(boxOrigin, m_renderListMarker.size());
 
     IntRect marker = m_renderListMarker.getRelativeMarkerRect();

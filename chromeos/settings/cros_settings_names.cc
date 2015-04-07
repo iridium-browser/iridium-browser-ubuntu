@@ -95,29 +95,10 @@ const char kReportDeviceNetworkInterfaces[] =
 // status reports to the device management server.
 const char kReportDeviceUsers[] = "cros.device_status.report_users";
 
-// A list of dictionaries, each detailing one extension to install as part of
-// the AppPack and including the following fields:
-// "extension-id": ID of the extension to install
-// "update-url": URL to check the extension's version and download location
-// "key-checksum": checksum of the extension's CRX public key, encoded in hex.
-const char kAppPack[] = "cros.app_pack";
-const char kAppPackKeyExtensionId[] = "extension-id";
-const char kAppPackKeyUpdateUrl[] = "update-url";
-
-// Values from the ScreenSaver proto. Defines the extension ID of the screen
-// saver extension and the timeout before the screen saver should be started.
-const char kScreenSaverExtensionId[] = "cros.screen_saver.extension_id";
-const char kScreenSaverTimeout[] = "cros.screen_saver.timeout";
-
-// Values from the ForcedLogoutTimeouts proto. Defines the timeouts before a
-// user is logged out after some period of inactivity as well as the duration of
-// a warning message informing the user about the pending logout.
-const char kIdleLogoutTimeout[] = "cros.idle_logout.timeout";
-const char kIdleLogoutWarningDuration[] = "cros.idle_logout.warning_duration";
-
-// Defines the set of URLs to be opened on login to the anonymous account used
-// if the device is in KIOSK mode.
-const char kStartUpUrls[] = "cros.start_up_urls";
+// Determines whether the device reports hardware status (CPU utilization,
+// disk space, etc) in device status reports to the device management server.
+const char kReportDeviceHardwareStatus[] =
+    "cros.device_status.report_hardware_status";
 
 // This policy should not appear in the protobuf ever but is used internally to
 // signal that we are running in a "safe-mode" for policy recovery.
@@ -159,5 +140,10 @@ const char kDeviceDisabled[] = "cros.device_disabled";
 // A string pref containing the message that should be shown to the user when
 // the device is disabled.
 const char kDeviceDisabledMessage[] = "cros.disabled_state.message";
+
+// A boolean pref that indicates whether the device automatically reboots when
+// the user initiates a shutdown via an UI element.  If set to true, all
+// shutdown buttons in the UI will be replaced by reboot buttons.
+const char kRebootOnShutdown[] = "cros.device.reboot_on_shutdown";
 
 }  // namespace chromeos

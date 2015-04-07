@@ -4,6 +4,7 @@
 
 """Module containing the report stages."""
 
+
 from __future__ import print_function
 
 import logging
@@ -13,7 +14,6 @@ import sys
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import failures_lib
-from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot import metadata_lib
 from chromite.cbuildbot import results_lib
 from chromite.cbuildbot import tree_status
@@ -25,6 +25,8 @@ from chromite.lib import cidb
 from chromite.lib import cros_build_lib
 from chromite.lib import gs
 from chromite.lib import osutils
+from chromite.lib import portage_util
+from chromite.lib import retry_stats
 from chromite.lib import toolchain
 
 
@@ -66,12 +68,58 @@ def WriteBasicMetadata(builder_run):
   builder_run.attrs.metadata.UpdateWithDict(metadata)
 
 
+def GetChildConfigListMetadata(child_configs, config_status_map):
+  """Creates a list for the child configs metadata.
+
+  This creates a list of child config dictionaries from the given child
+  configs, optionally adding the final status if the success map is
+  specified.
+
+  Args:
+    child_configs: The list of child configs for this build.
+    config_status_map: The map of config name to final build status.
+
+  Returns:
+    List of child config dictionaries, with optional final status
+  """
+  child_config_list = []
+  for c in child_configs:
+    pass_fail_status = None
+    if config_status_map:
+      if config_status_map[c['name']]:
+        pass_fail_status = constants.FINAL_STATUS_PASSED
+      else:
+        pass_fail_status = constants.FINAL_STATUS_FAILED
+    child_config_list.append({'name': c['name'],
+                              'boards': c['boards'],
+                              'status': pass_fail_status})
+  return child_config_list
+
+
 class BuildStartStage(generic_stages.BuilderStage):
   """The first stage to run.
 
   This stage writes a few basic metadata values that are known at the start of
   build, and inserts the build into the database, if appropriate.
   """
+
+  def _GetBuildTimeoutSeconds(self):
+    """Get the overall build timeout to be published to cidb.
+
+    Returns:
+      Timeout in seconds. None if no sensible timeout can be inferred.
+    """
+    timeout_seconds = self._run.options.timeout
+    if self._run.config.master:
+      master_timeout = constants.MASTER_BUILD_TIMEOUT_SECONDS.get(
+          self._run.config.build_type,
+          constants.MASTER_BUILD_TIMEOUT_DEFAULT_SECONDS)
+      if timeout_seconds > 0:
+        master_timeout = min(master_timeout, timeout_seconds)
+      return master_timeout
+
+    return timeout_seconds if timeout_seconds > 0 else None
+
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
     WriteBasicMetadata(self._run)
@@ -86,6 +134,9 @@ class BuildStartStage(generic_stages.BuilderStage):
                    d['build_id'])
       return
 
+    # Note: In other build stages we use self._run.GetCIDBHandle to fetch
+    # a cidb handle. However, since we don't yet have a build_id, we can't
+    # do that here.
     if cidb.CIDBConnectionFactory.IsCIDBSetup():
       db_type = cidb.CIDBConnectionFactory.GetCIDBConnectionType()
       db = cidb.CIDBConnectionFactory.GetCIDBConnectionForBuilder()
@@ -93,15 +144,17 @@ class BuildStartStage(generic_stages.BuilderStage):
         waterfall = d['buildbot-master-name']
         assert waterfall in constants.CIDB_KNOWN_WATERFALLS
         build_id = db.InsertBuild(
-             builder_name=d['builder-name'],
-             waterfall=waterfall,
-             build_number=d['build-number'],
-             build_config=d['bot-config'],
-             bot_hostname=d['bot-hostname'],
-             master_build_id=d['master_build_id'])
+            builder_name=d['builder-name'],
+            waterfall=waterfall,
+            build_number=d['build-number'],
+            build_config=d['bot-config'],
+            bot_hostname=d['bot-hostname'],
+            master_build_id=d['master_build_id'],
+            timeout_seconds=self._GetBuildTimeoutSeconds())
         self._run.attrs.metadata.UpdateWithDict({'build_id': build_id,
                                                  'db_type': db_type})
-        logging.info('Inserted build_id %s into cidb database.', build_id)
+        logging.info('Inserted build_id %s into cidb database type %s.',
+                     build_id, db_type)
 
 
   def HandleSkip(self):
@@ -137,6 +190,7 @@ class BuildReexecutionFinishedStage(generic_stages.BuilderStage,
   Where possible, metadata that is already known at this time should be
   written at this time rather than in ReportStage.
   """
+
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
     config = self._run.config
@@ -145,8 +199,8 @@ class BuildReexecutionFinishedStage(generic_stages.BuilderStage,
     # Flat list of all child config boards. Since child configs
     # are not allowed to have children, it is not necessary to search
     # deeper than one generation.
-    child_configs = [{'name': c['name'], 'boards' : c['boards']}
-                     for c in config['child_configs']]
+    child_configs = GetChildConfigListMetadata(
+        child_configs=config['child_configs'], config_status_map=None)
 
     sdk_verinfo = cros_build_lib.LoadKeyValueFile(
         os.path.join(build_root, constants.SDK_VERSION_FILE),
@@ -158,9 +212,9 @@ class BuildReexecutionFinishedStage(generic_stages.BuilderStage,
       platform_tag = verinfo.VersionString()
 
     version = {
-            'full': self._run.GetVersion(),
-            'milestone': verinfo.chrome_branch,
-            'platform': platform_tag,
+        'full': self._run.GetVersion(),
+        'milestone': verinfo.chrome_branch,
+        'platform': platform_tag,
     }
 
     metadata = {
@@ -203,19 +257,17 @@ class BuildReexecutionFinishedStage(generic_stages.BuilderStage,
     self.UploadMetadata(filename=constants.PARTIAL_METADATA_JSON)
 
     # Write child-per-build and board-per-build rows to database
-    if cidb.CIDBConnectionFactory.IsCIDBSetup():
-      db = cidb.CIDBConnectionFactory.GetCIDBConnectionForBuilder()
-      if db:
-        build_id = self._run.attrs.metadata.GetValue('build_id')
-        # TODO(akeshet): replace this with a GetValue call once crbug.com/406522
-        # is resolved
-        per_board_dict = self._run.attrs.metadata.GetDict()['board-metadata']
-        for board, board_metadata in per_board_dict.items():
-          db.InsertBoardPerBuild(build_id, board)
-          if board_metadata:
-            db.UpdateBoardPerBuildMetadata(build_id, board, board_metadata)
-        for child_config in self._run.attrs.metadata.GetValue('child-configs'):
-          db.InsertChildConfigPerBuild(build_id, child_config['name'])
+    build_id, db = self._run.GetCIDBHandle()
+    if db:
+      # TODO(akeshet): replace this with a GetValue call once crbug.com/406522
+      # is resolved
+      per_board_dict = self._run.attrs.metadata.GetDict()['board-metadata']
+      for board, board_metadata in per_board_dict.items():
+        db.InsertBoardPerBuild(build_id, board)
+        if board_metadata:
+          db.UpdateBoardPerBuildMetadata(build_id, board, board_metadata)
+      for child_config in self._run.attrs.metadata.GetValue('child-configs'):
+        db.InsertChildConfigPerBuild(build_id, child_config['name'])
 
 
 class ReportStage(generic_stages.BuilderStage,
@@ -415,23 +467,29 @@ class ReportStage(generic_stages.BuilderStage,
                    completion_stages.MasterSlaveSyncCompletionStage)
     )
 
+    child_configs_list = GetChildConfigListMetadata(
+        child_configs=config['child_configs'],
+        config_status_map=completion_stages.GetBuilderSuccessMap(self._run,
+                                                                 final_status))
+
     return metadata_lib.CBuildbotMetadata.GetReportMetadataDict(
         builder_run, get_changes_from_pool,
         get_statuses_from_slaves, config, stage, final_status, sync_instance,
-        completion_instance)
+        completion_instance, child_configs_list)
 
-  def PerformStage(self):
+  def ArchiveResults(self, final_status):
+    """Archive our build results.
+
+    Args:
+      final_status: constants.FINAL_STATUS_PASSED or
+                    constants.FINAL_STATUS_FAILED
+
+    Returns:
+      A dictionary with the aggregated _UploadArchiveIndex results.
+    """
     # Make sure local archive directory is prepared, if it was not already.
-    # TODO(mtennant): It is not clear how this happens, but a CQ master run
-    # that never sees an open tree somehow reaches Report stage without a
-    # set up archive directory.
     if not os.path.exists(self.archive_path):
       self.archive.SetupArchivePath()
-
-    if results_lib.Results.BuildSucceededSoFar():
-      final_status = constants.FINAL_STATUS_PASSED
-    else:
-      final_status = constants.FINAL_STATUS_FAILED
 
     # Upload metadata, and update the pass/fail streak counter for the main
     # run only. These aren't needed for the child builder runs.
@@ -451,47 +509,84 @@ class ReportStage(generic_stages.BuilderStage,
       run_archive_urls = self._UploadArchiveIndex(builder_run)
       if run_archive_urls:
         archive_urls.update(run_archive_urls)
-        # Also update the LATEST files, since this run did archive something.
-
-        archive = builder_run.GetArchive()
         # Check if the builder_run is tied to any boards and if so get all
         # upload urls.
-        upload_urls = self._GetUploadUrls('LATEST-*', builder_run=builder_run)
-        archive = builder_run.GetArchive()
-
-        archive.UpdateLatestMarkers(builder_run.manifest_branch,
-                                    builder_run.debug,
-                                    upload_urls=upload_urls)
-
-    version = getattr(self._run.attrs, 'release_tag', '')
-    results_lib.Results.Report(sys.stdout, archive_urls=archive_urls,
-                               current_version=version)
-
-    if cidb.CIDBConnectionFactory.IsCIDBSetup():
-      db = cidb.CIDBConnectionFactory.GetCIDBConnectionForBuilder()
-      if db:
-        build_id = self._run.attrs.metadata.GetValue('build_id')
-        # TODO(akeshet): Eliminate this status string translate once
-        # these differing status strings are merged, crbug.com/318930
         if final_status == constants.FINAL_STATUS_PASSED:
-          status_for_db = manifest_version.BuilderStatus.STATUS_PASSED
-        else:
-          status_for_db = manifest_version.BuilderStatus.STATUS_FAILED
+          # Update the LATEST files if the build passed.
+          try:
+            upload_urls = self._GetUploadUrls(
+                'LATEST-*', builder_run=builder_run)
+          except portage_util.MissingOverlayException as e:
+            # If the build failed prematurely, some overlays might be
+            # missing. Ignore them in this stage.
+            logging.warning(e)
+          else:
+            archive = builder_run.GetArchive()
+            archive.UpdateLatestMarkers(builder_run.manifest_branch,
+                                        builder_run.debug,
+                                        upload_urls=upload_urls)
 
-        # TODO(akeshet): Consider uploading the status pickle to the database,
-        # (by specifying that argument to FinishBuild), or come up with a
-        # pickle-free mechanism to describe failure details in database.
-        # TODO(akeshet): Find a clearer way to get the "primary upload url" for
-        # the metadata.json file. One alternative is _GetUploadUrls(...)[0].
-        # Today it seems that element 0 of its return list is the primary upload
-        # url, but there is no guarantee or unit test coverage of that.
-        metadata_url = os.path.join(self.upload_url, constants.METADATA_JSON)
-        db.FinishBuild(build_id, status=status_for_db,
-                       metadata_url=metadata_url)
+    return archive_urls
+
+  def PerformStage(self):
+    """Perform the actual work for this stage.
+
+    This includes final metadata archival, and update CIDB with our final status
+    as well as producting a logged build result summary.
+    """
+    if results_lib.Results.BuildSucceededSoFar():
+      final_status = constants.FINAL_STATUS_PASSED
+    else:
+      final_status = constants.FINAL_STATUS_FAILED
+
+    if not hasattr(self._run.attrs, 'release_tag'):
+      # If, for some reason, sync stage was not completed and
+      # release_tag was not set. Set it to None here because
+      # ArchiveResults() depends the existence of this attr.
+      self._run.attrs.release_tag = None
+
+    archive_urls = self.ArchiveResults(final_status)
+    metadata_url = os.path.join(self.upload_url, constants.METADATA_JSON)
+
+    results_lib.Results.Report(
+        sys.stdout, archive_urls=archive_urls,
+        current_version=(self._run.attrs.release_tag or ''))
+
+    retry_stats.ReportStats(sys.stdout)
+
+    build_id, db = self._run.GetCIDBHandle()
+    if db:
+      # TODO(akeshet): Eliminate this status string translate once
+      # these differing status strings are merged, crbug.com/318930
+      translateStatus = lambda s: (constants.BUILDER_STATUS_PASSED
+                                   if s == constants.FINAL_STATUS_PASSED
+                                   else constants.BUILDER_STATUS_FAILED)
+      status_for_db = translateStatus(final_status)
+
+      child_metadatas = self._run.attrs.metadata.GetDict().get(
+          'child-configs', [])
+      for child_metadata in child_metadatas:
+        db.FinishChildConfig(build_id, child_metadata['name'],
+                             translateStatus(child_metadata['status']))
+
+      # TODO(pprabhu): After BuildData and CBuildbotMetdata are merged, remove
+      # this extra temporary object creation.
+      # XXX:HACK We're creating a BuildData with an empty URL. Don't try to
+      # MarkGathered this object.
+      build_data = metadata_lib.BuildData("",
+                                          self._run.attrs.metadata.GetDict())
+      # TODO(akeshet): Find a clearer way to get the "primary upload url" for
+      # the metadata.json file. One alternative is _GetUploadUrls(...)[0].
+      # Today it seems that element 0 of its return list is the primary upload
+      # url, but there is no guarantee or unit test coverage of that.
+      db.FinishBuild(build_id, status=status_for_db,
+                     summary=build_data.failure_message,
+                     metadata_url=metadata_url)
 
 
 class RefreshPackageStatusStage(generic_stages.BuilderStage):
   """Stage for refreshing Portage package status in online spreadsheet."""
+
   def PerformStage(self):
     commands.RefreshPackageStatus(buildroot=self._build_root,
                                   boards=self._boards,

@@ -6,10 +6,12 @@
 #define DEVICE_USB_USB_DEVICE_HANDLE_IMPL_H_
 
 #include <map>
+#include <set>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/threading/thread_checker.h"
 #include "device/usb/usb_device_handle.h"
@@ -35,6 +37,7 @@ class UsbDeviceHandleImpl : public UsbDeviceHandle {
  public:
   scoped_refptr<UsbDevice> GetDevice() const override;
   void Close() override;
+  bool SetConfiguration(int configuration_value) override;
   bool ClaimInterface(int interface_number) override;
   bool ReleaseInterface(int interface_number) override;
   bool SetInterfaceAlternateSetting(int interface_number,
@@ -83,15 +86,16 @@ class UsbDeviceHandleImpl : public UsbDeviceHandle {
 
   // This constructor is called by UsbDevice.
   UsbDeviceHandleImpl(scoped_refptr<UsbContext> context,
-                      UsbDeviceImpl* device,
-                      PlatformUsbDeviceHandle handle,
-                      const UsbConfigDescriptor& config);
+                      scoped_refptr<UsbDeviceImpl> device,
+                      PlatformUsbDeviceHandle handle);
 
   ~UsbDeviceHandleImpl() override;
 
  private:
+  friend class Transfer;
+
   class InterfaceClaimer;
-  struct Transfer;
+  class Transfer;
 
   // Refresh endpoint_map_ after ClaimInterface, ReleaseInterface and
   // SetInterfaceAlternateSetting.
@@ -106,48 +110,34 @@ class UsbDeviceHandleImpl : public UsbDeviceHandle {
   // be submitted directly, otherwise a task to do so it posted. The callback
   // will be called on the current message loop of the thread where this
   // function was called.
-  void PostOrSubmitTransfer(PlatformUsbTransferHandle handle,
-                            UsbTransferType transfer_type,
-                            net::IOBuffer* buffer,
-                            size_t length,
-                            const UsbTransferCallback& callback);
+  void PostOrSubmitTransfer(scoped_ptr<Transfer> transfer);
 
   // Submits a transfer and starts tracking it. Retains the buffer and copies
   // the completion callback until the transfer finishes, whereupon it invokes
   // the callback then releases the buffer.
-  void SubmitTransfer(PlatformUsbTransferHandle handle,
-                      UsbTransferType transfer_type,
-                      net::IOBuffer* buffer,
-                      const size_t length,
-                      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-                      const UsbTransferCallback& callback);
-
-  static void LIBUSB_CALL
-      PlatformTransferCallback(PlatformUsbTransferHandle handle);
+  void SubmitTransfer(scoped_ptr<Transfer> transfer);
 
   // Invokes the callbacks associated with a given transfer, and removes it from
   // the in-flight transfer set.
-  void CompleteTransfer(PlatformUsbTransferHandle transfer);
+  void CompleteTransfer(scoped_ptr<Transfer> transfer);
 
   bool GetSupportedLanguages();
 
   // Informs the object to drop internal references.
   void InternalClose();
 
-  UsbDeviceImpl* device_;
+  scoped_refptr<UsbDeviceImpl> device_;
 
   PlatformUsbDeviceHandle handle_;
-
-  const UsbConfigDescriptor& config_;
 
   std::vector<uint16> languages_;
   std::map<uint8, base::string16> strings_;
 
-  typedef std::map<int, scoped_refptr<InterfaceClaimer> > ClaimedInterfaceMap;
+  typedef std::map<int, scoped_refptr<InterfaceClaimer>> ClaimedInterfaceMap;
   ClaimedInterfaceMap claimed_interfaces_;
 
-  typedef std::map<PlatformUsbTransferHandle, Transfer> TransferMap;
-  TransferMap transfers_;
+  // This set holds weak pointers to pending transfers.
+  std::set<Transfer*> transfers_;
 
   // A map from endpoints to interfaces
   typedef std::map<int, int> EndpointMap;
@@ -160,6 +150,7 @@ class UsbDeviceHandleImpl : public UsbDeviceHandle {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   base::ThreadChecker thread_checker_;
+  base::WeakPtrFactory<UsbDeviceHandleImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(UsbDeviceHandleImpl);
 };

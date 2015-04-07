@@ -25,6 +25,13 @@ GuestViewInternalCustomBindings::GuestViewInternalCustomBindings(
   RouteFunction("AttachGuest",
                 base::Bind(&GuestViewInternalCustomBindings::AttachGuest,
                            base::Unretained(this)));
+  RouteFunction("DetachGuest",
+                base::Bind(&GuestViewInternalCustomBindings::DetachGuest,
+                           base::Unretained(this)));
+  RouteFunction(
+      "RegisterDestructionCallback",
+      base::Bind(&GuestViewInternalCustomBindings::RegisterDestructionCallback,
+                 base::Unretained(this)));
 }
 
 void GuestViewInternalCustomBindings::AttachGuest(
@@ -41,11 +48,9 @@ void GuestViewInternalCustomBindings::AttachGuest(
   CHECK(args.Length() < 4 || args[3]->IsFunction());
 
   int element_instance_id = args[0]->Int32Value();
-  // An element instance ID uniquely identifies a ExtensionsGuestViewContainer
-  // within a RenderView.
+  // An element instance ID uniquely identifies a ExtensionsGuestViewContainer.
   ExtensionsGuestViewContainer* guest_view_container =
-      ExtensionsGuestViewContainer::FromID(
-          context()->GetRenderView()->GetRoutingID(), element_instance_id);
+      ExtensionsGuestViewContainer::FromID(element_instance_id);
 
   // TODO(fsamuel): Should we be reporting an error if the element instance ID
   // is invalid?
@@ -64,15 +69,68 @@ void GuestViewInternalCustomBindings::AttachGuest(
         static_cast<base::DictionaryValue*>(params_as_value.release()));
   }
 
-  linked_ptr<ExtensionsGuestViewContainer::AttachRequest> request(
+  linked_ptr<ExtensionsGuestViewContainer::Request> request(
       new ExtensionsGuestViewContainer::AttachRequest(
-          element_instance_id,
+          guest_view_container,
           guest_instance_id,
           params.Pass(),
           args.Length() == 4 ? args[3].As<v8::Function>() :
               v8::Handle<v8::Function>(),
           args.GetIsolate()));
-  guest_view_container->AttachGuest(request);
+  guest_view_container->IssueRequest(request);
+
+  args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
+}
+
+void GuestViewInternalCustomBindings::DetachGuest(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
+  // Allow for an optional callback parameter.
+  CHECK(args.Length() >= 1 && args.Length() <= 2);
+  // Element Instance ID.
+  CHECK(args[0]->IsInt32());
+  // Optional Callback Function.
+  CHECK(args.Length() < 2 || args[1]->IsFunction());
+
+  int element_instance_id = args[0]->Int32Value();
+  // An element instance ID uniquely identifies a ExtensionsGuestViewContainer.
+  ExtensionsGuestViewContainer* guest_view_container =
+      ExtensionsGuestViewContainer::FromID(element_instance_id);
+
+  // TODO(fsamuel): Should we be reporting an error if the element instance ID
+  // is invalid?
+  if (!guest_view_container)
+    return;
+
+  linked_ptr<ExtensionsGuestViewContainer::Request> request(
+      new ExtensionsGuestViewContainer::DetachRequest(
+          guest_view_container,
+          args.Length() == 2 ? args[1].As<v8::Function>() :
+              v8::Handle<v8::Function>(),
+          args.GetIsolate()));
+  guest_view_container->IssueRequest(request);
+
+  args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
+}
+
+void GuestViewInternalCustomBindings::RegisterDestructionCallback(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
+  // There are two parameters.
+  CHECK(args.Length() == 2);
+  // Element Instance ID.
+  CHECK(args[0]->IsInt32());
+  // Callback function.
+  CHECK(args[1]->IsFunction());
+
+  int element_instance_id = args[0]->Int32Value();
+  // An element instance ID uniquely identifies a ExtensionsGuestViewContainer
+  // within a RenderView.
+  ExtensionsGuestViewContainer* guest_view_container =
+      ExtensionsGuestViewContainer::FromID(element_instance_id);
+  if (!guest_view_container)
+    return;
+
+  guest_view_container->RegisterDestructionCallback(args[1].As<v8::Function>(),
+                                                    args.GetIsolate());
 
   args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
 }

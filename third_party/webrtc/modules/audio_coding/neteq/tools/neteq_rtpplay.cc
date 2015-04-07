@@ -26,6 +26,8 @@
 #include "webrtc/modules/audio_coding/codecs/pcm16b/include/pcm16b.h"
 #include "webrtc/modules/audio_coding/neteq/interface/neteq.h"
 #include "webrtc/modules/audio_coding/neteq/tools/input_audio_file.h"
+#include "webrtc/modules/audio_coding/neteq/tools/output_audio_file.h"
+#include "webrtc/modules/audio_coding/neteq/tools/output_wav_file.h"
 #include "webrtc/modules/audio_coding/neteq/tools/packet.h"
 #include "webrtc/modules/audio_coding/neteq/tools/rtp_file_source.h"
 #include "webrtc/modules/interface/module_common_types.h"
@@ -163,7 +165,7 @@ int main(int argc, char* argv[]) {
   std::string usage = "Tool for decoding an RTP dump file using NetEq.\n"
       "Run " + program_name + " --helpshort for usage.\n"
       "Example usage:\n" + program_name +
-      " input.rtp output.pcm\n";
+      " input.rtp output.{pcm, wav}\n";
   google::SetUsageMessage(usage);
   google::ParseCommandLineFlags(&argc, &argv, true);
 
@@ -193,13 +195,6 @@ int main(int argc, char* argv[]) {
     file_source->SelectSsrc(ssrc);
   }
 
-  FILE* out_file = fopen(argv[2], "wb");
-  if (!out_file) {
-    std::cerr << "Cannot open output file " << argv[2] << std::endl;
-    exit(1);
-  }
-  std::cout << "Output file: " << argv[2] << std::endl;
-
   // Check if a replacement audio file was provided, and if so, open it.
   bool replace_payload = false;
   webrtc::scoped_ptr<webrtc::test::InputAudioFile> replacement_audio_file;
@@ -208,19 +203,6 @@ int main(int argc, char* argv[]) {
         new webrtc::test::InputAudioFile(FLAGS_replacement_audio_file));
     replace_payload = true;
   }
-
-  // Enable tracing.
-  webrtc::Trace::CreateTrace();
-  webrtc::Trace::SetTraceFile((webrtc::test::OutputPath() +
-      "neteq_trace.txt").c_str());
-  webrtc::Trace::set_level_filter(webrtc::kTraceAll);
-
-  // Initialize NetEq instance.
-  int sample_rate_hz = 16000;
-  NetEq::Config config;
-  config.sample_rate_hz = sample_rate_hz;
-  NetEq* neteq = NetEq::Create(config);
-  RegisterPayloadTypes(neteq);
 
   // Read first packet.
   webrtc::scoped_ptr<webrtc::test::Packet> packet(file_source->NextPacket());
@@ -232,6 +214,44 @@ int main(int argc, char* argv[]) {
     return 0;
   }
   bool packet_available = true;
+
+  // Check the sample rate.
+  int sample_rate_hz = CodecSampleRate(packet->header().payloadType);
+  if (sample_rate_hz <= 0) {
+    printf("Warning: Invalid sample rate from RTP packet.\n");
+    webrtc::Trace::ReturnTrace();
+    return 0;
+  }
+
+  // Open the output file now that we know the sample rate. (Rate is only needed
+  // for wav files.)
+  // Check output file type.
+  std::string output_file_name = argv[2];
+  webrtc::scoped_ptr<webrtc::test::AudioSink> output;
+  if (output_file_name.size() >= 4 &&
+      output_file_name.substr(output_file_name.size() - 4) == ".wav") {
+    // Open a wav file.
+    output.reset(
+        new webrtc::test::OutputWavFile(output_file_name, sample_rate_hz));
+  } else {
+    // Open a pcm file.
+    output.reset(new webrtc::test::OutputAudioFile(output_file_name));
+  }
+
+  std::cout << "Output file: " << argv[2] << std::endl;
+
+  // Enable tracing.
+  webrtc::Trace::CreateTrace();
+  webrtc::Trace::SetTraceFile((webrtc::test::OutputPath() +
+      "neteq_trace.txt").c_str());
+  webrtc::Trace::set_level_filter(webrtc::kTraceAll);
+
+  // Initialize NetEq instance.
+  NetEq::Config config;
+  config.sample_rate_hz = sample_rate_hz;
+  NetEq* neteq = NetEq::Create(config);
+  RegisterPayloadTypes(neteq);
+
 
   // Set up variables for audio replacement if needed.
   webrtc::scoped_ptr<webrtc::test::Packet> next_packet;
@@ -255,6 +275,7 @@ int main(int argc, char* argv[]) {
 
   // This is the main simulation loop.
   // Set the simulation clock to start immediately with the first packet.
+  int start_time_ms = packet->time_ms();
   int time_now_ms = packet->time_ms();
   int next_input_time_ms = time_now_ms;
   int next_output_time_ms = time_now_ms;
@@ -286,7 +307,7 @@ int main(int argc, char* argv[]) {
       int error =
           neteq->InsertPacket(rtp_header,
                               payload_ptr,
-                              static_cast<int>(payload_len),
+                              payload_len,
                               packet->time_ms() * sample_rate_hz / 1000);
       if (error != NetEq::kOK) {
         if (neteq->LastError() == NetEq::kUnknownRtpPayloadType) {
@@ -349,8 +370,7 @@ int main(int argc, char* argv[]) {
       // Write to file.
       // TODO(hlundin): Make writing to file optional.
       size_t write_len = samples_per_channel * num_channels;
-      if (fwrite(out_data, sizeof(out_data[0]), write_len, out_file) !=
-          write_len) {
+      if (!output->WriteArray(out_data, write_len)) {
         std::cerr << "Error while writing to file" << std::endl;
         webrtc::Trace::ReturnTrace();
         exit(1);
@@ -361,9 +381,9 @@ int main(int argc, char* argv[]) {
     time_now_ms = std::min(next_input_time_ms, next_output_time_ms);
   }
 
-  std::cout << "Simulation done" << std::endl;
+  printf("Simulation done\n");
+  printf("Produced %i ms of audio\n", time_now_ms - start_time_ms);
 
-  fclose(out_file);
   delete neteq;
   webrtc::Trace::ReturnTrace();
   return 0;

@@ -47,8 +47,6 @@ public:
   // |list_pref_map_|.
   void Init();
 
-  void ShutdownOnUIThread();
-
   void OnUpdateContentLengths();
 
   // Gets the int64 pref at |pref_path| from the |DataReductionProxyPrefMap|.
@@ -64,6 +62,8 @@ public:
   // Writes the prefs stored in |DataReductionProxyPrefMap| and
   // |DataReductionProxyListPrefMap| to |pref_service|.
   void WritePrefs();
+
+  base::WeakPtr<DataReductionProxyStatisticsPrefs> GetWeakPtr();
 
 private:
   typedef std::map<const char*, int64> DataReductionProxyPrefMap;
@@ -97,9 +97,10 @@ private:
   bool delayed_task_posted_;
   DataReductionProxyPrefMap pref_map_;
   DataReductionProxyListPrefMap list_pref_map_;
-  base::WeakPtrFactory<DataReductionProxyStatisticsPrefs> weak_factory_;
   scoped_ptr<PrefChangeRegistrar> pref_change_registrar_;
   base::ThreadChecker thread_checker_;
+
+  base::WeakPtrFactory<DataReductionProxyStatisticsPrefs> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyStatisticsPrefs);
 };

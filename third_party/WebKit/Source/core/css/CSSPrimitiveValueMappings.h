@@ -47,6 +47,7 @@
 #include "platform/graphics/Path.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "platform/text/TextDirection.h"
+#include "platform/text/TextRun.h"
 #include "platform/text/UnicodeBidi.h"
 #include "platform/text/WritingMode.h"
 #include "wtf/MathExtras.h"
@@ -4465,33 +4466,23 @@ template<> inline CSSPrimitiveValue::operator EIsolation() const
     return IsolationAuto;
 }
 
-template<> inline CSSPrimitiveValue::CSSPrimitiveValue(TouchActionDelay t)
-    : CSSValue(PrimitiveClass)
-{
-    m_primitiveUnitType = CSS_VALUE_ID;
-    switch (t) {
-    case TouchActionDelayNone:
-        m_value.valueID = CSSValueNone;
-        break;
-    case TouchActionDelayScript:
-        m_value.valueID = CSSValueScript;
-        break;
-    }
-}
-
-template<> inline CSSPrimitiveValue::operator TouchActionDelay() const
+template<> inline CSSPrimitiveValue::operator ScrollBlocksOn() const
 {
     switch (m_value.valueID) {
     case CSSValueNone:
-        return TouchActionDelayNone;
-    case CSSValueScript:
-        return TouchActionDelayScript;
+        return ScrollBlocksOnNone;
+    case CSSValueStartTouch:
+        return ScrollBlocksOnStartTouch;
+    case CSSValueWheelEvent:
+        return ScrollBlocksOnWheelEvent;
+    case CSSValueScrollEvent:
+        return ScrollBlocksOnScrollEvent;
     default:
         break;
     }
 
     ASSERT_NOT_REACHED();
-    return TouchActionDelayNone;
+    return ScrollBlocksOnNone;
 }
 
 template<> inline CSSPrimitiveValue::CSSPrimitiveValue(CSSBoxType cssBox)
@@ -4763,14 +4754,14 @@ template<> inline CSSPrimitiveValue::CSSPrimitiveValue(ScrollBehavior behavior)
 {
     m_primitiveUnitType = CSS_VALUE_ID;
     switch (behavior) {
-    case ScrollBehaviorInstant:
-        m_value.valueID = CSSValueInstant;
+    case ScrollBehaviorAuto:
+        m_value.valueID = CSSValueAuto;
         break;
     case ScrollBehaviorSmooth:
         m_value.valueID = CSSValueSmooth;
         break;
-    case ScrollBehaviorAuto:
-        // Behavior 'auto' is only allowed in ScrollOptions arguments passed to
+    case ScrollBehaviorInstant:
+        // Behavior 'instant' is only allowed in ScrollOptions arguments passed to
         // CSSOM scroll APIs.
         ASSERT_NOT_REACHED();
     }
@@ -4779,15 +4770,15 @@ template<> inline CSSPrimitiveValue::CSSPrimitiveValue(ScrollBehavior behavior)
 template<> inline CSSPrimitiveValue::operator ScrollBehavior() const
 {
     switch (getValueID()) {
-    case CSSValueInstant:
-        return ScrollBehaviorInstant;
+    case CSSValueAuto:
+        return ScrollBehaviorAuto;
     case CSSValueSmooth:
         return ScrollBehaviorSmooth;
     default:
         break;
     }
     ASSERT_NOT_REACHED();
-    return ScrollBehaviorInstant;
+    return ScrollBehaviorAuto;
 }
 
 }

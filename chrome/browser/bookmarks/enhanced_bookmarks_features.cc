@@ -21,7 +21,6 @@
 #include "components/variations/variations_associated_data.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_provider.h"
-#include "ui/base/device_form_factor.h"
 
 namespace {
 
@@ -88,13 +87,8 @@ void UpdateBookmarksExperimentState(
 
   // kEnhancedBookmarksExperiment flag could have values "", "1" and "0".
   // "0" - user opted out.
-  bool opt_out = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+  bool opt_out = base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
                      switches::kEnhancedBookmarksExperiment) == "0";
-#if defined(OS_ANDROID)
-  // Tablets automagically do opt out.
-  opt_out =
-      opt_out || ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET;
-#endif  // defined(OS_ANDROID)
 
   BookmarksExperimentState bookmarks_experiment_new_state =
       BOOKMARKS_EXPERIMENT_NONE;
@@ -141,9 +135,9 @@ void UpdateBookmarksExperimentState(
   }
 
 #if defined(OS_ANDROID)
-  bool opt_in = !opt_out
-      && CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kEnhancedBookmarksExperiment) == "1";
+  bool opt_in = !opt_out &&
+                base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+                    switches::kEnhancedBookmarksExperiment) == "1";
   if (opt_in && bookmarks_experiment_new_state == BOOKMARKS_EXPERIMENT_NONE)
     bookmarks_experiment_new_state = BOOKMARKS_EXPERIMENT_ENABLED;
 #endif
@@ -208,7 +202,7 @@ bool IsEnhancedBookmarksExperimentEnabled(
   if (flags.find(switches::kManualEnhancedBookmarksOptout) != flags.end())
     return true;
 #else
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kManualEnhancedBookmarks) ||
       command_line->HasSwitch(switches::kManualEnhancedBookmarksOptout)) {
     return true;
@@ -243,8 +237,8 @@ bool IsEnhancedBookmarksEnabled(const PrefService* user_prefs) {
 #endif
 
 bool IsEnableDomDistillerSet() {
-  if (CommandLine::ForCurrentProcess()->
-      HasSwitch(switches::kEnableDomDistiller)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableDomDistiller)) {
     return true;
   }
   if (variations::GetVariationParamValue(
@@ -255,8 +249,8 @@ bool IsEnableDomDistillerSet() {
 }
 
 bool IsEnableSyncArticlesSet() {
-  if (CommandLine::ForCurrentProcess()->
-      HasSwitch(switches::kEnableSyncArticles)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableSyncArticles)) {
     return true;
   }
   if (variations::GetVariationParamValue(

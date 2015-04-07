@@ -24,8 +24,10 @@
 #include "SkGraphics.h"
 #include "SkOSFile.h"
 #include "SkPictureRecorder.h"
+#include "SkPictureUtils.h"
 #include "SkString.h"
 #include "SkSurface.h"
+#include "SkTaskGroup.h"
 
 #if SK_SUPPORT_GPU
     #include "gl/GrGLDefines.h"
@@ -70,6 +72,7 @@ DEFINE_int32(maxLoops, 1000000, "Never run a bench more times than this.");
 DEFINE_string(clip, "0,0,1000,1000", "Clip for SKPs.");
 DEFINE_string(scales, "1.0", "Space-separated scales for SKPs.");
 DEFINE_bool(bbh, true, "Build a BBH for SKPs?");
+DEFINE_bool(mpd, true, "Use MultiPictureDraw for the SKPs?");
 DEFINE_int32(flushEvery, 10, "Flush --outResultsFile every Nth run.");
 
 static SkString humanize(double ms) {
@@ -215,14 +218,16 @@ static int cpu_bench(const double overhead, Benchmark* bench, SkCanvas* canvas, 
 }
 
 #if SK_SUPPORT_GPU
+static void setup_gl(SkGLContext* gl) {
+    gl->makeCurrent();
+    // Make sure we're done with whatever came before.
+    SK_GL(*gl, Finish());
+}
+
 static int gpu_bench(SkGLContext* gl,
                      Benchmark* bench,
                      SkCanvas* canvas,
                      double* samples) {
-    gl->makeCurrent();
-    // Make sure we're done with whatever came before.
-    SK_GL(*gl, Finish());
-
     // First, figure out how many loops it'll take to get a frame up to FLAGS_gpuMs.
     int loops = FLAGS_loops;
     if (kAutoTuneLoops == loops) {
@@ -283,8 +288,10 @@ struct Config {
     int samples;
 #if SK_SUPPORT_GPU
     GrContextFactory::GLContextType ctxType;
+    bool useDFText;
 #else
     int bogusInt;
+    bool bogusBool;
 #endif
 };
 
@@ -327,10 +334,11 @@ static bool is_gpu_config_allowed(const char* name, GrContextFactory::GLContextT
 
 // Append all configs that are enabled and supported.
 static void create_configs(SkTDArray<Config>* configs) {
-    #define CPU_CONFIG(name, backend, color, alpha)                                               \
-        if (is_cpu_config_allowed(#name)) {                                                       \
-            Config config = { #name, Benchmark::backend, color, alpha, 0, kBogusGLContextType };  \
-            configs->push(config);                                                                \
+    #define CPU_CONFIG(name, backend, color, alpha)                       \
+        if (is_cpu_config_allowed(#name)) {                               \
+            Config config = { #name, Benchmark::backend, color, alpha, 0, \
+                              kBogusGLContextType, false };               \
+            configs->push(config);                                        \
         }
 
     if (FLAGS_cpu) {
@@ -340,7 +348,7 @@ static void create_configs(SkTDArray<Config>* configs) {
     }
 
 #if SK_SUPPORT_GPU
-    #define GPU_CONFIG(name, ctxType, samples)                                   \
+    #define GPU_CONFIG(name, ctxType, samples, useDFText)                        \
         if (is_gpu_config_allowed(#name, GrContextFactory::ctxType, samples)) {  \
             Config config = {                                                    \
                 #name,                                                           \
@@ -348,20 +356,22 @@ static void create_configs(SkTDArray<Config>* configs) {
                 kN32_SkColorType,                                                \
                 kPremul_SkAlphaType,                                             \
                 samples,                                                         \
-                GrContextFactory::ctxType };                                     \
+                GrContextFactory::ctxType,                                       \
+                useDFText };                                                     \
             configs->push(config);                                               \
         }
 
     if (FLAGS_gpu) {
-        GPU_CONFIG(gpu, kNative_GLContextType, 0)
-        GPU_CONFIG(msaa4, kNative_GLContextType, 4)
-        GPU_CONFIG(msaa16, kNative_GLContextType, 16)
-        GPU_CONFIG(nvprmsaa4, kNVPR_GLContextType, 4)
-        GPU_CONFIG(nvprmsaa16, kNVPR_GLContextType, 16)
-        GPU_CONFIG(debug, kDebug_GLContextType, 0)
-        GPU_CONFIG(nullgpu, kNull_GLContextType, 0)
+        GPU_CONFIG(gpu, kNative_GLContextType, 0, false)
+        GPU_CONFIG(msaa4, kNative_GLContextType, 4, false)
+        GPU_CONFIG(msaa16, kNative_GLContextType, 16, false)
+        GPU_CONFIG(nvprmsaa4, kNVPR_GLContextType, 4, false)
+        GPU_CONFIG(nvprmsaa16, kNVPR_GLContextType, 16, false)
+        GPU_CONFIG(gpudft, kNative_GLContextType, 0, true)
+        GPU_CONFIG(debug, kDebug_GLContextType, 0, false)
+        GPU_CONFIG(nullgpu, kNull_GLContextType, 0, false)
 #ifdef SK_ANGLE
-        GPU_CONFIG(angle, kANGLE_GLContextType, 0)
+        GPU_CONFIG(angle, kANGLE_GLContextType, 0, false)
 #endif
     }
 #endif
@@ -383,8 +393,11 @@ static Target* is_enabled(Benchmark* bench, const Config& config) {
     }
 #if SK_SUPPORT_GPU
     else if (Benchmark::kGPU_Backend == config.backend) {
-        target->surface.reset(SkSurface::NewRenderTarget(gGrFactory->get(config.ctxType), info,
-                                                         config.samples));
+        uint32_t flags = config.useDFText ? SkSurfaceProps::kUseDistanceFieldFonts_Flag : 0;
+        SkSurfaceProps props(flags, SkSurfaceProps::kLegacyFontHost_InitType);
+        target->surface.reset(SkSurface::NewRenderTarget(gGrFactory->get(config.ctxType),
+                                                         SkSurface::kNo_Budgeted, info,
+                                                         config.samples, &props));
         target->gl = gGrFactory->getGLContext(config.ctxType);
     }
 #endif
@@ -430,7 +443,8 @@ public:
                       , fGMs(skiagm::GMRegistry::Head())
                       , fCurrentRecording(0)
                       , fCurrentScale(0)
-                      , fCurrentSKP(0) {
+                      , fCurrentSKP(0)
+                      , fCurrentUseMPD(0) {
         for (int i = 0; i < FLAGS_skps.count(); i++) {
             if (SkStrEndsWith(FLAGS_skps[i], ".skp")) {
                 fSKPs.push_back() = FLAGS_skps[i];
@@ -454,6 +468,11 @@ public:
                 SkDebugf("Can't parse %s from --scales as an SkScalar.\n", FLAGS_scales[i]);
                 exit(1);
             }
+        }
+
+        fUseMPDs.push_back() = false;
+        if (FLAGS_mpd) {
+            fUseMPDs.push_back() = true;
         }
     }
 
@@ -507,31 +526,42 @@ public:
             SkString name = SkOSPath::Basename(path.c_str());
             fSourceType = "skp";
             fBenchType  = "recording";
+            fSKPBytes = static_cast<double>(SkPictureUtils::ApproximateBytesUsed(pic));
+            fSKPOps   = pic->approximateOpCount();
             return SkNEW_ARGS(RecordingBench, (name.c_str(), pic.get(), FLAGS_bbh));
         }
 
         // Then once each for each scale as SKPBenches (playback).
         while (fCurrentScale < fScales.count()) {
             while (fCurrentSKP < fSKPs.count()) {
-                const SkString& path = fSKPs[fCurrentSKP++];
+                const SkString& path = fSKPs[fCurrentSKP];
                 SkAutoTUnref<SkPicture> pic;
                 if (!ReadPicture(path.c_str(), &pic)) {
+                    fCurrentSKP++;
                     continue;
                 }
-                if (FLAGS_bbh) {
-                    // The SKP we read off disk doesn't have a BBH.  Re-record so it grows one.
-                    SkRTreeFactory factory;
-                    SkPictureRecorder recorder;
-                    pic->playback(recorder.beginRecording(pic->cullRect().width(),
-                                                          pic->cullRect().height(),
-                                                          &factory));
-                    pic.reset(recorder.endRecording());
+
+                while (fCurrentUseMPD < fUseMPDs.count()) {
+                    if (FLAGS_bbh) {
+                        // The SKP we read off disk doesn't have a BBH.  Re-record so it grows one.
+                        SkRTreeFactory factory;
+                        SkPictureRecorder recorder;
+                        static const int kFlags = SkPictureRecorder::kComputeSaveLayerInfo_RecordFlag;
+                        pic->playback(recorder.beginRecording(pic->cullRect().width(),
+                                                              pic->cullRect().height(),
+                                                              &factory, 
+                                                              fUseMPDs[fCurrentUseMPD] ? kFlags : 0));
+                        pic.reset(recorder.endRecording());
+                    }
+                    SkString name = SkOSPath::Basename(path.c_str());
+                    fSourceType = "skp";
+                    fBenchType = "playback";
+                    return SkNEW_ARGS(SKPBench,
+                            (name.c_str(), pic.get(), fClip,
+                             fScales[fCurrentScale], fUseMPDs[fCurrentUseMPD++]));
                 }
-                SkString name = SkOSPath::Basename(path.c_str());
-                fSourceType = "skp";
-                fBenchType  = "playback";
-                return SkNEW_ARGS(SKPBench,
-                        (name.c_str(), pic.get(), fClip, fScales[fCurrentScale]));
+                fCurrentUseMPD = 0;
+                fCurrentSKP++;
             }
             fCurrentSKP = 0;
             fCurrentScale++;
@@ -548,6 +578,14 @@ public:
                     SkStringPrintf("%d %d %d %d", fClip.fLeft, fClip.fTop,
                                                   fClip.fRight, fClip.fBottom).c_str());
             log->configOption("scale", SkStringPrintf("%.2g", fScales[fCurrentScale]).c_str());
+            if (fCurrentUseMPD > 0) {
+                SkASSERT(1 == fCurrentUseMPD || 2 == fCurrentUseMPD);
+                log->configOption("multi_picture_draw", fUseMPDs[fCurrentUseMPD-1] ? "true" : "false");
+            }
+        }
+        if (0 == strcmp(fBenchType, "recording")) {
+            log->metric("bytes", fSKPBytes);
+            log->metric("ops",   fSKPOps);
         }
     }
 
@@ -557,18 +595,23 @@ private:
     SkIRect            fClip;
     SkTArray<SkScalar> fScales;
     SkTArray<SkString> fSKPs;
+    SkTArray<bool>     fUseMPDs;
+
+    double fSKPBytes, fSKPOps;
 
     const char* fSourceType;  // What we're benching: bench, GM, SKP, ...
     const char* fBenchType;   // How we bench it: micro, recording, playback, ...
     int fCurrentRecording;
     int fCurrentScale;
     int fCurrentSKP;
+    int fCurrentUseMPD;
 };
 
 int nanobench_main();
 int nanobench_main() {
     SetupCrashHandler();
     SkAutoGraphics ag;
+    SkTaskGroup::Enabler enabled;
 
 #if SK_SUPPORT_GPU
     GrContext::Options grContextOpts;
@@ -652,6 +695,14 @@ int nanobench_main() {
             SkCanvas* canvas = targets[j]->surface.get() ? targets[j]->surface->getCanvas() : NULL;
             const char* config = targets[j]->config.name;
 
+#if SK_SUPPORT_GPU
+            if (Benchmark::kGPU_Backend == targets[j]->config.backend) {
+                setup_gl(targets[j]->gl);
+            }
+#endif
+
+            bench->perCanvasPreDraw(canvas);
+
             const int loops =
 #if SK_SUPPORT_GPU
                 Benchmark::kGPU_Backend == targets[j]->config.backend
@@ -659,6 +710,8 @@ int nanobench_main() {
                 :
 #endif
                  cpu_bench(       overhead, bench.get(), canvas, samples.get());
+
+            bench->perCanvasPostDraw(canvas);
 
             if (canvas && !FLAGS_writePath.isEmpty() && FLAGS_writePath[0]) {
                 SkString pngFilename = SkOSPath::Join(FLAGS_writePath[0], config);
@@ -681,11 +734,7 @@ int nanobench_main() {
                 fill_gpu_options(log.get(), targets[j]->gl);
             }
 #endif
-            log->timer("min_ms",    stats.min);
-            log->timer("median_ms", stats.median);
-            log->timer("mean_ms",   stats.mean);
-            log->timer("max_ms",    stats.max);
-            log->timer("stddev_ms", sqrt(stats.var));
+            log->metric("min_ms",    stats.min);
             if (runs++ % FLAGS_flushEvery == 0) {
                 log->flush();
             }
@@ -741,6 +790,10 @@ int nanobench_main() {
         }
 #endif
     }
+
+    log->bench("memory_usage", 0,0);
+    log->config("meta");
+    log->metric("max_rss_mb", sk_tools::getMaxResidentSetSizeMB());
 
     return 0;
 }

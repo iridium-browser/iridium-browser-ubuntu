@@ -21,7 +21,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/referrer.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 class Profile;
 
@@ -146,15 +146,11 @@ class PrerenderContents : public content::NotificationObserver,
 
   // Start rendering the contents in the prerendered state. If
   // |is_control_group| is true, this will go through some of the mechanics of
-  // starting a prerender, without actually creating the RenderView.
-  // |creator_child_id| is the id of the child process that caused the prerender
-  // to be created, and is needed so that the prerendered URLs can be sent to it
-  // so render-initiated navigations will swap in the prerendered page. |size|
+  // starting a prerender, without actually creating the RenderView. |size|
   // indicates the rectangular dimensions that the prerendered page should be.
   // |session_storage_namespace| indicates the namespace that the prerendered
   // page should be part of.
   virtual void StartPrerendering(
-      int creator_child_id,
       const gfx::Size& size,
       content::SessionStorageNamespace* session_storage_namespace,
       net::URLRequestContextGetter* request_context);
@@ -220,7 +216,7 @@ class PrerenderContents : public content::NotificationObserver,
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) override;
   void DidGetRedirectForResourceRequest(
-      content::RenderViewHost* render_view_host,
+      content::RenderFrameHost* render_frame_host,
       const content::ResourceRedirectDetails& details) override;
   bool OnMessageReceived(const IPC::Message& message) override;
 
@@ -431,9 +427,6 @@ class PrerenderContents : public content::NotificationObserver,
 
   // Experiment during which this prerender is performed.
   uint8 experiment_id_;
-
-  // The process that created the child id.
-  int creator_child_id_;
 
   // The size of the WebView from the launching page.
   gfx::Size size_;

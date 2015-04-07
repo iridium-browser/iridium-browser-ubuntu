@@ -34,6 +34,7 @@ public class TestAwContentsClient extends NullContentsClient {
     private final PictureListenerHelper mPictureListenerHelper;
     private final ShouldOverrideUrlLoadingHelper mShouldOverrideUrlLoadingHelper;
     private final DoUpdateVisitedHistoryHelper mDoUpdateVisitedHistoryHelper;
+    private final OnCreateWindowHelper mOnCreateWindowHelper;
 
     public TestAwContentsClient() {
         super(ThreadUtils.getUiThreadLooper());
@@ -49,6 +50,7 @@ public class TestAwContentsClient extends NullContentsClient {
         mPictureListenerHelper = new PictureListenerHelper();
         mShouldOverrideUrlLoadingHelper = new ShouldOverrideUrlLoadingHelper();
         mDoUpdateVisitedHistoryHelper = new DoUpdateVisitedHistoryHelper();
+        mOnCreateWindowHelper = new OnCreateWindowHelper();
         mAllowSslError = true;
     }
 
@@ -90,6 +92,10 @@ public class TestAwContentsClient extends NullContentsClient {
 
     public DoUpdateVisitedHistoryHelper getDoUpdateVisitedHistoryHelper() {
         return mDoUpdateVisitedHistoryHelper;
+    }
+
+    public OnCreateWindowHelper getOnCreateWindowHelper() {
+        return mOnCreateWindowHelper;
     }
 
     /**
@@ -214,6 +220,42 @@ public class TestAwContentsClient extends NullContentsClient {
             long contentLength) {
         getOnDownloadStartHelper().notifyCalled(url, userAgent, contentDisposition, mimeType,
                 contentLength);
+    }
+
+    /**
+     * Callback helper for onCreateWindow.
+     */
+    public static class OnCreateWindowHelper extends CallbackHelper {
+        private boolean mIsDialog;
+        private boolean mIsUserGesture;
+        private boolean mReturnValue;
+
+        public boolean getIsDialog() {
+            assert getCallCount() > 0;
+            return mIsDialog;
+        }
+
+        public boolean getUserAgent() {
+            assert getCallCount() > 0;
+            return mIsUserGesture;
+        }
+
+        public void setReturnValue(boolean returnValue) {
+            mReturnValue = returnValue;
+        }
+
+        public boolean notifyCalled(boolean isDialog, boolean isUserGesture) {
+            mIsDialog = isDialog;
+            mIsUserGesture = isUserGesture;
+            boolean returnValue = mReturnValue;
+            notifyCalled();
+            return returnValue;
+        }
+    }
+
+    @Override
+    public boolean onCreateWindow(boolean isDialog, boolean isUserGesture) {
+        return mOnCreateWindowHelper.notifyCalled(isDialog, isUserGesture);
     }
 
     /**

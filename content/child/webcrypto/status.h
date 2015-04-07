@@ -54,16 +54,16 @@ class CONTENT_EXPORT Status {
   // convertable to a dictionary.
   static Status ErrorJwkNotDictionary();
 
-  // The required property |property| was missing.
-  static Status ErrorJwkPropertyMissing(const std::string& property);
+  // The required JWK member |member_name| was missing.
+  static Status ErrorJwkMemberMissing(const std::string& member_name);
 
-  // The property |property| was not of type |expected_type|.
-  static Status ErrorJwkPropertyWrongType(const std::string& property,
-                                          const std::string& expected_type);
+  // The JWK member |member_name| was not of type |expected_type|.
+  static Status ErrorJwkMemberWrongType(const std::string& member_name,
+                                        const std::string& expected_type);
 
-  // The property |property| was a string, however could not be successfully
-  // base64 decoded.
-  static Status ErrorJwkBase64Decode(const std::string& property);
+  // The JWK member |member_name| was a string, however could not be
+  // successfully base64 decoded.
+  static Status ErrorJwkBase64Decode(const std::string& member_name);
 
   // The "ext" parameter was specified but was
   // incompatible with the value requested by the Web Crypto call.
@@ -103,13 +103,14 @@ class CONTENT_EXPORT Status {
   // given that is an error.
   static Status ErrorJwkIncorrectKeyLength();
 
-  // The JWK property |property| is supposed to represent a big-endian unsigned
+  // The JWK member |member_name| is supposed to represent a big-endian unsigned
   // integer, however was the empty string.
-  static Status ErrorJwkEmptyBigInteger(const std::string& property);
+  static Status ErrorJwkEmptyBigInteger(const std::string& member_name);
 
-  // The big-endian unsigned integer |property| contained leading zeros. This
+  // The big-endian unsigned integer |member_name| contained leading zeros. This
   // violates the JWA requirement that such octet strings be minimal.
-  static Status ErrorJwkBigIntegerHasLeadingZero(const std::string& property);
+  static Status ErrorJwkBigIntegerHasLeadingZero(
+      const std::string& member_name);
 
   // The key_ops lists a usage more than once.
   static Status ErrorJwkDuplicateKeyOps();
@@ -117,11 +118,6 @@ class CONTENT_EXPORT Status {
   // ------------------------------------
   // Other errors
   // ------------------------------------
-
-  // No key data was provided when importing an spki, pkcs8, or jwk formatted
-  // key. This does not apply to raw format, since it is possible to have empty
-  // key data there.
-  static Status ErrorImportEmptyKeyData();
 
   // Tried importing a key using an unsupported format for the key type (for
   // instance importing an HMAC key using format=spki).
@@ -134,6 +130,12 @@ class CONTENT_EXPORT Status {
   // The key data buffer provided for importKey() is an incorrect length for
   // AES.
   static Status ErrorImportAesKeyLength();
+
+  // The length specified when deriving an AES key was not 128 or 256 bits.
+  static Status ErrorGetAesKeyLength();
+
+  // Attempted to generate an AES key with an invalid length.
+  static Status ErrorGenerateAesKeyLength();
 
   // 192-bit AES keys are valid, however unsupported.
   static Status ErrorAes192BitUnsupported();
@@ -204,14 +206,55 @@ class CONTENT_EXPORT Status {
   // An unextractable key was used by an operation which exports the key data.
   static Status ErrorKeyNotExtractable();
 
-  // The key length specified when generating a key was invalid. Either it was
-  // zero, or it was not a multiple of 8 bits.
-  static Status ErrorGenerateKeyLength();
+  // Attempted to generate an HMAC key using a key length of 0.
+  static Status ErrorGenerateHmacKeyLengthZero();
+
+  // Attempted to import an HMAC key containing no data.
+  static Status ErrorHmacImportEmptyKey();
+
+  // Attempted to derive an HMAC key with zero length.
+  static Status ErrorGetHmacKeyLengthZero();
+
+  // Attempted to import an HMAC key using a bad optional length.
+  static Status ErrorHmacImportBadLength();
 
   // Attempted to create a key (either by importKey(), generateKey(), or
   // unwrapKey()) however the key usages were not applicable for the key type
   // and algorithm.
   static Status ErrorCreateKeyBadUsages();
+
+  // No usages were specified when generating/importing a secret or private key.
+  static Status ErrorCreateKeyEmptyUsages();
+
+  // An EC key imported using SPKI/PKCS8 format had the wrong curve specified in
+  // the key.
+  static Status ErrorImportedEcKeyIncorrectCurve();
+
+  // The "crv" member for a JWK did not match the expectations from importKey()
+  static Status ErrorJwkIncorrectCrv();
+
+  // The EC key failed validation (coordinates don't lie on curve, out of range,
+  // etc.)
+  static Status ErrorEcKeyInvalid();
+
+  // The octet string |member_name| was expected to be |expected_length| bytes
+  // long, but was instead |actual_length| bytes long.
+  static Status JwkOctetStringWrongLength(const std::string& member_name,
+                                          size_t expected_length,
+                                          size_t actual_length);
+
+  // The public key given for ECDH key derivation was not an EC public key.
+  static Status ErrorEcdhPublicKeyWrongType();
+
+  // The public key's algorithm was not ECDH.
+  static Status ErrorEcdhPublicKeyWrongAlgorithm();
+
+  // The public and private keys given to ECDH key derivation were not for the
+  // same named curve.
+  static Status ErrorEcdhCurveMismatch();
+
+  // The requested bit length for ECDH key derivation was too large.
+  static Status ErrorEcdhLengthTooBig(unsigned int max_length_bits);
 
  private:
   enum Type { TYPE_ERROR, TYPE_SUCCESS };

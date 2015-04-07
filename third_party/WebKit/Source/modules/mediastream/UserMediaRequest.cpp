@@ -179,7 +179,7 @@ void UserMediaRequest::contextDestroyed()
 {
     if (m_controller) {
         m_controller->cancelUserMediaRequest(this);
-        m_controller = 0;
+        m_controller = nullptr;
     }
 
     ContextLifecycleObserver::contextDestroyed();
@@ -187,8 +187,10 @@ void UserMediaRequest::contextDestroyed()
 
 void UserMediaRequest::trace(Visitor* visitor)
 {
+    visitor->trace(m_controller);
     visitor->trace(m_successCallback);
     visitor->trace(m_errorCallback);
+    ContextLifecycleObserver::trace(visitor);
 }
 
 } // namespace blink

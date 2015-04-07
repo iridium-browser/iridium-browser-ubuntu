@@ -16,13 +16,14 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "base/strings/string16.h"
 #include "base/task/cancelable_task_tracker.h"
-#include "chrome/browser/history/history_db_task.h"
-#include "chrome/browser/history/in_memory_url_index_types.h"
 #include "chrome/browser/history/scored_history_match.h"
+#include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/history/core/browser/in_memory_url_index_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "sql/connection.h"
@@ -245,9 +246,11 @@ class InMemoryURLIndex : public HistoryServiceObserver,
                     const URLRow& row,
                     const RedirectList& redirects,
                     base::Time visit_time) override;
+  void OnURLsModified(HistoryService* history_service,
+                      const URLRows& changed_urls) override;
+  void OnHistoryServiceLoaded(HistoryService* history_service) override;
 
   // Notification handlers.
-  void OnURLsModified(const URLsModifiedDetails* details);
   void OnURLsDeleted(const URLsDeletedDetails* details);
 
   // Sets the directory wherein the cache file will be maintained.
@@ -308,6 +311,9 @@ class InMemoryURLIndex : public HistoryServiceObserver,
   // temporary safety check to insure that the cache is saved before the
   // index has been destructed.
   bool needs_to_be_cached_;
+
+  ScopedObserver<HistoryService, HistoryServiceObserver>
+      history_service_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(InMemoryURLIndex);
 };

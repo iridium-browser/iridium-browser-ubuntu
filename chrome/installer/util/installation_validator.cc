@@ -29,9 +29,6 @@ BrowserDistribution::Type
 void InstallationValidator::ChromeRules::AddUninstallSwitchExpectations(
     const ProductContext& ctx,
     SwitchExpectations* expectations) const {
-  const bool is_multi_install =
-      ctx.state.uninstall_command().HasSwitch(switches::kMultiInstall);
-
   // --chrome should be present for uninstall iff --multi-install.  This wasn't
   // the case in Chrome 10 (between r68996 and r72497), though, so consider it
   // optional.
@@ -40,9 +37,6 @@ void InstallationValidator::ChromeRules::AddUninstallSwitchExpectations(
 void InstallationValidator::ChromeRules::AddRenameSwitchExpectations(
     const ProductContext& ctx,
     SwitchExpectations* expectations) const {
-  const bool is_multi_install =
-      ctx.state.uninstall_command().HasSwitch(switches::kMultiInstall);
-
   // --chrome should not be present for rename.  It was for a time, so we'll be
   // lenient so that mini_installer tests pass.
 
@@ -208,7 +202,8 @@ void InstallationValidator::ValidateOnOsUpgradeCommand(
     bool* is_valid) {
   DCHECK(is_valid);
 
-  CommandLine cmd_line(CommandLine::FromString(app_cmd.command_line()));
+  base::CommandLine cmd_line(
+      base::CommandLine::FromString(app_cmd.command_line()));
   base::string16 name(kCmdOnOsUpgrade);
 
   ValidateSetupPath(ctx, cmd_line.GetProgram(), name, is_valid);
@@ -237,7 +232,8 @@ void InstallationValidator::ValidateQueryEULAAcceptanceCommand(
     bool* is_valid) {
   DCHECK(is_valid);
 
-  CommandLine cmd_line(CommandLine::FromString(app_cmd.command_line()));
+  base::CommandLine cmd_line(
+      base::CommandLine::FromString(app_cmd.command_line()));
   base::string16 name(kCmdQueryEULAAcceptance);
 
   ValidateSetupPath(ctx, cmd_line.GetProgram(), name, is_valid);
@@ -263,7 +259,8 @@ void InstallationValidator::ValidateQuickEnableApplicationHostCommand(
     bool* is_valid) {
   DCHECK(is_valid);
 
-  CommandLine cmd_line(CommandLine::FromString(app_cmd.command_line()));
+  base::CommandLine cmd_line(
+      base::CommandLine::FromString(app_cmd.command_line()));
   base::string16 name(kCmdQuickEnableApplicationHost);
 
   ValidateSetupPath(ctx, cmd_line.GetProgram(), name, is_valid);
@@ -476,7 +473,7 @@ void InstallationValidator::ValidateSetupPath(const ProductContext& ctx,
 // Validates that |command| meets the expectations described in |expected|.
 void InstallationValidator::ValidateCommandExpectations(
     const ProductContext& ctx,
-    const CommandLine& command,
+    const base::CommandLine& command,
     const SwitchExpectations& expected,
     const base::string16& source,
     bool* is_valid) {
@@ -498,7 +495,7 @@ void InstallationValidator::ValidateCommandExpectations(
 // the product described by |ctx|
 void InstallationValidator::ValidateUninstallCommand(
     const ProductContext& ctx,
-    const CommandLine& command,
+    const base::CommandLine& command,
     const base::string16& source,
     bool* is_valid) {
   DCHECK(is_valid);
@@ -526,7 +523,8 @@ void InstallationValidator::ValidateRenameCommand(const ProductContext& ctx,
   DCHECK(is_valid);
   DCHECK(!ctx.state.rename_cmd().empty());
 
-  CommandLine command = CommandLine::FromString(ctx.state.rename_cmd());
+  base::CommandLine command =
+      base::CommandLine::FromString(ctx.state.rename_cmd());
   base::string16 name(base::ASCIIToUTF16("in-use renamer"));
 
   ValidateSetupPath(ctx, command.GetProgram(), name, is_valid);

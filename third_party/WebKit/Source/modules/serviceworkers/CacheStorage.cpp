@@ -8,7 +8,9 @@
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "core/dom/DOMException.h"
-#include "modules/serviceworkers/Cache.h"
+#include "core/dom/ExceptionCode.h"
+#include "modules/fetch/Request.h"
+#include "modules/fetch/Response.h"
 #include "public/platform/WebServiceWorkerCacheError.h"
 #include "public/platform/WebServiceWorkerCacheStorage.h"
 
@@ -27,7 +29,7 @@ PassRefPtrWillBeRawPtr<DOMException> createNoImplementationException()
 class CacheStorage::Callbacks final : public WebServiceWorkerCacheStorage::CacheStorageCallbacks {
     WTF_MAKE_NONCOPYABLE(Callbacks);
 public:
-    explicit Callbacks(PassRefPtr<ScriptPromiseResolver> resolver)
+    explicit Callbacks(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
         : m_resolver(resolver) { }
     virtual ~Callbacks() { }
 
@@ -47,14 +49,14 @@ public:
     }
 
 private:
-    RefPtr<ScriptPromiseResolver> m_resolver;
+    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
 };
 
 // FIXME: Consider using CallbackPromiseAdapter.
 class CacheStorage::WithCacheCallbacks final : public WebServiceWorkerCacheStorage::CacheStorageWithCacheCallbacks {
     WTF_MAKE_NONCOPYABLE(WithCacheCallbacks);
 public:
-    WithCacheCallbacks(const String& cacheName, CacheStorage* cacheStorage, PassRefPtr<ScriptPromiseResolver> resolver)
+    WithCacheCallbacks(const String& cacheName, CacheStorage* cacheStorage, PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
         : m_cacheName(cacheName), m_cacheStorage(cacheStorage), m_resolver(resolver) { }
     virtual ~WithCacheCallbacks() { }
 
@@ -83,14 +85,41 @@ public:
 private:
     String m_cacheName;
     Persistent<CacheStorage> m_cacheStorage;
-    RefPtr<ScriptPromiseResolver> m_resolver;
+    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
 };
+
+// FIXME: Consider using CallbackPromiseAdapter.
+class CacheStorage::MatchCallbacks : public WebServiceWorkerCacheStorage::CacheStorageMatchCallbacks {
+    WTF_MAKE_NONCOPYABLE(MatchCallbacks);
+public:
+    MatchCallbacks(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
+        : m_resolver(resolver) { }
+
+    virtual void onSuccess(WebServiceWorkerResponse* webResponse) override
+    {
+        m_resolver->resolve(Response::create(m_resolver->scriptState()->executionContext(), *webResponse));
+        m_resolver.clear();
+    }
+
+    virtual void onError(WebServiceWorkerCacheError* reason) override
+    {
+        if (*reason == WebServiceWorkerCacheErrorNotFound)
+            m_resolver->resolve();
+        else
+            m_resolver->reject(Cache::domExceptionForCacheError(*reason));
+        m_resolver.clear();
+    }
+
+private:
+    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
+};
+
 
 // FIXME: Consider using CallbackPromiseAdapter.
 class CacheStorage::DeleteCallbacks final : public WebServiceWorkerCacheStorage::CacheStorageCallbacks {
     WTF_MAKE_NONCOPYABLE(DeleteCallbacks);
 public:
-    DeleteCallbacks(const String& cacheName, CacheStorage* cacheStorage, PassRefPtr<ScriptPromiseResolver> resolver)
+    DeleteCallbacks(const String& cacheName, CacheStorage* cacheStorage, PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
         : m_cacheName(cacheName), m_cacheStorage(cacheStorage), m_resolver(resolver) { }
     virtual ~DeleteCallbacks() { }
 
@@ -113,14 +142,14 @@ public:
 private:
     String m_cacheName;
     Persistent<CacheStorage> m_cacheStorage;
-    RefPtr<ScriptPromiseResolver> m_resolver;
+    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
 };
 
 // FIXME: Consider using CallbackPromiseAdapter.
 class CacheStorage::KeysCallbacks final : public WebServiceWorkerCacheStorage::CacheStorageKeysCallbacks {
     WTF_MAKE_NONCOPYABLE(KeysCallbacks);
 public:
-    explicit KeysCallbacks(PassRefPtr<ScriptPromiseResolver> resolver)
+    explicit KeysCallbacks(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
         : m_resolver(resolver) { }
     virtual ~KeysCallbacks() { }
 
@@ -140,7 +169,7 @@ public:
     }
 
 private:
-    RefPtr<ScriptPromiseResolver> m_resolver;
+    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
 };
 
 CacheStorage* CacheStorage::create(WebServiceWorkerCacheStorage* webCacheStorage)
@@ -150,7 +179,7 @@ CacheStorage* CacheStorage::create(WebServiceWorkerCacheStorage* webCacheStorage
 
 ScriptPromise CacheStorage::open(ScriptState* scriptState, const String& cacheName)
 {
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
 
     if (m_nameToCacheMap.contains(cacheName)) {
@@ -169,7 +198,7 @@ ScriptPromise CacheStorage::open(ScriptState* scriptState, const String& cacheNa
 
 ScriptPromise CacheStorage::has(ScriptState* scriptState, const String& cacheName)
 {
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
 
     if (m_nameToCacheMap.contains(cacheName)) {
@@ -187,7 +216,7 @@ ScriptPromise CacheStorage::has(ScriptState* scriptState, const String& cacheNam
 
 ScriptPromise CacheStorage::deleteFunction(ScriptState* scriptState, const String& cacheName)
 {
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
 
     if (m_webCacheStorage)
@@ -200,11 +229,39 @@ ScriptPromise CacheStorage::deleteFunction(ScriptState* scriptState, const Strin
 
 ScriptPromise CacheStorage::keys(ScriptState* scriptState)
 {
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
 
     if (m_webCacheStorage)
         m_webCacheStorage->dispatchKeys(new KeysCallbacks(resolver));
+    else
+        resolver->reject(createNoImplementationException());
+
+    return promise;
+}
+
+ScriptPromise CacheStorage::match(ScriptState* scriptState, const RequestInfo& request, const CacheQueryOptions& options, ExceptionState& exceptionState)
+{
+    ASSERT(!request.isNull());
+
+    if (request.isRequest())
+        return matchImpl(scriptState, request.getAsRequest(), options);
+    Request* newRequest = Request::create(scriptState->executionContext(), request.getAsUSVString(), exceptionState);
+    if (exceptionState.hadException())
+        return ScriptPromise();
+    return matchImpl(scriptState, newRequest, options);
+}
+
+ScriptPromise CacheStorage::matchImpl(ScriptState* scriptState, const Request* request, const CacheQueryOptions& options)
+{
+    WebServiceWorkerRequest webRequest;
+    request->populateWebServiceWorkerRequest(webRequest);
+
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    const ScriptPromise promise = resolver->promise();
+
+    if (m_webCacheStorage)
+        m_webCacheStorage->dispatchMatch(new MatchCallbacks(resolver), webRequest, Cache::toWebQueryParams(options));
     else
         resolver->reject(createNoImplementationException());
 

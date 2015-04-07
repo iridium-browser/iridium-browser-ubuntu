@@ -197,6 +197,31 @@ void InsertBuiltInFunctions(sh::GLenum type, ShShaderSpec spec, const ShBuiltInR
     symbolTable.insertBuiltIn(COMMON_BUILTINS, float3, "smoothstep", float1, float1, float3);
     symbolTable.insertBuiltIn(COMMON_BUILTINS, float4, "smoothstep", float1, float1, float4);
 
+    TType *uint1 = new TType(EbtUInt);
+    TType *uint2 = new TType(EbtUInt, 2);
+    TType *uint3 = new TType(EbtUInt, 3);
+    TType *uint4 = new TType(EbtUInt, 4);
+
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, int1, "floatBitsToInt", float1);
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, int2, "floatBitsToInt", float2);
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, int3, "floatBitsToInt", float3);
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, int4, "floatBitsToInt", float4);
+
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, uint1, "floatBitsToUint", float1);
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, uint2, "floatBitsToUint", float2);
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, uint3, "floatBitsToUint", float3);
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, uint4, "floatBitsToUint", float4);
+
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, float1, "intBitsToFloat", int1);
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, float2, "intBitsToFloat", int2);
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, float3, "intBitsToFloat", int3);
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, float4, "intBitsToFloat", int4);
+
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, float1, "uintBitsToFloat", uint1);
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, float2, "uintBitsToFloat", uint2);
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, float3, "uintBitsToFloat", uint3);
+    symbolTable.insertBuiltIn(ESSL3_BUILTINS, float4, "uintBitsToFloat", uint4);
+
     //
     // Geometric Functions.
     //
@@ -620,6 +645,19 @@ void IdentifyBuiltIns(sh::GLenum type, ShShaderSpec spec,
                 symbolTable.insert(ESSL1_BUILTINS, new TVariable(NewPoolTString("gl_FragDepthEXT"), TType(EbtFloat, resources.FragmentPrecisionHigh ? EbpHigh : EbpMedium, EvqFragDepth, 1)));
                 symbolTable.relateToExtension(ESSL1_BUILTINS, "gl_FragDepthEXT", "GL_EXT_frag_depth");
             }
+            if (resources.EXT_shader_framebuffer_fetch)
+            {
+                symbolTable.insert(ESSL1_BUILTINS, new TVariable(NewPoolTString("gl_LastFragData[gl_MaxDrawBuffers]"), TType(EbtFloat, EbpMedium, EvqLastFragData,   4)));
+            }
+            else if (resources.NV_shader_framebuffer_fetch)
+            {
+                symbolTable.insert(ESSL1_BUILTINS, new TVariable(NewPoolTString("gl_LastFragColor"), TType(EbtFloat, EbpMedium, EvqLastFragColor,   4)));
+                symbolTable.insert(ESSL1_BUILTINS, new TVariable(NewPoolTString("gl_LastFragData[gl_MaxDrawBuffers]"), TType(EbtFloat, EbpMedium, EvqLastFragData,   4)));
+            }
+            else if (resources.ARM_shader_framebuffer_fetch)
+            {
+                symbolTable.insert(ESSL1_BUILTINS, new TVariable(NewPoolTString("gl_LastFragColorARM"), TType(EbtFloat, EbpMedium, EvqLastFragColor,   4)));
+            }
         } else {
             symbolTable.insert(ESSL1_BUILTINS, new TVariable(NewPoolTString("css_MixColor"), TType(EbtFloat, EbpMedium, EvqGlobal,      4)));
             symbolTable.insert(ESSL1_BUILTINS, new TVariable(NewPoolTString("css_ColorMatrix"), TType(EbtFloat, EbpMedium, EvqGlobal,      4, 4)));
@@ -680,6 +718,11 @@ void IdentifyBuiltIns(sh::GLenum type, ShShaderSpec spec,
     symbolTable.relateToOperator(COMMON_BUILTINS, "step",         EOpStep);
     symbolTable.relateToOperator(COMMON_BUILTINS, "smoothstep",   EOpSmoothStep);
 
+    symbolTable.relateToOperator(ESSL3_BUILTINS, "floatBitsToInt",  EOpFloatBitsToInt);
+    symbolTable.relateToOperator(ESSL3_BUILTINS, "floatBitsToUint", EOpFloatBitsToUint);
+    symbolTable.relateToOperator(ESSL3_BUILTINS, "intBitsToFloat",  EOpIntBitsToFloat);
+    symbolTable.relateToOperator(ESSL3_BUILTINS, "uintBitsToFloat", EOpUintBitsToFloat);
+
     symbolTable.relateToOperator(COMMON_BUILTINS, "length",       EOpLength);
     symbolTable.relateToOperator(COMMON_BUILTINS, "distance",     EOpDistance);
     symbolTable.relateToOperator(COMMON_BUILTINS, "dot",          EOpDot);
@@ -714,6 +757,14 @@ void IdentifyBuiltIns(sh::GLenum type, ShShaderSpec spec,
             symbolTable.relateToExtension(ESSL1_BUILTINS, "texture2DProjLodEXT", "GL_EXT_shader_texture_lod");
             symbolTable.relateToExtension(ESSL1_BUILTINS, "textureCubeLodEXT", "GL_EXT_shader_texture_lod");
         }
+        if (resources.NV_shader_framebuffer_fetch)
+        {
+            symbolTable.relateToExtension(ESSL1_BUILTINS, "gl_LastFragColor", "GL_NV_shader_framebuffer_fetch");
+        }
+        else if (resources.ARM_shader_framebuffer_fetch)
+        {
+            symbolTable.relateToExtension(ESSL1_BUILTINS, "gl_LastFragColorARM", "GL_ARM_shader_framebuffer_fetch");
+        }
         break;
     default: break;
     }
@@ -737,6 +788,22 @@ void IdentifyBuiltIns(sh::GLenum type, ShShaderSpec spec,
             TType fragData(EbtFloat, EbpMedium, EvqFragData, 4, 1, true);
             fragData.setArraySize(resources.MaxDrawBuffers);
             symbolTable.insert(ESSL1_BUILTINS, new TVariable(NewPoolTString("gl_FragData"), fragData));
+
+            if (resources.EXT_shader_framebuffer_fetch || resources.NV_shader_framebuffer_fetch) {
+                // Set up gl_LastFragData.  The array size.
+                TType lastFragData(EbtFloat, EbpMedium, EvqLastFragData, 4, 1, true);
+                lastFragData.setArraySize(resources.MaxDrawBuffers);
+                symbolTable.insert(ESSL1_BUILTINS, new TVariable(NewPoolTString("gl_LastFragData"), lastFragData));
+
+                if (resources.EXT_shader_framebuffer_fetch)
+                {
+                    symbolTable.relateToExtension(ESSL1_BUILTINS, "gl_LastFragData", "GL_EXT_shader_framebuffer_fetch");
+                }
+                else if (resources.NV_shader_framebuffer_fetch)
+                {
+                    symbolTable.relateToExtension(ESSL1_BUILTINS, "gl_LastFragData", "GL_NV_shader_framebuffer_fetch");
+                }
+            }
         }
         break;
     default: break;
@@ -758,4 +825,10 @@ void InitExtensionBehavior(const ShBuiltInResources& resources,
         extBehavior["GL_EXT_frag_depth"] = EBhUndefined;
     if (resources.EXT_shader_texture_lod)
         extBehavior["GL_EXT_shader_texture_lod"] = EBhUndefined;
+    if (resources.EXT_shader_framebuffer_fetch)
+        extBehavior["GL_EXT_shader_framebuffer_fetch"] = EBhUndefined;
+    if (resources.NV_shader_framebuffer_fetch)
+        extBehavior["GL_NV_shader_framebuffer_fetch"] = EBhUndefined;
+    if (resources.ARM_shader_framebuffer_fetch)
+        extBehavior["GL_ARM_shader_framebuffer_fetch"] = EBhUndefined;
 }

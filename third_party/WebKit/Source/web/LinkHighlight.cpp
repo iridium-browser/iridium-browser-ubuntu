@@ -107,8 +107,8 @@ void LinkHighlight::releaseResources()
 
 void LinkHighlight::attachLinkHighlightToCompositingLayer(const RenderLayerModelObject* paintInvalidationContainer)
 {
-    // FIXME: there should always be a GraphicsLayer. See https://code.google.com/p/chromium/issues/detail?id=359877.
     GraphicsLayer* newGraphicsLayer = paintInvalidationContainer->layer()->graphicsLayerBacking();
+    // FIXME: There should always be a GraphicsLayer. See crbug.com/431961.
     if (newGraphicsLayer && !newGraphicsLayer->drawsContent())
         newGraphicsLayer = paintInvalidationContainer->layer()->graphicsLayerBackingForScrolling();
     if (!newGraphicsLayer)
@@ -176,7 +176,7 @@ void LinkHighlight::computeQuads(const Node& node, Vector<FloatQuad>& outQuads) 
     // appropriately sized highlight we descend into the children and have them add their
     // boxes.
     if (renderer->isRenderInline()) {
-        for (Node* child = NodeRenderingTraversal::firstChild(&node); child; child = NodeRenderingTraversal::nextSibling(child))
+        for (Node* child = NodeRenderingTraversal::firstChild(node); child; child = NodeRenderingTraversal::nextSibling(*child))
             computeQuads(*child, outQuads);
     } else {
         // FIXME: this does not need to be absolute, just in the paint invalidation container's space.
@@ -189,6 +189,12 @@ bool LinkHighlight::computeHighlightLayerPathAndPosition(const RenderLayerModelO
     if (!m_node || !m_node->renderer() || !m_currentGraphicsLayer)
         return false;
     ASSERT(paintInvalidationContainer);
+
+    // FIXME: This is defensive code to avoid crashes such as those described in
+    // crbug.com/440887. This should be cleaned up once we fix the root cause of
+    // of the paint invalidation container not being composited.
+    if (!paintInvalidationContainer->layer()->compositedLayerMapping() && !paintInvalidationContainer->layer()->groupedMapping())
+        return false;
 
     // Get quads for node in absolute coordinates.
     Vector<FloatQuad> quads;
@@ -241,7 +247,7 @@ void LinkHighlight::paintContents(WebCanvas* canvas, const WebRect& webClipRect,
     if (!m_node || !m_node->renderer())
         return;
 
-    GraphicsContext gc(canvas,
+    GraphicsContext gc(canvas, nullptr,
         contextStatus == WebContentLayerClient::GraphicsContextEnabled ? GraphicsContext::NothingDisabled : GraphicsContext::FullyDisabled);
     IntRect clipRect(IntPoint(webClipRect.x, webClipRect.y), IntSize(webClipRect.width, webClipRect.height));
     gc.clip(clipRect);

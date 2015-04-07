@@ -215,11 +215,15 @@ THREAD_FUNCTION thread_encoding_proc(void *p_data)
                                   LAST_FRAME) {
                             // Increment, check for wrap-around.
                             if (cpi->consec_zero_last[map_index+mb_col] < 255)
-                              cpi->consec_zero_last[map_index+mb_col] +=
-                                  1;
+                              cpi->consec_zero_last[map_index+mb_col] += 1;
+                            if (cpi->consec_zero_last_mvbias[map_index+mb_col] < 255)
+                              cpi->consec_zero_last_mvbias[map_index+mb_col] += 1;
                           } else {
                             cpi->consec_zero_last[map_index+mb_col] = 0;
+                            cpi->consec_zero_last_mvbias[map_index+mb_col] = 0;
                           }
+                          if (x->zero_last_dot_suppress)
+                            cpi->consec_zero_last_mvbias[map_index+mb_col] = 0;
                         }
 
                         /* Special case code for cyclic refresh
@@ -261,7 +265,7 @@ THREAD_FUNCTION thread_encoding_proc(void *p_data)
                     /* pack tokens for this MB */
                     {
                         int tok_count = tp - tp_start;
-                        pack_tokens(w, tp_start, tok_count);
+                        vp8_pack_tokens(w, tp_start, tok_count);
                     }
 #else
                     cpi->tplist[mb_row].stop = tp;
@@ -346,7 +350,6 @@ static void setup_mbby_copy(MACROBLOCK *mbdst, MACROBLOCK *mbsrc)
     z->short_fdct8x4     = x->short_fdct8x4;
     z->short_walsh4x4    = x->short_walsh4x4;
     z->quantize_b        = x->quantize_b;
-    z->quantize_b_pair   = x->quantize_b_pair;
     z->optimize          = x->optimize;
 
     /*
@@ -506,6 +509,7 @@ void vp8cx_init_mbrthread_data(VP8_COMP *cpi,
         mb->intra_error = 0;
         vp8_zero(mb->count_mb_ref_frame_usage);
         mb->mbs_tested_so_far = 0;
+        mb->mbs_zero_last_dot_suppress = 0;
     }
 }
 

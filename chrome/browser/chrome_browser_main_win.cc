@@ -12,6 +12,7 @@
 #include "base/command_line.h"
 #include "base/environment.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
@@ -36,6 +37,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/terminate_on_heap_corruption_experiment_win.h"
@@ -47,7 +49,10 @@
 #include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/shell_util.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/utility_process_host.h"
+#include "content/public/browser/utility_process_host_client.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/dwrite_font_platform_win.h"
 #include "content/public/common/main_function_params.h"
 #include "installer_util_strings/installer_util_strings.h"
 #include "ui/base/cursor/cursor_loader_win.h"
@@ -57,6 +62,7 @@
 #include "ui/base/win/message_box_win.h"
 #include "ui/gfx/platform_font_win.h"
 #include "ui/gfx/switches.h"
+#include "ui/gfx/win/direct_write.h"
 #include "ui/strings/grit/app_locale_settings.h"
 
 #if defined(GOOGLE_CHROME_BUILD)
@@ -97,8 +103,12 @@ class TranslationDelegate : public installer::TranslationDelegate {
   virtual base::string16 GetLocalizedString(int installer_string_id) override;
 };
 
-bool IsSafeModeStart() {
-  return ::GetEnvironmentVariableA(chrome::kSafeModeEnvVar, NULL, 0) != 0;
+void ExecuteFontCacheBuildTask(const base::FilePath& path) {
+  base::WeakPtr<content::UtilityProcessHost> utility_process_host(
+      content::UtilityProcessHost::Create(NULL, NULL)->AsWeakPtr());
+  utility_process_host->DisableSandbox();
+  utility_process_host->Send(
+      new ChromeUtilityHostMsg_BuildDirectWriteFontCache(path));
 }
 
 }  // namespace
@@ -171,10 +181,10 @@ ChromeBrowserMainPartsWin::ChromeBrowserMainPartsWin(
     if (metro_switches_proc) {
       base::string16 metro_switches = (*metro_switches_proc)();
       if (!metro_switches.empty()) {
-        CommandLine extra_switches(CommandLine::NO_PROGRAM);
+        base::CommandLine extra_switches(base::CommandLine::NO_PROGRAM);
         extra_switches.ParseFromString(metro_switches);
-        CommandLine::ForCurrentProcess()->AppendArguments(extra_switches,
-                                                          false);
+        base::CommandLine::ForCurrentProcess()->AppendArguments(extra_switches,
+                                                                false);
       }
     }
   }
@@ -209,11 +219,6 @@ void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
 int ChromeBrowserMainPartsWin::PreCreateThreads() {
   int rv = ChromeBrowserMainParts::PreCreateThreads();
 
-  if (IsSafeModeStart()) {
-    // TODO(cpu): disable other troublesome features for safe mode.
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kDisableGpu);
-  }
   // TODO(viettrungluu): why don't we run this earlier?
   if (!parsed_command_line().HasSwitch(switches::kNoErrorDialogs) &&
       base::win::GetVersion() < base::win::VERSION_XP) {
@@ -232,11 +237,10 @@ int ChromeBrowserMainPartsWin::PreCreateThreads() {
   // launched for the plugin does not have the Win32K lockdown mode enabled.
   // TODO(ananta)
   // Revisit this when the pdf plugin uses skia and stops using GDI.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableWin32kRendererLockDown) &&
+  if (switches::IsWin32kRendererLockdownEnabled() &&
       base::win::GetVersion() >= base::win::VERSION_WIN8) {
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kOutOfProcessPdf);
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kEnableOutOfProcessPdf);
   }
   return rv;
 }
@@ -248,10 +252,30 @@ void ChromeBrowserMainPartsWin::ShowMissingLocaleMessageBox() {
                  MB_OK | MB_ICONERROR | MB_TOPMOST);
 }
 
+void ChromeBrowserMainPartsWin::PostProfileInit() {
+  ChromeBrowserMainParts::PostProfileInit();
+
+  // DirectWrite support is mainly available Windows 7 and up.
+  if (gfx::win::ShouldUseDirectWrite()) {
+    base::FilePath path(
+      profile()->GetPath().AppendASCII(content::kFontCacheSharedSectionName));
+    // This function will create a read only section if cache file exists
+    // otherwise it will spawn utility process to build cache file, which will
+    // be used during next browser start/postprofileinit.
+    if (!content::LoadFontCache(path)) {
+      content::BrowserThread::PostTask(
+          content::BrowserThread::IO, FROM_HERE,
+          base::Bind(ExecuteFontCacheBuildTask, path));
+    }
+  }
+}
+
 void ChromeBrowserMainPartsWin::PostBrowserStart() {
   ChromeBrowserMainParts::PostBrowserStart();
 
   UMA_HISTOGRAM_BOOLEAN("Windows.Tablet", base::win::IsTabletDevice());
+  UMA_HISTOGRAM_BOOLEAN("Windows.Win32kRendererLockdown",
+                        switches::IsWin32kRendererLockdownEnabled());
 
   // Set up a task to verify installed modules in the current process. Use a
   // delay to reduce the impact on startup time.
@@ -274,7 +298,7 @@ void ChromeBrowserMainPartsWin::PostBrowserStart() {
 
 // static
 void ChromeBrowserMainPartsWin::PrepareRestartOnCrashEnviroment(
-    const CommandLine& parsed_command_line) {
+    const base::CommandLine& parsed_command_line) {
   // Clear this var so child processes don't show the dialog by default.
   scoped_ptr<base::Environment> env(base::Environment::Create());
   env->UnSetVar(env_vars::kShowRestart);
@@ -308,7 +332,7 @@ void ChromeBrowserMainPartsWin::PrepareRestartOnCrashEnviroment(
 
 // static
 void ChromeBrowserMainPartsWin::RegisterApplicationRestart(
-    const CommandLine& parsed_command_line) {
+    const base::CommandLine& parsed_command_line) {
   DCHECK(base::win::GetVersion() >= base::win::VERSION_VISTA);
   base::ScopedNativeLibrary library(base::FilePath(L"kernel32.dll"));
   // Get the function pointer for RegisterApplicationRestart.
@@ -321,7 +345,7 @@ void ChromeBrowserMainPartsWin::RegisterApplicationRestart(
   }
   // The Windows Restart Manager expects a string of command line flags only,
   // without the program.
-  CommandLine command_line(CommandLine::NO_PROGRAM);
+  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
   command_line.AppendArguments(parsed_command_line, false);
   if (!command_line.HasSwitch(switches::kRestoreLastSession))
     command_line.AppendSwitch(switches::kRestoreLastSession);
@@ -343,7 +367,7 @@ void ChromeBrowserMainPartsWin::RegisterApplicationRestart(
 
 // static
 int ChromeBrowserMainPartsWin::HandleIconsCommands(
-    const CommandLine& parsed_command_line) {
+    const base::CommandLine& parsed_command_line) {
   if (parsed_command_line.HasSwitch(switches::kHideIcons)) {
     base::string16 cp_applet;
     base::win::Version version = base::win::GetVersion();
@@ -394,7 +418,7 @@ bool ChromeBrowserMainPartsWin::CheckMachineLevelInstall() {
         const UINT flags = MB_OK | MB_ICONERROR | MB_TOPMOST;
         ui::MessageBox(NULL, text, caption, flags);
       }
-      CommandLine uninstall_cmd(
+      base::CommandLine uninstall_cmd(
           InstallUtil::GetChromeUninstallCmd(false, dist->GetType()));
       if (!uninstall_cmd.GetProgram().empty()) {
         uninstall_cmd.AppendSwitch(installer::switches::kSelfDestruct);

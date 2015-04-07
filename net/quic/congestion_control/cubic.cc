@@ -5,11 +5,13 @@
 #include "net/quic/congestion_control/cubic.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/time/time.h"
 #include "net/quic/congestion_control/cube_root.h"
+#include "net/quic/quic_flags.h"
 #include "net/quic/quic_protocol.h"
 
 using std::max;
@@ -80,7 +82,6 @@ void Cubic::Reset() {
 
 void Cubic::UpdateCongestionControlStats(QuicPacketCount new_cubic_mode_cwnd,
                                          QuicPacketCount new_reno_mode_cwnd) {
-
   QuicPacketCount highest_new_cwnd = max(new_cubic_mode_cwnd,
                                          new_reno_mode_cwnd);
   if (last_congestion_window_ < highest_new_cwnd) {
@@ -135,8 +136,17 @@ QuicPacketCount Cubic::CongestionWindowAfterAck(
       time_to_origin_point_ = 0;
       origin_point_congestion_window_ = current_congestion_window;
     } else {
-      time_to_origin_point_ = CubeRoot::Root(kCubeFactor *
-          (last_max_congestion_window_ - current_congestion_window));
+      if (FLAGS_quic_use_std_cbrt) {
+        time_to_origin_point_ = static_cast<uint32>(
+            cbrt(kCubeFactor *
+                 (last_max_congestion_window_ - current_congestion_window)));
+      } else {
+        // TODO(rjshade): Remove CubeRoot source when removing
+        // FLAGS_quic_use_std_cbrt.
+        time_to_origin_point_ =
+            CubeRoot::Root(kCubeFactor * (last_max_congestion_window_ -
+                                          current_congestion_window));
+      }
       origin_point_congestion_window_ =
           last_max_congestion_window_;
     }
@@ -161,8 +171,8 @@ QuicPacketCount Cubic::CongestionWindowAfterAck(
   // suddenly, leading to more than one iteration through the following loop.
   while (true) {
     // Update estimated TCP congestion_window.
-    uint32 required_ack_count =
-        estimated_tcp_congestion_window_ / Alpha();
+    QuicPacketCount required_ack_count = static_cast<QuicPacketCount>(
+        estimated_tcp_congestion_window_ / Alpha());
     if (acked_packets_count_ < required_ack_count) {
       break;
     }

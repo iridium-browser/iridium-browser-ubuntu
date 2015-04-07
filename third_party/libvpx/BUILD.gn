@@ -53,84 +53,6 @@ config("libvpx_external_config") {
   ]
 }
 
-executable("libvpx_obj_int_extract") {
-  sources = [
-    "//third_party/libvpx/source/libvpx/build/make/obj_int_extract.c"
-  ]
-  configs += [ ":libvpx_config" ]
-  configs -= [ "//build/config/compiler:chromium_code" ]
-  configs += [ "//build/config/compiler:no_chromium_code" ]
-  if (is_android_webview_build) {
-    defines += [ "FORCE_PARSE_ELF" ]
-    include_dirs += [ "//third_party/libvpx/include" ]
-  }
-}
-
-# A library whose object files contain integers to be extracted.
-static_library("libvpx_asm_offsets") {
-  sources = [
-    "//third_party/libvpx/source/libvpx/vp8/encoder/vp8_asm_enc_offsets.c",
-    "//third_party/libvpx/source/libvpx/vpx_scale/vpx_scale_asm_offsets.c"
-  ]
-  configs += [ ":libvpx_config" ]
-  configs -= [ "//build/config/compiler:chromium_code" ]
-  configs += [ "//build/config/compiler:no_chromium_code" ]
-  if (is_clang) {
-    cflags = [ "-Wno-unused-function" ]
-  }
-}
-
-# This works only on POSIX to extract integer values from an object file.
-template("obj_int_extract") {
-  action(target_name) {
-    script = "//third_party/libvpx/obj_int_extract.py"
-    bin_label = "//third_party/libvpx($host_toolchain)"
-
-    args = [
-      "-e",
-      "./" + rebase_path(get_label_info(bin_label, "root_out_dir") +
-                         "/libvpx_obj_int_extract",
-                         root_build_dir)
-    ]
-
-    if (cpu_arch == "arm") {
-      args += [ "-f", "gas" ]
-    } else {
-      args += [ "-f", "rvds" ]
-    }
-
-    if (is_win) {
-      obj_extension = "obj"
-    } else {
-      obj_extension = "o"
-    }
-
-    args += [
-      "-b",
-      rebase_path(get_label_info(":libvpx_asm_offsets", "target_out_dir")) +
-          "/" + invoker.src_dir + "/libvpx_asm_offsets." +
-          invoker.obj_file_root + ".${obj_extension}"
-    ]
-    out_file = "$target_gen_dir/" + invoker.obj_file_root + ".asm"
-    args += [ "-o", rebase_path(out_file) ]
-    outputs = [ out_file ]
-    deps = [
-      ":libvpx_asm_offsets",
-      ":libvpx_obj_int_extract($host_toolchain)"
-    ]
-  }
-}
-
-obj_int_extract("gen_asm_offsets_vp8") {
-  src_dir = "source/libvpx/vp8/encoder"
-  obj_file_root = "vp8_asm_enc_offsets"
-}
-
-obj_int_extract("gen_asm_offsets_scale") {
-  src_dir = "source/libvpx/vpx_scale"
-  obj_file_root = "vpx_scale_asm_offsets"
-}
-
 if (cpu_arch == "x86" || cpu_arch == "x64") {
   yasm_assemble("libvpx_yasm") {
     if (cpu_arch == "x86") {
@@ -145,10 +67,6 @@ if (cpu_arch == "x86" || cpu_arch == "x64") {
       "//third_party/libvpx/source/config",
      "//third_party/libvpx/source/libvpx",
       target_gen_dir
-    ]
-    deps = [
-      ":gen_asm_offsets_vp8",
-      ":gen_asm_offsets_scale",
     ]
   }
 }
@@ -249,8 +167,6 @@ if (cpu_arch == "arm") {
     }
     deps = [
       ":convert_arm_assembly",
-      ":gen_asm_offsets_vp8",
-      ":gen_asm_offsets_scale",
     ]
   }
 }
@@ -282,9 +198,20 @@ static_library("libvpx") {
   } else if (cpu_arch == "arm64") {
     sources = libvpx_srcs_arm64
   }
+
+  # gn orders flags on a target before flags from configs. The default config
+  # adds -Wall, and these flags have to be after -Wall -- so they need to come
+  # from a config and can't be on the target directly.
+  config("libvpx_warnings") {
+    if (is_clang) {
+       cflags = [ "-Wno-conversion" ]
+     }
+  }
+
   configs += [ ":libvpx_config" ]
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
+  configs += [ ":libvpx_warnings" ]
   deps = []
   if (cpu_arch == "x86" || (cpu_arch == "x64" && !is_msan)) {
     deps += [

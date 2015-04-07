@@ -75,7 +75,7 @@ const KeyUsageMapping keyUsageMappings[] = {
     { WebCryptoKeyUsageUnwrapKey, "unwrapKey" },
 };
 
-COMPILE_ASSERT(EndOfWebCryptoKeyUsage == (1 << 7) + 1, update_keyUsageMappings);
+static_assert(EndOfWebCryptoKeyUsage == (1 << 7) + 1, "keyUsageMappings needs to be updated");
 
 const char* keyUsageToString(WebCryptoKeyUsage usage)
 {
@@ -93,35 +93,6 @@ WebCryptoKeyUsageMask keyUsageStringToMask(const String& usageString)
         if (keyUsageMappings[i].name == usageString)
             return keyUsageMappings[i].value;
     }
-    return 0;
-}
-
-WebCryptoKeyUsageMask toKeyUsage(WebCryptoOperation operation)
-{
-    switch (operation) {
-    case WebCryptoOperationEncrypt:
-        return WebCryptoKeyUsageEncrypt;
-    case WebCryptoOperationDecrypt:
-        return WebCryptoKeyUsageDecrypt;
-    case WebCryptoOperationSign:
-        return WebCryptoKeyUsageSign;
-    case WebCryptoOperationVerify:
-        return WebCryptoKeyUsageVerify;
-    case WebCryptoOperationDeriveKey:
-        return WebCryptoKeyUsageDeriveKey;
-    case WebCryptoOperationDeriveBits:
-        return WebCryptoKeyUsageDeriveBits;
-    case WebCryptoOperationWrapKey:
-        return WebCryptoKeyUsageWrapKey;
-    case WebCryptoOperationUnwrapKey:
-        return WebCryptoKeyUsageUnwrapKey;
-    case WebCryptoOperationDigest:
-    case WebCryptoOperationGenerateKey:
-    case WebCryptoOperationImportKey:
-        break;
-    }
-
-    ASSERT_NOT_REACHED();
     return 0;
 }
 
@@ -161,9 +132,9 @@ Vector<String> CryptoKey::usages() const
     return result;
 }
 
-bool CryptoKey::canBeUsedForAlgorithm(const WebCryptoAlgorithm& algorithm, WebCryptoOperation op, CryptoResult* result) const
+bool CryptoKey::canBeUsedForAlgorithm(const WebCryptoAlgorithm& algorithm, WebCryptoKeyUsage usage, CryptoResult* result) const
 {
-    if (!(m_key.usages() & toKeyUsage(op))) {
+    if (!(m_key.usages() & usage)) {
         result->completeWithError(WebCryptoErrorTypeInvalidAccess, "key.usages does not permit this operation");
         return false;
     }
@@ -196,7 +167,7 @@ bool CryptoKey::parseFormat(const String& formatString, WebCryptoKeyFormat& form
         return true;
     }
 
-    result->completeWithError(WebCryptoErrorTypeSyntax, "Invalid keyFormat argument");
+    result->completeWithError(WebCryptoErrorTypeType, "Invalid keyFormat argument");
     return false;
 }
 
@@ -206,7 +177,7 @@ bool CryptoKey::parseUsageMask(const Vector<String>& usages, WebCryptoKeyUsageMa
     for (size_t i = 0; i < usages.size(); ++i) {
         WebCryptoKeyUsageMask usage = keyUsageStringToMask(usages[i]);
         if (!usage) {
-            result->completeWithError(WebCryptoErrorTypeSyntax, "Invalid keyUsages argument");
+            result->completeWithError(WebCryptoErrorTypeType, "Invalid keyUsages argument");
             return false;
         }
         mask |= usage;

@@ -14,12 +14,12 @@ import math
 import multiprocessing
 import os
 import re
-import time
 
 from chromite.cbuildbot import archive_lib
 from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import results_lib
 from chromite.cbuildbot import constants
+from chromite.lib import clactions
 from chromite.lib import cros_build_lib
 from chromite.lib import gs
 from chromite.lib import parallel
@@ -35,49 +35,15 @@ METADATA_URL_GLOB = os.path.join(ARCHIVE_ROOT,
 LATEST_URL = os.path.join(ARCHIVE_ROOT, 'LATEST-master')
 
 
-GerritPatchTuple = collections.namedtuple('GerritPatchTuple',
-                                          ['gerrit_number', 'patch_number',
-                                           'internal'])
+GerritPatchTuple = clactions.GerritPatchTuple
 GerritChangeTuple = collections.namedtuple('GerritChangeTuple',
                                            ['gerrit_number', 'internal'])
 CLActionTuple = collections.namedtuple('CLActionTuple',
                                        ['change', 'action', 'timestamp',
                                         'reason'])
-CLActionWithBuildTuple = collections.namedtuple('CLActionWithBuildTuple',
+CLActionWithBuildTuple = collections.namedtuple(
+    'CLActionWithBuildTuple',
     ['change', 'action', 'timestamp', 'reason', 'bot_type', 'build'])
-
-
-def GetChangeAsSmallDictionary(change):
-  """Returns a small dictionary representation of a gerrit change.
-
-  Args:
-    change: A GerritPatch or GerritPatchTuple object.
-
-  Returns:
-    A dictionary of the form {'gerrit_number': change.gerrit_number,
-                              'patch_number': change.patch_number,
-                              'internal': change.internal}
-  """
-  return  {'gerrit_number': change.gerrit_number,
-           'patch_number': change.patch_number,
-           'internal': change.internal}
-
-
-def GetCLActionTuple(change, action, timestamp=None, reason=None):
-  """Returns a CLActionTuple suitable for recording in metadata or cidb.
-
-  Args:
-    change: A GerritPatch or GerritPatchTuple object.
-    action: The action taken, should be one of constants.CL_ACTIONS
-    timestamp: An integer timestamp such as int(time.time()) at which
-               the action was taken. Default: Now.
-    reason: Description of the reason the action was taken. Default: ''
-  """
-  return CLActionTuple(
-      GetChangeAsSmallDictionary(change),
-      action,
-      timestamp or int(time.time()),
-      reason)
 
 
 class _DummyLock(object):
@@ -266,15 +232,16 @@ class CBuildbotMetadata(object):
     Returns:
       self
     """
-    self._cl_action_list.append(
-        GetCLActionTuple(change, action, timestamp, reason))
+    cl_action = clactions.CLAction.FromGerritPatchAndAction(change, action,
+                                                            reason, timestamp)
+    self._cl_action_list.append(cl_action.AsMetadataEntry())
     return self
 
   @staticmethod
   def GetReportMetadataDict(builder_run, get_changes_from_pool,
                             get_statuses_from_slaves, config=None, stage=None,
                             final_status=None, sync_instance=None,
-                            completion_instance=None):
+                            completion_instance=None, child_configs_list=None):
     """Return a metadata dictionary summarizing a build.
 
     This method replaces code that used to exist in the ArchivingStageMixin
@@ -303,6 +270,8 @@ class CBuildbotMetadata(object):
                            information will be included. It not None, this
                            should be a derivative of
                            MasterSlaveSyncCompletionStage.
+      child_configs_list: The list of child config metadata.  If specified it
+                          should be added to the metadata.
 
     Returns:
        A metadata dictionary suitable to be json-serialized.
@@ -344,6 +313,9 @@ class CBuildbotMetadata(object):
           'description': entry.description,
           'log': builder_run.ConstructDashboardURL(stage=entry.name),
       })
+
+    if child_configs_list:
+      metadata['child-configs'] = child_configs_list
 
     if get_changes_from_pool:
       changes = []
@@ -387,6 +359,7 @@ class BuildData(object):
   and get() on a BuildData object.  Some values from metadata_dict are
   also surfaced through the following list of supported properties:
 
+  build_id
   build_number
   stages
   slaves
@@ -646,13 +619,19 @@ class BuildData(object):
 
   @property
   def failure_message(self):
+    message_list = []
+    # First collect failures in the master stages.
+    failed_stages = [s for s in self.stages if s['status'] == 'failed']
+    for stage in failed_stages:
+      if stage['summary']:
+        message_list.append('master: %s' % stage['summary'])
+
     mapping = {}
     # Dedup the messages from the slaves.
     for slave in self.GetFailedSlaves():
       message = self.slaves[slave]['reason']
       mapping[message] = mapping.get(message, []) + [slave]
 
-    message_list = []
     for message, slaves in mapping.iteritems():
       if len(slaves) >= 6:
         # Do not print all the names when there are more than 6 (an
@@ -722,8 +701,8 @@ class BuildData(object):
 
   @property
   def patches(self):
-    return [GerritPatchTuple(gerrit_number=change['gerrit_number'],
-                             patch_number=change['patch_number'],
+    return [GerritPatchTuple(gerrit_number=int(change['gerrit_number']),
+                             patch_number=int(change['patch_number']),
                              internal=change['internal'])
             for change in self.metadata_dict.get('changes', [])]
 
@@ -733,6 +712,10 @@ class BuildData(object):
       return 0
 
     return len(self.metadata_dict['changes'])
+
+  @property
+  def build_id(self):
+    return self.metadata_dict['build_id']
 
   @property
   def run_date(self):
@@ -819,15 +802,16 @@ def GetLatestMilestone():
     raise GetMilestoneError('LATEST file missing: %s' % latest_url)
 
 
-def GetMetadataURLsSince(target, start_date):
-  """Get metadata.json URLs for |target| since |start_date|.
+def GetMetadataURLsSince(target, start_date, end_date):
+  """Get metadata.json URLs for |target| from |start_date| until |end_date|.
 
   The modified time of the GS files is used to compare with start_date, so
   the completion date of the builder run is what is important here.
 
   Args:
     target: Builder target name.
-    start_date: datetime.date object.
+    start_date: datetime.date object of starting date.
+    end_date: datetime.date object of ending date.
 
   Returns:
     Metadata urls for runs found.
@@ -853,16 +837,16 @@ def GetMetadataURLsSince(target, start_date):
     # Sort by timestamp.
     urls = sorted(urls, key=lambda x: x.creation_time, reverse=True)
 
+    # Add relevant URLs to our list.
+    ret.extend([x.url for x in urls
+                if (x.creation_time.date() >= start_date and
+                    x.creation_time.date() <= end_date)])
+
     # See if we have gone far enough back by checking datetime of oldest URL
     # in the current batch.
     if urls[-1].creation_time.date() < start_date:
-      # We want a subset of these URLs, then we are done.
-      ret.extend([x.url for x in urls if x.creation_time.date() >= start_date])
       break
-
     else:
-      # Accept all these URLs, then continue on to the next milestone.
-      ret.extend([x.url for x in urls])
       milestone -= 1
       cros_build_lib.Info('Continuing on to R%d.', milestone)
 

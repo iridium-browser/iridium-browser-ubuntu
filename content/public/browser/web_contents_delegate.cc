@@ -9,9 +9,9 @@
 #include "base/memory/singleton.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/url_constants.h"
 #include "content/public/common/bindings_policy.h"
-#include "ui/gfx/rect.h"
+#include "content/public/common/url_constants.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace content {
 
@@ -33,7 +33,7 @@ gfx::Rect WebContentsDelegate::GetRootWindowResizerRect() const {
   return gfx::Rect();
 }
 
-bool WebContentsDelegate::ShouldSuppressDialogs() {
+bool WebContentsDelegate::ShouldSuppressDialogs(WebContents* source) {
   return false;
 }
 
@@ -132,6 +132,7 @@ bool WebContentsDelegate::OnGoToEntryOffset(int offset) {
 bool WebContentsDelegate::ShouldCreateWebContents(
     WebContents* web_contents,
     int route_id,
+    int main_frame_route_id,
     WindowContainerType window_container_type,
     const base::string16& frame_name,
     const GURL& target_url,
@@ -140,7 +141,8 @@ bool WebContentsDelegate::ShouldCreateWebContents(
   return true;
 }
 
-JavaScriptDialogManager* WebContentsDelegate::GetJavaScriptDialogManager() {
+JavaScriptDialogManager* WebContentsDelegate::GetJavaScriptDialogManager(
+    WebContents* source) {
   return NULL;
 }
 
@@ -212,6 +214,10 @@ gfx::Size WebContentsDelegate::GetSizeForNewRenderView(
 }
 
 bool WebContentsDelegate::IsNeverVisible(WebContents* web_contents) {
+  return false;
+}
+
+bool WebContentsDelegate::SaveFrame(const GURL& url, const Referrer& referrer) {
   return false;
 }
 

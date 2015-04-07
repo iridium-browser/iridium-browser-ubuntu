@@ -8,13 +8,27 @@
         '../third_party/android_tools/android_tools.gyp:android_support_v13_javalib',
     'chromium_code': 1,
     'chromecast_branding%': 'Chromium',
+    'disable_display%': 0,
   },
+  'includes': [
+    'chromecast_tests.gypi',
+  ],
   'target_defaults': {
     'include_dirs': [
       '..',  # Root of Chromium checkout
     ],
+    'conditions': [
+      ['disable_display==1', {
+        'defines': ['DISABLE_DISPLAY'],
+      }],
+    ],
   },
   'targets': [
+    # TODO(gunsch): Remove these fake targets once they're either added or no
+    # longer referenced from internal code.
+    {'target_name': 'cast_media_audio', 'type': 'none'},
+    {'target_name': 'cast_port_impl', 'type': 'none'},
+
     {
       'target_name': 'cast_base',
       'type': '<(component)',
@@ -25,6 +39,8 @@
         'base/metrics/cast_histograms.h',
         'base/metrics/cast_metrics_helper.cc',
         'base/metrics/cast_metrics_helper.h',
+        'base/metrics/grouped_histogram.cc',
+        'base/metrics/grouped_histogram.h'
       ],
     },  # end of target 'cast_base'
     {
@@ -103,8 +119,12 @@
         'chromecast_locales.gyp:chromecast_settings',
         'media/media.gyp:media_base',
         '../base/base.gyp:base',
+        '../components/components.gyp:breakpad_host',
         '../components/components.gyp:cdm_renderer',
         '../components/components.gyp:component_metrics_proto',
+        '../components/components.gyp:crash_component',
+        '../components/components.gyp:dns_prefetch_browser',
+        '../components/components.gyp:dns_prefetch_renderer',
         '../components/components.gyp:metrics',
         '../components/components.gyp:metrics_gpu',
         '../components/components.gyp:metrics_net',
@@ -147,19 +167,18 @@
         'browser/metrics/cast_stability_metrics_provider.cc',
         'browser/metrics/cast_stability_metrics_provider.h',
         'browser/metrics/platform_metrics_providers.h',
+        'browser/pref_service_helper.cc',
+        'browser/pref_service_helper.h',
         'browser/service/cast_service.cc',
         'browser/service/cast_service.h',
         'browser/url_request_context_factory.cc',
         'browser/url_request_context_factory.h',
-        'browser/webui/webui_cast.h',
         'common/cast_content_client.cc',
         'common/cast_content_client.h',
         'common/cast_paths.cc',
         'common/cast_paths.h',
         'common/cast_resource_delegate.cc',
         'common/cast_resource_delegate.h',
-        'common/chromecast_config.cc',
-        'common/chromecast_config.h',
         'common/chromecast_switches.cc',
         'common/chromecast_switches.h',
         'common/platform_client_auth.h',
@@ -167,6 +186,10 @@
         'common/pref_names.h',
         'renderer/cast_content_renderer_client.cc',
         'renderer/cast_content_renderer_client.h',
+        'renderer/cast_media_load_deferrer.cc',
+        'renderer/cast_media_load_deferrer.h',
+        'renderer/cast_render_process_observer.cc',
+        'renderer/cast_render_process_observer.h',
         'renderer/key_systems_cast.cc',
         'renderer/key_systems_cast.h',
       ],
@@ -179,9 +202,9 @@
           'sources': [
             'browser/cast_network_delegate_simple.cc',
             'browser/devtools/remote_debugging_server_simple.cc',
+            'browser/media/cast_browser_cdm_factory_simple.cc',
             'browser/metrics/platform_metrics_providers_simple.cc',
-            'browser/webui/webui_cast_simple.cc',
-            'common/chromecast_config_simple.cc',
+            'browser/pref_service_helper_simple.cc',
             'common/platform_client_auth_simple.cc',
             'renderer/key_systems_cast_simple.cc',
           ],
@@ -214,28 +237,6 @@
       ],
     },
     {
-      'target_name': 'cast_shell_unittests',
-      'type': '<(gtest_target_type)',
-      'dependencies': [
-        'cast_shell_common',
-        '../base/base.gyp:base_prefs_test_support',
-        '../base/base.gyp:run_all_unittests',
-        '../base/base.gyp:test_support_base',
-        '../components/components.gyp:component_metrics_proto',
-        '../testing/gtest.gyp:gtest',
-      ],
-      'sources': [
-        'browser/metrics/cast_metrics_service_client_unittest.cc',
-      ],
-      'conditions': [
-        ['use_allocator!="none"', {
-          'dependencies': [
-            '../base/allocator/allocator.gyp:allocator',
-          ],
-        }],
-      ]
-    },  # end of target 'cast_metrics_unittests'
-    {
       'target_name': 'cast_version_header',
       'type': 'none',
       'direct_dependent_settings': {
@@ -259,7 +260,7 @@
             '<(version_py_path)',
             '-e', 'VERSION_FULL="<(version_full)"',
             # Revision is taken from buildbot if available; otherwise, a dev string is used.
-            '-e', 'CAST_BUILD_REVISION="<!(echo ${BUILD_NUMBER:="local.${USER}"})"',
+            '-e', 'CAST_BUILD_REVISION="<!(echo ${CAST_BUILD_REVISION:="eng.${USER}.<!(date +%Y%m%d.%H%M%S)"})"',
             '-e', 'CAST_IS_DEBUG_BUILD=1 if "<(CONFIGURATION_NAME)" == "Debug" else 0',
             'common/version.h.in',
             '<@(_outputs)',
@@ -270,24 +271,6 @@
         },
       ],
     },
-    {
-      'target_name': 'cast_metrics_test_support',
-      'type': '<(component)',
-      'dependencies': [
-        'cast_base',
-      ],
-      'sources': [
-        'base/metrics/cast_metrics_test_helper.cc',
-        'base/metrics/cast_metrics_test_helper.h',
-      ],
-    },  # end of target 'cast_metrics_test_support'
-    {
-      'target_name': 'cast_tests',
-      'type': 'none',
-      'dependencies': [
-        'media/media.gyp:cast_media_unittests',
-      ],
-    },
   ],  # end of targets
 
   # Targets for Android receiver.
@@ -295,11 +278,23 @@
     ['OS=="android"', {
       'targets': [
         {
+          'target_name': 'cast_shell_icudata',
+          'type': 'none',
+          'dependencies': [
+            '../third_party/icu/icu.gyp:icudata',
+          ],
+          'copies': [{
+            'destination': '<(PRODUCT_DIR)/assets',
+            'files': ['<(PRODUCT_DIR)/icudtl.dat'],
+          }],
+        },
+        {
           'target_name': 'libcast_shell_android',
           'type': 'shared_library',
           'dependencies': [
             'cast_jni_headers',
             'cast_shell_common',
+            'cast_shell_icudata',
             'cast_shell_pak',
             'cast_version_header',
             '../base/base.gyp:base',
@@ -366,6 +361,15 @@
           'includes': ['../build/java.gypi'],
         },  # end of target 'cast_shell_java'
         {
+          'target_name': 'cast_shell_manifest',
+          'type': 'none',
+          'variables': {
+            'jinja_inputs': ['browser/android/apk/AndroidManifest.xml.jinja2'],
+            'jinja_output': '<(SHARED_INTERMEDIATE_DIR)/cast_shell_manifest/AndroidManifest.xml',
+          },
+          'includes': [ '../build/android/jinja_template.gypi' ],
+        },
+        {
           'target_name': 'cast_shell_apk',
           'type': 'none',
           'dependencies': [
@@ -382,7 +386,7 @@
             # if the actual Java path is used.
             # This will hopefully be removable after the great GN migration.
             'java_in_dir': 'android',
-            'android_manifest_path': 'browser/android/apk/AndroidManifest.xml',
+            'android_manifest_path': '<(SHARED_INTERMEDIATE_DIR)/cast_shell_manifest/AndroidManifest.xml',
             'package_name': 'org.chromium.chromecast.shell',
             'native_lib_target': 'libcast_shell_android',
             'asset_location': '<(PRODUCT_DIR)/assets',
@@ -412,6 +416,69 @@
       ],  # end of targets
     }, {  # OS != "android"
       'targets': [
+        {
+          'target_name': 'cast_crash_client',
+          'type': '<(component)',
+          'dependencies': [
+            '../breakpad/breakpad.gyp:breakpad_client',
+            '../components/components.gyp:crash_component',
+          ],
+          'sources': [
+            'crash/cast_crash_reporter_client.cc',
+            'crash/cast_crash_reporter_client.h',
+          ],
+          'conditions': [
+            ['chromecast_branding=="Chrome"', {
+              'dependencies': [
+                '<(cast_internal_gyp):crash_internal',
+              ],
+            }, {
+              'sources': [
+                'crash/cast_crash_reporter_client_simple.cc',
+              ],
+            }],
+          ]
+        },  # end of target 'cast_crash_client'
+        {
+          'target_name': 'cast_shell_media',
+          'type': '<(component)',
+          'dependencies': [
+            'media/media.gyp:cast_media',
+            '../content/content.gyp:content',
+            '../ipc/ipc.gyp:ipc',
+            '../media/media.gyp:media',
+          ],
+          'sources': [
+            'browser/media/cast_browser_cdm_factory.cc',
+            'browser/media/cast_browser_cdm_factory.h',
+            'browser/media/cma_message_filter_host.cc',
+            'browser/media/cma_message_filter_host.h',
+            'browser/media/cma_message_loop.cc',
+            'browser/media/cma_message_loop.h',
+            'browser/media/media_pipeline_host.cc',
+            'browser/media/media_pipeline_host.h',
+            'common/media/cma_ipc_common.h',
+            'common/media/cma_messages.h',
+            'common/media/cma_message_generator.cc',
+            'common/media/cma_message_generator.h',
+            'common/media/cma_param_traits.cc',
+            'common/media/cma_param_traits.h',
+            'common/media/shared_memory_chunk.cc',
+            'common/media/shared_memory_chunk.h',
+            'renderer/media/audio_pipeline_proxy.cc',
+            'renderer/media/audio_pipeline_proxy.h',
+            'renderer/media/cma_media_renderer_factory.cc',
+            'renderer/media/cma_media_renderer_factory.h',
+            'renderer/media/cma_message_filter_proxy.cc',
+            'renderer/media/cma_message_filter_proxy.h',
+            'renderer/media/media_channel_proxy.cc',
+            'renderer/media/media_channel_proxy.h',
+            'renderer/media/media_pipeline_proxy.cc',
+            'renderer/media/media_pipeline_proxy.h',
+            'renderer/media/video_pipeline_proxy.cc',
+            'renderer/media/video_pipeline_proxy.h',
+          ],
+        },  # end of target 'cast_shell_media'
         # This target contains all of the primary code of |cast_shell|, except
         # for |main|. This allows end-to-end tests using |cast_shell|.
         # This also includes all targets that cannot be built on Android.
@@ -419,7 +486,9 @@
           'target_name': 'cast_shell_core',
           'type': '<(component)',
           'dependencies': [
+            'cast_crash_client',
             'cast_net',
+            'cast_shell_media',
             'cast_shell_common',
             'media/media.gyp:cast_media',
             '../ui/aura/aura.gyp:aura_test_support',
@@ -444,37 +513,6 @@
           ],
           'sources': [
             'app/cast_main.cc',
-          ],
-        },
-        {
-          'target_name': 'cast_shell_browser_test',
-          'type': '<(gtest_target_type)',
-          'dependencies': [
-            'cast_shell_test_support',
-            '../testing/gtest.gyp:gtest',
-          ],
-          'defines': [
-            'HAS_OUT_OF_PROC_TEST_RUNNER',
-          ],
-          'sources': [
-            'browser/test/chromecast_shell_browser_test.cc',
-          ],
-        },
-        {
-          'target_name': 'cast_shell_test_support',
-          'type': '<(component)',
-          'defines': [
-            'HAS_OUT_OF_PROC_TEST_RUNNER',
-          ],
-          'dependencies': [
-            'cast_shell_core',
-            '../content/content_shell_and_tests.gyp:content_browser_test_support',
-            '../testing/gtest.gyp:gtest',
-          ],
-          'sources': [
-            'browser/test/chromecast_browser_test.cc',
-            'browser/test/chromecast_browser_test.h',
-            'browser/test/chromecast_browser_test_runner.cc',
           ],
         },
       ],  # end of targets

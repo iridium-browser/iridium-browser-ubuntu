@@ -26,7 +26,7 @@
 #include "media/filters/ffmpeg_demuxer.h"
 #include "media/filters/ffmpeg_glue.h"
 #include "media/filters/in_memory_url_protocol.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace {
 
@@ -59,9 +59,11 @@ namespace cast {
 FakeMediaSource::FakeMediaSource(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     base::TickClock* clock,
-    const VideoSenderConfig& video_config)
+    const VideoSenderConfig& video_config,
+    bool keep_frames)
     : task_runner_(task_runner),
       video_config_(video_config),
+     keep_frames_(keep_frames),
       synthetic_count_(0),
       clock_(clock),
       audio_frame_count_(0),
@@ -245,6 +247,8 @@ void FakeMediaSource::SendNextFakeFrame() {
 
   base::TimeDelta video_time = VideoFrameTime(++video_frame_count_);
   video_frame->set_timestamp(video_time);
+  if (keep_frames_)
+    inserted_video_frame_queue_.push(video_frame);
   video_frame_input_->InsertRawVideoFrame(video_frame,
                                           start_time_ + video_time);
 
@@ -319,6 +323,8 @@ bool FakeMediaSource::SendNextTranscodedVideo(base::TimeDelta elapsed_time) {
 
   // Use the timestamp from the file if we're transcoding.
   video_frame->set_timestamp(ScaleTimestamp(decoded_frame->timestamp()));
+  if (keep_frames_)
+    inserted_video_frame_queue_.push(video_frame);
   video_frame_input_->InsertRawVideoFrame(
       video_frame, start_time_ + video_frame->timestamp());
 
@@ -467,7 +473,7 @@ void FakeMediaSource::DecodeAudio(ScopedAVPacket packet) {
       playback_rate_ * av_audio_context()->sample_rate /
       kAudioPacketsPerSecond;
   while (frames_needed_to_scale <= audio_algo_.frames_buffered()) {
-    if (!audio_algo_.FillBuffer(audio_fifo_input_bus_.get(),
+    if (!audio_algo_.FillBuffer(audio_fifo_input_bus_.get(), 0,
                                 audio_fifo_input_bus_->frames(),
                                 playback_rate_)) {
       // Nothing can be scaled. Decode some more.
@@ -574,6 +580,15 @@ void FakeMediaSource::ProvideData(int frame_delay,
     LOG(WARNING) << "Not enough audio data for resampling.";
     output_bus->Zero();
   }
+}
+
+scoped_refptr<media::VideoFrame>
+FakeMediaSource::PopOldestInsertedVideoFrame() {
+  CHECK(!inserted_video_frame_queue_.empty());
+  scoped_refptr<media::VideoFrame> video_frame =
+      inserted_video_frame_queue_.front();
+  inserted_video_frame_queue_.pop();
+  return video_frame;
 }
 
 AVStream* FakeMediaSource::av_audio_stream() {

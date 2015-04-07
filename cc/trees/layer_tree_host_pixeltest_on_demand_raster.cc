@@ -59,8 +59,6 @@ class BlueYellowLayerClient : public ContentLayerClient {
   explicit BlueYellowLayerClient(gfx::Rect layer_rect)
       : layer_rect_(layer_rect) {}
 
-  void DidChangeLayerCanUseLCDText() override {}
-
   bool FillsBoundsCompletely() const override { return false; }
 
   void PaintContents(
@@ -80,6 +78,13 @@ class BlueYellowLayerClient : public ContentLayerClient {
                          layer_rect_.width(),
                          layer_rect_.height() / 2),
         paint);
+  }
+
+  scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
+      const gfx::Rect& clip,
+      GraphicsContextStatus gc_status) override {
+    NOTIMPLEMENTED();
+    return DisplayItemList::Create();
   }
 
  private:

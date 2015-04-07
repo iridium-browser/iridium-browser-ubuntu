@@ -25,7 +25,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestTypedefs::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestTypedefs::domTemplate, V8TestTypedefs::refObject, V8TestTypedefs::derefObject, V8TestTypedefs::trace, 0, 0, 0, V8TestTypedefs::installConditionallyEnabledMethods, V8TestTypedefs::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestTypedefs::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestTypedefs::domTemplate, V8TestTypedefs::refObject, V8TestTypedefs::derefObject, V8TestTypedefs::trace, 0, 0, V8TestTypedefs::installConditionallyEnabledMethods, V8TestTypedefs::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestTypedefs.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -36,7 +36,7 @@ namespace TestTypedefsV8Internal {
 
 static void uLongLongAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestTypedefs* impl = V8TestTypedefs::toImpl(holder);
     v8SetReturnValue(info, static_cast<double>(impl->uLongLongAttribute()));
 }
@@ -50,7 +50,7 @@ static void uLongLongAttributeAttributeGetterCallback(v8::Local<v8::String>, con
 
 static void uLongLongAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "uLongLongAttribute", "TestTypedefs", holder, info.GetIsolate());
     TestTypedefs* impl = V8TestTypedefs::toImpl(holder);
     TONATIVE_VOID_EXCEPTIONSTATE(unsigned long long, cppValue, toUInt64(v8Value, exceptionState), exceptionState);
@@ -66,7 +66,7 @@ static void uLongLongAttributeAttributeSetterCallback(v8::Local<v8::String>, v8:
 
 static void TestTypedefsConstructorGetter(v8::Local<v8::String>, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Value> data = info.Data();
+    v8::Local<v8::Value> data = info.Data();
     ASSERT(data->IsExternal());
     V8PerContextData* perContextData = V8PerContextData::from(info.Holder()->CreationContext());
     if (!perContextData)
@@ -77,7 +77,7 @@ static void TestTypedefsConstructorGetter(v8::Local<v8::String>, const v8::Prope
 static void TestTypedefsForceSetAttributeOnThis(v8::Local<v8::String> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
     if (info.This()->IsObject())
-        v8::Handle<v8::Object>::Cast(info.This())->ForceSet(name, v8Value);
+        v8::Local<v8::Object>::Cast(info.This())->ForceSet(name, v8Value);
 }
 
 static void TestTypedefsForceSetAttributeOnThisCallback(v8::Local<v8::String> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
@@ -145,7 +145,7 @@ static void voidMethodTestCallbackInterfaceTypeArgMethod(const v8::FunctionCallb
             V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodTestCallbackInterfaceTypeArg", "TestTypedefs", "The callback provided as parameter 1 is not a function."));
             return;
         }
-        testCallbackInterfaceTypeArg = V8TestCallbackInterface::create(v8::Handle<v8::Function>::Cast(info[0]), ScriptState::current(info.GetIsolate()));
+        testCallbackInterfaceTypeArg = V8TestCallbackInterface::create(v8::Local<v8::Function>::Cast(info[0]), ScriptState::current(info.GetIsolate()));
     }
     impl->voidMethodTestCallbackInterfaceTypeArg(testCallbackInterfaceTypeArg);
 }
@@ -223,7 +223,7 @@ static void arrayOfStringsMethodArrayOfStringsArgMethod(const v8::FunctionCallba
     {
         TONATIVE_VOID_EXCEPTIONSTATE_INTERNAL(arrayOfStringsArg, toImplArray<String>(info[0], 1, info.GetIsolate(), exceptionState), exceptionState);
     }
-    v8SetReturnValue(info, v8Array(impl->arrayOfStringsMethodArrayOfStringsArg(arrayOfStringsArg), info.Holder(), info.GetIsolate()));
+    v8SetReturnValue(info, toV8(impl->arrayOfStringsMethodArrayOfStringsArg(arrayOfStringsArg), info.Holder(), info.GetIsolate()));
 }
 
 static void arrayOfStringsMethodArrayOfStringsArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -246,7 +246,7 @@ static void stringArrayMethodStringArrayArgMethod(const v8::FunctionCallbackInfo
     {
         TONATIVE_VOID_EXCEPTIONSTATE_INTERNAL(stringArrayArg, toImplArray<String>(info[0], 1, info.GetIsolate(), exceptionState), exceptionState);
     }
-    v8SetReturnValue(info, v8Array(impl->stringArrayMethodStringArrayArg(stringArrayArg), info.Holder(), info.GetIsolate()));
+    v8SetReturnValue(info, toV8(impl->stringArrayMethodStringArrayArg(stringArrayArg), info.Holder(), info.GetIsolate()));
 }
 
 static void stringArrayMethodStringArrayArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -267,8 +267,8 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
         TOSTRING_VOID_INTERNAL(stringArg, info[0]);
     }
     RefPtr<TestTypedefs> impl = TestTypedefs::create(stringArg);
-    v8::Handle<v8::Object> wrapper = info.Holder();
-    impl->associateWithWrapper(&V8TestTypedefs::wrapperTypeInfo, wrapper, info.GetIsolate());
+    v8::Local<v8::Object> wrapper = info.Holder();
+    impl->associateWithWrapper(info.GetIsolate(), &V8TestTypedefs::wrapperTypeInfo, wrapper);
     v8SetReturnValue(info, wrapper);
 }
 
@@ -306,16 +306,15 @@ void V8TestTypedefs::constructorCallback(const v8::FunctionCallbackInfo<v8::Valu
     TestTypedefsV8Internal::constructor(info);
 }
 
-static void installV8TestTypedefsTemplate(v8::Handle<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+static void installV8TestTypedefsTemplate(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
 {
     functionTemplate->ReadOnlyPrototype();
 
     v8::Local<v8::Signature> defaultSignature;
-    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(functionTemplate, "TestTypedefs", v8::Local<v8::FunctionTemplate>(), V8TestTypedefs::internalFieldCount,
+    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "TestTypedefs", v8::Local<v8::FunctionTemplate>(), V8TestTypedefs::internalFieldCount,
         V8TestTypedefsAttributes, WTF_ARRAY_LENGTH(V8TestTypedefsAttributes),
         0, 0,
-        V8TestTypedefsMethods, WTF_ARRAY_LENGTH(V8TestTypedefsMethods),
-        isolate);
+        V8TestTypedefsMethods, WTF_ARRAY_LENGTH(V8TestTypedefsMethods));
     functionTemplate->SetCallHandler(V8TestTypedefs::constructorCallback);
     functionTemplate->SetLength(1);
     v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
@@ -327,40 +326,34 @@ static void installV8TestTypedefsTemplate(v8::Handle<v8::FunctionTemplate> funct
     functionTemplate->Set(v8AtomicString(isolate, "toString"), V8PerIsolateData::from(isolate)->toStringTemplate());
 }
 
-v8::Handle<v8::FunctionTemplate> V8TestTypedefs::domTemplate(v8::Isolate* isolate)
+v8::Local<v8::FunctionTemplate> V8TestTypedefs::domTemplate(v8::Isolate* isolate)
 {
     return V8DOMConfiguration::domClassTemplate(isolate, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestTypedefsTemplate);
 }
 
-bool V8TestTypedefs::hasInstance(v8::Handle<v8::Value> v8Value, v8::Isolate* isolate)
+bool V8TestTypedefs::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
 {
     return V8PerIsolateData::from(isolate)->hasInstance(&wrapperTypeInfo, v8Value);
 }
 
-v8::Handle<v8::Object> V8TestTypedefs::findInstanceInPrototypeChain(v8::Handle<v8::Value> v8Value, v8::Isolate* isolate)
+v8::Local<v8::Object> V8TestTypedefs::findInstanceInPrototypeChain(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
 {
     return V8PerIsolateData::from(isolate)->findInstanceInPrototypeChain(&wrapperTypeInfo, v8Value);
 }
 
-TestTypedefs* V8TestTypedefs::toImplWithTypeCheck(v8::Isolate* isolate, v8::Handle<v8::Value> value)
+TestTypedefs* V8TestTypedefs::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
-    return hasInstance(value, isolate) ? blink::toScriptWrappableBase(v8::Handle<v8::Object>::Cast(value))->toImpl<TestTypedefs>() : 0;
+    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
 }
 
-void V8TestTypedefs::refObject(ScriptWrappableBase* scriptWrappableBase)
+void V8TestTypedefs::refObject(ScriptWrappable* scriptWrappable)
 {
-    scriptWrappableBase->toImpl<TestTypedefs>()->ref();
+    scriptWrappable->toImpl<TestTypedefs>()->ref();
 }
 
-void V8TestTypedefs::derefObject(ScriptWrappableBase* scriptWrappableBase)
+void V8TestTypedefs::derefObject(ScriptWrappable* scriptWrappable)
 {
-    scriptWrappableBase->toImpl<TestTypedefs>()->deref();
-}
-
-template<>
-v8::Handle<v8::Value> toV8NoInline(TestTypedefs* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-{
-    return toV8(impl, creationContext, isolate);
+    scriptWrappable->toImpl<TestTypedefs>()->deref();
 }
 
 } // namespace blink

@@ -209,6 +209,10 @@ void OmniboxViewMac::OnTabChanged(const WebContents* web_contents) {
   }
 }
 
+void OmniboxViewMac::ResetTabState(WebContents* web_contents) {
+  StoreStateToTab(web_contents, nullptr);
+}
+
 void OmniboxViewMac::Update() {
   UpdatePlaceholderText();
 
@@ -838,7 +842,7 @@ void OmniboxViewMac::OnSetFocus(bool control_down) {
 
 void OmniboxViewMac::OnKillFocus() {
   // Tell the model to reset itself.
-  model()->OnWillKillFocus(NULL);
+  model()->OnWillKillFocus();
   model()->OnKillFocus();
 
   OnDidKillFocus();

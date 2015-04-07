@@ -8,10 +8,10 @@
 #include "content/public/browser/browser_thread.h"
 #include "skia/ext/platform_canvas.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/scrollbar_size.h"
-#include "ui/gfx/size_conversions.h"
 #include "ui/gfx/skbitmap_operations.h"
 
 namespace {
@@ -50,24 +50,13 @@ void SimpleThumbnailCrop::ProcessBitmap(
       ComputeTargetSizeAtMaximumScale(target_size_),
       &context->clip_result);
 
-  context->score.boring_score = CalculateBoringScore(thumbnail);
+  context->score.boring_score = color_utils::CalculateBoringScore(thumbnail);
   context->score.good_clipping =
       (context->clip_result == CLIP_RESULT_WIDER_THAN_TALL ||
        context->clip_result == CLIP_RESULT_TALLER_THAN_WIDE ||
        context->clip_result == CLIP_RESULT_NOT_CLIPPED);
 
   callback.Run(*context.get(), thumbnail);
-}
-
-double SimpleThumbnailCrop::CalculateBoringScore(const SkBitmap& bitmap) {
-  if (bitmap.isNull() || bitmap.empty())
-    return 1.0;
-  int histogram[256] = {0};
-  color_utils::BuildLumaHistogram(bitmap, histogram);
-
-  int color_count = *std::max_element(histogram, histogram + 256);
-  int pixel_count = bitmap.width() * bitmap.height();
-  return static_cast<double>(color_count) / pixel_count;
 }
 
 SkBitmap SimpleThumbnailCrop::GetClippedBitmap(const SkBitmap& bitmap,

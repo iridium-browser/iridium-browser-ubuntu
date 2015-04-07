@@ -16,6 +16,8 @@ build directory) and rsyncs the contents of the staging directory onto your
 device's rootfs.
 """
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import collections
@@ -63,6 +65,8 @@ _ANDROID_DIR_EXTRACT_PATH = 'system/chrome/*'
 _CHROME_DIR = '/opt/google/chrome'
 _CHROME_DIR_MOUNT = '/mnt/stateful_partition/deploy_rootfs/opt/google/chrome'
 
+_UMOUNT_DIR_IF_MOUNTPOINT_CMD = (
+    'if mountpoint -q %(dir)s; then umount %(dir)s; fi')
 _BIND_TO_FINAL_DIR_CMD = 'mount --rbind %s %s'
 _SET_MOUNT_FLAGS_CMD = 'mount -o remount,exec,suid %s'
 
@@ -95,14 +99,16 @@ class DeployChrome(object):
     self.tempdir = tempdir
     self.options = options
     self.staging_dir = staging_dir
-    self.host = remote.RemoteAccess(options.to, tempdir, port=options.port)
-    self._rootfs_is_still_readonly = multiprocessing.Event()
+    if not self.options.staging_only:
+      self.device = remote.RemoteDevice(options.to, port=options.port,
+                                        ping=options.ping)
+    self._target_dir_is_still_readonly = multiprocessing.Event()
 
     self.copy_paths = chrome_util.GetCopyPaths('chrome')
     self.chrome_dir = _CHROME_DIR
 
   def _GetRemoteMountFree(self, remote_dir):
-    result = self.host.RemoteSh(DF_COMMAND % remote_dir, capture_output=True)
+    result = self.device.RunCommand(DF_COMMAND % remote_dir)
     line = result.output.splitlines()[1]
     value = line.split()[3]
     multipliers = {
@@ -113,7 +119,8 @@ class DeployChrome(object):
     return int(value.rstrip('GMK')) * multipliers.get(value[-1], 1)
 
   def _GetRemoteDirSize(self, remote_dir):
-    result = self.host.RemoteSh('du -ks %s' % remote_dir, capture_output=True)
+    result = self.device.RunCommand('du -ks %s' % remote_dir,
+                                    capture_output=True)
     return int(result.output.split()[0])
 
   def _GetStagingDirSize(self):
@@ -123,8 +130,8 @@ class DeployChrome(object):
     return int(result.output.split()[0])
 
   def _ChromeFileInUse(self):
-    result = self.host.RemoteSh(LSOF_COMMAND % (self.options.target_dir,),
-                                error_code_ok=True, capture_output=True)
+    result = self.device.RunCommand(LSOF_COMMAND % (self.options.target_dir,),
+                                    error_code_ok=True, capture_output=True)
     return result.returncode == 0
 
   def _DisableRootfsVerification(self):
@@ -138,7 +145,7 @@ class DeployChrome(object):
         # Since we stopped Chrome earlier, it's good form to start it up again.
         if self.options.startui:
           logging.info('Starting Chrome...')
-          self.host.RemoteSh('start ui')
+          self.device.RunCommand('start ui')
         raise DeployFailure('Need rootfs verification to be disabled. '
                             'Aborting.')
 
@@ -148,12 +155,12 @@ class DeployChrome(object):
     cmd = ('/usr/share/vboot/bin/make_dev_ssd.sh --partitions %d '
            '--remove_rootfs_verification --force')
     for partition in (KERNEL_A_PARTITION, KERNEL_B_PARTITION):
-      self.host.RemoteSh(cmd % partition, error_code_ok=True)
+      self.device.RunCommand(cmd % partition, error_code_ok=True)
 
     # A reboot in developer mode takes a while (and has delays), so the user
     # will have time to read and act on the USB boot instructions below.
     logging.info('Please remember to press Ctrl-U if you are booting from USB.')
-    self.host.RemoteReboot()
+    self.device.Reboot()
 
     # Now that the machine has been rebooted, we need to kill Chrome again.
     self._KillProcsIfNeeded()
@@ -166,7 +173,7 @@ class DeployChrome(object):
     # <job_name> <status> ['process' <pid>].
     # <status> is in the format <goal>/<state>.
     try:
-      result = self.host.RemoteSh('status ui', capture_output=True)
+      result = self.device.RunCommand('status ui', capture_output=True)
     except cros_build_lib.RunCommandError as e:
       if 'Unknown job' in e.result.error:
         return False
@@ -178,7 +185,7 @@ class DeployChrome(object):
   def _KillProcsIfNeeded(self):
     if self._CheckUiJobStarted():
       logging.info('Shutting down Chrome...')
-      self.host.RemoteSh('stop ui')
+      self.device.RunCommand('stop ui')
 
     # Developers sometimes run session_manager manually, in which case we'll
     # need to help shut the chrome processes down.
@@ -188,7 +195,7 @@ class DeployChrome(object):
           logging.warning('The chrome binary on the device is in use.')
           logging.warning('Killing chrome and session_manager processes...\n')
 
-          self.host.RemoteSh("pkill 'chrome|session_manager'",
+          self.device.RunCommand("pkill 'chrome|session_manager'",
                              error_code_ok=True)
           # Wait for processes to actually terminate
           time.sleep(POST_KILL_WAIT)
@@ -201,18 +208,19 @@ class DeployChrome(object):
   def _MountRootfsAsWritable(self, error_code_ok=True):
     """Mount the rootfs as writable.
 
-    If the command fails, and error_code_ok is True, then this function sets
-    self._rootfs_is_still_readonly.
+    If the command fails, and error_code_ok is True, and the target dir is not
+    writable then this function sets self._target_dir_is_still_readonly.
 
     Args:
       error_code_ok: See remote.RemoteAccess.RemoteSh for details.
     """
     # TODO: Should migrate to use the remount functions in remote_access.
-    result = self.host.RemoteSh(MOUNT_RW_COMMAND,
-                                error_code_ok=error_code_ok,
-                                capture_output=True)
-    if result.returncode:
-      self._rootfs_is_still_readonly.set()
+    result = self.device.RunCommand(MOUNT_RW_COMMAND,
+                                    error_code_ok=error_code_ok,
+                                    capture_output=True)
+    if (result.returncode and
+        not self.device.IsPathWritable(self.options.target_dir)):
+      self._target_dir_is_still_readonly.set()
 
   def _GetDeviceInfo(self):
     steps = [
@@ -242,26 +250,26 @@ class DeployChrome(object):
     logging.info('Copying Chrome to %s on device...', self.options.target_dir)
     # Show the output (status) for this command.
     dest_path = _CHROME_DIR
-    self.host.Rsync('%s/' % os.path.abspath(self.staging_dir),
-                    self.options.target_dir,
-                    inplace=True, debug_level=logging.INFO,
-                    verbose=self.options.verbose)
+    self.device.CopyToDevice('%s/' % os.path.abspath(self.staging_dir),
+                             self.options.target_dir,
+                             inplace=True, debug_level=logging.INFO,
+                             verbose=self.options.verbose)
 
     for p in self.copy_paths:
       if p.mode:
         # Set mode if necessary.
-        self.host.RemoteSh('chmod %o %s/%s' % (p.mode, dest_path,
-                                               p.src if not p.dest else p.dest))
+        self.device.RunCommand('chmod %o %s/%s' % (
+            p.mode, dest_path, p.src if not p.dest else p.dest))
 
 
     if self.options.startui:
       logging.info('Starting UI...')
-      self.host.RemoteSh('start ui')
+      self.device.RunCommand('start ui')
 
   def _CheckConnection(self):
     try:
       logging.info('Testing connection to the device...')
-      self.host.RemoteSh('true')
+      self.device.RunCommand('true')
     except cros_build_lib.RunCommandError as ex:
       logging.error('Error connecting to the test device.')
       raise DeployFailure(ex)
@@ -272,11 +280,15 @@ class DeployChrome(object):
         """Checks if the passed-in file is present in the build directory."""
         return os.path.exists(os.path.join(self.options.build_dir, filename))
 
-      if BinaryExists('app_shell') and not BinaryExists('chrome'):
-        # app_shell deployment.
-        self.copy_paths = chrome_util.GetCopyPaths('app_shell')
+      # Handle non-Chrome deployments.
+      if not BinaryExists('chrome'):
+        if BinaryExists('envoy_shell'):
+          self.copy_paths = chrome_util.GetCopyPaths('envoy')
+        elif BinaryExists('app_shell'):
+          self.copy_paths = chrome_util.GetCopyPaths('app_shell')
+
         # TODO(derat): Update _Deploy() and remove this after figuring out how
-        # app_shell should be executed.
+        # {app,envoy}_shell should be executed.
         self.options.startui = False
 
   def _PrepareStagingDir(self):
@@ -287,11 +299,20 @@ class DeployChrome(object):
     logging.info('Mounting Chrome...')
 
     # Create directory if does not exist
-    self.host.RemoteSh('mkdir -p --mode 0775 %s' % (self.options.mount_dir,))
-    self.host.RemoteSh(_BIND_TO_FINAL_DIR_CMD % (self.options.target_dir,
-                                                 self.options.mount_dir))
+    self.device.RunCommand('mkdir -p --mode 0775 %s' % (
+                               self.options.mount_dir,))
+    # Umount the existing mount on mount_dir if present first
+    self.device.RunCommand(_UMOUNT_DIR_IF_MOUNTPOINT_CMD %
+                           {'dir': self.options.mount_dir})
+    self.device.RunCommand(_BIND_TO_FINAL_DIR_CMD % (self.options.target_dir,
+                                                     self.options.mount_dir))
     # Chrome needs partition to have exec and suid flags set
-    self.host.RemoteSh(_SET_MOUNT_FLAGS_CMD % (self.options.mount_dir,))
+    self.device.RunCommand(_SET_MOUNT_FLAGS_CMD % (self.options.mount_dir,))
+
+  def Cleanup(self):
+    """Clean up RemoteDevice."""
+    if not self.options.staging_only:
+      self.device.Cleanup()
 
   def Perform(self):
     self._CheckDeployType()
@@ -310,9 +331,9 @@ class DeployChrome(object):
                                     return_values=True)
     self._CheckDeviceFreeSpace(ret[0])
 
-    # If we failed to mark the rootfs as writable, try disabling rootfs
-    # verification.
-    if self._rootfs_is_still_readonly.is_set():
+    # If we're trying to deploy to a dir which is not writable and we failed
+    # to mark the rootfs as writable, try disabling rootfs verification.
+    if self._target_dir_is_still_readonly.is_set():
       self._DisableRootfsVerification()
 
     if self.options.mount_dir is not None:
@@ -375,10 +396,14 @@ def _CreateParser():
                     help='Show more debug output.')
   parser.add_option('--mount-dir', type='path', default=None,
                     help='Deploy Chrome in target directory and bind it '
-                         'to the directory specified by this flag.')
+                         'to the directory specified by this flag.'
+                         'Any existing mount on this directory will be '
+                         'umounted first.')
   parser.add_option('--mount', action='store_true', default=False,
                     help='Deploy Chrome to default target directory and bind '
-                         'it to the default mount directory.')
+                         'it to the default mount directory.'
+                         'Any existing mount on this directory will be '
+                         'umounted first.')
 
   group = optparse.OptionGroup(parser, 'Advanced Options')
   group.add_option('-l', '--local-pkg-path', type='path',
@@ -395,6 +420,8 @@ def _CreateParser():
   group.add_option('--strip-flags', default=None,
                    help="Flags to call the 'strip' binutil tool with.  "
                         "Overrides the default arguments.")
+  group.add_option('--ping', action='store_true', default=False,
+                   help='Ping the device before connection attempt.')
   parser.add_option_group(group)
 
   group = optparse.OptionGroup(parser, 'Metadata Overrides (Advanced)',
@@ -619,3 +646,4 @@ def main(argv):
         deploy.Perform()
       except failures_lib.StepFailure as ex:
         raise SystemExit(str(ex).strip())
+      deploy.Cleanup()

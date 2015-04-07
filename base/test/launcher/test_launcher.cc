@@ -29,6 +29,7 @@
 #include "base/strings/stringize_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/gtest_util.h"
 #include "base/test/launcher/test_results_tracker.h"
 #include "base/test/sequenced_worker_pool_owner.h"
 #include "base/test/test_switches.h"
@@ -227,7 +228,7 @@ CommandLine PrepareCommandLineForGTest(const CommandLine& command_line,
   // on a CommandLine with a wrapper is known to break.
   // TODO(phajdan.jr): Give it a try to support CommandLine removing switches.
 #if defined(OS_WIN)
-  new_command_line.PrependWrapper(ASCIIToWide(wrapper));
+  new_command_line.PrependWrapper(ASCIIToUTF16(wrapper));
 #elif defined(OS_POSIX)
   new_command_line.PrependWrapper(wrapper);
 #endif
@@ -241,7 +242,7 @@ CommandLine PrepareCommandLineForGTest(const CommandLine& command_line,
 int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
                                       const LaunchOptions& options,
                                       int flags,
-                                      base::TimeDelta timeout,
+                                      TimeDelta timeout,
                                       bool* was_timeout) {
 #if defined(OS_POSIX)
   // Make sure an option we rely on is present - see LaunchChildGTestProcess.
@@ -286,7 +287,7 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
   new_options.allow_new_privs = true;
 #endif
 
-  base::ProcessHandle process_handle;
+  ProcessHandle process_handle;
 
   {
     // Note how we grab the lock before the process possibly gets created.
@@ -294,21 +295,19 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
     // in the set.
     AutoLock lock(g_live_processes_lock.Get());
 
-    if (!base::LaunchProcess(command_line, new_options, &process_handle))
+    if (!LaunchProcess(command_line, new_options, &process_handle))
       return -1;
 
     g_live_processes.Get().insert(std::make_pair(process_handle, command_line));
   }
 
   int exit_code = 0;
-  if (!base::WaitForExitCodeWithTimeout(process_handle,
-                                        &exit_code,
-                                        timeout)) {
+  if (!WaitForExitCodeWithTimeout(process_handle, &exit_code, timeout)) {
     *was_timeout = true;
     exit_code = -1;  // Set a non-zero exit code to signal a failure.
 
     // Ensure that the process terminates.
-    base::KillProcess(process_handle, -1, true);
+    KillProcess(process_handle, -1, true);
   }
 
   {
@@ -323,14 +322,14 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
       // or due to it timing out, we need to clean up any child processes that
       // it might have created. On Windows, child processes are automatically
       // cleaned up using JobObjects.
-      base::KillProcessGroup(process_handle);
+      KillProcessGroup(process_handle);
     }
 #endif
 
     g_live_processes.Get().erase(process_handle);
   }
 
-  base::CloseProcessHandle(process_handle);
+  CloseProcessHandle(process_handle);
 
   return exit_code;
 }
@@ -346,7 +345,7 @@ void RunCallback(
 
 void DoLaunchChildTestProcess(
     const CommandLine& command_line,
-    base::TimeDelta timeout,
+    TimeDelta timeout,
     int flags,
     bool redirect_stdio,
     scoped_refptr<MessageLoopProxy> message_loop_proxy,
@@ -354,8 +353,8 @@ void DoLaunchChildTestProcess(
   TimeTicks start_time = TimeTicks::Now();
 
   // Redirect child process output to a file.
-  base::FilePath output_file;
-  CHECK(base::CreateTemporaryFile(&output_file));
+  FilePath output_file;
+  CHECK(CreateTemporaryFile(&output_file));
 
   LaunchOptions options;
 #if defined(OS_WIN)
@@ -384,8 +383,8 @@ void DoLaunchChildTestProcess(
 #elif defined(OS_POSIX)
   options.new_process_group = true;
 
-  base::FileHandleMappingVector fds_mapping;
-  base::ScopedFD output_file_fd;
+  FileHandleMappingVector fds_mapping;
+  ScopedFD output_file_fd;
 
   if (redirect_stdio) {
     output_file_fd.reset(open(output_file.value().c_str(), O_RDWR));
@@ -411,9 +410,9 @@ void DoLaunchChildTestProcess(
   }
 
   std::string output_file_contents;
-  CHECK(base::ReadFileToString(output_file, &output_file_contents));
+  CHECK(ReadFileToString(output_file, &output_file_contents));
 
-  if (!base::DeleteFile(output_file, false)) {
+  if (!DeleteFile(output_file, false)) {
     // This needs to be non-fatal at least for Windows.
     LOG(WARNING) << "Failed to delete " << output_file.AsUTF8Unsafe();
   }
@@ -518,7 +517,7 @@ bool TestLauncher::Run() {
 void TestLauncher::LaunchChildGTestProcess(
     const CommandLine& command_line,
     const std::string& wrapper,
-    base::TimeDelta timeout,
+    TimeDelta timeout,
     int flags,
     const LaunchChildGTestProcessCallback& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -900,61 +899,54 @@ bool TestLauncher::Init() {
 }
 
 void TestLauncher::RunTests() {
-  testing::UnitTest* const unit_test = testing::UnitTest::GetInstance();
+  std::vector<SplitTestName> tests(GetCompiledInTests());
 
   std::vector<std::string> test_names;
 
-  for (int i = 0; i < unit_test->total_test_case_count(); ++i) {
-    const testing::TestCase* test_case = unit_test->GetTestCase(i);
-    for (int j = 0; j < test_case->total_test_count(); ++j) {
-      const testing::TestInfo* test_info = test_case->GetTestInfo(j);
-      std::string test_name = FormatFullTestName(
-          test_info->test_case_name(), test_info->name());
+  for (size_t i = 0; i < tests.size(); i++) {
+    std::string test_name = FormatFullTestName(tests[i].first, tests[i].second);
 
-      results_tracker_.AddTest(test_name);
+    results_tracker_.AddTest(test_name);
 
-      const CommandLine* command_line = CommandLine::ForCurrentProcess();
-      if (test_name.find("DISABLED") != std::string::npos) {
-        results_tracker_.AddDisabledTest(test_name);
+    const CommandLine* command_line = CommandLine::ForCurrentProcess();
+    if (test_name.find("DISABLED") != std::string::npos) {
+      results_tracker_.AddDisabledTest(test_name);
 
-        // Skip disabled tests unless explicitly requested.
-        if (!command_line->HasSwitch(kGTestRunDisabledTestsFlag))
-          continue;
-      }
-
-      if (!launcher_delegate_->ShouldRunTest(test_case, test_info))
+      // Skip disabled tests unless explicitly requested.
+      if (!command_line->HasSwitch(kGTestRunDisabledTestsFlag))
         continue;
+    }
 
-      // Skip the test that doesn't match the filter (if given).
-      if (!positive_test_filter_.empty()) {
-        bool found = false;
-        for (size_t k = 0; k < positive_test_filter_.size(); ++k) {
-          if (MatchPattern(test_name, positive_test_filter_[k])) {
-            found = true;
-            break;
-          }
-        }
+    if (!launcher_delegate_->ShouldRunTest(tests[i].first, tests[i].second))
+      continue;
 
-        if (!found)
-          continue;
-      }
-      bool excluded = false;
-      for (size_t k = 0; k < negative_test_filter_.size(); ++k) {
-        if (MatchPattern(test_name, negative_test_filter_[k])) {
-          excluded = true;
+    // Skip the test that doesn't match the filter (if given).
+    if (!positive_test_filter_.empty()) {
+      bool found = false;
+      for (size_t k = 0; k < positive_test_filter_.size(); ++k) {
+        if (MatchPattern(test_name, positive_test_filter_[k])) {
+          found = true;
           break;
         }
       }
-      if (excluded)
-        continue;
 
-      if (base::Hash(test_name) % total_shards_ !=
-          static_cast<uint32>(shard_index_)) {
+      if (!found)
         continue;
-      }
-
-      test_names.push_back(test_name);
     }
+    bool excluded = false;
+    for (size_t k = 0; k < negative_test_filter_.size(); ++k) {
+      if (MatchPattern(test_name, negative_test_filter_[k])) {
+        excluded = true;
+        break;
+      }
+    }
+    if (excluded)
+      continue;
+
+    if (Hash(test_name) % total_shards_ != static_cast<uint32>(shard_index_))
+      continue;
+
+    test_names.push_back(test_name);
   }
 
   test_started_count_ = launcher_delegate_->RunTests(this, test_names);

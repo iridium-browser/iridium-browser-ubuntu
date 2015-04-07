@@ -47,10 +47,10 @@ namespace content {
 namespace {
 
 GURL GetStartupURL() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kContentBrowserTest))
     return GURL();
-  const CommandLine::StringVector& args = command_line->GetArgs();
+  const base::CommandLine::StringVector& args = command_line->GetArgs();
 
 #if defined(OS_ANDROID)
   // Delay renderer creation on Android until surface is ready.
@@ -87,10 +87,7 @@ ShellBrowserMainParts::ShellBrowserMainParts(
 }
 
 ShellBrowserMainParts::~ShellBrowserMainParts() {
-  if (devtools_http_handler_) {
-    // Note that Stop destroys devtools_http_handler_.
-    devtools_http_handler_->Stop();
-  }
+  DCHECK(!devtools_http_handler_);
 }
 
 #if !defined(OS_MACOSX)
@@ -127,16 +124,15 @@ void ShellBrowserMainParts::InitializeMessageLoopContext() {
   Shell::CreateNewWindow(browser_context_.get(),
                          GetStartupURL(),
                          NULL,
-                         MSG_ROUTING_NONE,
                          gfx::Size());
 }
 
 void ShellBrowserMainParts::PreMainMessageLoopRun() {
 #if defined(OS_ANDROID)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableCrashReporter)) {
     base::FilePath crash_dumps_dir =
-        CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+        base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(
             switches::kCrashDumpsDir);
     crash_dump_manager_.reset(new breakpad::CrashDumpManager(crash_dumps_dir));
   }
@@ -147,9 +143,8 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
   Shell::Initialize();
   net::NetModule::SetResourceProvider(PlatformResourceProvider);
 
-  // CreateHttpHandler retains ownership over DevToolsHttpHandler.
-  devtools_http_handler_ =
-      ShellDevToolsManagerDelegate::CreateHttpHandler(browser_context_.get());
+  devtools_http_handler_.reset(
+      ShellDevToolsManagerDelegate::CreateHttpHandler(browser_context_.get()));
 
   InitializeMessageLoopContext();
 
@@ -165,11 +160,7 @@ bool ShellBrowserMainParts::MainMessageLoopRun(int* result_code)  {
 }
 
 void ShellBrowserMainParts::PostMainMessageLoopRun() {
-  if (devtools_http_handler_) {
-    // Note that Stop destroys devtools_http_handler_.
-    devtools_http_handler_->Stop();
-    devtools_http_handler_ = nullptr;
-  }
+  devtools_http_handler_.reset();
   browser_context_.reset();
   off_the_record_browser_context_.reset();
 }

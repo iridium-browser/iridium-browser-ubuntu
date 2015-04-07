@@ -10,7 +10,7 @@
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/browser/app_window/size_constraints.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/views/controls/webview/unhandled_keyboard_event_handler.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -54,19 +54,19 @@ class NativeAppWindowViews : public extensions::NativeAppWindow,
   // Signal that CanHaveTransparentBackground has changed.
   void OnCanHaveAlphaEnabledChanged();
 
+  extensions::AppWindow* app_window() { return app_window_; }
+  const extensions::AppWindow* app_window() const { return app_window_; }
+
+  views::WebView* web_view() { return web_view_; }
+  const views::WebView* web_view() const { return web_view_; }
+
   views::Widget* widget() { return widget_; }
+  const views::Widget* widget() const { return widget_; }
 
   void set_window_for_testing(views::Widget* window) { widget_ = window; }
   void set_web_view_for_testing(views::WebView* view) { web_view_ = view; }
 
  protected:
-  extensions::AppWindow* app_window() { return app_window_; }
-  const extensions::AppWindow* app_window() const { return app_window_; }
-
-  const views::Widget* widget() const { return widget_; }
-
-  views::WebView* web_view() { return web_view_; }
-
   // Initializes |widget_| for |app_window|.
   virtual void InitializeWindow(
       extensions::AppWindow* app_window,
@@ -141,6 +141,7 @@ class NativeAppWindowViews : public extensions::NativeAppWindow,
       const std::vector<extensions::DraggableRegion>& regions) override;
   SkRegion* GetDraggableRegion() override;
   void UpdateShape(scoped_ptr<SkRegion> region) override;
+  void SetInterceptAllKeys(bool want_all_keys) override;
   void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) override;
   bool IsFrameless() const override;

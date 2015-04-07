@@ -83,6 +83,7 @@ class GCMDriverDesktop : public GCMDriver {
   void RemoveAccountMapping(const std::string& account_id) override;
   base::Time GetLastTokenFetchTime() override;
   void SetLastTokenFetchTime(const base::Time& time) override;
+  void WakeFromSuspendForHeartbeat(bool wake) override;
 
   // Exposed for testing purpose.
   bool gcm_enabled() const { return gcm_enabled_; }
@@ -150,8 +151,7 @@ class GCMDriverDesktop : public GCMDriver {
   bool connected_;
 
   // List of observers to notify when connection state changes.
-  // Makes sure list is empty on destruction.
-  ObserverList<GCMConnectionObserver, true> connection_observer_list_;
+  ObserverList<GCMConnectionObserver, false> connection_observer_list_;
 
   // Account mapper. Only works when user is signed in.
   scoped_ptr<GCMAccountMapper> account_mapper_;
@@ -163,6 +163,10 @@ class GCMDriverDesktop : public GCMDriver {
   scoped_refptr<base::SequencedTaskRunner> io_thread_;
 
   scoped_ptr<GCMDelayedTaskController> delayed_task_controller_;
+
+  // Whether the HeartbeatManager should try to wake the system from suspend for
+  // sending heartbeat messages.
+  bool wake_from_suspend_enabled_;
 
   // For all the work occurring on the IO thread. Must be destroyed on the IO
   // thread.

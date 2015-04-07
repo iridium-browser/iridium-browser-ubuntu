@@ -25,6 +25,11 @@ base::FilePath FakeProfile::GetPath() const {
   return path_;
 }
 
+scoped_ptr<content::ZoomLevelDelegate> FakeProfile::CreateZoomLevelDelegate(
+    const base::FilePath& partition_path) {
+  return nullptr;
+}
+
 bool FakeProfile::IsOffTheRecord() const {
   return false;
 }
@@ -96,6 +101,14 @@ Profile* FakeProfile::GetOriginalProfile() {
 }
 
 bool FakeProfile::IsSupervised() {
+  return false;
+}
+
+bool FakeProfile::IsChild() {
+  return false;
+}
+
+bool FakeProfile::IsLegacySupervised() {
   return false;
 }
 

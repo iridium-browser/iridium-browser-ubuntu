@@ -42,7 +42,6 @@
         'remoting_protocol',
         '../third_party/libyuv/libyuv.gyp:libyuv',
         '../third_party/webrtc/modules/modules.gyp:desktop_capture',
-        '../third_party/libwebm/libwebm.gyp:libwebm',
       ],
       'sources': [
         '<@(remoting_client_sources)',
@@ -69,7 +68,9 @@
             '<(SHARED_INTERMEDIATE_DIR)/main.html',
             '<(remoting_webapp_template_main)',
             '--template', '<@(remoting_webapp_template_files)',
-            '--js', '<@(remoting_webapp_main_html_js_files)',
+            '--js',
+            '<@(remoting_webapp_shared_main_html_js_files)',
+            '<@(remoting_webapp_crd_main_html_js_files)',
           ],
         },
         {

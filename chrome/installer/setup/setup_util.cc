@@ -23,6 +23,7 @@
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
 #include "chrome/installer/setup/setup_constants.h"
+#include "chrome/installer/util/app_registration_data.h"
 #include "chrome/installer/util/copy_tree_work_item.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/installation_state.h"
@@ -44,15 +45,15 @@ namespace {
 // the off chance that waiting itself fails, |exit_code| is set to
 // WAIT_FOR_EXISTING_FAILED.
 bool LaunchAndWaitForExistingInstall(const base::FilePath& setup_exe,
-                                     const CommandLine& command_line,
+                                     const base::CommandLine& command_line,
                                      int* exit_code) {
   DCHECK(exit_code);
-  CommandLine new_cl(setup_exe);
+  base::CommandLine new_cl(setup_exe);
 
   // Copy over all switches but --install-archive.
-  CommandLine::SwitchMap switches(command_line.GetSwitches());
+  base::CommandLine::SwitchMap switches(command_line.GetSwitches());
   switches.erase(switches::kInstallArchive);
-  for (CommandLine::SwitchMap::const_iterator i = switches.begin();
+  for (base::CommandLine::SwitchMap::const_iterator i = switches.begin();
        i != switches.end(); ++i) {
     if (i->second.empty())
       new_cl.AppendSwitch(i->first);
@@ -61,8 +62,8 @@ bool LaunchAndWaitForExistingInstall(const base::FilePath& setup_exe,
   }
 
   // Copy over all arguments.
-  CommandLine::StringVector args(command_line.GetArgs());
-  for (CommandLine::StringVector::const_iterator i = args.begin();
+  base::CommandLine::StringVector args(command_line.GetArgs());
+  for (base::CommandLine::StringVector::const_iterator i = args.begin();
        i != args.end(); ++i) {
     new_cl.AppendArgNative(*i);
   }
@@ -70,13 +71,13 @@ bool LaunchAndWaitForExistingInstall(const base::FilePath& setup_exe,
   // Launch the process and wait for it to exit.
   VLOG(1) << "Launching existing installer with command: "
           << new_cl.GetCommandLineString();
-  base::ProcessHandle handle = INVALID_HANDLE_VALUE;
-  if (!base::LaunchProcess(new_cl, base::LaunchOptions(), &handle)) {
+  base::Process process = base::LaunchProcess(new_cl, base::LaunchOptions());
+  if (!process.IsValid()) {
     PLOG(ERROR) << "Failed to launch existing installer with command: "
                 << new_cl.GetCommandLineString();
     return false;
   }
-  if (!base::WaitForExitCode(handle, exit_code)) {
+  if (!process.WaitForExit(exit_code)) {
     PLOG(DFATAL) << "Failed to get exit code from existing installer";
     *exit_code = WAIT_FOR_EXISTING_FAILED;
   } else {
@@ -284,7 +285,7 @@ bool GetExistingHigherInstaller(
 }
 
 bool DeferToExistingInstall(const base::FilePath& setup_exe,
-                            const CommandLine& command_line,
+                            const base::CommandLine& command_line,
                             const InstallerState& installer_state,
                             const base::FilePath& temp_path,
                             InstallStatus* install_status) {
@@ -431,7 +432,7 @@ bool IsUninstallSuccess(InstallStatus install_status) {
           install_status == UNINSTALL_REQUIRES_REBOOT);
 }
 
-bool ContainsUnsupportedSwitch(const CommandLine& cmd_line) {
+bool ContainsUnsupportedSwitch(const base::CommandLine& cmd_line) {
   static const char* const kLegacySwitches[] = {
     // Chrome Frame ready-mode.
     "ready-mode",
@@ -453,6 +454,17 @@ bool ContainsUnsupportedSwitch(const CommandLine& cmd_line) {
 
 bool IsProcessorSupported() {
   return base::CPU().has_sse2();
+}
+
+base::string16 GetRegistrationDataCommandKey(
+    const AppRegistrationData& reg_data,
+    const wchar_t* name) {
+  base::string16 cmd_key(reg_data.GetVersionKey());
+  cmd_key.append(1, base::FilePath::kSeparators[0])
+      .append(google_update::kRegCommandsKey)
+      .append(1, base::FilePath::kSeparators[0])
+      .append(name);
+  return cmd_key;
 }
 
 ScopedTokenPrivilege::ScopedTokenPrivilege(const wchar_t* privilege_name)

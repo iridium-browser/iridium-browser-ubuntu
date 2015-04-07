@@ -230,8 +230,14 @@ cr.define('options.dictionary_words', function() {
     },
 
     /** @override */
-    shouldFocusPlaceholder: function() {
+    shouldFocusPlaceholderOnEditCommit: function() {
       return false;
+    },
+
+    /** @override */
+    getInitialFocusableItem: function() {
+      return /** @type {options.InlineEditableItem} */(
+          this.getListItemByIndex(this.selectionModel.length - 1));
     },
   };
 

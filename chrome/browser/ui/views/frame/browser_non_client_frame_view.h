@@ -8,7 +8,7 @@
 #include "chrome/browser/ui/views/profiles/new_avatar_button.h"
 #include "ui/views/window/non_client_view.h"
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
 class SupervisedUserAvatarLabel;
 #endif
 class AvatarMenuButton;
@@ -28,7 +28,7 @@ class BrowserNonClientFrameView : public views::NonClientFrameView,
 
   NewAvatarButton* new_avatar_button() const { return new_avatar_button_; }
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
   SupervisedUserAvatarLabel* supervised_user_avatar_label() const {
     return supervised_user_avatar_label_;
   }
@@ -52,6 +52,13 @@ class BrowserNonClientFrameView : public views::NonClientFrameView,
   // Updates the throbber.
   virtual void UpdateThrobber(bool running) = 0;
 
+  // Updates any toolbar components in the frame. The default implementation
+  // does nothing.
+  virtual void UpdateToolbar();
+
+  // Returns the location icon, if this frame has any.
+  virtual views::View* GetLocationIconView() const;
+
   // Overriden from views::View.
   void VisibilityChanged(views::View* starting_from, bool is_visible) override;
 
@@ -70,7 +77,7 @@ class BrowserNonClientFrameView : public views::NonClientFrameView,
 
  private:
   // Draws a taskbar icon if avatar are enabled, erases it otherwise.  If
-  // |taskbar_badge_avatar| is NULL, then |avatar| is used.
+  // |taskbar_badge_avatar| is null, then |avatar| is used.
   void DrawTaskbarDecoration(const gfx::Image& avatar,
                              const gfx::Image& taskbar_badge_avatar);
 
@@ -87,15 +94,15 @@ class BrowserNonClientFrameView : public views::NonClientFrameView,
   BrowserView* browser_view_;
 
   // Menu button that displays that either the incognito icon or the profile
-  // icon.  May be NULL for some frame styles.
+  // icon.  May be null for some frame styles.
   AvatarMenuButton* avatar_button_;
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
   SupervisedUserAvatarLabel* supervised_user_avatar_label_;
 #endif
 
   // Menu button that displays the name of the active or guest profile.
-  // May be NULL and will not be displayed for off the record profiles.
+  // May be null and will not be displayed for off the record profiles.
   NewAvatarButton* new_avatar_button_;
 };
 

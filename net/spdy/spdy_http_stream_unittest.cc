@@ -130,8 +130,7 @@ class SpdyHttpStreamTest : public testing::Test,
 INSTANTIATE_TEST_CASE_P(
     NextProto,
     SpdyHttpStreamTest,
-    testing::Values(kProtoDeprecatedSPDY2,
-                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4));
+    testing::Values(kProtoSPDY31, kProtoSPDY4_14, kProtoSPDY4_15));
 
 // SpdyHttpStream::GetUploadProgress() should still work even before the
 // stream is initialized.
@@ -700,9 +699,6 @@ TEST_P(SpdyHttpStreamTest, SpdyURLTest) {
 // Test the receipt of a WINDOW_UPDATE frame while waiting for a chunk to be
 // made available is handled correctly.
 TEST_P(SpdyHttpStreamTest, DelayedSendChunkedPostWithWindowUpdate) {
-  if (GetParam() < kProtoSPDY3)
-    return;
-
   scoped_ptr<SpdyFrame> req(spdy_util_.ConstructChunkedSpdyPost(NULL, 0));
   scoped_ptr<SpdyFrame> chunk1(spdy_util_.ConstructSpdyBodyFrame(1, true));
   MockWrite writes[] = {
@@ -758,16 +754,18 @@ TEST_P(SpdyHttpStreamTest, DelayedSendChunkedPostWithWindowUpdate) {
 
   // Verify that the window size has decreased.
   ASSERT_TRUE(http_stream->stream() != NULL);
-  EXPECT_NE(static_cast<int>(kSpdyStreamInitialWindowSize),
-            http_stream->stream()->send_window_size());
+  EXPECT_NE(
+      static_cast<int>(SpdySession::GetInitialWindowSize(session_->protocol())),
+      http_stream->stream()->send_window_size());
 
   // Read window update.
   deterministic_data_->RunFor(1);
 
   // Verify the window update.
   ASSERT_TRUE(http_stream->stream() != NULL);
-  EXPECT_EQ(static_cast<int>(kSpdyStreamInitialWindowSize),
-            http_stream->stream()->send_window_size());
+  EXPECT_EQ(
+      static_cast<int>(SpdySession::GetInitialWindowSize(session_->protocol())),
+      http_stream->stream()->send_window_size());
 
   // Read response headers.
   deterministic_data_->RunFor(1);

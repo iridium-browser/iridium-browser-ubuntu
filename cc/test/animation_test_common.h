@@ -26,12 +26,12 @@ class FakeFloatAnimationCurve : public FloatAnimationCurve {
   explicit FakeFloatAnimationCurve(double duration);
   ~FakeFloatAnimationCurve() override;
 
-  double Duration() const override;
-  float GetValue(double now) const override;
+  base::TimeDelta Duration() const override;
+  float GetValue(base::TimeDelta now) const override;
   scoped_ptr<AnimationCurve> Clone() const override;
 
  private:
-  double duration_;
+  base::TimeDelta duration_;
 };
 
 class FakeTransformTransition : public TransformAnimationCurve {
@@ -39,19 +39,20 @@ class FakeTransformTransition : public TransformAnimationCurve {
   explicit FakeTransformTransition(double duration);
   ~FakeTransformTransition() override;
 
-  double Duration() const override;
-  gfx::Transform GetValue(double time) const override;
+  base::TimeDelta Duration() const override;
+  gfx::Transform GetValue(base::TimeDelta time) const override;
   bool AnimatedBoundsForBox(const gfx::BoxF& box,
                             gfx::BoxF* bounds) const override;
   bool AffectsScale() const override;
   bool IsTranslation() const override;
+  bool PreservesAxisAlignment() const override;
   bool MaximumTargetScale(bool forward_direction,
                           float* max_scale) const override;
 
   scoped_ptr<AnimationCurve> Clone() const override;
 
  private:
-  double duration_;
+  base::TimeDelta duration_;
 };
 
 class FakeFloatTransition : public FloatAnimationCurve {
@@ -59,13 +60,13 @@ class FakeFloatTransition : public FloatAnimationCurve {
   FakeFloatTransition(double duration, float from, float to);
   ~FakeFloatTransition() override;
 
-  double Duration() const override;
-  float GetValue(double time) const override;
+  base::TimeDelta Duration() const override;
+  float GetValue(base::TimeDelta time) const override;
 
   scoped_ptr<AnimationCurve> Clone() const override;
 
  private:
-  double duration_;
+  base::TimeDelta duration_;
   float from_;
   float to_;
 };

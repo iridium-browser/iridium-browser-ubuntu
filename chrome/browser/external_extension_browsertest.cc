@@ -34,7 +34,7 @@ class SearchProviderTest : public InProcessBrowserTest {
  protected:
   SearchProviderTest() {}
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     ASSERT_TRUE(test_server()->Start());
 
     // Map all hosts to our local server.
@@ -106,8 +106,8 @@ IN_PROC_BROWSER_TEST_F(SearchProviderTest,
   const char* expected_results[] = { "2",
                                      "1",
                                      "0" };
-  COMPILE_ASSERT(arraysize(test_hosts) == arraysize(expected_results),
-                 there_should_be_a_result_for_each_host);
+  static_assert(arraysize(test_hosts) == arraysize(expected_results),
+                "each host should have a test result");
   IsSearchProviderTestData test_data[2 * arraysize(test_hosts)];
 
   // Start results for the normal mode.

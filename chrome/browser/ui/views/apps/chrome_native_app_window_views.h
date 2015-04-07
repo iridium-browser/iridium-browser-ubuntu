@@ -19,6 +19,7 @@ class ImmersiveFullscreenController;
 }
 #endif
 
+class DesktopKeyboardCapture;
 class ExtensionKeybindingRegistryViews;
 
 namespace views {
@@ -45,12 +46,6 @@ class ChromeNativeAppWindowViews
   virtual void InitializePanelWindow(
       const extensions::AppWindow::CreateParams& create_params);
   virtual views::NonClientFrameView* CreateStandardDesktopAppFrame();
-
- private:
-  FRIEND_TEST_ALL_PREFIXES(ShapedAppWindowTargeterTest,
-                           ResizeInsetsWithinBounds);
-
-  apps::AppWindowFrameView* CreateNonStandardAppFrame();
 
   // ui::BaseWindow implementation.
   gfx::Rect GetRestoredBounds() const override;
@@ -82,11 +77,18 @@ class ChromeNativeAppWindowViews
   bool HasFrameColor() const override;
   SkColor ActiveFrameColor() const override;
   SkColor InactiveFrameColor() const override;
+  void SetInterceptAllKeys(bool want_all_keys) override;
 
   // NativeAppWindowViews implementation.
   void InitializeWindow(
       extensions::AppWindow* app_window,
       const extensions::AppWindow::CreateParams& create_params) override;
+
+ private:
+  FRIEND_TEST_ALL_PREFIXES(ShapedAppWindowTargeterTest,
+                           ResizeInsetsWithinBounds);
+
+  apps::AppWindowFrameView* CreateNonStandardAppFrame();
 
   // True if the window is fullscreen or fullscreen is pending.
   bool is_fullscreen_;
@@ -114,6 +116,9 @@ class ChromeNativeAppWindowViews
 
   // Used to show the system menu.
   scoped_ptr<views::MenuRunner> menu_runner_;
+
+  // Used to capture all keyboard events including task switching sequence.
+  scoped_ptr<DesktopKeyboardCapture> desktop_keyboard_capture_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeNativeAppWindowViews);
 };

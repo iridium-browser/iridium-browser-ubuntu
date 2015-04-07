@@ -178,8 +178,8 @@ const char* const kDangerStrings[] = {
   kDangerHost,
   kDangerUnwanted
 };
-COMPILE_ASSERT(arraysize(kDangerStrings) == content::DOWNLOAD_DANGER_TYPE_MAX,
-               download_danger_type_enum_changed);
+static_assert(arraysize(kDangerStrings) == content::DOWNLOAD_DANGER_TYPE_MAX,
+              "kDangerStrings should have DOWNLOAD_DANGER_TYPE_MAX elements");
 
 // Note: Any change to the state strings, should be accompanied by a
 // corresponding change to downloads.json.
@@ -189,8 +189,8 @@ const char* const kStateStrings[] = {
   kStateInterrupted,
   kStateInterrupted,
 };
-COMPILE_ASSERT(arraysize(kStateStrings) == DownloadItem::MAX_DOWNLOAD_STATE,
-               download_item_state_enum_changed);
+static_assert(arraysize(kStateStrings) == DownloadItem::MAX_DOWNLOAD_STATE,
+              "kStateStrings should have MAX_DOWNLOAD_STATE elements");
 
 const char* DangerString(content::DownloadDangerType danger) {
   DCHECK(danger >= 0);
@@ -869,61 +869,7 @@ ExtensionDownloadsEventRouterData::DeterminerInfo::~DeterminerInfo() {}
 const char ExtensionDownloadsEventRouterData::kKey[] =
   "DownloadItem ExtensionDownloadsEventRouterData";
 
-class ManagerDestructionObserver : public DownloadManager::Observer {
- public:
-  static void CheckForHistoryFilesRemoval(DownloadManager* manager) {
-    if (!manager)
-      return;
-    if (!manager_file_existence_last_checked_)
-      manager_file_existence_last_checked_ =
-        new std::map<DownloadManager*, ManagerDestructionObserver*>();
-    if (!(*manager_file_existence_last_checked_)[manager])
-      (*manager_file_existence_last_checked_)[manager] =
-        new ManagerDestructionObserver(manager);
-    (*manager_file_existence_last_checked_)[manager]->
-      CheckForHistoryFilesRemovalInternal();
-  }
-
- private:
-  static const int kFileExistenceRateLimitSeconds = 10;
-
-  explicit ManagerDestructionObserver(DownloadManager* manager)
-      : manager_(manager) {
-    manager_->AddObserver(this);
-  }
-
-  ~ManagerDestructionObserver() override { manager_->RemoveObserver(this); }
-
-  void ManagerGoingDown(DownloadManager* manager) override {
-    manager_file_existence_last_checked_->erase(manager);
-    if (manager_file_existence_last_checked_->size() == 0) {
-      delete manager_file_existence_last_checked_;
-      manager_file_existence_last_checked_ = NULL;
-    }
-  }
-
-  void CheckForHistoryFilesRemovalInternal() {
-    base::Time now(base::Time::Now());
-    int delta = now.ToTimeT() - last_checked_.ToTimeT();
-    if (delta > kFileExistenceRateLimitSeconds) {
-      last_checked_ = now;
-      manager_->CheckForHistoryFilesRemoval();
-    }
-  }
-
-  static std::map<DownloadManager*, ManagerDestructionObserver*>*
-    manager_file_existence_last_checked_;
-
-  DownloadManager* manager_;
-  base::Time last_checked_;
-
-  DISALLOW_COPY_AND_ASSIGN(ManagerDestructionObserver);
-};
-
-std::map<DownloadManager*, ManagerDestructionObserver*>*
-  ManagerDestructionObserver::manager_file_existence_last_checked_ = NULL;
-
-void OnDeterminingFilenameWillDispatchCallback(
+bool OnDeterminingFilenameWillDispatchCallback(
     bool* any_determiners,
     ExtensionDownloadsEventRouterData* data,
     content::BrowserContext* context,
@@ -933,6 +879,7 @@ void OnDeterminingFilenameWillDispatchCallback(
   base::Time installed =
       ExtensionPrefs::Get(context)->GetInstallTime(extension->id());
   data->AddPendingDeterminer(extension->id(), installed);
+  return true;
 }
 
 bool Fault(bool error,
@@ -1118,8 +1065,16 @@ bool DownloadsSearchFunction::RunSync() {
   DownloadManager* manager = NULL;
   DownloadManager* incognito_manager = NULL;
   GetManagers(GetProfile(), include_incognito(), &manager, &incognito_manager);
-  ManagerDestructionObserver::CheckForHistoryFilesRemoval(manager);
-  ManagerDestructionObserver::CheckForHistoryFilesRemoval(incognito_manager);
+  ExtensionDownloadsEventRouter* router =
+      DownloadServiceFactory::GetForBrowserContext(
+          manager->GetBrowserContext())->GetExtensionEventRouter();
+  router->CheckForHistoryFilesRemoval();
+  if (incognito_manager) {
+    ExtensionDownloadsEventRouter* incognito_router =
+        DownloadServiceFactory::GetForBrowserContext(
+            incognito_manager->GetBrowserContext())->GetExtensionEventRouter();
+    incognito_router->CheckForHistoryFilesRemoval();
+  }
   DownloadQuery::DownloadVector results;
   RunDownloadQuery(params->query,
                    manager,
@@ -1936,6 +1891,19 @@ void ExtensionDownloadsEventRouter::OnExtensionUnloaded(
       shelf_disabling_extensions_.find(extension);
   if (iter != shelf_disabling_extensions_.end())
     shelf_disabling_extensions_.erase(iter);
+}
+
+void ExtensionDownloadsEventRouter::CheckForHistoryFilesRemoval() {
+  static const int kFileExistenceRateLimitSeconds = 10;
+  DownloadManager* manager = notifier_.GetManager();
+  if (!manager)
+    return;
+  base::Time now(base::Time::Now());
+  int delta = now.ToTimeT() - last_checked_removal_.ToTimeT();
+  if (delta <= kFileExistenceRateLimitSeconds)
+    return;
+  last_checked_removal_ = now;
+  manager->CheckForHistoryFilesRemoval();
 }
 
 }  // namespace extensions

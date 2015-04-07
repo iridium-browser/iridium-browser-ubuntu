@@ -18,10 +18,15 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/ownership/owner_key_util.h"
 #include "components/ownership/owner_settings_service.h"
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
 class Profile;
+
+namespace content {
+class WebUI;
+}
 
 namespace ownership {
 class OwnerKeyUtil;
@@ -41,7 +46,20 @@ class OwnerSettingsServiceChromeOS : public ownership::OwnerSettingsService,
                                      public SessionManagerClient::Observer,
                                      public DeviceSettingsService::Observer {
  public:
+  typedef base::Callback<void(bool success)> OnManagementSettingsSetCallback;
+
+  struct ManagementSettings {
+    ManagementSettings();
+    ~ManagementSettings();
+
+    policy::ManagementMode management_mode;
+    std::string request_token;
+    std::string device_id;
+  };
+
   virtual ~OwnerSettingsServiceChromeOS();
+
+  static OwnerSettingsServiceChromeOS* FromWebUI(content::WebUI* web_ui);
 
   void OnTPMTokenReady(bool tpm_token_enabled);
 
@@ -49,6 +67,10 @@ class OwnerSettingsServiceChromeOS : public ownership::OwnerSettingsService,
   virtual bool HandlesSetting(const std::string& setting) override;
   virtual bool Set(const std::string& setting,
                    const base::Value& value) override;
+  virtual bool AppendToList(const std::string& setting,
+                            const base::Value& value) override;
+  virtual bool RemoveFromList(const std::string& setting,
+                              const base::Value& value) override;
   virtual bool CommitTentativeDeviceSettings(
       scoped_ptr<enterprise_management::PolicyData> policy) override;
 
@@ -64,6 +86,10 @@ class OwnerSettingsServiceChromeOS : public ownership::OwnerSettingsService,
   virtual void OwnershipStatusChanged() override;
   virtual void DeviceSettingsUpdated() override;
   virtual void OnDeviceSettingsServiceShutdown() override;
+
+  // Sets the management related settings.
+  void SetManagementSettings(const ManagementSettings& settings,
+                             const OnManagementSettingsSetCallback& callback);
 
   // Checks if the user is the device owner, without the user profile having to
   // been initialized. Should be used only if login state is in safe mode.
@@ -86,7 +112,8 @@ class OwnerSettingsServiceChromeOS : public ownership::OwnerSettingsService,
       enterprise_management::ChromeDeviceSettingsProto& settings);
 
   bool has_pending_changes() const {
-    return !pending_changes_.empty() || tentative_settings_.get();
+    return !pending_changes_.empty() || tentative_settings_.get() ||
+           has_pending_management_settings_;
   }
 
  private:
@@ -117,9 +144,12 @@ class OwnerSettingsServiceChromeOS : public ownership::OwnerSettingsService,
       scoped_ptr<enterprise_management::PolicyFetchResponse> policy_response);
 
   // Called by DeviceSettingsService when modified and signed device
-  // settings are stored. Notifies observers and tries to store device
-  // settings again.
+  // settings are stored.
   void OnSignedPolicyStored(bool success);
+
+  // Report status to observers and tries to continue storing pending chages to
+  // device settings.
+  void ReportStatusAndContinueStoring(bool success);
 
   DeviceSettingsService* device_settings_service_;
 
@@ -137,6 +167,17 @@ class OwnerSettingsServiceChromeOS : public ownership::OwnerSettingsService,
 
   // A set of pending changes to device settings.
   base::ScopedPtrHashMap<std::string, base::Value> pending_changes_;
+
+  // True if there're pending changes to management settings.
+  bool has_pending_management_settings_;
+
+  // A set of pending changes to management settings.
+  ManagementSettings pending_management_settings_;
+
+  // A set of callbacks that need to be run after management settings
+  // are set and policy is stored.
+  std::vector<OnManagementSettingsSetCallback>
+      pending_management_settings_callbacks_;
 
   // A protobuf containing pending changes to device settings.
   scoped_ptr<enterprise_management::ChromeDeviceSettingsProto>

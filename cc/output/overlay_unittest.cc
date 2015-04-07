@@ -152,6 +152,7 @@ TextureDrawQuad* CreateCandidateQuadAt(ResourceProvider* resource_provider,
   ResourceProvider::ResourceId resource_id = CreateResource(resource_provider);
   bool premultiplied_alpha = false;
   bool flipped = false;
+  bool nearest_neighbor = false;
   float vertex_opacity[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 
   TextureDrawQuad* overlay_quad =
@@ -166,7 +167,8 @@ TextureDrawQuad* CreateCandidateQuadAt(ResourceProvider* resource_provider,
                        kUVBottomRight,
                        SK_ColorTRANSPARENT,
                        vertex_opacity,
-                       flipped);
+                       flipped,
+                       nearest_neighbor);
 
   return overlay_quad;
 }
@@ -203,10 +205,10 @@ static void CompareRenderPassLists(const RenderPassList& expected_list,
     RenderPass* actual = actual_list[i];
 
     EXPECT_EQ(expected->id, actual->id);
-    EXPECT_RECT_EQ(expected->output_rect, actual->output_rect);
+    EXPECT_EQ(expected->output_rect, actual->output_rect);
     EXPECT_EQ(expected->transform_to_root_target,
               actual->transform_to_root_target);
-    EXPECT_RECT_EQ(expected->damage_rect, actual->damage_rect);
+    EXPECT_EQ(expected->damage_rect, actual->damage_rect);
     EXPECT_EQ(expected->has_transparent_background,
               actual->has_transparent_background);
 
@@ -255,7 +257,7 @@ TEST(OverlayTest, OverlaysProcessorHasStrategy) {
 
 class SingleOverlayOnTopTest : public testing::Test {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     provider_ = TestContextProvider::Create();
     output_surface_.reset(new OverlayOutputSurface(provider_));
     EXPECT_TRUE(output_surface_->BindToClient(&client_));
@@ -524,7 +526,7 @@ TEST_F(SingleOverlayOnTopTest, AllowNotTopIfNotOccluded) {
 class OverlayInfoRendererGL : public GLRenderer {
  public:
   OverlayInfoRendererGL(RendererClient* client,
-                        const LayerTreeSettings* settings,
+                        const RendererSettings* settings,
                         OutputSurface* output_surface,
                         ResourceProvider* resource_provider)
       : GLRenderer(client,
@@ -539,7 +541,7 @@ class OverlayInfoRendererGL : public GLRenderer {
 
   using GLRenderer::BeginDrawingFrame;
 
-  virtual void FinishDrawingFrame(DrawingFrame* frame) override {
+  void FinishDrawingFrame(DrawingFrame* frame) override {
     GLRenderer::FinishDrawingFrame(frame);
 
     if (!expect_overlays_) {
@@ -601,7 +603,7 @@ class GLRendererWithOverlaysTest : public testing::Test {
 
   void SwapBuffers() { renderer_->SwapBuffers(CompositorFrameMetadata()); }
 
-  LayerTreeSettings settings_;
+  RendererSettings settings_;
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<OverlayOutputSurface> output_surface_;
   FakeRendererClient renderer_client_;

@@ -78,8 +78,8 @@ int UploadFileElementReader::Read(IOBuffer* buf,
                                   const CompletionCallback& callback) {
   DCHECK(!callback.is_null());
 
-  uint64 num_bytes_to_read =
-      std::min(BytesRemaining(), static_cast<uint64>(buf_length));
+  int num_bytes_to_read = static_cast<int>(
+      std::min(BytesRemaining(), static_cast<uint64>(buf_length)));
   if (num_bytes_to_read == 0)
     return 0;
 
@@ -140,7 +140,7 @@ void UploadFileElementReader::OnSeekCompleted(
   if (result < 0) {
     DLOG(WARNING) << "Failed to seek \"" << path_.value()
                   << "\" to offset: " << range_offset_ << " (" << result << ")";
-    callback.Run(result);
+    callback.Run(static_cast<int>(result));
     return;
   }
 
@@ -174,12 +174,14 @@ void UploadFileElementReader::OnGetFileInfoCompleted(
   }
 
   // If the underlying file has been changed and the expected file modification
-  // time is set, treat it as error. Note that the expected modification time
-  // from WebKit is based on time_t precision. So we have to convert both to
-  // time_t to compare. This check is used for sliced files.
+  // time is set, treat it as error. Note that |expected_modification_time_| may
+  // have gone through multiple conversion steps involving loss of precision
+  // (including conversion to time_t). Therefore the check below only verifies
+  // that the timestamps are within one second of each other. This check is used
+  // for sliced files.
   if (!expected_modification_time_.is_null() &&
-      expected_modification_time_.ToTimeT() !=
-      file_info->last_modified.ToTimeT()) {
+      (expected_modification_time_ - file_info->last_modified).InSeconds() !=
+          0) {
     callback.Run(ERR_UPLOAD_FILE_CHANGED);
     return;
   }

@@ -389,12 +389,15 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
                         sizeof wNAF[0]); /* includes space for pivot */
   val_sub = OPENSSL_malloc(totalnum * sizeof val_sub[0]);
 
+  /* Ensure wNAF is initialised in case we end up going to err. */
+  if (wNAF) {
+    wNAF[0] = NULL; /* preliminary pivot */
+  }
+
   if (!wsize || !wNAF_len || !wNAF || !val_sub) {
     OPENSSL_PUT_ERROR(EC, ec_wNAF_mul, ERR_R_MALLOC_FAILURE);
     goto err;
   }
-
-  wNAF[0] = NULL; /* preliminary pivot */
 
   /* num_val will be the total number of temporarily precomputed points */
   num_val = 0;
@@ -443,8 +446,8 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
          * as the wNAF belonging to the generator,
          * so wNAF splitting will not buy us anything. */
 
-        numblocks = 1;
-        totalnum = num + 1; /* don't use wNAF splitting */
+        numblocks = 1; /* don't use wNAF splitting */
+        totalnum = num + numblocks;
         wNAF[num] = tmp_wNAF;
         wNAF[num + 1] = NULL;
         wNAF_len[num] = tmp_len;

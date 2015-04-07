@@ -136,8 +136,8 @@
         'views/apps_grid_view_folder_delegate.h',
         'views/cached_label.cc',
         'views/cached_label.h',
-        'views/contents_switcher_view.cc',
-        'views/contents_switcher_view.h',
+        'views/contents_animator.cc',
+        'views/contents_animator.h',
         'views/contents_view.cc',
         'views/contents_view.h',
         'views/folder_background_view.cc',
@@ -160,7 +160,11 @@
         'views/search_result_container_view.h',
         'views/search_result_list_view.cc',
         'views/search_result_list_view.h',
+        'views/search_result_page_view.cc',
+        'views/search_result_page_view.h',
         'views/search_result_list_view_delegate.h',
+        'views/search_result_tile_item_list_view.cc',
+        'views/search_result_tile_item_list_view.h',
         'views/search_result_tile_item_view.cc',
         'views/search_result_tile_item_view.h',
         'views/search_result_view.cc',
@@ -269,9 +273,11 @@
         'views/app_list_main_view_unittest.cc',
         'views/app_list_view_unittest.cc',
         'views/apps_grid_view_unittest.cc',
+        'views/contents_view_unittest.cc',
         'views/folder_header_view_unittest.cc',
         'views/search_box_view_unittest.cc',
         'views/search_result_list_view_unittest.cc',
+        'views/search_result_page_view_unittest.cc',
         'views/speech_view_unittest.cc',
         'views/test/apps_grid_view_test_api.cc',
         'views/test/apps_grid_view_test_api.h',
@@ -365,5 +371,29 @@
         },
       ],
     }],  # toolkit_views==1
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'app_list_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'app_list_unittests',
+          ],
+          'includes': [
+            '../../build/isolate.gypi',
+          ],
+          'sources': [
+            'app_list_unittests.isolate',
+          ],
+          'conditions': [
+            ['use_x11 == 1', {
+              'dependencies': [
+                '../../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+              ],
+            }],
+          ],
+        },
+      ],
+    }],
   ],
 }

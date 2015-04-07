@@ -15,23 +15,27 @@
 <translation id="3622586652998721735">设为默认方案</translation>
 <translation id="2179565792157161713">在新标签页中打开详细说明</translation>
 <translation id="2471847333270902538"><ph name="SITE"/> 的颜色方案：</translation>
+<translation id="381767806621926835">右键点击任何具有“longdesc”或“aria-describedat”属性的内容，可查看其详细说明。</translation>
+<translation id="786423340267544509">为具有“aria-describedat”或“longdesc”属性的元素添加边框。</translation>
 <translation id="690628312087070417">当光标跳转较长距离时：</translation>
 <translation id="5331422999063554397">反转颜色</translation>
 <translation id="2648340354586434750">按住 &lt;span class='key'&gt;Option&lt;/span&gt; 键可逐字移动。</translation>
+<translation id="4769065380738716500">图片已被其 alt 文字取代。</translation>
 <translation id="5287723860611749454">&lt;p&gt;使用箭头键在文档中移动。&lt;/p&gt;&lt;p&gt;点击任意位置即可将光标移至相应位置。&lt;/p&gt; &lt;p&gt;按 &lt;span class='key'&gt;Shift&lt;/span&gt; + 箭头键可选择文字。&lt;/p&gt;</translation>
 <translation id="5558600050691192317">键盘命令</translation>
 <translation id="633394792577263429">按住 &lt;span class='key'&gt;Control&lt;/span&gt; 键可逐字移动。</translation>
+<translation id="2079545284768500474">撤消</translation>
 <translation id="8254860724243898966">按 &lt;span class='key'&gt;Alt&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt;（提高亮度键或 F7 键）可启用光标浏览模式。再按一次可将其停用。</translation>
 <translation id="3812541808639806898">图片替代文字查看器</translation>
 <translation id="1287053896835709737">黑底黄字</translation>
 <translation id="4896660567607030658">无反馈，仅显示光标。</translation>
 <translation id="5631241868147802353">默认颜色方案：</translation>
-<translation id="625377550964694810">包含“longdesc”或“aria-describedat”属性的任何 HTML 元素都会带有颜色鲜亮的粗边框，如果您右键点击此类元素，上下文菜单中将会增加一个用于查看详细说明的选项。</translation>
 <translation id="5173942593318174089">使用动画突出显示光标位置。</translation>
-<translation id="894241283505723656">通过上下文菜单打开详细说明</translation>
+<translation id="894241283505723656">在上下文菜单中显示详细说明选项</translation>
 <translation id="5555153510860501336">高对比度模式已停用</translation>
 <translation id="1703735871906654364">光标浏览模式</translation>
 <translation id="7384431257964758081">高对比度模式已启用</translation>
+<translation id="6550675742724504774">选项</translation>
 <translation id="5650358096585648000">视觉反馈</translation>
 <translation id="4388820049312272371">使用快速闪烁突出显示光标位置。</translation>
 <translation id="4023902424053835668">使用箭头键浏览网页中的文字。</translation>

@@ -123,7 +123,9 @@ int64 FileVideoCaptureDevice::ParseFileAndExtractVideoFormat(
 base::File FileVideoCaptureDevice::OpenFileForRead(
     const base::FilePath& file_path) {
   base::File file(file_path, base::File::FLAG_OPEN | base::File::FLAG_READ);
-  CHECK(file.IsValid()) << file_path.value();
+  DVLOG_IF(1, file.IsValid()) << file_path.value() << ", error: "
+                        << base::File::ErrorToString(file.error_details());
+  CHECK(file.IsValid());
   return file.Pass();
 }
 
@@ -212,6 +214,7 @@ void FileVideoCaptureDevice::OnCaptureTask() {
   DCHECK_EQ(capture_thread_.message_loop(), base::MessageLoop::current());
   if (!client_)
     return;
+  const base::TimeTicks timestamp_before_reading = base::TimeTicks::Now();
   int result = file_.Read(current_byte_index_,
                           reinterpret_cast<char*>(video_frame_.get()),
                           frame_size_);
@@ -236,11 +239,19 @@ void FileVideoCaptureDevice::OnCaptureTask() {
                                   0,
                                   base::TimeTicks::Now());
   // Reschedule next CaptureTask.
+  const base::TimeDelta frame_interval =
+      base::TimeDelta::FromMicroseconds(1E6 / capture_format_.frame_rate);
+  base::TimeDelta next_on_capture_timedelta = frame_interval -
+      (base::TimeTicks::Now() - timestamp_before_reading);
+  if (next_on_capture_timedelta.InMilliseconds() < 0) {
+    DLOG(WARNING) << "Frame reading took longer than the frame interval.";
+    next_on_capture_timedelta = frame_interval;
+  }
   base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&FileVideoCaptureDevice::OnCaptureTask,
                  base::Unretained(this)),
-      base::TimeDelta::FromSeconds(1) / capture_format_.frame_rate);
+      next_on_capture_timedelta);
 }
 
 }  // namespace media

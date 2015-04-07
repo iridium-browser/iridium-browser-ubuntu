@@ -207,25 +207,10 @@ int ViERTP_RTCPImpl::SetRtxSendPayloadType(const int video_channel,
   return 0;
 }
 
-int ViERTP_RTCPImpl::SetPadWithRedundantPayloads(int video_channel,
-                                                 bool enable) {
-  LOG_F(LS_INFO) << "channel: " << video_channel
-                 << " pad with redundant payloads: " << (enable ? "enable" :
-                 "disable");
-  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
-  ViEChannel* vie_channel = cs.Channel(video_channel);
-  if (!vie_channel) {
-    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
-    return -1;
-  }
-  vie_channel->SetPadWithRedundantPayloads(enable);
-  return 0;
-}
-
 int ViERTP_RTCPImpl::SetRtxReceivePayloadType(const int video_channel,
                                               const uint8_t payload_type) {
   LOG_F(LS_INFO) << "channel: " << video_channel
-               << " payload_type: " << static_cast<int>(payload_type);
+                 << " payload_type: " << static_cast<int>(payload_type);
   ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
   ViEChannel* vie_channel = cs.Channel(video_channel);
   if (!vie_channel) {
@@ -292,10 +277,7 @@ int ViERTP_RTCPImpl::SetRTCPStatus(const int video_channel,
   }
 
   RTCPMethod module_mode = ViERTCPModeToRTCPMethod(rtcp_mode);
-  if (vie_channel->SetRTCPMode(module_mode) != 0) {
-    shared_data_->SetLastError(kViERtpRtcpUnknownError);
-    return -1;
-  }
+  vie_channel->SetRTCPMode(module_mode);
   return 0;
 }
 
@@ -307,11 +289,7 @@ int ViERTP_RTCPImpl::GetRTCPStatus(const int video_channel,
     shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
     return -1;
   }
-  RTCPMethod module_mode = kRtcpOff;
-  if (vie_channel->GetRTCPMode(&module_mode) != 0) {
-    shared_data_->SetLastError(kViERtpRtcpUnknownError);
-    return -1;
-  }
+  RTCPMethod module_mode = vie_channel->GetRTCPMode();
   rtcp_mode = RTCPMethodToViERTCPMode(module_mode);
   return 0;
 }
@@ -370,8 +348,8 @@ int ViERTP_RTCPImpl::SendApplicationDefinedRTCPPacket(
     shared_data_->SetLastError(kViERtpRtcpNotSending);
     return -1;
   }
-  RTCPMethod method;
-  if (vie_channel->GetRTCPMode(&method) != 0 || method == kRtcpOff) {
+  RTCPMethod method = vie_channel->GetRTCPMode();
+  if (method == kRtcpOff) {
     shared_data_->SetLastError(kViERtpRtcpRtcpDisabled);
     return -1;
   }
@@ -545,10 +523,7 @@ int ViERTP_RTCPImpl::SetTMMBRStatus(const int video_channel,
     shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
     return -1;
   }
-  if (vie_channel->EnableTMMBR(enable) != 0) {
-    shared_data_->SetLastError(kViERtpRtcpUnknownError);
-    return -1;
-  }
+  vie_channel->EnableTMMBR(enable);
   return 0;
 }
 
@@ -588,7 +563,7 @@ int ViERTP_RTCPImpl::SetReceiveTimestampOffsetStatus(int video_channel,
                                                      bool enable,
                                                      int id) {
   LOG_F(LS_INFO) << "channel: " << video_channel
-                 << "enable: " << (enable ? "on" : "off") << " id: " << id;
+                 << " enable: " << (enable ? "on" : "off") << " id: " << id;
   ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
   ViEChannel* vie_channel = cs.Channel(video_channel);
   if (!vie_channel) {
@@ -606,7 +581,7 @@ int ViERTP_RTCPImpl::SetSendAbsoluteSendTimeStatus(int video_channel,
                                                    bool enable,
                                                    int id) {
   LOG_F(LS_INFO) << "channel: " << video_channel
-                 << "enable: " << (enable ? "on" : "off") << " id: " << id;
+                 << " enable: " << (enable ? "on" : "off") << " id: " << id;
 
   ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
   ViEChannel* vie_channel = cs.Channel(video_channel);
@@ -625,7 +600,7 @@ int ViERTP_RTCPImpl::SetReceiveAbsoluteSendTimeStatus(int video_channel,
                                                       bool enable,
                                                       int id) {
   LOG_F(LS_INFO) << "channel: " << video_channel
-                 << "enable: " << (enable ? "on" : "off") << " id: " << id;
+                 << " enable: " << (enable ? "on" : "off") << " id: " << id;
   ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
   ViEChannel* vie_channel = cs.Channel(video_channel);
   if (!vie_channel) {
@@ -900,37 +875,6 @@ int ViERTP_RTCPImpl::DeregisterRTPObserver(const int video_channel) {
     return -1;
   }
   if (vie_channel->RegisterRtpObserver(NULL) != 0) {
-    shared_data_->SetLastError(kViERtpRtcpObserverNotRegistered);
-    return -1;
-  }
-  return 0;
-}
-
-int ViERTP_RTCPImpl::RegisterRTCPObserver(const int video_channel,
-                                          ViERTCPObserver& observer) {
-  LOG_F(LS_INFO) << "channel " << video_channel;
-  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
-  ViEChannel* vie_channel = cs.Channel(video_channel);
-  if (!vie_channel) {
-    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
-    return -1;
-  }
-  if (vie_channel->RegisterRtcpObserver(&observer) != 0) {
-    shared_data_->SetLastError(kViERtpRtcpObserverAlreadyRegistered);
-    return -1;
-  }
-  return 0;
-}
-
-int ViERTP_RTCPImpl::DeregisterRTCPObserver(const int video_channel) {
-  LOG_F(LS_INFO) << "channel " << video_channel;
-  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
-  ViEChannel* vie_channel = cs.Channel(video_channel);
-  if (!vie_channel) {
-    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
-    return -1;
-  }
-  if (vie_channel->RegisterRtcpObserver(NULL) != 0) {
     shared_data_->SetLastError(kViERtpRtcpObserverNotRegistered);
     return -1;
   }

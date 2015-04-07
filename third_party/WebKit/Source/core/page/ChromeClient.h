@@ -22,17 +22,17 @@
 #ifndef ChromeClient_h
 #define ChromeClient_h
 
-#include "core/accessibility/AXObjectCache.h"
+#include "core/dom/AXObjectCache.h"
 #include "core/inspector/ConsoleAPITypes.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/NavigationPolicy.h"
 #include "core/frame/ConsoleTypes.h"
+#include "core/html/forms/PopupMenuClient.h"
 #include "core/page/FocusType.h"
 #include "core/rendering/style/RenderStyleConstants.h"
 #include "platform/Cursor.h"
 #include "platform/HostWindow.h"
 #include "platform/PopupMenu.h"
-#include "platform/PopupMenuClient.h"
 #include "platform/heap/Handle.h"
 #include "platform/scroll/ScrollTypes.h"
 #include "wtf/Forward.h"
@@ -114,7 +114,7 @@ public:
 
     virtual void setResizable(bool) = 0;
 
-    virtual bool shouldReportDetailedMessageForSource(const String& source) = 0;
+    virtual bool shouldReportDetailedMessageForSource(LocalFrame&, const String& source) = 0;
     virtual void addMessageToConsole(LocalFrame*, MessageSource, MessageLevel, const String& message, unsigned lineNumber, const String& sourceID, const String& stackTrace) = 0;
 
     virtual bool canRunBeforeUnloadConfirmPanel() = 0;
@@ -133,13 +133,14 @@ public:
     virtual IntRect windowResizerRect() const = 0;
 
     // Methods used by HostWindow.
-    virtual void invalidateContentsAndRootView(const IntRect&) = 0;
-    virtual void invalidateContentsForSlowScroll(const IntRect&) = 0;
+    virtual void invalidateRect(const IntRect&) = 0;
     virtual IntRect rootViewToScreen(const IntRect&) const = 0;
     virtual blink::WebScreenInfo screenInfo() const = 0;
     virtual void setCursor(const Cursor&) = 0;
     virtual void scheduleAnimation() = 0;
     // End methods used by HostWindow.
+
+    virtual void scheduleAnimationForFrame(LocalFrame*) { }
 
     virtual void dispatchViewportPropertiesDidChange(const ViewportDescription&) const { }
 
@@ -147,7 +148,7 @@ public:
     virtual void deviceOrPageScaleFactorChanged() const { }
     virtual void layoutUpdated(LocalFrame*) const { }
 
-    virtual void mouseDidMoveOverElement(const HitTestResult&, unsigned modifierFlags) = 0;
+    virtual void mouseDidMoveOverElement(const HitTestResult&) = 0;
 
     virtual void setToolTip(const String&, TextDirection) = 0;
 
@@ -177,8 +178,10 @@ public:
     // Allows ports to customize the type of graphics layers created by this page.
     virtual GraphicsLayerFactory* graphicsLayerFactory() const { return nullptr; }
 
-    // Pass 0 as the GraphicsLayer to detatch the root layer.
-    virtual void attachRootGraphicsLayer(GraphicsLayer*) = 0;
+    // Pass 0 as the GraphicsLayer to detach the root layer.
+    // This sets the graphics layer for the LocalFrame's WebWidget, if it has one. Otherwise
+    // it sets it for the WebViewImpl.
+    virtual void attachRootGraphicsLayer(GraphicsLayer*, LocalFrame* localRoot) = 0;
 
     virtual void enterFullScreenForElement(Element*) { }
     virtual void exitFullScreenForElement(Element*) { }
@@ -192,11 +195,8 @@ public:
 
     // Checks if there is an opened popup, called by RenderMenuList::showPopup().
     virtual bool hasOpenedPopup() const = 0;
-    virtual PassRefPtrWillBeRawPtr<PopupMenu> createPopupMenu(LocalFrame&, PopupMenuClient*) const = 0;
-    // For testing.
-    virtual void setPagePopupDriver(PagePopupDriver*) = 0;
-    virtual void resetPagePopupDriver() = 0;
-    virtual PagePopupDriver* pagePopupDriver() const = 0;
+    virtual PassRefPtrWillBeRawPtr<PopupMenu> createPopupMenu(LocalFrame&, PopupMenuClient*) = 0;
+    virtual DOMWindow* pagePopupWindowForTesting() const = 0;
 
     virtual void postAccessibilityNotification(AXObject*, AXObjectCache::AXNotification) { }
     virtual String acceptLanguages() = 0;
@@ -218,16 +218,21 @@ public:
 
     virtual bool isChromeClientImpl() const { return false; }
 
-    virtual void didAssociateFormControls(const WillBeHeapVector<RefPtrWillBeMember<Element>>&) { }
+    virtual void didAssociateFormControls(const WillBeHeapVector<RefPtrWillBeMember<Element>>&, LocalFrame*) { }
     virtual void didChangeValueInTextField(HTMLFormControlElement&) { }
     virtual void didEndEditingOnTextField(HTMLInputElement&) { }
     virtual void handleKeyboardEventOnTextField(HTMLInputElement&, KeyboardEvent&) { }
+    virtual void textFieldDataListChanged(HTMLInputElement&) { }
 
     // Input mehtod editor related functions.
     virtual void didCancelCompositionOnSelectionChange() { }
     virtual void willSetInputMethodState() { }
     virtual void didUpdateTextOfFocusedElementByNonUserInput() { }
     virtual void showImeIfNeeded() { }
+
+    virtual void registerViewportLayers() const { }
+
+    virtual void showUnhandledTapUIIfNeeded(IntPoint, Node*, bool) { }
 
 protected:
     virtual ~ChromeClient() { }

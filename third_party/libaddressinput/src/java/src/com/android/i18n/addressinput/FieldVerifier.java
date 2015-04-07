@@ -16,6 +16,7 @@
 
 package com.android.i18n.addressinput;
 
+import com.android.i18n.addressinput.LookupKey.KeyType;
 import com.android.i18n.addressinput.LookupKey.ScriptType;
 
 import java.util.EnumSet;
@@ -27,15 +28,18 @@ import java.util.regex.Pattern;
 
 /**
  * Accesses address verification data used to verify components of an address.
- * <p> Not all fields require all types of validation, although this could be done. In particular,
+ * <p>
+ * Not all fields require all types of validation, although this could be done. In particular,
  * the current implementation only provides known value verification for the hierarchical fields,
  * and only provides format and match verification for the postal code field.
  */
-public class FieldVerifier {
+public final class FieldVerifier {
+  // A value for a particular language is has the language separated by this String.
+  private static final String LOCALE_DELIMITER = "--";
   // Node data values are delimited by this symbol.
-  private static final String DATA_DELIMITER = "~";
+  private static final String LIST_DELIMITER = "~";
   // Keys are built up using this delimiter: eg data/US, data/US/CA.
-  private static final String KEY_DELIMITER = "/";
+  private static final String KEY_NODE_DELIMITER = "/";
 
   private static final FormatInterpreter FORMAT_INTERPRETER =
       new FormatInterpreter(new FormOptions.Builder().build());
@@ -77,7 +81,6 @@ public class FieldVerifier {
   /**
    * Creates a field verifier based on its parent and on the new data for this node supplied by
    * nodeData (which may be null).
-   *
    * Package-private so it can be accessed by tests.
    */
   FieldVerifier(FieldVerifier parent, AddressVerificationNodeData nodeData) {
@@ -103,7 +106,7 @@ public class FieldVerifier {
     // Keys come from the countries under "data".
     AddressVerificationNodeData rootNode = dataSource.getDefaultData("data");
     if (rootNode.containsKey(AddressDataKey.COUNTRIES)) {
-      keys = rootNode.get(AddressDataKey.COUNTRIES).split(DATA_DELIMITER);
+      keys = rootNode.get(AddressDataKey.COUNTRIES).split(LIST_DELIMITER);
     }
     // candidateValues is just the set of keys.
     candidateValues = Util.buildNameToKeyMap(keys, null, null);
@@ -129,13 +132,13 @@ public class FieldVerifier {
       id = nodeData.get(AddressDataKey.ID);
     }
     if (nodeData.containsKey(AddressDataKey.SUB_KEYS)) {
-      keys = nodeData.get(AddressDataKey.SUB_KEYS).split(DATA_DELIMITER);
+      keys = nodeData.get(AddressDataKey.SUB_KEYS).split(LIST_DELIMITER);
     }
     if (nodeData.containsKey(AddressDataKey.SUB_LNAMES)) {
-      latinNames = nodeData.get(AddressDataKey.SUB_LNAMES).split(DATA_DELIMITER);
+      latinNames = nodeData.get(AddressDataKey.SUB_LNAMES).split(LIST_DELIMITER);
     }
     if (nodeData.containsKey(AddressDataKey.SUB_NAMES)) {
-      localNames = nodeData.get(AddressDataKey.SUB_NAMES).split(DATA_DELIMITER);
+      localNames = nodeData.get(AddressDataKey.SUB_NAMES).split(LIST_DELIMITER);
     }
     if (nodeData.containsKey(AddressDataKey.XZIP)) {
       format = Pattern.compile(nodeData.get(AddressDataKey.XZIP), Pattern.CASE_INSENSITIVE);
@@ -144,25 +147,60 @@ public class FieldVerifier {
       // This key has two different meanings, depending on whether this is a country-level key
       // or not.
       if (isCountryKey()) {
-        format = Pattern.compile(nodeData.get(AddressDataKey.ZIP),
-            Pattern.CASE_INSENSITIVE);
+        format = Pattern.compile(nodeData.get(AddressDataKey.ZIP), Pattern.CASE_INSENSITIVE);
       } else {
-        match = Pattern.compile(nodeData.get(AddressDataKey.ZIP),
-            Pattern.CASE_INSENSITIVE);
+        match = Pattern.compile(nodeData.get(AddressDataKey.ZIP), Pattern.CASE_INSENSITIVE);
       }
     }
     // If there are latin names but no local names, and there are the same number of latin names
     // as there are keys, then we assume the local names are the same as the keys.
-    if (keys != null && localNames == null && latinNames != null &&
-        keys.length == latinNames.length) {
+    if (keys != null && localNames == null && latinNames != null
+        && keys.length == latinNames.length) {
       localNames = keys;
     }
-
     // These fields are populated from RegionDataConstants so that the metadata server can be
     // updated without needing to be in sync with clients.
     if (isCountryKey()) {
-      populatePossibleAndRequired(id.split(KEY_DELIMITER)[1]);
+      populatePossibleAndRequired(getRegionCodeFromKey(id));
     }
+  }
+
+  /**
+   * This method assumes the hierarchyKey contains a region code. If not, returns ZZ.
+   */
+  private static String getRegionCodeFromKey(String hierarchyKey) {
+    String[] parts = hierarchyKey.split(KEY_NODE_DELIMITER);
+    if (parts.length == 1) {
+      // Return the unknown region if none was found.
+      return "ZZ";
+    }
+    return parts[1].split(LOCALE_DELIMITER)[0];
+  }
+
+  // TODO: We should be consistent with where the language data comes from; what are the
+  // consequences if the server is out-of-sync with the client? We should get the language from the
+  // same place here and in FormController; it's not obvious that happens right now.
+  private Set<String> getAcceptableAlternateLanguages(String regionCode) {
+    // TODO: We should have a class that knows how to get information about the data, rather than
+    // getting the node and extracting keys here.
+    LookupKey lookupKey =
+        new LookupKey.Builder(KeyType.DATA.name().toLowerCase() + KEY_NODE_DELIMITER
+            + regionCode).build();
+    AddressVerificationNodeData countryNode = dataSource.getDefaultData(lookupKey.toString());
+    String languages = countryNode.get(AddressDataKey.LANGUAGES);
+    String defaultLanguage = countryNode.get(AddressDataKey.LANG);
+    Set<String> alternateLanguages = new HashSet<String>();
+    // If languages is set, defaultLanguage will be set as well.
+    if (languages != null && defaultLanguage != null) {
+      String languagesArray[] = languages.split(LIST_DELIMITER);
+      for (String lang : languagesArray) {
+        // The default language is never appended to keys.
+        if (!lang.equals(defaultLanguage)) {
+          alternateLanguages.add(lang);
+        }
+      }
+    }
+    return alternateLanguages;
   }
 
   private void populatePossibleAndRequired(String regionCode) {
@@ -172,13 +210,31 @@ public class FieldVerifier {
   }
 
   FieldVerifier refineVerifier(String sublevel) {
-    if (Util.trimToNull(sublevel) == null) {
+    if (Util.trimToNull(sublevel) == null || id == null) {
       return new FieldVerifier(this, null);
     }
-    // If the parent node didn't exist, then the subLevelName will start with "null".
-    String subLevelName = id + KEY_DELIMITER + sublevel;
+
+    // Split the subkey into key + language (if any). Check the language is an acceptable
+    // alternative for the region, for which we have data. If not, we drop it from the data key.
+    String[] parts = sublevel.split(LOCALE_DELIMITER);
+
+    // Makes the new key - the old key, plus the new data, minus the language code.
+    String currentFullKey = id + KEY_NODE_DELIMITER + parts[0];
+
+    // If a language was present, check that it is valid.
+    if (parts.length > 1) {
+      // Since currentFullKey must have the KEY_NODE_DELIMITER - we added it above - this is safe.
+      String regionCode = getRegionCodeFromKey(currentFullKey);
+      if (getAcceptableAlternateLanguages(regionCode).contains(parts[1])) {
+        currentFullKey = currentFullKey + LOCALE_DELIMITER + parts[1];
+      }
+    }
+
+    // This fixes the position of the language in the key, so data/CA--fr/Quebec would be
+    // canonicalised to data/CA/Quebec--fr.
+    currentFullKey = new LookupKey.Builder(currentFullKey).build().toString();
     // For names with no Latin equivalent, we can look up the sublevel name directly.
-    AddressVerificationNodeData nodeData = dataSource.get(subLevelName);
+    AddressVerificationNodeData nodeData = dataSource.get(currentFullKey);
     if (nodeData != null) {
       return new FieldVerifier(this, nodeData);
     }
@@ -191,8 +247,9 @@ public class FieldVerifier {
       if (latinNames[n].equalsIgnoreCase(sublevel)) {
         // We found a match - we should try looking up a key with the local name at the same
         // index.
-        subLevelName = id + KEY_DELIMITER + localNames[n];
-        nodeData = dataSource.get(subLevelName);
+        currentFullKey =
+            new LookupKey.Builder(id + KEY_NODE_DELIMITER + localNames[n]).build().toString();
+        nodeData = dataSource.get(currentFullKey);
         if (nodeData != null) {
           return new FieldVerifier(this, nodeData);
         }
@@ -214,6 +271,17 @@ public class FieldVerifier {
    * Checks a value in a particular script for a particular field to see if it causes the problem
    * specified. If so, this problem is added to the AddressProblems collection passed in. Returns
    * true if no problem was found.
+   *
+   * @param script the script type used to verify address. This affects countries
+   *     where there are values in the local language and in latin script, such as China.
+   *     If null, do not consider script type, so both latin and local language values would be
+   *     considered valid.
+   * @param problem problem type to check. For example, when problem type is
+   *     {@code UNEXPECTED_FIELD}, checks that the input {@code field} is not used.
+   * @param field address field to verify.
+   * @param value field value.
+   * @param problems collection of problems collected during verification.
+   * @return true if verification passes.
    */
   protected boolean check(ScriptType script, AddressProblemType problem, AddressField field,
       String value, AddressProblems problems) {
@@ -221,7 +289,7 @@ public class FieldVerifier {
 
     String trimmedValue = Util.trimToNull(value);
     switch (problem) {
-      case USING_UNUSED_FIELD:
+      case UNEXPECTED_FIELD:
         if (trimmedValue != null && !possiblyUsedFields.contains(field)) {
           problemFound = true;
         }
@@ -240,15 +308,13 @@ public class FieldVerifier {
         }
         problemFound = !isKnownInScript(script, trimmedValue);
         break;
-      case UNRECOGNIZED_FORMAT:
-        if (trimmedValue != null && format != null &&
-            !format.matcher(trimmedValue).matches()) {
+      case INVALID_FORMAT:
+        if (trimmedValue != null && format != null && !format.matcher(trimmedValue).matches()) {
           problemFound = true;
         }
         break;
       case MISMATCHING_VALUE:
-        if (trimmedValue != null && match != null &&
-            !match.matcher(trimmedValue).lookingAt()) {
+        if (trimmedValue != null && match != null && !match.matcher(trimmedValue).lookingAt()) {
           problemFound = true;
         }
         break;
@@ -270,8 +336,7 @@ public class FieldVerifier {
     String trimmedValue = Util.trimToNull(value);
     Util.checkNotNull(trimmedValue);
     if (script == null) {
-      return (candidateValues == null ||
-          candidateValues.containsKey(trimmedValue.toLowerCase()));
+      return (candidateValues == null || candidateValues.containsKey(trimmedValue.toLowerCase()));
     }
     // Otherwise, if we know the script, we want to restrict the candidates to only names in
     // that script.
@@ -305,8 +370,7 @@ public class FieldVerifier {
     EnumSet<AddressField> result = EnumSet.of(AddressField.COUNTRY);
     for (AddressField field : fields) {
       // Replace ADDRESS_LINE with STREET_ADDRESS because that's what the validation expects.
-      if (field == AddressField.ADDRESS_LINE_1 ||
-          field == AddressField.ADDRESS_LINE_2) {
+      if (field == AddressField.ADDRESS_LINE_1 || field == AddressField.ADDRESS_LINE_2) {
         result.add(AddressField.STREET_ADDRESS);
       } else {
         result.add(field);
@@ -321,6 +385,6 @@ public class FieldVerifier {
    */
   private boolean isCountryKey() {
     Util.checkNotNull(id, "Cannot use null as key");
-    return id.split(KEY_DELIMITER).length == 2;
+    return id.split(KEY_NODE_DELIMITER).length == 2;
   }
 }

@@ -7,13 +7,14 @@
 
 #include "core/paint/BlockPainter.h"
 #include "core/paint/BoxPainter.h"
+#include "core/paint/RenderDrawingRecorder.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderMultiColumnSet.h"
 #include "platform/geometry/LayoutPoint.h"
 
 namespace blink {
 
-void MultiColumnSetPainter::paintObject(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void MultiColumnSetPainter::paintObject(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     if (m_renderMultiColumnSet.style()->visibility() != VISIBLE)
         return;
@@ -31,7 +32,7 @@ void MultiColumnSetPainter::paintObject(PaintInfo& paintInfo, const LayoutPoint&
     paintColumnRules(paintInfo, paintOffset);
 }
 
-void MultiColumnSetPainter::paintColumnRules(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void MultiColumnSetPainter::paintColumnRules(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     if (m_renderMultiColumnSet.flowThread()->isRenderPagedFlowThread())
         return;
@@ -50,8 +51,8 @@ void MultiColumnSetPainter::paintColumnRules(PaintInfo& paintInfo, const LayoutP
     if (colCount <= 1)
         return;
 
+    DrawingRecorder drawingRecorder(paintInfo.context, m_renderMultiColumnSet.displayItemClient(), DisplayItem::ColumnRules, m_renderMultiColumnSet.visualOverflowRect());
     bool antialias = BoxPainter::shouldAntialiasLines(paintInfo.context);
-
     bool leftToRight = m_renderMultiColumnSet.style()->isLeftToRightDirection();
     LayoutUnit currLogicalLeftOffset = leftToRight ? LayoutUnit() : m_renderMultiColumnSet.contentLogicalWidth();
     LayoutUnit ruleAdd = m_renderMultiColumnSet.borderAndPaddingLogicalLeft();

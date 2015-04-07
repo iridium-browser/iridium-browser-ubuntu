@@ -44,10 +44,8 @@
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
-#include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/api/i18n/default_locale_handler.h"
 #include "chrome/common/extensions/api/tabs.h"
 #include "chrome/common/extensions/api/windows.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -56,6 +54,7 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/translate/core/common/language_detection_details.h"
+#include "components/ui/zoom/zoom_controller.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
@@ -69,6 +68,7 @@
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_function_util.h"
 #include "extensions/browser/extension_host.h"
+#include "extensions/browser/extension_zoom_request_client.h"
 #include "extensions/browser/file_reader.h"
 #include "extensions/browser/script_executor.h"
 #include "extensions/common/api/extension_types.h"
@@ -76,6 +76,7 @@
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/manifest_handlers/default_locale_handler.h"
 #include "extensions/common/message_bundle.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/user_script.h"
@@ -97,6 +98,7 @@ using content::NavigationEntry;
 using content::OpenURLParams;
 using content::Referrer;
 using content::WebContents;
+using ui_zoom::ZoomController;
 
 namespace extensions {
 
@@ -855,6 +857,11 @@ bool TabsQueryFunction::RunSync() {
     if (!include_incognito() && GetProfile() != browser->profile())
       continue;
 
+    if (!browser->extension_window_controller()->IsVisibleToExtension(
+            extension())) {
+      continue;
+    }
+
     if (window_id >= 0 && window_id != ExtensionTabUtil::GetWindowId(browser))
       continue;
 
@@ -1468,7 +1475,8 @@ bool TabsReloadFunction::RunSync() {
   if (web_contents->ShowingInterstitialPage()) {
     // This does as same as Browser::ReloadInternal.
     NavigationEntry* entry = web_contents->GetController().GetVisibleEntry();
-    OpenURLParams params(entry->GetURL(), Referrer(), CURRENT_TAB,
+    GURL reload_url = entry ? entry->GetURL() : GURL(url::kAboutBlankURL);
+    OpenURLParams params(reload_url, Referrer(), CURRENT_TAB,
                          ui::PAGE_TRANSITION_RELOAD, false);
     GetCurrentBrowser()->OpenURL(params);
   } else if (bypass_cache) {
@@ -1846,7 +1854,9 @@ bool TabsSetZoomFunction::RunAsync() {
       ZoomController::FromWebContents(web_contents);
   double zoom_level = content::ZoomFactorToZoomLevel(params->zoom_factor);
 
-  if (!zoom_controller->SetZoomLevelByExtension(zoom_level, extension())) {
+  scoped_refptr<ExtensionZoomRequestClient> client(
+      new ExtensionZoomRequestClient(extension()));
+  if (!zoom_controller->SetZoomLevelByClient(zoom_level, client)) {
     // Tried to zoom a tab in disabled mode.
     error_ = keys::kCannotZoomDisabledTabError;
     return false;

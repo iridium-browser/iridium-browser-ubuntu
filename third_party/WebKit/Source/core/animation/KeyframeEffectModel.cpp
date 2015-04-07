@@ -49,14 +49,14 @@ PropertySet KeyframeEffectModelBase::properties() const
     return result;
 }
 
-PassOwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation>>> KeyframeEffectModelBase::sample(int iteration, double fraction, double iterationDuration) const
+void KeyframeEffectModelBase::sample(int iteration, double fraction, double iterationDuration, OwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation>>>& result) const
 {
     ASSERT(iteration >= 0);
     ASSERT(!isNull(fraction));
     ensureKeyframeGroups();
     ensureInterpolationEffect();
 
-    return m_interpolationEffect->getActiveInterpolations(fraction, iterationDuration);
+    return m_interpolationEffect->getActiveInterpolations(fraction, iterationDuration, result);
 }
 
 KeyframeEffectModelBase::KeyframeVector KeyframeEffectModelBase::normalizedKeyframes(const KeyframeVector& keyframes)
@@ -122,8 +122,11 @@ void KeyframeEffectModelBase::ensureKeyframeGroups() const
     }
 
     // Add synthetic keyframes.
+    m_hasSyntheticKeyframes = false;
     for (const auto& entry : *m_keyframeGroups) {
-        entry.value->addSyntheticKeyframeIfRequired(this);
+        if (entry.value->addSyntheticKeyframeIfRequired())
+            m_hasSyntheticKeyframes = true;
+
         entry.value->removeRedundantKeyframes();
     }
 }
@@ -204,13 +207,22 @@ void KeyframeEffectModelBase::PropertySpecificKeyframeGroup::removeRedundantKeyf
     ASSERT(m_keyframes.size() >= 2);
 }
 
-void KeyframeEffectModelBase::PropertySpecificKeyframeGroup::addSyntheticKeyframeIfRequired(const KeyframeEffectModelBase* context)
+bool KeyframeEffectModelBase::PropertySpecificKeyframeGroup::addSyntheticKeyframeIfRequired()
 {
     ASSERT(!m_keyframes.isEmpty());
-    if (m_keyframes.first()->offset() != 0.0)
+
+    bool addedSyntheticKeyframe = false;
+
+    if (m_keyframes.first()->offset() != 0.0) {
         m_keyframes.insert(0, m_keyframes.first()->neutralKeyframe(0, nullptr));
-    if (m_keyframes.last()->offset() != 1.0)
+        addedSyntheticKeyframe = true;
+    }
+    if (m_keyframes.last()->offset() != 1.0) {
         appendKeyframe(m_keyframes.last()->neutralKeyframe(1, nullptr));
+        addedSyntheticKeyframe = true;
+    }
+
+    return addedSyntheticKeyframe;
 }
 
 void KeyframeEffectModelBase::PropertySpecificKeyframeGroup::trace(Visitor* visitor)

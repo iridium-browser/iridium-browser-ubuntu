@@ -11,6 +11,9 @@
 #include "ui/aura/window_tree_host_ozone.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/transform.h"
+#include "ui/ozone/public/input_controller.h"
+#include "ui/ozone/public/ozone_platform.h"
+#include "ui/platform_window/platform_window.h"
 
 namespace ash {
 namespace {
@@ -19,21 +22,27 @@ class AshWindowTreeHostOzone : public AshWindowTreeHost,
                                public aura::WindowTreeHostOzone {
  public:
   explicit AshWindowTreeHostOzone(const gfx::Rect& initial_bounds);
-  virtual ~AshWindowTreeHostOzone();
+  ~AshWindowTreeHostOzone() override;
 
  private:
   // AshWindowTreeHost:
-  virtual void ToggleFullScreen() override;
-  virtual bool ConfineCursorToRootWindow() override;
-  virtual void UnConfineCursor() override;
-  virtual void SetRootWindowTransformer(
+  void ToggleFullScreen() override;
+  bool ConfineCursorToRootWindow() override;
+  void UnConfineCursor() override;
+  void SetRootWindowTransformer(
       scoped_ptr<RootWindowTransformer> transformer) override;
-  virtual gfx::Insets GetHostInsets() const override;
-  virtual aura::WindowTreeHost* AsWindowTreeHost() override;
-  virtual void SetRootTransform(const gfx::Transform& transform) override;
-  virtual gfx::Transform GetRootTransform() const override;
-  virtual gfx::Transform GetInverseRootTransform() const override;
-  virtual void UpdateRootWindowSize(const gfx::Size& host_size) override;
+  gfx::Insets GetHostInsets() const override;
+  aura::WindowTreeHost* AsWindowTreeHost() override;
+  void SetRootTransform(const gfx::Transform& transform) override;
+  gfx::Transform GetRootTransform() const override;
+  gfx::Transform GetInverseRootTransform() const override;
+  void UpdateRootWindowSize(const gfx::Size& host_size) override;
+  void OnCursorVisibilityChangedNative(bool show) override;
+  void SetBounds(const gfx::Rect& bounds) override;
+  void DispatchEvent(ui::Event* event) override;
+
+  // Temporarily disable the tap-to-click feature. Used on CrOS.
+  void SetTapToClickPaused(bool state);
 
   TransformerHelper transformer_helper_;
 
@@ -41,17 +50,21 @@ class AshWindowTreeHostOzone : public AshWindowTreeHost,
 };
 
 AshWindowTreeHostOzone::AshWindowTreeHostOzone(const gfx::Rect& initial_bounds)
-    : aura::WindowTreeHostOzone(initial_bounds),
-      transformer_helper_(this) {}
+    : aura::WindowTreeHostOzone(initial_bounds), transformer_helper_(this) {
+}
 
-AshWindowTreeHostOzone::~AshWindowTreeHostOzone() {}
+AshWindowTreeHostOzone::~AshWindowTreeHostOzone() {
+}
 
 void AshWindowTreeHostOzone::ToggleFullScreen() {
   NOTIMPLEMENTED();
 }
 
 bool AshWindowTreeHostOzone::ConfineCursorToRootWindow() {
-  return false;
+  gfx::Rect confined_bounds(GetBounds().size());
+  confined_bounds.Inset(transformer_helper_.GetHostInsets());
+  platform_window()->ConfineCursorToBounds(confined_bounds);
+  return true;
 }
 
 void AshWindowTreeHostOzone::UnConfineCursor() {
@@ -61,6 +74,7 @@ void AshWindowTreeHostOzone::UnConfineCursor() {
 void AshWindowTreeHostOzone::SetRootWindowTransformer(
     scoped_ptr<RootWindowTransformer> transformer) {
   transformer_helper_.SetRootWindowTransformer(transformer.Pass());
+  ConfineCursorToRootWindow();
 }
 
 gfx::Insets AshWindowTreeHostOzone::GetHostInsets() const {
@@ -85,6 +99,31 @@ gfx::Transform AshWindowTreeHostOzone::GetInverseRootTransform() const {
 
 void AshWindowTreeHostOzone::UpdateRootWindowSize(const gfx::Size& host_size) {
   transformer_helper_.UpdateWindowSize(host_size);
+}
+
+void AshWindowTreeHostOzone::OnCursorVisibilityChangedNative(bool show) {
+  SetTapToClickPaused(!show);
+}
+
+void AshWindowTreeHostOzone::SetBounds(const gfx::Rect& bounds) {
+  WindowTreeHostOzone::SetBounds(bounds);
+  ConfineCursorToRootWindow();
+}
+
+void AshWindowTreeHostOzone::DispatchEvent(ui::Event* event) {
+  if (event->IsLocatedEvent())
+    TranslateLocatedEvent(static_cast<ui::LocatedEvent*>(event));
+  SendEventToProcessor(event);
+}
+
+void AshWindowTreeHostOzone::SetTapToClickPaused(bool state) {
+#if defined(OS_CHROMEOS)
+  DCHECK(ui::OzonePlatform::GetInstance()->GetInputController());
+
+  // Temporarily pause tap-to-click when the cursor is hidden.
+  ui::OzonePlatform::GetInstance()->GetInputController()->SetTapToClickPaused(
+      state);
+#endif
 }
 
 }  // namespace

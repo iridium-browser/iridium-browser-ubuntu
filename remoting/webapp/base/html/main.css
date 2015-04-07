@@ -346,16 +346,9 @@ section {
 .host-list-empty-instructions {
   padding-__MSG_@@bidi_start_edge__: 36px;
   color: #666;
-  background-image: url('host_setup_instructions.webp');
+  background-image: url(host_setup_instructions.webp);
   background-repeat: no-repeat;
   background-position: -3px -2px;
-}
-
-#host-list-empty-hosting-supported {
-  margin-top: 14px;
-  padding-top: 20px;
-  border-top: 1px solid #E5E5E5;
-  background-position-y: 18px;
 }
 
 .selectable {
@@ -385,7 +378,7 @@ section {
 }
 
 .error-state {
-  background-image: url('icon_warning.webp');
+  background-image: url(icon_warning.webp);
   background-repeat: no-repeat;
   background-position: top __MSG_@@bidi_start_edge__;
   padding-__MSG_@@bidi_start_edge__: 30px;
@@ -423,42 +416,6 @@ section {
   text-align: center;
   font-size: 12px;
   margin-top: 30px;
-}
-
-#butter-bar {
-  position: absolute;
-  top: 80px;
-  left: 0;
-  display: -webkit-box;
-  width: 100%;
-}
-
-#butter-bar-dismiss img {
-  vertical-align: top;
-  opacity: 0.4;
-  margin-__MSG_@@bidi_start_edge__: 2px;
-  margin-__MSG_@@bidi_end_edge__: -12px;
-}
-
-#butter-bar-dimiss:hover {
-  opacity: 0.7;
-}
-
-#butter-bar > p {
-  background-color: #f9edbe;
-  border: 1px solid #f0c36d;
-  border-radius: 2px;
-  box-shadow: 0px 2px 4px rgba(0,0,0,0.2);
-  color: #222;
-  font-size: 12px;
-  padding: 4px 16px;
-  margin: auto;
-}
-
-#butter-bar a {
-  color: inherit;
-  text-decoration: underline;
-  padding-__MSG_@@bidi_start_edge__: 2px;
 }
 
 #paired-clients-list table {
@@ -529,7 +486,7 @@ thead {
 }
 
 .host-list-main-icon > span {
-  background-image: url('icon_warning.webp');
+  background-image: url(icon_warning.webp);
   background-repeat: no-repeat;
   position: absolute;
   width: 22px;
@@ -553,7 +510,7 @@ button {
 }
 
 .waiting {
-  background-image: url('spinner.gif');
+  background-image: url(spinner.gif);
   background-repeat: no-repeat;
   background-position: __MSG_@@bidi_start_edge__ 3px;
   padding: 5px 30px;
@@ -597,6 +554,10 @@ button {
   margin-top: 12px;
 }
 
+.checkbox-label.disabled {
+  color: #888;
+}
+
 .checkbox-label input[type=checkbox] {
   float: __MSG_@@bidi_start_edge__;
   margin-__MSG_@@bidi_start_edge__: -20px;
@@ -605,13 +566,12 @@ button {
   margin-top: 2px;
 }
 
-#current-email {
-  color: rgba(0, 0, 0, 0.5);
+.checkbox-indent {
+  margin-left: 18px;
 }
 
-#daemon-plugin-container {
-  width: 0;
-  height: 0;
+#current-email {
+  color: rgba(0, 0, 0, 0.5);
 }
 
 .dialog-container {
@@ -653,11 +613,6 @@ html.apps-v2.scrollable {
   width: 460px;
 }
 */
-
-#host-plugin-container {
-  width: 0;
-  height: 0;
-}
 
 /* The NAT traversal state is independent of the app mode, and both need
  * to be combined to determine the visibility of the butter bar. We use
@@ -739,7 +694,7 @@ html.apps-v2.scrollable {
  * no scroll-bars, so the advantages of flex-box layout to achieve centering
  * (ie, the DOM is easier to measure to determine when scroll-bars are needed)
  * don't apply */
-.full-screen #session-mode {
+.fullscreen #session-mode {
   position: fixed;
   top: 0;
   left: 0;
@@ -750,38 +705,6 @@ html.apps-v2.scrollable {
  * the window height in addition to the home-screen UI. */
 body:not(.connected) #session-mode {
   height: auto;
-}
-
-/* video-container needs relative position so that mediasource-video-output can
- * be positioned relative to the parent with position:absolute. */
-#video-container {
-  position: relative;
-}
-
-/* mediasource-video-output is hidden by default. */
-#video-container video {
-  display: none;
-}
-
-/* Use absolute positioning for mediasource-video-output so that it's rendered
- * at the same position as the plugin. */
-#video-container.mediasource-rendering video {
-  display: block;
-  position: absolute;
-  left: 0;
-  top: 0;
-  box-shadow: 0 0 8px 0 black;
-}
-
-/*
- * With MediaSource-based rendering the plugin is transparent and is placed on
- * top of the <video> element so that it can still receive mouse events.
- *
- * TODO(sergeyu): This is temporary solution. Ideally mouse and keyboard events
- * should be captured on JS level and passed to the plugin.
- */
-#video-container.mediasource-rendering .client-plugin-container {
-  opacity: 0;
 }
 
 .mouse-cursor-overlay {

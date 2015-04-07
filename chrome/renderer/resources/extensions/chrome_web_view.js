@@ -7,14 +7,14 @@
 var ChromeWebView = require('chromeWebViewInternal').ChromeWebView;
 var CreateEvent = require('webViewEvents').CreateEvent;
 var EventBindings = require('event_bindings');
-var WebView = require('webView').WebView;
+var WebViewImpl = require('webView').WebViewImpl;
 
 var CHROME_WEB_VIEW_EVENTS = {
   'contextmenu': {
     evt: CreateEvent('chromeWebViewInternal.contextmenu'),
     cancelable: true,
     customHandler: function(handler, event, webViewEvent) {
-      handler.webViewInternal.maybeHandleContextMenu(event, webViewEvent);
+      handler.webViewImpl.maybeHandleContextMenu(event, webViewEvent);
     },
     fields: ['items']
   }
@@ -24,7 +24,7 @@ var CHROME_WEB_VIEW_EVENTS = {
  * Implemented when the ChromeWebView API is available.
  * @private
  */
-WebView.prototype.maybeGetChromeWebViewEvents = function() {
+WebViewImpl.prototype.maybeGetChromeWebViewEvents = function() {
   return CHROME_WEB_VIEW_EVENTS;
 };
 
@@ -34,10 +34,10 @@ WebView.prototype.maybeGetChromeWebViewEvents = function() {
  * This will be overridden in chrome_web_view_experimental.js to implement
  * contextmenu  API.
  */
-WebView.prototype.maybeHandleContextMenu = function(e, webViewEvent) {
+WebViewImpl.prototype.maybeHandleContextMenu = function(e, webViewEvent) {
   var requestId = e.requestId;
   // Setting |params| = undefined will show the context menu unmodified, hence
   // the 'contextmenu' API is disabled for stable channel.
   var params = undefined;
-  ChromeWebView.showContextMenu(this.guestInstanceId, requestId, params);
+  ChromeWebView.showContextMenu(this.guest.getId(), requestId, params);
 };

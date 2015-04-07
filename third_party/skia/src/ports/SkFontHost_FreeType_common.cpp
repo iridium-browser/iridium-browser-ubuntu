@@ -165,20 +165,20 @@ static void copyFT2LCD16(const FT_Bitmap& bitmap, const SkMask& mask, int lcdIsB
  *
  *  Yes, No, Never Requested, Never Produced
  *
- *                        kBW kA8 k3D kARGB32 kLCD16 kLCD32
- *  FT_PIXEL_MODE_MONO     Y   Y  NR     N       Y     NR
- *  FT_PIXEL_MODE_GRAY     N   Y  NR     N       Y     NR
- *  FT_PIXEL_MODE_GRAY2   NP  NP  NR    NP      NP     NR
- *  FT_PIXEL_MODE_GRAY4   NP  NP  NR    NP      NP     NR
- *  FT_PIXEL_MODE_LCD     NP  NP  NR    NP      NP     NR
- *  FT_PIXEL_MODE_LCD_V   NP  NP  NR    NP      NP     NR
- *  FT_PIXEL_MODE_BGRA     N   N  NR     Y       N     NR
+ *                        kBW kA8 k3D kARGB32 kLCD16
+ *  FT_PIXEL_MODE_MONO     Y   Y  NR     N       Y
+ *  FT_PIXEL_MODE_GRAY     N   Y  NR     N       Y
+ *  FT_PIXEL_MODE_GRAY2   NP  NP  NR    NP      NP
+ *  FT_PIXEL_MODE_GRAY4   NP  NP  NR    NP      NP
+ *  FT_PIXEL_MODE_LCD     NP  NP  NR    NP      NP
+ *  FT_PIXEL_MODE_LCD_V   NP  NP  NR    NP      NP
+ *  FT_PIXEL_MODE_BGRA     N   N  NR     Y       N
  *
  *  TODO: All of these N need to be Y or otherwise ruled out.
  */
 static void copyFTBitmap(const FT_Bitmap& srcFTBitmap, SkMask& dstMask) {
-    SkASSERT(dstMask.fBounds.width() == srcFTBitmap.width);
-    SkASSERT(dstMask.fBounds.height() == srcFTBitmap.rows);
+    SkASSERT(dstMask.fBounds.width() == static_cast<int>(srcFTBitmap.width));
+    SkASSERT(dstMask.fBounds.height() == static_cast<int>(srcFTBitmap.rows));
 
     const uint8_t* src = reinterpret_cast<const uint8_t*>(srcFTBitmap.buffer);
     const FT_Pixel_Mode srcFormat = static_cast<FT_Pixel_Mode>(srcFTBitmap.pixel_mode);

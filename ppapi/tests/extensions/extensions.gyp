@@ -54,10 +54,8 @@
       'type': 'none',
       'variables': {
         'nexe_target': 'ppapi_tests_extensions_packaged_app',
-        # TODO(teravest): Add testing for glibc, pnacl, and nonsfi modes.
         'build_newlib': 1,
         'build_glibc': 0,
-        'build_pnacl_newlib': 0,
         'nexe_destination_dir': 'test_data/ppapi/tests/extensions/packaged_app',
         'sources': [
           'packaged_app/test_packaged_app.cc'
@@ -67,8 +65,37 @@
           'packaged_app/index.html',
           'packaged_app/main.js',
           'packaged_app/manifest.json',
+          'packaged_app/test_file.txt',
+          'packaged_app/test_file2.txt',
+        ],
+        'create_nmf_args_portable': [
+          # Add lots of "files" entries to make sure that open_resource can
+          # handle more files than FileDescriptorSet::kMaxDescriptorsPerMessage.
+          '-xtest_file0:test_file.txt',
+          '-xtest_file1:test_file2.txt',
+          '-xtest_file2:test_file.txt',
+          '-xtest_file3:test_file2.txt',
+          '-xtest_file4:test_file.txt',
+          '-xtest_file5:test_file2.txt',
+          '-xtest_file6:test_file.txt',
+          '-xtest_file7:test_file2.txt',
         ],
       },
+      'conditions': [
+        ['target_arch=="ia32" and OS=="linux"', {
+          # Enable nonsfi testing only on ia32-linux environment.
+          # See chrome/test/data/nacl/nacl_test_data.gyp for more info.
+          'variables': {
+            'build_pnacl_newlib': 1,
+            'translate_pexe_with_build': 1,
+            'enable_x86_32_nonsfi': 1,
+          },
+        }],
+      ],
+      # Shim is a dependency for the nexe because we pre-translate.
+      'dependencies': [
+        '<(DEPTH)/ppapi/native_client/src/untrusted/pnacl_irt_shim/pnacl_irt_shim.gyp:aot',
+      ],
     },
   ],
 }

@@ -85,7 +85,7 @@ void HTMLImportLoader::responseReceived(Resource* resource, const ResourceRespon
     ASSERT_UNUSED(handle, !handle);
     // Resource may already have been loaded with the import loader
     // being added as a client later & now being notified. Fail early.
-    if (resource->loadFailedOrCanceled() || response.httpStatusCode() >= 400) {
+    if (resource->loadFailedOrCanceled() || response.httpStatusCode() >= 400 || !response.httpHeaderField("Content-Disposition").isNull()) {
         setState(StateError);
         return;
     }
@@ -116,7 +116,7 @@ HTMLImportLoader::State HTMLImportLoader::startWritingAndParsing(const ResourceR
     DocumentInit init = DocumentInit(response.url(), 0, m_controller->master()->contextDocument(), m_controller)
         .withRegistrationContext(m_controller->master()->registrationContext());
     m_document = HTMLDocument::create(init);
-    m_writer = DocumentWriter::create(m_document.get(), response.mimeType(), "UTF-8");
+    m_writer = DocumentWriter::create(m_document.get(), AllowAsynchronousParsing, response.mimeType(), "UTF-8");
 
     DocumentParser* parser = m_document->parser();
     ASSERT(parser);

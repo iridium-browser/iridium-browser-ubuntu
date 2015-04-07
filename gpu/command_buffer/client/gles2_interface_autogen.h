@@ -19,9 +19,12 @@ virtual void BindAttribLocation(GLuint program,
                                 GLuint index,
                                 const char* name) = 0;
 virtual void BindBuffer(GLenum target, GLuint buffer) = 0;
+virtual void BindBufferBase(GLenum target, GLuint index, GLuint buffer) = 0;
 virtual void BindFramebuffer(GLenum target, GLuint framebuffer) = 0;
 virtual void BindRenderbuffer(GLenum target, GLuint renderbuffer) = 0;
+virtual void BindSampler(GLuint unit, GLuint sampler) = 0;
 virtual void BindTexture(GLenum target, GLuint texture) = 0;
+virtual void BindTransformFeedback(GLenum target, GLuint transformfeedback) = 0;
 virtual void BlendColor(GLclampf red,
                         GLclampf green,
                         GLclampf blue,
@@ -71,6 +74,11 @@ virtual void CompressedTexSubImage2D(GLenum target,
                                      GLenum format,
                                      GLsizei imageSize,
                                      const void* data) = 0;
+virtual void CopyBufferSubData(GLenum readtarget,
+                               GLenum writetarget,
+                               GLintptr readoffset,
+                               GLintptr writeoffset,
+                               GLsizeiptr size) = 0;
 virtual void CopyTexImage2D(GLenum target,
                             GLint level,
                             GLenum internalformat,
@@ -94,8 +102,10 @@ virtual void DeleteBuffers(GLsizei n, const GLuint* buffers) = 0;
 virtual void DeleteFramebuffers(GLsizei n, const GLuint* framebuffers) = 0;
 virtual void DeleteProgram(GLuint program) = 0;
 virtual void DeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) = 0;
+virtual void DeleteSamplers(GLsizei n, const GLuint* samplers) = 0;
 virtual void DeleteShader(GLuint shader) = 0;
 virtual void DeleteTextures(GLsizei n, const GLuint* textures) = 0;
+virtual void DeleteTransformFeedbacks(GLsizei n, const GLuint* ids) = 0;
 virtual void DepthFunc(GLenum func) = 0;
 virtual void DepthMask(GLboolean flag) = 0;
 virtual void DepthRangef(GLclampf zNear, GLclampf zFar) = 0;
@@ -120,12 +130,19 @@ virtual void FramebufferTexture2D(GLenum target,
                                   GLenum textarget,
                                   GLuint texture,
                                   GLint level) = 0;
+virtual void FramebufferTextureLayer(GLenum target,
+                                     GLenum attachment,
+                                     GLuint texture,
+                                     GLint level,
+                                     GLint layer) = 0;
 virtual void FrontFace(GLenum mode) = 0;
 virtual void GenBuffers(GLsizei n, GLuint* buffers) = 0;
 virtual void GenerateMipmap(GLenum target) = 0;
 virtual void GenFramebuffers(GLsizei n, GLuint* framebuffers) = 0;
 virtual void GenRenderbuffers(GLsizei n, GLuint* renderbuffers) = 0;
+virtual void GenSamplers(GLsizei n, GLuint* samplers) = 0;
 virtual void GenTextures(GLsizei n, GLuint* textures) = 0;
+virtual void GenTransformFeedbacks(GLsizei n, GLuint* ids) = 0;
 virtual void GetActiveAttrib(GLuint program,
                              GLuint index,
                              GLsizei bufsize,
@@ -156,6 +173,11 @@ virtual void GetFramebufferAttachmentParameteriv(GLenum target,
                                                  GLenum pname,
                                                  GLint* params) = 0;
 virtual void GetIntegerv(GLenum pname, GLint* params) = 0;
+virtual void GetInternalformativ(GLenum target,
+                                 GLenum format,
+                                 GLenum pname,
+                                 GLsizei bufSize,
+                                 GLint* params) = 0;
 virtual void GetProgramiv(GLuint program, GLenum pname, GLint* params) = 0;
 virtual void GetProgramInfoLog(GLuint program,
                                GLsizei bufsize,
@@ -164,6 +186,12 @@ virtual void GetProgramInfoLog(GLuint program,
 virtual void GetRenderbufferParameteriv(GLenum target,
                                         GLenum pname,
                                         GLint* params) = 0;
+virtual void GetSamplerParameterfv(GLuint sampler,
+                                   GLenum pname,
+                                   GLfloat* params) = 0;
+virtual void GetSamplerParameteriv(GLuint sampler,
+                                   GLenum pname,
+                                   GLint* params) = 0;
 virtual void GetShaderiv(GLuint shader, GLenum pname, GLint* params) = 0;
 virtual void GetShaderInfoLog(GLuint shader,
                               GLsizei bufsize,
@@ -191,17 +219,31 @@ virtual void GetVertexAttribPointerv(GLuint index,
                                      GLenum pname,
                                      void** pointer) = 0;
 virtual void Hint(GLenum target, GLenum mode) = 0;
+virtual void InvalidateFramebuffer(GLenum target,
+                                   GLsizei count,
+                                   const GLenum* attachments) = 0;
+virtual void InvalidateSubFramebuffer(GLenum target,
+                                      GLsizei count,
+                                      const GLenum* attachments,
+                                      GLint x,
+                                      GLint y,
+                                      GLsizei width,
+                                      GLsizei height) = 0;
 virtual GLboolean IsBuffer(GLuint buffer) = 0;
 virtual GLboolean IsEnabled(GLenum cap) = 0;
 virtual GLboolean IsFramebuffer(GLuint framebuffer) = 0;
 virtual GLboolean IsProgram(GLuint program) = 0;
 virtual GLboolean IsRenderbuffer(GLuint renderbuffer) = 0;
+virtual GLboolean IsSampler(GLuint sampler) = 0;
 virtual GLboolean IsShader(GLuint shader) = 0;
 virtual GLboolean IsTexture(GLuint texture) = 0;
+virtual GLboolean IsTransformFeedback(GLuint transformfeedback) = 0;
 virtual void LineWidth(GLfloat width) = 0;
 virtual void LinkProgram(GLuint program) = 0;
+virtual void PauseTransformFeedback() = 0;
 virtual void PixelStorei(GLenum pname, GLint param) = 0;
 virtual void PolygonOffset(GLfloat factor, GLfloat units) = 0;
+virtual void ReadBuffer(GLenum src) = 0;
 virtual void ReadPixels(GLint x,
                         GLint y,
                         GLsizei width,
@@ -214,7 +256,16 @@ virtual void RenderbufferStorage(GLenum target,
                                  GLenum internalformat,
                                  GLsizei width,
                                  GLsizei height) = 0;
+virtual void ResumeTransformFeedback() = 0;
 virtual void SampleCoverage(GLclampf value, GLboolean invert) = 0;
+virtual void SamplerParameterf(GLuint sampler, GLenum pname, GLfloat param) = 0;
+virtual void SamplerParameterfv(GLuint sampler,
+                                GLenum pname,
+                                const GLfloat* params) = 0;
+virtual void SamplerParameteri(GLuint sampler, GLenum pname, GLint param) = 0;
+virtual void SamplerParameteriv(GLuint sampler,
+                                GLenum pname,
+                                const GLint* params) = 0;
 virtual void Scissor(GLint x, GLint y, GLsizei width, GLsizei height) = 0;
 virtual void ShaderBinary(GLsizei n,
                           const GLuint* shaders,
@@ -248,6 +299,16 @@ virtual void TexImage2D(GLenum target,
                         GLenum format,
                         GLenum type,
                         const void* pixels) = 0;
+virtual void TexImage3D(GLenum target,
+                        GLint level,
+                        GLint internalformat,
+                        GLsizei width,
+                        GLsizei height,
+                        GLsizei depth,
+                        GLint border,
+                        GLenum format,
+                        GLenum type,
+                        const void* pixels) = 0;
 virtual void TexParameterf(GLenum target, GLenum pname, GLfloat param) = 0;
 virtual void TexParameterfv(GLenum target,
                             GLenum pname,
@@ -256,6 +317,12 @@ virtual void TexParameteri(GLenum target, GLenum pname, GLint param) = 0;
 virtual void TexParameteriv(GLenum target,
                             GLenum pname,
                             const GLint* params) = 0;
+virtual void TexStorage3D(GLenum target,
+                          GLsizei levels,
+                          GLenum internalFormat,
+                          GLsizei width,
+                          GLsizei height,
+                          GLsizei depth) = 0;
 virtual void TexSubImage2D(GLenum target,
                            GLint level,
                            GLint xoffset,
@@ -265,18 +332,35 @@ virtual void TexSubImage2D(GLenum target,
                            GLenum format,
                            GLenum type,
                            const void* pixels) = 0;
+virtual void TexSubImage3D(GLenum target,
+                           GLint level,
+                           GLint xoffset,
+                           GLint yoffset,
+                           GLint zoffset,
+                           GLsizei width,
+                           GLsizei height,
+                           GLsizei depth,
+                           GLenum format,
+                           GLenum type,
+                           const void* pixels) = 0;
 virtual void Uniform1f(GLint location, GLfloat x) = 0;
 virtual void Uniform1fv(GLint location, GLsizei count, const GLfloat* v) = 0;
 virtual void Uniform1i(GLint location, GLint x) = 0;
 virtual void Uniform1iv(GLint location, GLsizei count, const GLint* v) = 0;
+virtual void Uniform1ui(GLint location, GLuint x) = 0;
+virtual void Uniform1uiv(GLint location, GLsizei count, const GLuint* v) = 0;
 virtual void Uniform2f(GLint location, GLfloat x, GLfloat y) = 0;
 virtual void Uniform2fv(GLint location, GLsizei count, const GLfloat* v) = 0;
 virtual void Uniform2i(GLint location, GLint x, GLint y) = 0;
 virtual void Uniform2iv(GLint location, GLsizei count, const GLint* v) = 0;
+virtual void Uniform2ui(GLint location, GLuint x, GLuint y) = 0;
+virtual void Uniform2uiv(GLint location, GLsizei count, const GLuint* v) = 0;
 virtual void Uniform3f(GLint location, GLfloat x, GLfloat y, GLfloat z) = 0;
 virtual void Uniform3fv(GLint location, GLsizei count, const GLfloat* v) = 0;
 virtual void Uniform3i(GLint location, GLint x, GLint y, GLint z) = 0;
 virtual void Uniform3iv(GLint location, GLsizei count, const GLint* v) = 0;
+virtual void Uniform3ui(GLint location, GLuint x, GLuint y, GLuint z) = 0;
+virtual void Uniform3uiv(GLint location, GLsizei count, const GLuint* v) = 0;
 virtual void Uniform4f(GLint location,
                        GLfloat x,
                        GLfloat y,
@@ -285,18 +369,48 @@ virtual void Uniform4f(GLint location,
 virtual void Uniform4fv(GLint location, GLsizei count, const GLfloat* v) = 0;
 virtual void Uniform4i(GLint location, GLint x, GLint y, GLint z, GLint w) = 0;
 virtual void Uniform4iv(GLint location, GLsizei count, const GLint* v) = 0;
+virtual void Uniform4ui(GLint location,
+                        GLuint x,
+                        GLuint y,
+                        GLuint z,
+                        GLuint w) = 0;
+virtual void Uniform4uiv(GLint location, GLsizei count, const GLuint* v) = 0;
 virtual void UniformMatrix2fv(GLint location,
                               GLsizei count,
                               GLboolean transpose,
                               const GLfloat* value) = 0;
+virtual void UniformMatrix2x3fv(GLint location,
+                                GLsizei count,
+                                GLboolean transpose,
+                                const GLfloat* value) = 0;
+virtual void UniformMatrix2x4fv(GLint location,
+                                GLsizei count,
+                                GLboolean transpose,
+                                const GLfloat* value) = 0;
 virtual void UniformMatrix3fv(GLint location,
                               GLsizei count,
                               GLboolean transpose,
                               const GLfloat* value) = 0;
+virtual void UniformMatrix3x2fv(GLint location,
+                                GLsizei count,
+                                GLboolean transpose,
+                                const GLfloat* value) = 0;
+virtual void UniformMatrix3x4fv(GLint location,
+                                GLsizei count,
+                                GLboolean transpose,
+                                const GLfloat* value) = 0;
 virtual void UniformMatrix4fv(GLint location,
                               GLsizei count,
                               GLboolean transpose,
                               const GLfloat* value) = 0;
+virtual void UniformMatrix4x2fv(GLint location,
+                                GLsizei count,
+                                GLboolean transpose,
+                                const GLfloat* value) = 0;
+virtual void UniformMatrix4x3fv(GLint location,
+                                GLsizei count,
+                                GLboolean transpose,
+                                const GLfloat* value) = 0;
 virtual void UseProgram(GLuint program) = 0;
 virtual void ValidateProgram(GLuint program) = 0;
 virtual void VertexAttrib1f(GLuint indx, GLfloat x) = 0;
@@ -311,6 +425,23 @@ virtual void VertexAttrib4f(GLuint indx,
                             GLfloat z,
                             GLfloat w) = 0;
 virtual void VertexAttrib4fv(GLuint indx, const GLfloat* values) = 0;
+virtual void VertexAttribI4i(GLuint indx,
+                             GLint x,
+                             GLint y,
+                             GLint z,
+                             GLint w) = 0;
+virtual void VertexAttribI4iv(GLuint indx, const GLint* values) = 0;
+virtual void VertexAttribI4ui(GLuint indx,
+                              GLuint x,
+                              GLuint y,
+                              GLuint z,
+                              GLuint w) = 0;
+virtual void VertexAttribI4uiv(GLuint indx, const GLuint* values) = 0;
+virtual void VertexAttribIPointer(GLuint indx,
+                                  GLint size,
+                                  GLenum type,
+                                  GLsizei stride,
+                                  const void* ptr) = 0;
 virtual void VertexAttribPointer(GLuint indx,
                                  GLint size,
                                  GLenum type,
@@ -353,7 +484,9 @@ virtual void GenQueriesEXT(GLsizei n, GLuint* queries) = 0;
 virtual void DeleteQueriesEXT(GLsizei n, const GLuint* queries) = 0;
 virtual GLboolean IsQueryEXT(GLuint id) = 0;
 virtual void BeginQueryEXT(GLenum target, GLuint id) = 0;
+virtual void BeginTransformFeedback(GLenum primitivemode) = 0;
 virtual void EndQueryEXT(GLenum target) = 0;
+virtual void EndTransformFeedback() = 0;
 virtual void GetQueryivEXT(GLenum target, GLenum pname, GLint* params) = 0;
 virtual void GetQueryObjectuivEXT(GLuint id, GLenum pname, GLuint* params) = 0;
 virtual void InsertEventMarkerEXT(GLsizei length, const GLchar* marker) = 0;
@@ -392,10 +525,6 @@ virtual void ResizeCHROMIUM(GLuint width,
 virtual const GLchar* GetRequestableExtensionsCHROMIUM() = 0;
 virtual void RequestExtensionCHROMIUM(const char* extension) = 0;
 virtual void RateLimitOffscreenContextCHROMIUM() = 0;
-virtual void GetMultipleIntegervCHROMIUM(const GLenum* pnames,
-                                         GLuint count,
-                                         GLint* results,
-                                         GLsizeiptr size) = 0;
 virtual void GetProgramInfoCHROMIUM(GLuint program,
                                     GLsizei bufsize,
                                     GLsizei* size,
@@ -462,7 +591,8 @@ virtual void UniformValuebufferCHROMIUM(GLint location,
                                         GLenum subscription) = 0;
 virtual void BindTexImage2DCHROMIUM(GLenum target, GLint imageId) = 0;
 virtual void ReleaseTexImage2DCHROMIUM(GLenum target, GLint imageId) = 0;
-virtual void TraceBeginCHROMIUM(const char* name) = 0;
+virtual void TraceBeginCHROMIUM(const char* category_name,
+                                const char* trace_name) = 0;
 virtual void TraceEndCHROMIUM() = 0;
 virtual void AsyncTexSubImage2DCHROMIUM(GLenum target,
                                         GLint level,
@@ -503,6 +633,7 @@ virtual void ScheduleOverlayPlaneCHROMIUM(GLint plane_z_order,
                                           GLfloat uv_y,
                                           GLfloat uv_width,
                                           GLfloat uv_height) = 0;
+virtual void SwapInterval(GLint interval) = 0;
 virtual void MatrixLoadfCHROMIUM(GLenum matrixMode, const GLfloat* m) = 0;
 virtual void MatrixLoadIdentityCHROMIUM(GLenum matrixMode) = 0;
 virtual void BlendBarrierKHR() = 0;

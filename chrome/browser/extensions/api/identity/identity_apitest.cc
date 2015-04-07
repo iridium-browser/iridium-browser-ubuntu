@@ -41,6 +41,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/guest_view/guest_view_base.h"
 #include "extensions/common/manifest_handlers/oauth2_manifest_handler.h"
 #include "extensions/common/test_util.h"
@@ -401,7 +402,7 @@ gaia::AccountIds CreateIds(std::string email, std::string obfid) {
 }
 
 class IdentityGetAccountsFunctionTest : public ExtensionBrowserTest {
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kExtensionsMultiAccount);
   }
@@ -513,7 +514,7 @@ IN_PROC_BROWSER_TEST_F(IdentityGetAccountsFunctionTest, TwoAccountsSignedIn) {
 
 class IdentityOldProfilesGetAccountsFunctionTest
     : public IdentityGetAccountsFunctionTest {
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     // Don't add the multi-account switch that parent class would have.
   }
 };
@@ -618,10 +619,10 @@ class IdentityGetProfileUserInfoFunctionTest : public IdentityTestWithSignin {
  private:
   scoped_refptr<Extension> CreateExtensionWithEmailPermission() {
     scoped_ptr<base::DictionaryValue> test_extension_value(
-        utils::ParseDictionary(
+        api_test_utils::ParseDictionary(
             "{\"name\": \"Test\", \"version\": \"1.0\", "
             "\"permissions\": [\"identity.email\"]}"));
-    return utils::CreateExtension(test_extension_value.get());
+    return api_test_utils::CreateExtension(test_extension_value.get());
   }
 };
 
@@ -652,12 +653,12 @@ IN_PROC_BROWSER_TEST_F(IdentityGetProfileUserInfoFunctionTest,
   SignIn("president@example.com", "12345");
   scoped_ptr<api::identity::ProfileUserInfo> info = RunGetProfileUserInfo();
   EXPECT_TRUE(info->email.empty());
-  EXPECT_EQ("12345", info->id);
+  EXPECT_TRUE(info->id.empty());
 }
 
 class GetAuthTokenFunctionTest : public IdentityTestWithSignin {
  public:
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     IdentityTestWithSignin::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kExtensionsMultiAccount);
   }
@@ -861,7 +862,8 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
   SignIn("primary@example.com");
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -885,7 +887,8 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
   SignIn("primary@example.com");
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -1662,7 +1665,7 @@ IN_PROC_BROWSER_TEST_F(RemoveCachedAuthTokenFunctionTest, MatchingToken) {
 
 class LaunchWebAuthFlowFunctionTest : public AsyncExtensionBrowserTest {
  public:
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     AsyncExtensionBrowserTest::SetUpCommandLine(command_line);
     // Reduce performance test variance by disabling background networking.
     command_line->AppendSwitch(switches::kDisableBackgroundNetworking);
@@ -1742,7 +1745,8 @@ IN_PROC_BROWSER_TEST_F(LaunchWebAuthFlowFunctionTest, LoadFailed) {
 IN_PROC_BROWSER_TEST_F(LaunchWebAuthFlowFunctionTest, NonInteractiveSuccess) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -1768,7 +1772,8 @@ IN_PROC_BROWSER_TEST_F(
     LaunchWebAuthFlowFunctionTest, InteractiveFirstNavigationSuccess) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 

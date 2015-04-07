@@ -14,6 +14,7 @@
 #include "pdf/out_of_process_instance.h"
 #include "ppapi/c/ppp.h"
 #include "ppapi/cpp/private/pdf.h"
+#include "v8/include/v8.h"
 
 bool g_sdk_initialized_via_pepper = false;
 
@@ -28,7 +29,6 @@ bool g_sdk_initialized_via_pepper = false;
 #endif
 
 #if defined(OS_WIN)
-HMODULE g_hmodule;
 
 void HandleInvalidParameter(const wchar_t* expression,
                             const wchar_t* function,
@@ -48,7 +48,6 @@ void HandlePureVirtualCall() {
 
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason_for_call, LPVOID reserved) {
-  g_hmodule = module;
   if (reason_for_call == DLL_PROCESS_ATTACH) {
     // On windows following handlers work only inside module. So breakpad in
     // chrome.dll does not catch that. To avoid linking related code or
@@ -56,6 +55,17 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason_for_call, LPVOID reserved) {
     // and crash in a way interceptable by breakpad of parent module.
     _set_invalid_parameter_handler(HandleInvalidParameter);
     _set_purecall_handler(HandlePureVirtualCall);
+
+#if defined(ARCH_CPU_X86_64) && _MSC_VER <= 1800
+    // VS2013's CRT only checks the existence of FMA3 instructions, not the
+    // enabled-ness of them at the OS level (this is fixed in VS2015). We force
+    // off usage of FMA3 instructions in the CRT to avoid using that path and
+    // hitting illegal instructions when running on CPUs that support FMA3, but
+    // OSs that don't. Because we use the static library CRT we have to call
+    // this function once in each DLL.
+    // See http://crbug.com/436603.
+    _set_FMA3_enable(0);
+#endif  // ARCH_CPU_X86_64 && _MSC_VER <= 1800
   }
   return TRUE;
 }
@@ -88,11 +98,16 @@ bool PDFModule::Init() {
 
 pp::Instance* PDFModule::CreateInstance(PP_Instance instance) {
   if (!g_sdk_initialized_via_pepper) {
-    void* data = NULL;
-#if defined(OS_WIN)
-    data = g_hmodule;
-#endif
-    if (!chrome_pdf::InitializeSDK(data))
+    v8::StartupData natives;
+    v8::StartupData snapshot;
+    pp::PDF::GetV8ExternalSnapshotData(pp::InstanceHandle(instance),
+                                       &natives.data, &natives.raw_size,
+                                       &snapshot.data, &snapshot.raw_size);
+    if (natives.data) {
+      v8::V8::SetNativesDataBlob(&natives);
+      v8::V8::SetSnapshotDataBlob(&snapshot);
+    }
+    if (!chrome_pdf::InitializeSDK())
       return NULL;
     g_sdk_initialized_via_pepper = true;
   }
@@ -155,7 +170,7 @@ PP_EXPORT bool RenderPDFPageToDC(const void* pdf_buffer,
                                  bool center_in_bounds,
                                  bool autorotate) {
   if (!g_sdk_initialized_via_pepper) {
-    if (!chrome_pdf::InitializeSDK(g_hmodule)) {
+    if (!chrome_pdf::InitializeSDK()) {
       return false;
     }
   }
@@ -183,11 +198,7 @@ bool GetPDFDocInfo(const void* pdf_buffer,
                    int buffer_size, int* page_count,
                    double* max_page_width) {
   if (!g_sdk_initialized_via_pepper) {
-    void* data = NULL;
-#if defined(OS_WIN)
-    data = g_hmodule;
-#endif
-    if (!chrome_pdf::InitializeSDK(data))
+    if (!chrome_pdf::InitializeSDK())
       return false;
   }
   scoped_ptr<chrome_pdf::PDFEngineExports> engine_exports(
@@ -214,11 +225,7 @@ bool GetPDFPageSizeByIndex(const void* pdf_buffer,
                            int pdf_buffer_size, int page_number,
                            double* width, double* height) {
   if (!g_sdk_initialized_via_pepper) {
-    void* data = NULL;
-#if defined(OS_WIN)
-    data = g_hmodule;
-#endif
-    if (!chrome_pdf::InitializeSDK(data))
+    if (!chrome_pdf::InitializeSDK())
       return false;
   }
   scoped_ptr<chrome_pdf::PDFEngineExports> engine_exports(
@@ -252,11 +259,7 @@ bool RenderPDFPageToBitmap(const void* pdf_buffer,
                            int dpi,
                            bool autorotate) {
   if (!g_sdk_initialized_via_pepper) {
-    void* data = NULL;
-#if defined(OS_WIN)
-    data = g_hmodule;
-#endif
-    if (!chrome_pdf::InitializeSDK(data))
+    if (!chrome_pdf::InitializeSDK())
       return false;
   }
   scoped_ptr<chrome_pdf::PDFEngineExports> engine_exports(

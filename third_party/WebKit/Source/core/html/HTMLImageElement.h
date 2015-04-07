@@ -34,6 +34,7 @@ namespace blink {
 
 class HTMLFormElement;
 class ImageCandidate;
+class ShadowRoot;
 
 class HTMLImageElement final : public HTMLElement, public CanvasImageSource {
     DEFINE_WRAPPERTYPEINFO();
@@ -42,6 +43,8 @@ public:
 
     static PassRefPtrWillBeRawPtr<HTMLImageElement> create(Document&);
     static PassRefPtrWillBeRawPtr<HTMLImageElement> create(Document&, HTMLFormElement*, bool createdByParser);
+    static PassRefPtrWillBeRawPtr<HTMLImageElement> createForJSConstructor(Document&);
+    static PassRefPtrWillBeRawPtr<HTMLImageElement> createForJSConstructor(Document&, int width);
     static PassRefPtrWillBeRawPtr<HTMLImageElement> createForJSConstructor(Document&, int width, int height);
 
     virtual ~HTMLImageElement();
@@ -56,7 +59,7 @@ public:
 
     bool isServerMap() const;
 
-    const AtomicString& altText() const;
+    virtual String altText() const override final;
 
     ImageResource* cachedImage() const { return imageLoader().image(); }
     void setImageResource(ImageResource* i) { imageLoader().setImage(i); };
@@ -86,6 +89,8 @@ public:
 
     virtual HTMLFormElement* formOwner() const override;
     void formRemovedFromTree(const Node& formRoot);
+    virtual void ensureFallbackContent();
+    virtual void ensurePrimaryContent();
 
     // CanvasImageSourceImplementations
     virtual PassRefPtr<Image> getSourceImageForCanvas(SourceImageMode, SourceImageStatus*) const override;
@@ -96,11 +101,18 @@ public:
 
     // public so that HTMLPictureElement can call this as well.
     void selectSourceURL(ImageLoader::UpdateFromElementBehavior);
+    void reattachFallbackContent();
+    void setUseFallbackContent();
+    void setIsFallbackImage() { m_isFallbackImage = true; }
+
 protected:
     explicit HTMLImageElement(Document&, HTMLFormElement* = 0, bool createdByParser = false);
 
     virtual void didMoveToNewDocument(Document& oldDocument) override;
+    virtual bool useFallbackContent() const { return m_useFallbackContent; }
 
+    virtual void didAddUserAgentShadowRoot(ShadowRoot&) override;
+    virtual PassRefPtr<RenderStyle> customStyleForRenderer() override;
 private:
     virtual bool areAuthorShadowsAllowed() const override { return false; }
 
@@ -146,6 +158,8 @@ private:
     unsigned m_elementCreatedByParser : 1;
     // Intrinsic sizing is viewport dependant if the 'w' descriptor was used for the picked resource.
     unsigned m_intrinsicSizingViewportDependant : 1;
+    unsigned m_useFallbackContent : 1;
+    unsigned m_isFallbackImage : 1;
 };
 
 } // namespace blink

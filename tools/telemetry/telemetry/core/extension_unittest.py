@@ -11,7 +11,7 @@ import unittest
 from telemetry.core import browser_finder
 from telemetry.core import extension_to_load
 from telemetry.core import util
-from telemetry.unittest import options_for_unittests
+from telemetry.unittest_util import options_for_unittests
 
 
 class ExtensionTest(unittest.TestCase):
@@ -137,10 +137,9 @@ class MultipleExtensionTest(unittest.TestCase):
       return
 
     # Test contains.
-    loaded_extensions = filter(lambda e: e in self._browser.extensions,
-                               self._extensions_to_load)
+    loaded_extensions = [e for e in self._extensions_to_load
+                         if e in self._browser.extensions]
     self.assertEqual(len(loaded_extensions), len(self._extensions_to_load))
-
     for load_extension in self._extensions_to_load:
       extension = self._browser.extensions[load_extension]
       assert extension

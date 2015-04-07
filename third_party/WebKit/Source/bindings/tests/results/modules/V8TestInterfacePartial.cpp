@@ -57,9 +57,7 @@ static void voidMethodPartialOverloadMethod(const v8::FunctionCallbackInfo<v8::V
         }
         break;
     default:
-        exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(0, info.Length()));
-        exceptionState.throwIfNeeded();
-        return;
+        break;
     }
     exceptionState.throwTypeError("No function was found that matched the signature provided.");
     exceptionState.throwIfNeeded();
@@ -87,9 +85,7 @@ static void staticVoidMethodPartialOverloadMethod(const v8::FunctionCallbackInfo
         }
         break;
     default:
-        exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(0, info.Length()));
-        exceptionState.throwIfNeeded();
-        return;
+        break;
     }
     exceptionState.throwTypeError("No function was found that matched the signature provided.");
     exceptionState.throwIfNeeded();
@@ -100,11 +96,11 @@ static void promiseMethodPartialOverload3Method(const v8::FunctionCallbackInfo<v
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
     Document* document;
     {
-        if (info.Length() > 0 && !V8Document::hasInstance(info[0], info.GetIsolate())) {
+        document = V8Document::toImplWithTypeCheck(info.GetIsolate(), info[0]);
+        if (!document) {
             v8SetReturnValue(info, ScriptPromise::rejectRaw(info.GetIsolate(), V8ThrowException::createTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("promiseMethodPartialOverload", "TestInterface", "parameter 1 is not of type 'Document'."))));
             return;
         }
-        document = V8Document::toImpl(v8::Handle<v8::Object>::Cast(info[0]));
     }
     v8SetReturnValue(info, TestPartialInterfaceImplementation3::promiseMethodPartialOverload(*impl, document).v8Value());
 }
@@ -122,9 +118,7 @@ static void promiseMethodPartialOverloadMethod(const v8::FunctionCallbackInfo<v8
         }
         break;
     default:
-        exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(0, info.Length()));
-        v8SetReturnValue(info, exceptionState.reject(ScriptState::current(info.GetIsolate())).v8Value());
-        return;
+        break;
     }
     exceptionState.throwTypeError("No function was found that matched the signature provided.");
     v8SetReturnValue(info, exceptionState.reject(ScriptState::current(info.GetIsolate())).v8Value());
@@ -153,9 +147,7 @@ static void staticPromiseMethodPartialOverloadMethod(const v8::FunctionCallbackI
         }
         break;
     default:
-        exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(0, info.Length()));
-        v8SetReturnValue(info, exceptionState.reject(ScriptState::current(info.GetIsolate())).v8Value());
-        return;
+        break;
     }
     exceptionState.throwTypeError("No function was found that matched the signature provided.");
     v8SetReturnValue(info, exceptionState.reject(ScriptState::current(info.GetIsolate())).v8Value());
@@ -176,11 +168,11 @@ static void partial2VoidMethod3Method(const v8::FunctionCallbackInfo<v8::Value>&
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
     Node* node;
     {
-        if (info.Length() > 0 && !V8Node::hasInstance(info[0], info.GetIsolate())) {
+        node = V8Node::toImplWithTypeCheck(info.GetIsolate(), info[0]);
+        if (!node) {
             V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("partial2VoidMethod", "TestInterface", "parameter 1 is not of type 'Node'."));
             return;
         }
-        node = V8Node::toImpl(v8::Handle<v8::Object>::Cast(info[0]));
     }
     TestPartialInterfaceImplementation3::partial2VoidMethod(*impl, node);
 }
@@ -202,9 +194,7 @@ static void partial2VoidMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& 
         }
         break;
     default:
-        exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(0, info.Length()));
-        exceptionState.throwIfNeeded();
-        return;
+        break;
     }
     exceptionState.throwTypeError("No function was found that matched the signature provided.");
     exceptionState.throwIfNeeded();
@@ -232,9 +222,7 @@ static void partial2StaticVoidMethodMethod(const v8::FunctionCallbackInfo<v8::Va
         }
         break;
     default:
-        exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(0, info.Length()));
-        exceptionState.throwIfNeeded();
-        return;
+        break;
     }
     exceptionState.throwTypeError("No function was found that matched the signature provided.");
     exceptionState.throwIfNeeded();
@@ -242,19 +230,18 @@ static void partial2StaticVoidMethodMethod(const v8::FunctionCallbackInfo<v8::Va
 
 } // namespace TestInterfaceImplementationPartialV8Internal
 
-void V8TestInterfacePartial::installV8TestInterfaceTemplate(v8::Handle<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+void V8TestInterfacePartial::installV8TestInterfaceTemplate(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
 {
     V8TestInterface::installV8TestInterfaceTemplate(functionTemplate, isolate);
 
     v8::Local<v8::Signature> defaultSignature;
     if (!RuntimeEnabledFeatures::featureNameEnabled())
-        defaultSignature = V8DOMConfiguration::installDOMClassTemplate(functionTemplate, "", v8::Local<v8::FunctionTemplate>(), V8TestInterface::internalFieldCount, 0, 0, 0, 0, 0, 0, isolate);
+        defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "", v8::Local<v8::FunctionTemplate>(), V8TestInterface::internalFieldCount, 0, 0, 0, 0, 0, 0);
     else
-        defaultSignature = V8DOMConfiguration::installDOMClassTemplate(functionTemplate, "TestInterface", v8::Local<v8::FunctionTemplate>(), V8TestInterface::internalFieldCount,
+        defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "TestInterface", v8::Local<v8::FunctionTemplate>(), V8TestInterface::internalFieldCount,
             0, 0,
             0, 0,
-            0, 0,
-            isolate);
+            0, 0);
     v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
     ALLOW_UNUSED_LOCAL(instanceTemplate);
     v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
@@ -262,11 +249,11 @@ void V8TestInterfacePartial::installV8TestInterfaceTemplate(v8::Handle<v8::Funct
     static const V8DOMConfiguration::ConstantConfiguration V8TestInterfaceConstants[] = {
         {"PARTIAL3_UNSIGNED_SHORT", 0, 0, 0, V8DOMConfiguration::ConstantTypeUnsignedShort},
     };
-    V8DOMConfiguration::installConstants(functionTemplate, prototypeTemplate, V8TestInterfaceConstants, WTF_ARRAY_LENGTH(V8TestInterfaceConstants), isolate);
+    V8DOMConfiguration::installConstants(isolate, functionTemplate, prototypeTemplate, V8TestInterfaceConstants, WTF_ARRAY_LENGTH(V8TestInterfaceConstants));
     functionTemplate->InstanceTemplate()->SetCallAsFunctionHandler(V8TestInterface::legacyCallCustom);
 }
 
-void V8TestInterfacePartial::installConditionallyEnabledMethods(v8::Handle<v8::Object> prototypeObject, v8::Isolate* isolate)
+void V8TestInterfacePartial::installConditionallyEnabledMethods(v8::Local<v8::Object> prototypeObject, v8::Isolate* isolate)
 {
     V8TestInterface::installConditionallyEnabledMethods(prototypeObject, isolate);
 }
@@ -277,7 +264,7 @@ bool V8TestInterface::PrivateScript::shortMethodWithShortArgumentImplementedInPr
         return false;
     v8::HandleScope handleScope(toIsolate(frame));
     ScriptForbiddenScope::AllowUserAgentScript script;
-    v8::Handle<v8::Context> contextInPrivateScript = toV8Context(frame, DOMWrapperWorld::privateScriptIsolatedWorld());
+    v8::Local<v8::Context> contextInPrivateScript = toV8Context(frame, DOMWrapperWorld::privateScriptIsolatedWorld());
     if (contextInPrivateScript.IsEmpty())
         return false;
     ScriptState* scriptState = ScriptState::from(contextInPrivateScript);
@@ -286,12 +273,12 @@ bool V8TestInterface::PrivateScript::shortMethodWithShortArgumentImplementedInPr
         return false;
 
     ScriptState::Scope scope(scriptState);
-    v8::Handle<v8::Value> holder = toV8(holderImpl, scriptState->context()->Global(), scriptState->isolate());
+    v8::Local<v8::Value> holder = toV8(holderImpl, scriptState->context()->Global(), scriptState->isolate());
 
-    v8::Handle<v8::Value> valueHandle = v8::Integer::New(scriptState->isolate(), value);
-    v8::Handle<v8::Value> argv[] = { valueHandle };
+    v8::Local<v8::Value> valueHandle = v8::Integer::New(scriptState->isolate(), value);
+    v8::Local<v8::Value> argv[] = { valueHandle };
     ExceptionState exceptionState(ExceptionState::ExecutionContext, "shortMethodWithShortArgumentImplementedInPrivateScript", "TestInterfaceImplementation", scriptState->context()->Global(), scriptState->isolate());
-    v8::Handle<v8::Value> v8Value = PrivateScriptRunner::runDOMMethod(scriptState, scriptStateInUserScript, "TestInterfaceImplementation", "shortMethodWithShortArgumentImplementedInPrivateScript", holder, 1, argv);
+    v8::Local<v8::Value> v8Value = PrivateScriptRunner::runDOMMethod(scriptState, scriptStateInUserScript, "TestInterfaceImplementation", "shortMethodWithShortArgumentImplementedInPrivateScript", holder, 1, argv);
     if (v8Value.IsEmpty())
         return false;
     TONATIVE_DEFAULT_EXCEPTIONSTATE(int, cppValue, toInt16(v8Value, exceptionState), exceptionState, false);

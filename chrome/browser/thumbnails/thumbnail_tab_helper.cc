@@ -17,7 +17,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "ui/gfx/color_utils.h"
-#include "ui/gfx/size_conversions.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/scrollbar_size.h"
 #include "ui/gfx/skbitmap_operations.h"
@@ -64,9 +64,9 @@ void UpdateThumbnail(const ThumbnailingContext& context,
 
 void ProcessCapturedBitmap(scoped_refptr<ThumbnailingContext> context,
                            scoped_refptr<ThumbnailingAlgorithm> algorithm,
-                           bool succeeded,
-                           const SkBitmap& bitmap) {
-  if (!succeeded)
+                           const SkBitmap& bitmap,
+                           content::ReadbackResponse response) {
+  if (response != content::READBACK_SUCCESS)
     return;
 
   // On success, we must be on the UI thread (on failure because of shutdown we

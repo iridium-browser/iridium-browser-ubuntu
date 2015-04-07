@@ -28,6 +28,7 @@
 
 #include "bindings/core/v8/ScriptPromiseProperty.h"
 #include "core/dom/ActiveDOMObject.h"
+#include "core/dom/DOMArrayPiece.h"
 #include "core/dom/DOMException.h"
 #include "modules/EventTargetModules.h"
 #include "platform/Timer.h"
@@ -36,12 +37,8 @@
 
 namespace blink {
 
-class DOMArrayBuffer;
-class DOMArrayBufferView;
 class GenericEventQueue;
-class MediaKeyError;
 class MediaKeys;
-class WebString;
 
 // References are held by JS only. However, even if all JS references are
 // dropped, it won't be garbage collected until close event received or
@@ -57,7 +54,8 @@ class WebString;
 // it may outlive any JavaScript references as long as the MediaKeys object is alive.
 // The WebContentDecryptionModuleSession has the same lifetime as this object.
 class MediaKeySession final
-    : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<MediaKeySession>, public ActiveDOMObject, public EventTargetWithInlineData
+    : public RefCountedGarbageCollectedEventTargetWithInlineData<MediaKeySession>
+    , public ActiveDOMObject
     , private WebContentDecryptionModuleSession::Client {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<MediaKeySession>);
     DEFINE_WRAPPERTYPEINFO();
@@ -67,20 +65,14 @@ public:
     static bool isValidSessionType(const String& sessionType);
     virtual ~MediaKeySession();
 
-    const String& keySystem() const { return m_keySystem; }
     String sessionId() const;
     double expiration() const { return m_expiration; }
     ScriptPromise closed(ScriptState*);
 
-    ScriptPromise generateRequest(ScriptState*, const String& initDataType, DOMArrayBuffer* initData);
-    ScriptPromise generateRequest(ScriptState*, const String& initDataType, DOMArrayBufferView* initData);
+    ScriptPromise generateRequest(ScriptState*, const String& initDataType, const DOMArrayPiece& initData);
     ScriptPromise load(ScriptState*, const String& sessionId);
 
-    void setError(MediaKeyError*);
-    MediaKeyError* error() { return m_error.get(); }
-
-    ScriptPromise update(ScriptState*, DOMArrayBuffer* response);
-    ScriptPromise update(ScriptState*, DOMArrayBufferView* response);
+    ScriptPromise update(ScriptState*, const DOMArrayPiece& response);
     ScriptPromise close(ScriptState*);
     ScriptPromise remove(ScriptState*);
 
@@ -98,23 +90,18 @@ public:
 
 private:
     class PendingAction;
-    friend class NewSessionResult;
-    friend class LoadSessionResult;
+    friend class NewSessionResultPromise;
+    friend class LoadSessionResultPromise;
 
     MediaKeySession(ScriptState*, MediaKeys*, const String& sessionType);
 
     void actionTimerFired(Timer<MediaKeySession>*);
 
     // WebContentDecryptionModuleSession::Client
+    virtual void message(MessageType, const unsigned char* message, size_t messageLength) override;
     virtual void message(const unsigned char* message, size_t messageLength, const WebURL& destinationURL) override;
-    virtual void ready() override;
     virtual void close() override;
-    virtual void error(MediaKeyErrorCode, unsigned long systemCode) override;
-    virtual void error(WebContentDecryptionModuleException, unsigned long systemCode, const WebString& errorMessage) override;
     virtual void expirationChanged(double updatedExpiryTimeInMS) override;
-
-    ScriptPromise generateRequestInternal(ScriptState*, const String& initDataType, PassRefPtr<DOMArrayBuffer> initData);
-    ScriptPromise updateInternal(ScriptState*, PassRefPtr<DOMArrayBuffer> response);
 
     // Called by NewSessionResult when the new session has been created.
     void finishGenerateRequest();
@@ -123,7 +110,6 @@ private:
     void finishLoad();
 
     String m_keySystem;
-    RefPtrWillBeMember<MediaKeyError> m_error;
     OwnPtrWillBeMember<GenericEventQueue> m_asyncEventQueue;
     OwnPtr<WebContentDecryptionModuleSession> m_session;
 
@@ -140,7 +126,7 @@ private:
     bool m_isClosed; // Is the CDM finished with this session?
 
     // Keep track of the closed promise.
-    typedef ScriptPromiseProperty<Member<MediaKeySession>, V8UndefinedType, RefPtrWillBeMember<DOMException> > ClosedPromise;
+    typedef ScriptPromiseProperty<Member<MediaKeySession>, ToV8UndefinedGenerator, RefPtrWillBeMember<DOMException> > ClosedPromise;
     Member<ClosedPromise> m_closedPromise;
 
     HeapDeque<Member<PendingAction> > m_pendingActions;

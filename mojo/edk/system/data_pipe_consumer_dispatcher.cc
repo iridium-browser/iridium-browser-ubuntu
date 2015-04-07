@@ -15,7 +15,7 @@ DataPipeConsumerDispatcher::DataPipeConsumerDispatcher() {
 }
 
 void DataPipeConsumerDispatcher::Init(scoped_refptr<DataPipe> data_pipe) {
-  DCHECK(data_pipe.get());
+  DCHECK(data_pipe);
   data_pipe_ = data_pipe;
 }
 
@@ -25,12 +25,12 @@ Dispatcher::Type DataPipeConsumerDispatcher::GetType() const {
 
 DataPipeConsumerDispatcher::~DataPipeConsumerDispatcher() {
   // |Close()|/|CloseImplNoLock()| should have taken care of the pipe.
-  DCHECK(!data_pipe_.get());
+  DCHECK(!data_pipe_);
 }
 
-void DataPipeConsumerDispatcher::CancelAllWaitersNoLock() {
+void DataPipeConsumerDispatcher::CancelAllAwakablesNoLock() {
   lock().AssertAcquired();
-  data_pipe_->ConsumerCancelAllWaiters();
+  data_pipe_->ConsumerCancelAllAwakables();
 }
 
 void DataPipeConsumerDispatcher::CloseImplNoLock() {
@@ -77,9 +77,7 @@ MojoResult DataPipeConsumerDispatcher::ReadDataImplNoLock(
   }
 
   return data_pipe_->ConsumerReadData(
-      elements,
-      num_bytes,
-      !!(flags & MOJO_READ_DATA_FLAG_ALL_OR_NONE),
+      elements, num_bytes, !!(flags & MOJO_READ_DATA_FLAG_ALL_OR_NONE),
       !!(flags & MOJO_READ_DATA_FLAG_PEEK));
 }
 
@@ -91,8 +89,7 @@ MojoResult DataPipeConsumerDispatcher::BeginReadDataImplNoLock(
 
   // These flags may not be used in two-phase mode.
   if ((flags & MOJO_READ_DATA_FLAG_DISCARD) ||
-      (flags & MOJO_READ_DATA_FLAG_QUERY) ||
-      (flags & MOJO_READ_DATA_FLAG_PEEK))
+      (flags & MOJO_READ_DATA_FLAG_QUERY) || (flags & MOJO_READ_DATA_FLAG_PEEK))
     return MOJO_RESULT_INVALID_ARGUMENT;
 
   return data_pipe_->ConsumerBeginReadData(
@@ -112,20 +109,21 @@ HandleSignalsState DataPipeConsumerDispatcher::GetHandleSignalsStateImplNoLock()
   return data_pipe_->ConsumerGetHandleSignalsState();
 }
 
-MojoResult DataPipeConsumerDispatcher::AddWaiterImplNoLock(
-    Waiter* waiter,
+MojoResult DataPipeConsumerDispatcher::AddAwakableImplNoLock(
+    Awakable* awakable,
     MojoHandleSignals signals,
     uint32_t context,
     HandleSignalsState* signals_state) {
   lock().AssertAcquired();
-  return data_pipe_->ConsumerAddWaiter(waiter, signals, context, signals_state);
+  return data_pipe_->ConsumerAddAwakable(awakable, signals, context,
+                                         signals_state);
 }
 
-void DataPipeConsumerDispatcher::RemoveWaiterImplNoLock(
-    Waiter* waiter,
+void DataPipeConsumerDispatcher::RemoveAwakableImplNoLock(
+    Awakable* awakable,
     HandleSignalsState* signals_state) {
   lock().AssertAcquired();
-  data_pipe_->ConsumerRemoveWaiter(waiter, signals_state);
+  data_pipe_->ConsumerRemoveAwakable(awakable, signals_state);
 }
 
 bool DataPipeConsumerDispatcher::IsBusyNoLock() const {

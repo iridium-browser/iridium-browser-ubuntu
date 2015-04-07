@@ -11,8 +11,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 #include "ui/gfx/font_list.h"
+#include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/range/range.h"
-#include "ui/gfx/rect_f.h"
 
 using testing::AtLeast;
 using testing::Return;
@@ -74,7 +74,7 @@ class PasswordGenerationPopupViewCocoaTest : public CocoaTest {
     : password_(base::ASCIIToUTF16("wow! such password"))
   {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     mock_controller_.reset(new MockPasswordGenerationPopupController);
     EXPECT_CALL(*mock_controller_, password())
         .WillRepeatedly(Return(password_));

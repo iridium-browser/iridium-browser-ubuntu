@@ -50,11 +50,18 @@ static LocalFrame* createWindow(LocalFrame& openerFrame, LocalFrame& lookupFrame
     ASSERT(!features.dialog || request.frameName().isEmpty());
 
     if (!request.frameName().isEmpty() && request.frameName() != "_blank" && policy == NavigationPolicyIgnore) {
-        if (LocalFrame* frame = lookupFrame.loader().findFrameForNavigation(request.frameName(), openerFrame.document())) {
-            if (request.frameName() != "_self")
-                frame->page()->focusController().setFocusedFrame(frame);
+        if (Frame* frame = lookupFrame.findFrameForNavigation(request.frameName(), openerFrame)) {
+            if (request.frameName() != "_self") {
+                if (FrameHost* host = frame->host()) {
+                    if (host == openerFrame.host())
+                        frame->page()->focusController().setFocusedFrame(frame);
+                    else
+                        host->chrome().focus();
+                }
+            }
             created = false;
-            return frame;
+            // FIXME: Make this work with RemoteFrames.
+            return frame->isLocalFrame() ? toLocalFrame(frame) : nullptr;
         }
     }
 
@@ -149,11 +156,11 @@ LocalFrame* createWindow(const String& urlString, const AtomicString& frameName,
 
     newFrame->loader().setOpener(&openerFrame);
 
-    if (newFrame->domWindow()->isInsecureScriptAccess(callingWindow, completedURL))
+    if (newFrame->localDOMWindow()->isInsecureScriptAccess(callingWindow, completedURL))
         return newFrame;
 
     if (function)
-        function(newFrame->domWindow(), functionContext);
+        function(newFrame->localDOMWindow(), functionContext);
 
     if (created)
         newFrame->loader().load(FrameLoadRequest(callingWindow.document(), completedURL));

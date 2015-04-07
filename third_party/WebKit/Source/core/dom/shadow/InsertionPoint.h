@@ -78,13 +78,13 @@ protected:
     virtual void willRecalcStyle(StyleRecalcChange) override;
 
 private:
-    bool isInsertionPoint() const WTF_DELETED_FUNCTION; // This will catch anyone doing an unnecessary check.
+    bool isInsertionPoint() const = delete; // This will catch anyone doing an unnecessary check.
 
     ContentDistribution m_distribution;
     bool m_registeredWithShadowRoot;
 };
 
-typedef WillBeHeapVector<RefPtrWillBeMember<InsertionPoint> > DestinationInsertionPoints;
+typedef WillBeHeapVector<RefPtrWillBeMember<InsertionPoint>, 1> DestinationInsertionPoints;
 
 DEFINE_ELEMENT_TYPE_CASTS(InsertionPoint, isInsertionPoint());
 

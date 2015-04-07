@@ -37,6 +37,7 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "cc/base/switches.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_impl.h"
@@ -57,6 +58,7 @@
 #include "chrome/browser/gpu/three_d_api_observer.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/metrics/field_trial_synchronizer.h"
+#include "chrome/browser/metrics/metrics_services_manager.h"
 #include "chrome/browser/metrics/thread_watcher.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
 #include "chrome/browser/nacl_host/nacl_browser_delegate_impl.h"
@@ -110,6 +112,7 @@
 #include "components/rappor/rappor_service.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
+#include "components/translate/content/browser/browser_cld_utils.h"
 #include "components/translate/content/common/cld_data_source.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/variations/net/variations_http_header_provider.h"
@@ -118,6 +121,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/power_usage_monitor.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
@@ -162,6 +166,7 @@
 #include "chrome/browser/browser_util_win.h"
 #include "chrome/browser/chrome_browser_main_win.h"
 #include "chrome/browser/chrome_select_file_dialog_factory_win.h"
+#include "chrome/browser/component_updater/caps_installer_win.h"
 #include "chrome/browser/component_updater/sw_reporter_installer_win.h"
 #include "chrome/browser/first_run/try_chrome_dialog_view.h"
 #include "chrome/browser/first_run/upgrade_util_win.h"
@@ -183,7 +188,7 @@
 #endif
 
 #if !defined(OS_IOS)
-#include "chrome/browser/ui/app_modal_dialogs/chrome_javascript_native_dialog_factory.h"
+#include "chrome/browser/ui/app_modal/chrome_javascript_native_dialog_factory.h"
 #endif
 
 #if !defined(DISABLE_NACL)
@@ -219,7 +224,7 @@ namespace {
 
 // This function provides some ways to test crash and assertion handling
 // behavior of the program.
-void HandleTestParameters(const CommandLine& command_line) {
+void HandleTestParameters(const base::CommandLine& command_line) {
   // This parameter causes an assertion.
   if (command_line.HasSwitch(switches::kBrowserAssertTest)) {
     DCHECK(false);
@@ -247,7 +252,7 @@ void AddFirstRunNewTabs(StartupBrowserCreator* browser_creator,
 // |local_state_task_runner| must be a shutdown-blocking task runner.
 PrefService* InitializeLocalState(
     base::SequencedTaskRunner* local_state_task_runner,
-    const CommandLine& parsed_command_line) {
+    const base::CommandLine& parsed_command_line) {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::InitializeLocalState")
   base::FilePath local_state_path;
   PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path);
@@ -324,7 +329,7 @@ PrefService* InitializeLocalState(
 // should not continue.
 Profile* CreatePrimaryProfile(const content::MainFunctionParams& parameters,
                               const base::FilePath& user_data_dir,
-                              const CommandLine& parsed_command_line) {
+                              const base::CommandLine& parsed_command_line) {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::CreateProfile")
   base::Time start = base::Time::Now();
   if (profiles::IsMultipleProfilesEnabled() &&
@@ -364,7 +369,9 @@ Profile* CreatePrimaryProfile(const content::MainFunctionParams& parameters,
   // signed out, then we should show the user manager instead. By switching
   // the active profile to the guest profile we ensure that no
   // browser windows will be opened for the guest profile.
-  if (switches::IsNewProfileManagement() && !profile->IsGuestSession()) {
+  if (switches::IsNewProfileManagement() &&
+      profile &&
+      !profile->IsGuestSession()) {
     ProfileInfoCache& cache =
         g_browser_process->profile_manager()->GetProfileInfoCache();
     size_t profile_index = cache.GetIndexOfProfileWithPath(profile_path);
@@ -421,9 +428,9 @@ void RegisterComponentsForUpdate() {
     g_browser_process->pnacl_component_installer()->RegisterPnaclComponent(cus);
 #endif
 
-  if (translate::CldDataSource::ShouldRegisterForComponentUpdates()) {
-    RegisterCldComponent(cus);
-  }
+  // Registration of the CLD Component is a no-op unless the CLD data source has
+  // been configured to be the "Component" data source.
+  RegisterCldComponent(cus);
 
   base::FilePath path;
   if (PathService::Get(chrome::DIR_USER_DATA, &path)) {
@@ -436,17 +443,16 @@ void RegisterComponentsForUpdate() {
     // network.
     // For Chrome OS this registration is delayed until user login.
     g_browser_process->crl_set_fetcher()->StartInitialLoad(cus, path);
+    // Registration of the EV Whitelist component here is not necessary for:
+    // 1. Android: Because it currently does not have the EV indicator.
+    // 2. Chrome OS: On Chrome OS this registration is delayed until user login.
+    RegisterEVWhitelistComponent(cus, path);
 #endif
   }
 
-#if !defined(OS_ANDROID)
-  // Android does not currently have the EV indicator. No need to get the
-  // EV certs whitelist on Android, then.
-  RegisterEVWhitelistComponent(cus);
-#endif
-
 #if defined(OS_WIN)
   RegisterSwReporterComponent(cus, g_browser_process->local_state());
+  RegisterCAPSComponent(cus);
 #endif
 
   cus->Start();
@@ -454,7 +460,7 @@ void RegisterComponentsForUpdate() {
 
 #if !defined(OS_ANDROID)
 bool ProcessSingletonNotificationCallback(
-    const CommandLine& command_line,
+    const base::CommandLine& command_line,
     const base::FilePath& current_directory) {
   // Drop the request if the browser process is already in shutdown path.
   if (!g_browser_process || g_browser_process->IsShuttingDown())
@@ -491,7 +497,7 @@ bool ProcessSingletonNotificationCallback(
 }
 #endif  // !defined(OS_ANDROID)
 
-void LaunchDevToolsHandlerIfNeeded(const CommandLine& command_line) {
+void LaunchDevToolsHandlerIfNeeded(const base::CommandLine& command_line) {
   if (command_line.HasSwitch(::switches::kRemoteDebuggingPort)) {
     std::string port_str =
         command_line.GetSwitchValueASCII(::switches::kRemoteDebuggingPort);
@@ -500,7 +506,7 @@ void LaunchDevToolsHandlerIfNeeded(const CommandLine& command_line) {
       g_browser_process->CreateDevToolsHttpProtocolHandler(
           chrome::HOST_DESKTOP_TYPE_NATIVE,
           "127.0.0.1",
-          port);
+          static_cast<uint16>(port));
     } else {
       DLOG(WARNING) << "Invalid http debugger port number " << port;
     }
@@ -599,9 +605,12 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
   field_trial_list_.reset(
       new base::FieldTrialList(metrics->CreateEntropyProvider().release()));
 
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableBenchmarking))
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kEnableBenchmarking) ||
+      command_line->HasSwitch(cc::switches::kEnableGpuBenchmarking)) {
     base::FieldTrial::EnableBenchmarking();
+  }
 
   // Ensure any field trials specified on the command line are initialized.
   if (command_line->HasSwitch(switches::kForceFieldTrials)) {
@@ -667,26 +676,15 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
 
 void ChromeBrowserMainParts::StartMetricsRecording() {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::StartMetricsRecording");
-  metrics::MetricsService* metrics = g_browser_process->metrics_service();
 
-  const bool only_do_metrics_recording =
-      parsed_command_line_.HasSwitch(switches::kMetricsRecordingOnly) ||
-      parsed_command_line_.HasSwitch(switches::kEnableBenchmarking);
-  if (only_do_metrics_recording) {
-    // If we're testing then we don't care what the user preference is, we turn
-    // on recording, but not reporting, otherwise tests fail.
-    metrics->StartRecordingForTests();
-    return;
-  }
-
-  metrics->CheckForClonedInstall(
+  g_browser_process->metrics_service()->CheckForClonedInstall(
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
-  const bool metrics_enabled = metrics->StartIfMetricsReportingEnabled();
-  // TODO(asvitkine): Since this function is not run on Android, RAPPOR is
-  // currently disabled there. http://crbug.com/370041
-  browser_process_->rappor_service()->Start(
-      browser_process_->system_request_context(),
-      metrics_enabled);
+
+  bool may_record = g_browser_process->GetMetricsServicesManager()->
+      IsMetricsReportingEnabled();
+
+  g_browser_process->GetMetricsServicesManager()->UpdatePermissions(
+      may_record, true);
 }
 
 void ChromeBrowserMainParts::RecordBrowserStartupTime() {
@@ -872,17 +870,18 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
     about_flags::PrefServiceFlagsStorage flags_storage_(
         g_browser_process->local_state());
     about_flags::ConvertFlagsToSwitches(&flags_storage_,
-                                        CommandLine::ForCurrentProcess(),
+                                        base::CommandLine::ForCurrentProcess(),
                                         about_flags::kAddSentinels);
   }
 #endif
 
   local_state_->UpdateCommandLinePrefStore(
-      new CommandLinePrefStore(CommandLine::ForCurrentProcess()));
+      new CommandLinePrefStore(base::CommandLine::ForCurrentProcess()));
 
   // Reset the command line in the crash report details, since we may have
   // just changed it to include experiments.
-  crash_keys::SetSwitchesFromCommandLine(CommandLine::ForCurrentProcess());
+  crash_keys::SetSwitchesFromCommandLine(
+      base::CommandLine::ForCurrentProcess());
 
   // Mac starts it earlier in |PreMainMessageLoopStart()| (because it is
   // needed when loading the MainMenu.nib and the language doesn't depend on
@@ -971,8 +970,6 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
           prefs::kBrowserSuppressDefaultBrowserPrompt,
           master_prefs_->suppress_default_browser_prompt_for_version);
     }
-
-    AppListService::Get(chrome::HOST_DESKTOP_TYPE_NATIVE)->HandleFirstRun();
   }
 #endif
 
@@ -1068,7 +1065,7 @@ void ChromeBrowserMainParts::PreProfileInit() {
 #endif  // OS_ANDROID
 
 #if defined(ENABLE_EXTENSIONS)
-  InstallJavaScriptDialogExtensionsClient();
+  javascript_dialog_extensions_client::InstallClient();
 #endif
 
 #if !defined(OS_IOS)
@@ -1502,6 +1499,10 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // http://crbug.com/105065.
   browser_process_->notification_ui_manager();
 
+  // This must be called prior to RegisterComponentsForUpdate, in case the CLD
+  // data source is based on the Component Updater.
+  translate::BrowserCldUtils::ConfigureDefaultDataProvider();
+
   if (!parsed_command_line().HasSwitch(switches::kDisableComponentUpdate))
     RegisterComponentsForUpdate();
 
@@ -1588,6 +1589,11 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
     run_message_loop_ = false;
   }
   browser_creator_.reset();
+
+#if !defined(OS_LINUX) || defined(OS_CHROMEOS)  // http://crbug.com/426393
+  if (g_browser_process->metrics_service()->reporting_active())
+    content::StartPowerUsageMonitor();
+#endif
 
   process_power_collector_.reset(new ProcessPowerCollector);
   process_power_collector_->Initialize();

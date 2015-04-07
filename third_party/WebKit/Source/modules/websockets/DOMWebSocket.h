@@ -42,6 +42,7 @@
 #include "wtf/Deque.h"
 #include "wtf/Forward.h"
 #include "wtf/text/AtomicStringHash.h"
+#include <stdint.h>
 
 namespace blink {
 
@@ -50,7 +51,7 @@ class DOMArrayBuffer;
 class DOMArrayBufferView;
 class ExceptionState;
 
-class DOMWebSocket : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<DOMWebSocket>, public EventTargetWithInlineData, public ActiveDOMObject, public WebSocketChannelClient {
+class DOMWebSocket : public RefCountedGarbageCollectedEventTargetWithInlineData<DOMWebSocket>, public ActiveDOMObject, public WebSocketChannelClient {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<DOMWebSocket>);
     DEFINE_WRAPPERTYPEINFO();
     USING_GARBAGE_COLLECTED_MIXIN(DOMWebSocket);
@@ -89,7 +90,7 @@ public:
 
     const KURL& url() const;
     State readyState() const;
-    unsigned long bufferedAmount() const;
+    unsigned bufferedAmount() const;
 
     String protocol() const;
     String extensions() const;
@@ -120,7 +121,7 @@ public:
     virtual void didReceiveTextMessage(const String& message) override;
     virtual void didReceiveBinaryMessage(PassOwnPtr<Vector<char> >) override;
     virtual void didError() override;
-    virtual void didConsumeBufferedAmount(unsigned long) override;
+    virtual void didConsumeBufferedAmount(uint64_t) override;
     virtual void didStartClosingHandshake() override;
     virtual void didClose(ClosingHandshakeCompletionStatus, unsigned short code, const String& reason) override;
 
@@ -197,11 +198,9 @@ private:
     // not.
     void closeInternal(int, const String&, ExceptionState&);
 
-    size_t getFramingOverhead(size_t payloadSize);
-
     // Updates m_bufferedAmountAfterClose given the amount of data passed to
     // send() method after the state changed to CLOSING or CLOSED.
-    void updateBufferedAmountAfterClose(unsigned long);
+    void updateBufferedAmountAfterClose(uint64_t);
     void reflectBufferedAmountConsumption(Timer<DOMWebSocket>*);
 
     void releaseChannel();
@@ -215,11 +214,11 @@ private:
 
     State m_state;
     KURL m_url;
-    unsigned long m_bufferedAmount;
+    uint64_t m_bufferedAmount;
     // The consumed buffered amount that will be reflected to m_bufferedAmount
     // later. It will be cleared once reflected.
-    unsigned long m_consumedBufferedAmount;
-    unsigned long m_bufferedAmountAfterClose;
+    uint64_t m_consumedBufferedAmount;
+    uint64_t m_bufferedAmountAfterClose;
     BinaryType m_binaryType;
     // The subprotocol the server selected.
     String m_subprotocol;

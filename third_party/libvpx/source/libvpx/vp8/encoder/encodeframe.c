@@ -522,7 +522,8 @@ void encode_mb_row(VP8_COMP *cpi,
             }
 
 #endif
-            // Keep track of how many (consecutive) times a block is coded
+
+            // Keep track of how many (consecutive) times a  block is coded
             // as ZEROMV_LASTREF, for base layer frames.
             // Reset to 0 if its coded as anything else.
             if (cpi->current_layer == 0) {
@@ -531,9 +532,14 @@ void encode_mb_row(VP8_COMP *cpi,
                 // Increment, check for wrap-around.
                 if (cpi->consec_zero_last[map_index+mb_col] < 255)
                   cpi->consec_zero_last[map_index+mb_col] += 1;
+                if (cpi->consec_zero_last_mvbias[map_index+mb_col] < 255)
+                  cpi->consec_zero_last_mvbias[map_index+mb_col] += 1;
               } else {
                 cpi->consec_zero_last[map_index+mb_col] = 0;
+                cpi->consec_zero_last_mvbias[map_index+mb_col] = 0;
               }
+              if (x->zero_last_dot_suppress)
+                cpi->consec_zero_last_mvbias[map_index+mb_col] = 0;
             }
 
             /* Special case code for cyclic refresh
@@ -574,7 +580,7 @@ void encode_mb_row(VP8_COMP *cpi,
         /* pack tokens for this MB */
         {
             int tok_count = *tp - tp_start;
-            pack_tokens(w, tp_start, tok_count);
+            vp8_pack_tokens(w, tp_start, tok_count);
         }
 #endif
         /* Increment pointer into gf usage flags structure. */
@@ -1252,7 +1258,6 @@ int vp8cx_encode_inter_macroblock
         if(cpi->sf.use_fastquant_for_pick)
         {
             x->quantize_b      = vp8_fast_quantize_b;
-            x->quantize_b_pair = vp8_fast_quantize_b_pair;
 
             /* the fast quantizer does not use zbin_extra, so
              * do not recalculate */
@@ -1265,7 +1270,6 @@ int vp8cx_encode_inter_macroblock
         if (cpi->sf.improved_quant)
         {
             x->quantize_b      = vp8_regular_quantize_b;
-            x->quantize_b_pair = vp8_regular_quantize_b_pair;
         }
 
         /* restore cpi->zbin_mode_boost_enabled */

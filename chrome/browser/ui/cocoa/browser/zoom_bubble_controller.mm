@@ -9,8 +9,8 @@
 #include "chrome/browser/chrome_page_zoom.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
-#include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/ui/zoom/zoom_controller.h"
 #include "content/public/common/page_zoom.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "ui/base/cocoa/hover_button.h"
@@ -75,6 +75,8 @@ void SetZoomBubbleAutoCloseDelayForTesting(NSTimeInterval time_interval) {
 
 @implementation ZoomBubbleController
 
+@synthesize delegate = delegate_;
+
 - (id)initWithParentWindow:(NSWindow*)parentWindow
                   delegate:(ZoomBubbleControllerDelegate*)delegate {
   base::scoped_nsobject<InfoBubbleWindow> window(
@@ -126,6 +128,10 @@ void SetZoomBubbleAutoCloseDelayForTesting(NSTimeInterval time_interval) {
 }
 
 - (void)onZoomChanged {
+  // |delegate_| may be set null by this object's owner.
+  if (!delegate_)
+    return;
+
   // TODO(shess): It may be appropriate to close the window if
   // |contents| or |zoomController| are NULL.  But they can be NULL in
   // tests.
@@ -134,7 +140,8 @@ void SetZoomBubbleAutoCloseDelayForTesting(NSTimeInterval time_interval) {
   if (!contents)
     return;
 
-  ZoomController* zoomController = ZoomController::FromWebContents(contents);
+  ui_zoom::ZoomController* zoomController =
+      ui_zoom::ZoomController::FromWebContents(contents);
   if (!zoomController)
     return;
 
@@ -168,8 +175,11 @@ void SetZoomBubbleAutoCloseDelayForTesting(NSTimeInterval time_interval) {
 }
 
 - (void)windowWillClose:(NSNotification*)notification {
-  delegate_->OnClose();
-  delegate_ = NULL;
+  // |delegate_| may be set null by this object's owner.
+  if (delegate_) {
+    delegate_->OnClose();
+    delegate_ = NULL;
+  }
   [NSObject cancelPreviousPerformRequestsWithTarget:self
                                            selector:@selector(autoCloseBubble)
                                              object:nil];
@@ -304,6 +314,9 @@ void SetZoomBubbleAutoCloseDelayForTesting(NSTimeInterval time_interval) {
 }
 
 - (void)zoomHelper:(content::PageZoom)alterPageZoom {
+  // |delegate| can be null after -windowWillClose:.
+  if (!delegate_)
+    return;
   content::WebContents* webContents = delegate_->GetWebContents();
 
   // TODO(shess): Zoom() immediately dereferences |webContents|, and

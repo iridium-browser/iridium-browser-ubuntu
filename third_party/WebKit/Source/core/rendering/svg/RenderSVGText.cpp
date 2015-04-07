@@ -92,14 +92,6 @@ const RenderSVGText* RenderSVGText::locateRenderSVGTextAncestor(const RenderObje
     return toRenderSVGText(start);
 }
 
-void RenderSVGText::mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect& rect, const PaintInvalidationState* paintInvalidationState) const
-{
-    FloatRect paintInvalidationRect = rect;
-    paintInvalidationRect.inflate(style()->outlineWidth());
-    computeFloatRectForPaintInvalidation(paintInvalidationContainer, paintInvalidationRect, paintInvalidationState);
-    rect = enclosingLayoutRect(paintInvalidationRect);
-}
-
 static inline void collectLayoutAttributes(RenderObject* text, Vector<SVGTextLayoutAttributes*>& attributes)
 {
     for (RenderObject* descendant = text; descendant; descendant = descendant->nextInPreOrder(text)) {
@@ -337,7 +329,7 @@ void RenderSVGText::layout()
         ASSERT(m_layoutAttributes.isEmpty());
         collectLayoutAttributes(this, m_layoutAttributes);
         updateFontInAllDescendants(this);
-        m_layoutAttributesBuilder.buildLayoutAttributesForForSubtree(this);
+        m_layoutAttributesBuilder.buildLayoutAttributesForForSubtree(*this);
 
         m_needsReordering = true;
         m_needsTextMetricsUpdate = false;
@@ -351,7 +343,7 @@ void RenderSVGText::layout()
             m_needsTextMetricsUpdate = false;
         }
 
-        m_layoutAttributesBuilder.buildLayoutAttributesForForSubtree(this);
+        m_layoutAttributesBuilder.buildLayoutAttributesForForSubtree(*this);
         m_needsReordering = true;
         m_needsPositioningValuesUpdate = false;
         updateCachedBoundariesInParents = true;
@@ -464,7 +456,7 @@ void RenderSVGText::absoluteQuads(Vector<FloatQuad>& quads, bool* wasFixed) cons
     quads.append(localToAbsoluteQuad(strokeBoundingBox(), 0 /* mode */, wasFixed));
 }
 
-void RenderSVGText::paint(PaintInfo& paintInfo, const LayoutPoint&)
+void RenderSVGText::paint(const PaintInfo& paintInfo, const LayoutPoint&)
 {
     SVGTextPainter(*this).paint(paintInfo);
 }

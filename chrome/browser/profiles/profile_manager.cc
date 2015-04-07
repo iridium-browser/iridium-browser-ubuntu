@@ -38,6 +38,7 @@
 #include "chrome/browser/profiles/startup_task_runner_service_factory.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -53,6 +54,8 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/password_manager/core/browser/password_store.h"
+#include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -71,7 +74,9 @@
 #include "extensions/common/manifest.h"
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
+#include "chrome/browser/supervised_user/child_accounts/child_account_service.h"
+#include "chrome/browser/supervised_user/child_accounts/child_account_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #endif
@@ -638,53 +643,56 @@ void ProfileManager::ScheduleProfileForDeletion(
   PrefService* local_state = g_browser_process->local_state();
   ProfileInfoCache& cache = GetProfileInfoCache();
 
+  // If we're deleting the last (non-legacy-supervised) profile, then create a
+  // new profile in its place.
+  base::FilePath last_non_supervised_profile_path;
+  for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
+    base::FilePath cur_path = cache.GetPathOfProfileAtIndex(i);
+    // Make sure that this profile is not pending deletion, and is not
+    // legacy-supervised.
+    if (cur_path != profile_dir &&
+        !cache.ProfileIsLegacySupervisedAtIndex(i) &&
+        !IsProfileMarkedForDeletion(cur_path)) {
+      last_non_supervised_profile_path = cur_path;
+      break;
+    }
+  }
+
+  base::FilePath new_path;
+  if (last_non_supervised_profile_path.empty()) {
+    // If we are using --new-avatar-menu, then assign the default
+    // placeholder avatar and name. Otherwise, use random ones.
+    bool is_new_avatar_menu = switches::IsNewAvatarMenu();
+    int avatar_index = profiles::GetPlaceholderAvatarIndex();
+    base::string16 new_avatar_url = is_new_avatar_menu ?
+        base::UTF8ToUTF16(profiles::GetDefaultAvatarIconUrl(avatar_index)) :
+        base::string16();
+    base::string16 new_profile_name = is_new_avatar_menu ?
+        cache.ChooseNameForNewProfile(avatar_index) : base::string16();
+
+    new_path = GenerateNextProfileDirectoryPath();
+    CreateProfileAsync(new_path,
+                       callback,
+                       new_profile_name,
+                       new_avatar_url,
+                       std::string());
+
+    ProfileMetrics::LogProfileAddNewUser(
+        ProfileMetrics::ADD_NEW_USER_LAST_DELETED);
+  }
+
+  // Update the last used profile pref before closing browser windows. This
+  // way the correct last used profile is set for any notification observers.
   const std::string last_used_profile =
       local_state->GetString(prefs::kProfileLastUsed);
-
   if (last_used_profile == profile_dir.BaseName().MaybeAsASCII() ||
       last_used_profile == GetGuestProfilePath().BaseName().MaybeAsASCII()) {
-    // Update the last used profile pref before closing browser windows. This
-    // way the correct last used profile is set for any notification observers.
-    base::FilePath last_non_supervised_profile_path;
-    for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
-      base::FilePath cur_path = cache.GetPathOfProfileAtIndex(i);
-      // Make sure that this profile is not pending deletion.
-      if (cur_path != profile_dir && !cache.ProfileIsSupervisedAtIndex(i) &&
-          !IsProfileMarkedForDeletion(cur_path)) {
-        last_non_supervised_profile_path = cur_path;
-        break;
-      }
-    }
-
-    // If we're deleting the last (non-supervised) profile, then create a new
-    // profile in its place.
     const std::string last_non_supervised_profile =
         last_non_supervised_profile_path.BaseName().MaybeAsASCII();
     if (last_non_supervised_profile.empty()) {
-      base::FilePath new_path = GenerateNextProfileDirectoryPath();
-      // Make sure the last used profile path is pointing at it. This way the
-      // correct last used profile is set for any notification observers.
+      DCHECK(!new_path.empty());
       local_state->SetString(prefs::kProfileLastUsed,
                              new_path.BaseName().MaybeAsASCII());
-
-      // If we are using --new-avatar-menu, then assign the default
-      // placeholder avatar and name. Otherwise, use random ones.
-      bool is_new_avatar_menu = switches::IsNewAvatarMenu();
-      int avatar_index = profiles::GetPlaceholderAvatarIndex();
-      base::string16 new_avatar_url = is_new_avatar_menu ?
-          base::UTF8ToUTF16(profiles::GetDefaultAvatarIconUrl(avatar_index)) :
-          base::string16();
-      base::string16 new_profile_name = is_new_avatar_menu ?
-          cache.ChooseNameForNewProfile(avatar_index) : base::string16();
-
-      CreateProfileAsync(new_path,
-                         callback,
-                         new_profile_name,
-                         new_avatar_url,
-                         std::string());
-
-      ProfileMetrics::LogProfileAddNewUser(
-          ProfileMetrics::ADD_NEW_USER_LAST_DELETED);
     } else {
       // On the Mac, the browser process is not killed when all browser windows
       // are closed, so just in case we are deleting the active profile, and no
@@ -787,7 +795,7 @@ void ProfileManager::InitProfileUserPrefs(Profile* profile) {
   if (!profile->GetPrefs()->HasPrefPath(prefs::kProfileName))
     profile->GetPrefs()->SetString(prefs::kProfileName, profile_name);
 
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   bool force_supervised_user_id =
       command_line->HasSwitch(switches::kSupervisedUserId);
   if (force_supervised_user_id) {
@@ -829,7 +837,8 @@ void ProfileManager::Observe(
   if (type == chrome::NOTIFICATION_LOGIN_USER_CHANGED) {
     logged_in_ = true;
 
-    const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+    const base::CommandLine& command_line =
+        *base::CommandLine::ForCurrentProcess();
     if (!command_line.HasSwitch(switches::kTestType)) {
       // If we don't have a mounted profile directory we're in trouble.
       // TODO(davemoore) Once we have better api this check should ensure that
@@ -993,6 +1002,7 @@ void ProfileManager::DoFinalInit(Profile* profile, bool go_off_the_record) {
 void ProfileManager::DoFinalInitForServices(Profile* profile,
                                             bool go_off_the_record) {
 #if defined(ENABLE_EXTENSIONS)
+  ProfileInfoCache& cache = GetProfileInfoCache();
   extensions::ExtensionSystem::Get(profile)->InitForRegularProfile(
       !go_off_the_record);
   // During tests, when |profile| is an instance of TestingProfile,
@@ -1001,11 +1011,22 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
     extensions::ExtensionSystem::Get(profile)->extension_service()->
         RegisterContentSettings(profile->GetHostContentSettingsMap());
   }
+  // Set the block extensions bit on the ExtensionService. There likely are no
+  // blockable extensions to block.
+  size_t profile_index = cache.GetIndexOfProfileWithPath(profile->GetPath());
+  if (profile_index != std::string::npos &&
+      cache.ProfileIsSigninRequiredAtIndex(profile_index)) {
+    extensions::ExtensionSystem::Get(profile)
+        ->extension_service()
+        ->BlockAllExtensions();
+  }
+
 #endif
-#if defined(ENABLE_MANAGED_USERS) && !defined(OS_ANDROID)
+#if defined(ENABLE_SUPERVISED_USERS)
   // Initialization needs to happen after extension system initialization (for
   // extension::ManagementPolicy) and InitProfileUserPrefs (for setting the
   // initializing the supervised flag if necessary).
+  ChildAccountServiceFactory::GetForProfile(profile)->Init();
   SupervisedUserServiceFactory::GetForProfile(profile)->Init();
 #endif
   // Start the deferred task runners once the profile is loaded.
@@ -1017,7 +1038,7 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
   DataReductionProxyChromeSettingsFactory::GetForBrowserContext(profile)->
       MaybeActivateDataReductionProxy(true);
 
-  AccountTrackerServiceFactory::GetForProfile(profile);
+  AccountTrackerServiceFactory::GetForProfile(profile)->EnableNetworkFetches();
   AccountReconcilorFactory::GetForProfile(profile);
 }
 
@@ -1168,8 +1189,10 @@ void ProfileManager::AddProfileToCache(Profile* profile) {
   if (profile->GetPath().DirName() != cache.GetUserDataDir())
     return;
 
-  base::string16 username = base::UTF8ToUTF16(profile->GetPrefs()->GetString(
-      prefs::kGoogleServicesUsername));
+  SigninManagerBase* signin_manager =
+      SigninManagerFactory::GetForProfile(profile);
+  base::string16 username = base::UTF8ToUTF16(
+      signin_manager->GetAuthenticatedUsername());
 
   size_t profile_index = cache.GetIndexOfProfileWithPath(profile->GetPath());
   if (profile_index != std::string::npos) {

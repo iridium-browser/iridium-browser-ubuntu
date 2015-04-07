@@ -13,6 +13,7 @@
 
 #include <stddef.h>  // size_t
 #include <stdio.h>  // FILE
+#include <vector>
 
 #include "webrtc/base/platform_file.h"
 #include "webrtc/common.h"
@@ -80,6 +81,27 @@ struct ExperimentalNs {
   ExperimentalNs() : enabled(false) {}
   explicit ExperimentalNs(bool enabled) : enabled(enabled) {}
   bool enabled;
+};
+
+// Coordinates in meters.
+struct Point {
+  Point(float x, float y, float z) {
+    c[0] = x;
+    c[1] = y;
+    c[2] = z;
+  }
+  float c[3];
+};
+
+// Use to enable beamforming. Must be provided through the constructor. It will
+// have no impact if used with AudioProcessing::SetExtraOptions().
+struct Beamforming {
+  Beamforming() : enabled(false) {}
+  Beamforming(bool enabled, const std::vector<Point>& array_geometry)
+      : enabled(enabled),
+        array_geometry(array_geometry) {}
+  const bool enabled;
+  const std::vector<Point> array_geometry;
 };
 
 static const int kAudioProcMaxNativeSampleRateHz = 32000;
@@ -380,7 +402,8 @@ class AudioProcessing {
   enum NativeRate {
     kSampleRate8kHz = 8000,
     kSampleRate16kHz = 16000,
-    kSampleRate32kHz = 32000
+    kSampleRate32kHz = 32000,
+    kSampleRate48kHz = 48000
   };
 
   static const int kChunkSizeMs = 10;

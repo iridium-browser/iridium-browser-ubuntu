@@ -7,48 +7,18 @@
 
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
+#include "content/common/content_export.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_memory_buffer.h"
-#include "ui/gfx/size.h"
 
 namespace content {
 
 // Provides common implementation of a GPU memory buffer.
-class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
+class CONTENT_EXPORT GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
  public:
-  typedef base::Callback<void(scoped_ptr<GpuMemoryBufferImpl> buffer)>
-      CreationCallback;
-  typedef base::Callback<void(const gfx::GpuMemoryBufferHandle& handle)>
-      AllocationCallback;
   typedef base::Callback<void(uint32 sync_point)> DestructionCallback;
 
   ~GpuMemoryBufferImpl() override;
-
-  // Creates a GPU memory buffer instance with |size| and |format| for |usage|
-  // by the current process and |client_id|.
-  static void Create(gfx::GpuMemoryBufferId id,
-                     const gfx::Size& size,
-                     Format format,
-                     Usage usage,
-                     int client_id,
-                     const CreationCallback& callback);
-
-  // Allocates a GPU memory buffer with |size| and |internalformat| for |usage|
-  // by |child_process| and |child_client_id|. The |handle| returned can be
-  // used by the |child_process| to create an instance of this class.
-  static void AllocateForChildProcess(gfx::GpuMemoryBufferId id,
-                                      const gfx::Size& size,
-                                      Format format,
-                                      Usage usage,
-                                      base::ProcessHandle child_process,
-                                      int child_client_id,
-                                      const AllocationCallback& callback);
-
-  // Notify that GPU memory buffer has been deleted by |child_process|.
-  static void DeletedByChildProcess(gfx::GpuMemoryBufferType type,
-                                    gfx::GpuMemoryBufferId id,
-                                    base::ProcessHandle child_process,
-                                    int child_client_id,
-                                    uint32 sync_point);
 
   // Creates an instance from the given |handle|. |size| and |internalformat|
   // should match what was used to allocate the |handle|. |callback| is
@@ -89,6 +59,7 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
   bool mapped_;
   uint32 destruction_sync_point_;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(GpuMemoryBufferImpl);
 };
 

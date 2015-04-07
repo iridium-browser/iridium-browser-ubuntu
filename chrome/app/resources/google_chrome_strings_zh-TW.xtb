@@ -47,6 +47,7 @@ Google Chrome 無法復原您的設定。</translation>
 <translation id="568643307450491754">您的書籤會顯示在 Chrome 選單中或書籤列上。</translation>
 <translation id="8556340503434111824">Google Chrome 推出全新版本，速度更勝以往。</translation>
 <translation id="8987477933582888019">網路瀏覽器</translation>
+<translation id="3749644715096758981">Chrome 無法更新至最新版本，因此您並未取得最新功能和安全性問題修正。請自行更新 Chrome。</translation>
 <translation id="4728575227883772061">安裝因不明錯誤而失敗。如果 Google Chrome 目前正在執行中，請將其關閉然後再試一次。</translation>
 <translation id="3080151273017101988">Google Chrome 關閉時繼續執行背景應用程式</translation>
 <translation id="4149882025268051530">安裝程式無法解壓縮封存檔案，請再次下載 Google Chrome。</translation>
@@ -85,6 +86,7 @@ Google Chrome 無法復原您的設定。</translation>
 <translation id="225614027745146050">歡迎使用</translation>
 <translation id="7473891865547856676">不用了，謝謝</translation>
 <translation id="3149510190863420837">Chrome 應用程式</translation>
+<translation id="8851136666856101339">主要元素</translation>
 <translation id="7473136999113284234">Chrome 會自動更新，隨時讓您使用最新版本。</translation>
 <translation id="7084448929020576097"><ph name="FILE_NAME"/> 是惡意軟體，因此已遭到 Chrome 封鎖。</translation>
 <translation id="6368958679917195344">Chrome 作業系統藉助了其他<ph name="BEGIN_LINK_CROS_OSS"/>開放原始碼軟體<ph name="END_LINK_CROS_OSS"/>的相關技術才得以問世。</translation>
@@ -144,7 +146,6 @@ Google Chrome 無法復原您的設定。</translation>
 <translation id="5855036575689098185">您電腦上執行的軟體與 Google Chrome 不相容。</translation>
 <translation id="7164397146364144019">您可以自動將疑似安全性事件的詳細資料傳送給 Google，協助我們讓 Chrome 變得更安全、更好用。</translation>
 <translation id="8008534537613507642">重新安裝 Chrome</translation>
-<translation id="2044287590254833138">Google Chrome 工具列</translation>
 <translation id="8862326446509486874">您沒有在系統層級進行安裝的權限，請以管理員的身分執行安裝檔。</translation>
 <translation id="2874156562296220396">Google Chrome 的開發仰賴 <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> 開放原始碼計劃與其他<ph name="BEGIN_LINK_OSS"/>開放原始碼軟體<ph name="END_LINK_OSS"/>的協助才得以完成。</translation>
 <translation id="7191567847629796517">Google Chrome 作業系統不支援啟用外部應用程式以處理 <ph name="SCHEME"/> 連結。所要求的連結為 <ph name="PROTOLINK"/>。</translation>
@@ -156,6 +157,7 @@ Google Chrome 無法復原您的設定。</translation>
 <translation id="2290095356545025170">您是否確定要解除安裝 Google Chrome？</translation>
 <translation id="7062966102157262887">目前正在進行下載，您要結束 Google Chrome 並取消下載嗎？</translation>
 <translation id="4273752058983339720">已將 Google Chrome 設定為開機時自動啟動。</translation>
+<translation id="2316129865977710310">不，謝謝</translation>
 <translation id="415994390253732730">Chrome 出現異常行為？</translation>
 <translation id="1104959162601287462">關於 Chrome 作業系統(&amp;C)</translation>
 <translation id="5328989068199000832">Google Chrome Binaries</translation>
@@ -258,6 +260,7 @@ Google Chrome 無法復原您的設定。</translation>
 <translation id="6626317981028933585">抱歉，我們無法在 Mozilla Firefox 執行時取得其設定。如果要將這些設定匯入到 Google Chrome，請儲存您的工作，並關閉所有 Firefox 視窗。然後按一下 [繼續]。</translation>
 <translation id="7242029209006116544">您已登入管理化環境下的帳戶，並將管理控制權授予您的 Chrome 設定檔。您的 Chrome 資料 (例如應用程式、書籤、紀錄、密碼和其他設定) 均將永久與 <ph name="USER_NAME"/> 建立關聯。您可以透過 Google 帳戶資訊主頁刪除這些資料，但您無法將這些資料與其他帳戶建立關聯。如要另行保留現有的 Chromium 資料，您可以選擇建立新的設定檔。<ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">這個擴充功能也會控管 Chrome 啟動時或您使用網址列搜尋時所顯示的網頁。</translation>
+<translation id="1553358976309200471">更新 Chrome</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Copyright <ph name="YEAR"/> Google Inc. 版權所有。</translation>
 <translation id="1698376642261615901">Google Chrome 瀏覽器開啟網頁和執行應用程式的速度奇快無比！除了執行速度迅速、穩定且容易使用之外，內建防護機制還可讓您安心瀏覽網頁，無需擔心受到網路釣魚與惡意軟體的威脅。</translation>

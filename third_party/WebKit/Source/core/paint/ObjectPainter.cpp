@@ -5,7 +5,7 @@
 #include "config.h"
 #include "core/paint/ObjectPainter.h"
 
-#include "core/paint/DrawingRecorder.h"
+#include "core/paint/RenderDrawingRecorder.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderObject.h"
 #include "core/rendering/RenderTheme.h"
@@ -15,10 +15,10 @@
 
 namespace blink {
 
-void ObjectPainter::paintFocusRing(PaintInfo& paintInfo, const LayoutPoint& paintOffset, RenderStyle* style)
+void ObjectPainter::paintFocusRing(const PaintInfo& paintInfo, const LayoutPoint& paintOffset, RenderStyle* style)
 {
     Vector<LayoutRect> focusRingRects;
-    m_renderObject.addFocusRingRects(focusRingRects, paintOffset, paintInfo.paintContainer());
+    m_renderObject.addFocusRingRects(focusRingRects, paintOffset);
     ASSERT(style->outlineStyleIsAuto());
     Vector<IntRect> focusRingIntRects;
     for (size_t i = 0; i < focusRingRects.size(); ++i)
@@ -26,13 +26,15 @@ void ObjectPainter::paintFocusRing(PaintInfo& paintInfo, const LayoutPoint& pain
     paintInfo.context->drawFocusRing(focusRingIntRects, style->outlineWidth(), style->outlineOffset(), m_renderObject.resolveColor(style, CSSPropertyOutlineColor));
 }
 
-void ObjectPainter::paintOutline(PaintInfo& paintInfo, const LayoutRect& paintRect)
+void ObjectPainter::paintOutline(const PaintInfo& paintInfo, const LayoutRect& paintRect)
 {
     RenderStyle* styleToUse = m_renderObject.style();
     if (!styleToUse->hasOutline())
         return;
 
-    DrawingRecorder recorder(paintInfo.context, &m_renderObject, paintInfo.phase, paintRect);
+    RenderDrawingRecorder recorder(paintInfo.context, m_renderObject, paintInfo.phase, paintRect);
+    if (recorder.canUseCachedDrawing())
+        return;
 
     if (styleToUse->outlineStyleIsAuto()) {
         if (RenderTheme::theme().shouldDrawDefaultFocusRing(&m_renderObject)) {

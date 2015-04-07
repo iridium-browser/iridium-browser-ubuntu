@@ -27,6 +27,11 @@ class SyncApiComponentFactory {
 
   // Creates attachment service.
   // Note: Should only be called from the model type thread.
+  //
+  // |store_birthday| is the store birthday.  Must not be empty.
+  //
+  // |model_type| is the model type this AttachmentService will be used with.
+  //
   // |delegate| is optional delegate for AttachmentService to notify about
   // asynchronous events (AttachmentUploaded). Pass NULL if delegate is not
   // provided. AttachmentService doesn't take ownership of delegate, the pointer
@@ -34,6 +39,8 @@ class SyncApiComponentFactory {
   virtual scoped_ptr<syncer::AttachmentService> CreateAttachmentService(
       const scoped_refptr<syncer::AttachmentStore>& attachment_store,
       const syncer::UserShare& user_share,
+      const std::string& store_birthday,
+      syncer::ModelType model_type,
       syncer::AttachmentService::Delegate* delegate) = 0;
 };
 

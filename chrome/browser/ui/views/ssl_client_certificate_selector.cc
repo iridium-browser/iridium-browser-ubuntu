@@ -82,10 +82,10 @@ void CertificateSelectorTableModel::SetObserver(
 
 SSLClientCertificateSelector::SSLClientCertificateSelector(
     content::WebContents* web_contents,
-    const net::HttpNetworkSession* network_session,
     const scoped_refptr<net::SSLCertRequestInfo>& cert_request_info,
     const chrome::SelectCertificateCallback& callback)
-    : SSLClientAuthObserver(network_session, cert_request_info, callback),
+    : SSLClientAuthObserver(web_contents->GetBrowserContext(),
+                            cert_request_info, callback),
       model_(new CertificateSelectorTableModel(cert_request_info.get())),
       web_contents_(web_contents),
       table_(NULL),
@@ -133,7 +133,7 @@ void SSLClientCertificateSelector::Init() {
 
   StartObserving();
 
-  ShowWebModalDialogViews(this, web_contents_);
+  constrained_window::ShowWebModalDialogViews(this, web_contents_);
 
   // Select the first row automatically.  This must be done after the dialog has
   // been created.
@@ -274,13 +274,12 @@ namespace chrome {
 
 void ShowSSLClientCertificateSelector(
     content::WebContents* contents,
-    const net::HttpNetworkSession* network_session,
     net::SSLCertRequestInfo* cert_request_info,
     const chrome::SelectCertificateCallback& callback) {
   DVLOG(1) << __FUNCTION__ << " " << contents;
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   (new SSLClientCertificateSelector(
-       contents, network_session, cert_request_info, callback))->Init();
+       contents, cert_request_info, callback))->Init();
 }
 
 }  // namespace chrome

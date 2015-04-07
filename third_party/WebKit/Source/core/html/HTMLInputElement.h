@@ -91,6 +91,8 @@ public:
     // or url.
     bool isTextField() const;
 
+    bool isImage() const;
+
     bool checked() const { return m_isChecked; }
     void setChecked(bool, TextFieldEventBehavior = DispatchNoEvent);
 
@@ -154,7 +156,7 @@ public:
     virtual bool isActivatedSubmit() const override final;
     virtual void setActivatedSubmit(bool flag) override final;
 
-    String altText() const;
+    virtual String altText() const override final;
 
     int maxResults() const { return m_maxResults; }
 
@@ -240,8 +242,8 @@ public:
     virtual void setRangeText(const String& replacement, ExceptionState&) override final;
     virtual void setRangeText(const String& replacement, unsigned start, unsigned end, const String& selectionMode, ExceptionState&) override final;
 
-    bool hasImageLoader() const { return m_imageLoader; }
-    HTMLImageLoader* imageLoader();
+    HTMLImageLoader* imageLoader() const { return m_imageLoader.get(); }
+    HTMLImageLoader& ensureImageLoader();
 
     bool setupDateTimeChooserParameters(DateTimeChooserParameters&);
 
@@ -252,6 +254,9 @@ public:
     AXObject* popupRootAXObject();
     virtual void didNotifySubtreeInsertionsToDocument() override;
 
+    virtual void ensureFallbackContent();
+    virtual void ensurePrimaryContent();
+    bool hasFallbackContent() const;
 protected:
     HTMLInputElement(Document&, HTMLFormElement*, bool createdByParser);
 
@@ -296,6 +301,7 @@ private:
     virtual bool isPresentationAttribute(const QualifiedName&) const override final;
     virtual void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override final;
     virtual void finishParsingChildren() override final;
+    virtual void parserDidSetAttributes() override final;
 
     virtual void copyNonAttributePropertiesFromElement(const Element&) override final;
 
@@ -334,6 +340,8 @@ private:
     virtual bool recalcWillValidate() const override final;
     virtual void requiredAttributeChanged() override final;
 
+    void updateTouchEventHandlerRegistry();
+    void initializeTypeInParsing();
     void updateType();
 
     virtual void subtreeHasChanged() override final;
@@ -348,9 +356,7 @@ private:
     RadioButtonGroupScope* radioButtonGroupScope() const;
     void addToRadioButtonGroup();
     void removeFromRadioButtonGroup();
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
     virtual PassRefPtr<RenderStyle> customStyleForRenderer() override;
-#endif
 
     virtual bool shouldDispatchFormControlChangeEvent(String&, String&) override;
 

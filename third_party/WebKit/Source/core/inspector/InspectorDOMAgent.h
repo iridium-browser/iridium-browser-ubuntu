@@ -53,6 +53,7 @@ class Document;
 class Element;
 class EventTarget;
 class ExceptionState;
+class InsertionPoint;
 class InspectorFrontend;
 class InspectorHistory;
 class InspectorOverlay;
@@ -60,7 +61,7 @@ class InspectorPageAgent;
 class Node;
 class PlatformGestureEvent;
 class PlatformTouchEvent;
-class RevalidateStyleAttributeTask;
+class InspectorRevalidateDOMTask;
 class ShadowRoot;
 
 struct HighlightConfig;
@@ -99,6 +100,7 @@ public:
     }
 
     static String toErrorString(ExceptionState&);
+    static bool getPseudoElementType(PseudoId, TypeBuilder::DOM::PseudoType::Enum*);
 
     virtual ~InspectorDOMAgent();
     virtual void trace(Visitor*) override;
@@ -117,6 +119,7 @@ public:
     virtual void querySelectorAll(ErrorString*, int nodeId, const String& selectors, RefPtr<TypeBuilder::Array<int> >& result) override;
     virtual void getDocument(ErrorString*, RefPtr<TypeBuilder::DOM::Node>& root) override;
     virtual void requestChildNodes(ErrorString*, int nodeId, const int* depth) override;
+    virtual void requestShadowHostDistributedNodes(ErrorString*, int nodeId, RefPtr<TypeBuilder::Array<TypeBuilder::DOM::InsertionPointDistribution> >& insertionPointDistributions) override;
     virtual void setAttributeValue(ErrorString*, int elementId, const String& name, const String& value) override;
     virtual void setAttributesAsText(ErrorString*, int elementId, const String& text, const String* name) override;
     virtual void removeAttribute(ErrorString*, int elementId, const String& name) override;
@@ -173,13 +176,15 @@ public:
     void didInsertDOMNode(Node*);
     void willRemoveDOMNode(Node*);
     void willModifyDOMAttr(Element*, const AtomicString& oldValue, const AtomicString& newValue);
-    void didModifyDOMAttr(Element*, const String& name, const AtomicString& value);
-    void didRemoveDOMAttr(Element*, const String& name);
+    void didModifyDOMAttr(Element*, const QualifiedName&, const AtomicString& value);
+    void didRemoveDOMAttr(Element*, const QualifiedName&);
     void styleAttributeInvalidated(const WillBeHeapVector<RawPtrWillBeMember<Element> >& elements);
+    void contentDistributionInvalidated(const WillBeHeapVector<RawPtrWillBeMember<Element> >& elements);
     void characterDataModified(CharacterData*);
     void didInvalidateStyleAttr(Node*);
     void didPushShadowRoot(Element* host, ShadowRoot*);
     void willPopShadowRoot(Element* host, ShadowRoot*);
+    void didPerformElementShadowDistribution(Element*);
     void frameDocumentUpdated(LocalFrame*);
     void pseudoElementCreated(PseudoElement*);
     void pseudoElementDestroyed(PseudoElement*);
@@ -232,6 +237,7 @@ private:
 
     void inspect(Node*);
 
+    int pushNodePathToFrontend(Node*, NodeToIdMap* nodeMap);
     int pushNodePathToFrontend(Node*);
     void pushChildNodesToFrontend(int nodeId, int depth = 1);
 
@@ -251,6 +257,8 @@ private:
 
     bool pushDocumentUponHandlelessOperation(ErrorString*);
 
+    RawPtrWillBeMember<InspectorRevalidateDOMTask> revalidateTask();
+
     RawPtrWillBeMember<InspectorPageAgent> m_pageAgent;
     RawPtrWillBeMember<InjectedScriptManager> m_injectedScriptManager;
     InspectorOverlay* m_overlay;
@@ -262,12 +270,13 @@ private:
     WillBeHeapHashMap<int, RawPtrWillBeMember<Node> > m_idToNode;
     WillBeHeapHashMap<int, RawPtrWillBeMember<NodeToIdMap> > m_idToNodesMap;
     HashSet<int> m_childrenRequested;
+    HashSet<int> m_distributedNodesRequested;
     HashMap<int, int> m_cachedChildCount;
     int m_lastNodeId;
     RefPtrWillBeMember<Document> m_document;
     typedef WillBeHeapHashMap<String, WillBeHeapVector<RefPtrWillBeMember<Node> > > SearchResults;
     SearchResults m_searchResults;
-    OwnPtrWillBeMember<RevalidateStyleAttributeTask> m_revalidateStyleAttrTask;
+    OwnPtrWillBeMember<InspectorRevalidateDOMTask> m_revalidateTask;
     SearchMode m_searchingForNode;
     OwnPtr<HighlightConfig> m_inspectModeHighlightConfig;
     OwnPtrWillBeMember<InspectorHistory> m_history;

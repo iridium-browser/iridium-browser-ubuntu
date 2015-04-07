@@ -82,7 +82,7 @@ void ImageSource::StartDataRequest(
     return;
   }
 
-  if (!image_loader_.get()) {
+  if (!image_loader_) {
     image_loader_ = new UserImageLoader(ImageDecoder::DEFAULT_CODEC,
                                         task_runner_);
   }

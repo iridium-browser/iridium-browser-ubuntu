@@ -49,6 +49,15 @@ enum EasyUnlockLoginEvent {
   // Password is used for sign-in because phone is not right next to the
   // Chromebook.
   PASSWORD_SIGN_IN_TX_POWER_TOO_HIGH = 15,
+  // Password is used for sign-in because Easy sign-in failed.
+  PASSWORD_SIGN_IN_LOGIN_FAILED = 16,
+  // Password is used for sign-in because pairing data is changed for a "new"
+  // Chromebook (where there was no previous pairing data)..
+  PASSWORD_SIGN_IN_PAIRING_ADDED = 17,
+  // Password is used for sign-in because there is no screenlock state handler.
+  // Most likely because EasyUnlock is disabled, e.g. Bluetooth adapter not
+  // ready.
+  PASSWORD_SIGN_IN_NO_SCREENLOCK_STATE_HANDLER = 18,
 
   EASY_SIGN_IN_LOGIN_EVENT_COUNT  // Must be the last.
 };

@@ -20,6 +20,7 @@
 #include "cc/resources/raster_buffer.h"
 #include "cc/resources/rasterizer.h"
 #include "cc/resources/tile.h"
+#include "cc/resources/tile_task_runner.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
 namespace cc {
@@ -41,7 +42,6 @@ class RasterTaskImpl : public RasterTask {
       const void* tile_id,
       int source_frame_number,
       bool analyze_picture,
-      RenderingStatsInstrumentation* rendering_stats,
       const base::Callback<void(const RasterSource::SolidColorAnalysis&, bool)>&
           reply,
       ImageDecodeTask::Vector* dependencies)
@@ -54,7 +54,6 @@ class RasterTaskImpl : public RasterTask {
         tile_id_(tile_id),
         source_frame_number_(source_frame_number),
         analyze_picture_(analyze_picture),
-        rendering_stats_(rendering_stats),
         reply_(reply) {}
 
   // Overridden from Task:
@@ -73,12 +72,12 @@ class RasterTaskImpl : public RasterTask {
     Raster(raster_source_.get());
   }
 
-  // Overridden from RasterizerTask:
-  void ScheduleOnOriginThread(RasterizerTaskClient* client) override {
+  // Overridden from TileTask:
+  void ScheduleOnOriginThread(TileTaskClient* client) override {
     DCHECK(!raster_buffer_);
     raster_buffer_ = client->AcquireBufferForRaster(resource());
   }
-  void CompleteOnOriginThread(RasterizerTaskClient* client) override {
+  void CompleteOnOriginThread(TileTaskClient* client) override {
     client->ReleaseBufferForRaster(raster_buffer_.Pass());
   }
   void RunReplyOnOriginThread() override {
@@ -110,8 +109,6 @@ class RasterTaskImpl : public RasterTask {
   void Raster(const RasterSource* raster_source) {
     frame_viewer_instrumentation::ScopedRasterTask raster_task(
         tile_id_, tile_resolution_, source_frame_number_, layer_id_);
-    devtools_instrumentation::ScopedLayerTask layer_task(
-        devtools_instrumentation::kRasterTask, layer_id_);
 
     DCHECK(raster_source);
 
@@ -128,7 +125,6 @@ class RasterTaskImpl : public RasterTask {
   const void* tile_id_;
   int source_frame_number_;
   bool analyze_picture_;
-  RenderingStatsInstrumentation* rendering_stats_;
   const base::Callback<void(const RasterSource::SolidColorAnalysis&, bool)>
       reply_;
   scoped_ptr<RasterBuffer> raster_buffer_;
@@ -140,11 +136,9 @@ class ImageDecodeTaskImpl : public ImageDecodeTask {
  public:
   ImageDecodeTaskImpl(SkPixelRef* pixel_ref,
                       int layer_id,
-                      RenderingStatsInstrumentation* rendering_stats,
                       const base::Callback<void(bool was_canceled)>& reply)
       : pixel_ref_(skia::SharePtr(pixel_ref)),
         layer_id_(layer_id),
-        rendering_stats_(rendering_stats),
         reply_(reply) {}
 
   // Overridden from Task:
@@ -156,11 +150,15 @@ class ImageDecodeTaskImpl : public ImageDecodeTask {
     // This will cause the image referred to by pixel ref to be decoded.
     pixel_ref_->lockPixels();
     pixel_ref_->unlockPixels();
+
+    // Release the reference after decoding image to ensure that it is not
+    // kept alive unless needed.
+    pixel_ref_.clear();
   }
 
-  // Overridden from RasterizerTask:
-  void ScheduleOnOriginThread(RasterizerTaskClient* client) override {}
-  void CompleteOnOriginThread(RasterizerTaskClient* client) override {}
+  // Overridden from TileTask:
+  void ScheduleOnOriginThread(TileTaskClient* client) override {}
+  void CompleteOnOriginThread(TileTaskClient* client) override {}
   void RunReplyOnOriginThread() override { reply_.Run(!HasFinishedRunning()); }
 
  protected:
@@ -169,11 +167,24 @@ class ImageDecodeTaskImpl : public ImageDecodeTask {
  private:
   skia::RefPtr<SkPixelRef> pixel_ref_;
   int layer_id_;
-  RenderingStatsInstrumentation* rendering_stats_;
   const base::Callback<void(bool was_canceled)> reply_;
 
   DISALLOW_COPY_AND_ASSIGN(ImageDecodeTaskImpl);
 };
+
+const char* TaskSetName(TaskSet task_set) {
+  switch (task_set) {
+    case TileManager::ALL:
+      return "ALL";
+    case TileManager::REQUIRED_FOR_ACTIVATION:
+      return "REQUIRED_FOR_ACTIVATION";
+    case TileManager::REQUIRED_FOR_DRAW:
+      return "REQUIRED_FOR_DRAW";
+  }
+
+  NOTREACHED();
+  return "Invalid TaskSet";
+}
 
 }  // namespace
 
@@ -194,14 +205,11 @@ scoped_ptr<TileManager> TileManager::Create(
     TileManagerClient* client,
     base::SequencedTaskRunner* task_runner,
     ResourcePool* resource_pool,
+    TileTaskRunner* tile_task_runner,
     Rasterizer* rasterizer,
-    RenderingStatsInstrumentation* rendering_stats_instrumentation,
     size_t scheduled_raster_task_limit) {
-  return make_scoped_ptr(new TileManager(client,
-                                         task_runner,
-                                         resource_pool,
-                                         rasterizer,
-                                         rendering_stats_instrumentation,
+  return make_scoped_ptr(new TileManager(client, task_runner, resource_pool,
+                                         tile_task_runner, rasterizer,
                                          scheduled_raster_task_limit));
 }
 
@@ -209,24 +217,40 @@ TileManager::TileManager(
     TileManagerClient* client,
     const scoped_refptr<base::SequencedTaskRunner>& task_runner,
     ResourcePool* resource_pool,
+    TileTaskRunner* tile_task_runner,
     Rasterizer* rasterizer,
-    RenderingStatsInstrumentation* rendering_stats_instrumentation,
     size_t scheduled_raster_task_limit)
     : client_(client),
       task_runner_(task_runner),
       resource_pool_(resource_pool),
+      tile_task_runner_(tile_task_runner),
       rasterizer_(rasterizer),
       scheduled_raster_task_limit_(scheduled_raster_task_limit),
       all_tiles_that_need_to_be_rasterized_are_scheduled_(true),
-      rendering_stats_instrumentation_(rendering_stats_instrumentation),
-      did_initialize_visible_tile_(false),
       did_check_for_completed_tasks_since_last_schedule_tasks_(true),
       did_oom_on_last_assign_(false),
+      ready_to_activate_notifier_(
+          task_runner_.get(),
+          base::Bind(&TileManager::NotifyReadyToActivate,
+                     base::Unretained(this))),
+      ready_to_draw_notifier_(
+          task_runner_.get(),
+          base::Bind(&TileManager::NotifyReadyToDraw, base::Unretained(this))),
       ready_to_activate_check_notifier_(
           task_runner_.get(),
           base::Bind(&TileManager::CheckIfReadyToActivate,
-                     base::Unretained(this))) {
-  rasterizer_->SetClient(this);
+                     base::Unretained(this))),
+      ready_to_draw_check_notifier_(
+          task_runner_.get(),
+          base::Bind(&TileManager::CheckIfReadyToDraw, base::Unretained(this))),
+      more_tiles_need_prepare_check_notifier_(
+          task_runner_.get(),
+          base::Bind(&TileManager::CheckIfMoreTilesNeedToBePrepared,
+                     base::Unretained(this))),
+      eviction_priority_queue_is_up_to_date_(false),
+      did_notify_ready_to_activate_(false),
+      did_notify_ready_to_draw_(false) {
+  tile_task_runner_->SetClient(this);
 }
 
 TileManager::~TileManager() {
@@ -234,14 +258,14 @@ TileManager::~TileManager() {
   // our memory usage to drop to zero.
   global_state_ = GlobalStateThatImpactsTilePriority();
 
-  RasterTaskQueue empty;
-  rasterizer_->ScheduleTasks(&empty);
+  TileTaskQueue empty;
+  tile_task_runner_->ScheduleTasks(&empty);
   orphan_raster_tasks_.clear();
 
   // This should finish all pending tasks and release any uninitialized
   // resources.
-  rasterizer_->Shutdown();
-  rasterizer_->CheckForCompletedTasks();
+  tile_task_runner_->Shutdown();
+  tile_task_runner_->CheckForCompletedTasks();
 
   FreeResourcesForReleasedTiles();
   CleanUpReleasedTiles();
@@ -277,7 +301,7 @@ void TileManager::CleanUpReleasedTiles() {
       continue;
     }
 
-    DCHECK(!tile->HasResources());
+    DCHECK(!tile->HasResource());
     DCHECK(tiles_.find(tile->id()) != tiles_.end());
     tiles_.erase(tile->id());
 
@@ -294,126 +318,151 @@ void TileManager::CleanUpReleasedTiles() {
   }
 }
 
-void TileManager::DidFinishRunningTasks(TaskSet task_set) {
-  if (task_set == ALL) {
-    TRACE_EVENT1("cc", "TileManager::DidFinishRunningTasks", "task_set", "ALL");
+void TileManager::DidFinishRunningTileTasks(TaskSet task_set) {
+  TRACE_EVENT1("cc", "TileManager::DidFinishRunningTileTasks", "task_set",
+               TaskSetName(task_set));
 
-    bool memory_usage_above_limit = resource_pool_->total_memory_usage_bytes() >
-                                    global_state_.soft_memory_limit_in_bytes;
+  switch (task_set) {
+    case ALL: {
+      bool memory_usage_above_limit =
+          resource_pool_->total_memory_usage_bytes() >
+          global_state_.soft_memory_limit_in_bytes;
 
-    // When OOM, keep re-assigning memory until we reach a steady state
-    // where top-priority tiles are initialized.
-    if (all_tiles_that_need_to_be_rasterized_are_scheduled_ &&
-        !memory_usage_above_limit)
-      return;
+      if (all_tiles_that_need_to_be_rasterized_are_scheduled_ &&
+          !memory_usage_above_limit)
+        return;
 
-    rasterizer_->CheckForCompletedTasks();
-    did_check_for_completed_tasks_since_last_schedule_tasks_ = true;
-
-    TileVector tiles_that_need_to_be_rasterized;
-    AssignGpuMemoryToTiles(&tiles_that_need_to_be_rasterized);
-
-    // |tiles_that_need_to_be_rasterized| will be empty when we reach a
-    // steady memory state. Keep scheduling tasks until we reach this state.
-    if (!tiles_that_need_to_be_rasterized.empty()) {
-      ScheduleTasks(tiles_that_need_to_be_rasterized);
+      more_tiles_need_prepare_check_notifier_.Schedule();
       return;
     }
-
-    FreeResourcesForReleasedTiles();
-
-    resource_pool_->ReduceResourceUsage();
-
-    // We don't reserve memory for required-for-activation tiles during
-    // accelerated gestures, so we just postpone activation when we don't
-    // have these tiles, and activate after the accelerated gesture.
-    // Likewise if we don't allow any tiles (as is the case when we're
-    // invisible), if we have tiles that aren't ready, then we shouldn't
-    // activate as activation can cause checkerboards.
-    bool allow_rasterize_on_demand =
-        global_state_.tree_priority != SMOOTHNESS_TAKES_PRIORITY &&
-        global_state_.memory_limit_policy != ALLOW_NOTHING;
-
-    // Use on-demand raster for any required-for-activation tiles that have not
-    // been been assigned memory after reaching a steady memory state. This
-    // ensures that we activate even when OOM. Note that we have to rebuilt the
-    // queue in case the last AssignGpuMemoryToTiles evicted some tiles that
-    // would otherwise not be picked up by the old raster queue.
-    client_->BuildRasterQueue(&raster_priority_queue_,
-                              global_state_.tree_priority);
-    bool ready_to_activate = true;
-    while (!raster_priority_queue_.IsEmpty()) {
-      Tile* tile = raster_priority_queue_.Top();
-      ManagedTileState& mts = tile->managed_state();
-
-      if (tile->required_for_activation() && !mts.draw_info.IsReadyToDraw()) {
-        // If we can't raster on demand, give up early (and don't activate).
-        if (!allow_rasterize_on_demand) {
-          ready_to_activate = false;
-          break;
-        }
-
-        mts.draw_info.set_rasterize_on_demand();
-        client_->NotifyTileStateChanged(tile);
-      }
-      raster_priority_queue_.Pop();
-    }
-
-    if (ready_to_activate) {
-      DCHECK(IsReadyToActivate());
+    case REQUIRED_FOR_ACTIVATION:
       ready_to_activate_check_notifier_.Schedule();
-    }
-    raster_priority_queue_.Reset();
-    return;
+      return;
+    case REQUIRED_FOR_DRAW:
+      ready_to_draw_check_notifier_.Schedule();
+      return;
   }
 
-  if (task_set == REQUIRED_FOR_ACTIVATION) {
-    TRACE_EVENT1("cc",
-                 "TileManager::DidFinishRunningTasks",
-                 "task_set",
-                 "REQUIRED_FOR_ACTIVATION");
-    ready_to_activate_check_notifier_.Schedule();
-  }
+  NOTREACHED();
 }
 
-void TileManager::ManageTiles(const GlobalStateThatImpactsTilePriority& state) {
-  TRACE_EVENT0("cc", "TileManager::ManageTiles");
+void TileManager::PrepareTiles(
+    const GlobalStateThatImpactsTilePriority& state) {
+  TRACE_EVENT0("cc", "TileManager::PrepareTiles");
 
   global_state_ = state;
 
-  // We need to call CheckForCompletedTasks() once in-between each call
-  // to ScheduleTasks() to prevent canceled tasks from being scheduled.
-  if (!did_check_for_completed_tasks_since_last_schedule_tasks_) {
-    rasterizer_->CheckForCompletedTasks();
-    did_check_for_completed_tasks_since_last_schedule_tasks_ = true;
+  PrepareTilesMode prepare_tiles_mode = rasterizer_->GetPrepareTilesMode();
+
+  // TODO(hendrikw): Consider moving some of this code to the rasterizer.
+  if (prepare_tiles_mode != PrepareTilesMode::PREPARE_NONE) {
+    // We need to call CheckForCompletedTasks() once in-between each call
+    // to ScheduleTasks() to prevent canceled tasks from being scheduled.
+    if (!did_check_for_completed_tasks_since_last_schedule_tasks_) {
+      tile_task_runner_->CheckForCompletedTasks();
+      did_check_for_completed_tasks_since_last_schedule_tasks_ = true;
+    }
+
+    FreeResourcesForReleasedTiles();
+    CleanUpReleasedTiles();
+
+    TileVector tiles_that_need_to_be_rasterized;
+    AssignGpuMemoryToTiles(&tiles_that_need_to_be_rasterized,
+                           scheduled_raster_task_limit_, false);
+
+    // Schedule tile tasks.
+    ScheduleTasks(tiles_that_need_to_be_rasterized);
+
+    did_notify_ready_to_activate_ = false;
+    did_notify_ready_to_draw_ = false;
+  } else {
+    if (global_state_.hard_memory_limit_in_bytes == 0) {
+      TileVector tiles_that_need_to_be_rasterized;
+      AssignGpuMemoryToTiles(&tiles_that_need_to_be_rasterized,
+                             scheduled_raster_task_limit_, false);
+      DCHECK(tiles_that_need_to_be_rasterized.empty());
+    }
+
+    did_notify_ready_to_activate_ = false;
+    did_notify_ready_to_draw_ = false;
+    ready_to_activate_notifier_.Schedule();
+    ready_to_draw_notifier_.Schedule();
   }
+
+  TRACE_EVENT_INSTANT1("cc", "DidPrepareTiles", TRACE_EVENT_SCOPE_THREAD,
+                       "state", BasicStateAsValue());
+
+  TRACE_COUNTER_ID1("cc", "unused_memory_bytes", this,
+                    resource_pool_->total_memory_usage_bytes() -
+                        resource_pool_->acquired_memory_usage_bytes());
+}
+
+void TileManager::SynchronouslyRasterizeTiles(
+    const GlobalStateThatImpactsTilePriority& state) {
+  TRACE_EVENT0("cc", "TileManager::SynchronouslyRasterizeTiles");
+
+  DCHECK(rasterizer_->GetPrepareTilesMode() !=
+         PrepareTilesMode::RASTERIZE_PRIORITIZED_TILES);
+
+  global_state_ = state;
 
   FreeResourcesForReleasedTiles();
   CleanUpReleasedTiles();
 
   TileVector tiles_that_need_to_be_rasterized;
-  AssignGpuMemoryToTiles(&tiles_that_need_to_be_rasterized);
+  AssignGpuMemoryToTiles(&tiles_that_need_to_be_rasterized,
+                         std::numeric_limits<size_t>::max(), true);
 
-  // Finally, schedule rasterizer tasks.
-  ScheduleTasks(tiles_that_need_to_be_rasterized);
+  // We must reduce the amount of unused resources before calling
+  // RunTasks to prevent usage from rising above limits.
+  resource_pool_->ReduceResourceUsage();
 
-  TRACE_EVENT_INSTANT1("cc",
-                       "DidManage",
-                       TRACE_EVENT_SCOPE_THREAD,
-                       "state",
+  // Run and complete all raster task synchronously.
+  rasterizer_->RasterizeTiles(
+      tiles_that_need_to_be_rasterized, resource_pool_,
+      base::Bind(&TileManager::UpdateTileDrawInfo, base::Unretained(this)));
+
+  // Use on-demand raster for any required-for-activation tiles that have not
+  // been been assigned memory after reaching a steady memory state. This
+  // ensures that we activate even when OOM. Note that we have to rebuilt the
+  // queue in case the last AssignGpuMemoryToTiles evicted some tiles that would
+  // otherwise not be picked up by the old raster queue.
+  client_->BuildRasterQueue(&raster_priority_queue_,
+                            global_state_.tree_priority);
+
+  // Use on-demand raster for any tiles that have not been been assigned
+  // memory. This ensures that we draw even when OOM.
+  while (!raster_priority_queue_.IsEmpty()) {
+    Tile* tile = raster_priority_queue_.Top();
+    TileDrawInfo& draw_info = tile->draw_info();
+
+    if (tile->required_for_draw() && !draw_info.IsReadyToDraw()) {
+      draw_info.set_rasterize_on_demand();
+      client_->NotifyTileStateChanged(tile);
+    }
+    raster_priority_queue_.Pop();
+  }
+  raster_priority_queue_.Reset();
+
+  TRACE_EVENT_INSTANT1("cc", "DidRasterize", TRACE_EVENT_SCOPE_THREAD, "state",
                        BasicStateAsValue());
 
-  TRACE_COUNTER_ID1("cc",
-                    "unused_memory_bytes",
-                    this,
+  TRACE_COUNTER_ID1("cc", "unused_memory_bytes", this,
                     resource_pool_->total_memory_usage_bytes() -
                         resource_pool_->acquired_memory_usage_bytes());
 }
 
-bool TileManager::UpdateVisibleTiles() {
+void TileManager::UpdateVisibleTiles(
+    const GlobalStateThatImpactsTilePriority& state) {
   TRACE_EVENT0("cc", "TileManager::UpdateVisibleTiles");
 
-  rasterizer_->CheckForCompletedTasks();
+  tile_task_runner_->CheckForCompletedTasks();
+
+  DCHECK(rasterizer_);
+  PrepareTilesMode prepare_tiles_mode = rasterizer_->GetPrepareTilesMode();
+  if (prepare_tiles_mode != PrepareTilesMode::RASTERIZE_PRIORITIZED_TILES)
+    SynchronouslyRasterizeTiles(state);
+
   did_check_for_completed_tasks_since_last_schedule_tasks_ = true;
 
   TRACE_EVENT_INSTANT1(
@@ -423,10 +472,6 @@ bool TileManager::UpdateVisibleTiles() {
       "stats",
       RasterTaskCompletionStatsAsValue(update_visible_tiles_stats_));
   update_visible_tiles_stats_ = RasterTaskCompletionStats();
-
-  bool did_initialize_visible_tile = did_initialize_visible_tile_;
-  did_initialize_visible_tile_ = false;
-  return did_initialize_visible_tile;
 }
 
 scoped_refptr<base::debug::ConvertableToTraceFormat>
@@ -513,7 +558,9 @@ bool TileManager::TilePriorityViolatesMemoryPolicy(
 }
 
 void TileManager::AssignGpuMemoryToTiles(
-    TileVector* tiles_that_need_to_be_rasterized) {
+    TileVector* tiles_that_need_to_be_rasterized,
+    size_t scheduled_raster_task_limit,
+    bool required_for_draw_only) {
   TRACE_EVENT_BEGIN0("cc", "TileManager::AssignGpuMemoryToTiles");
 
   // Maintain the list of released resources that can potentially be re-used
@@ -542,38 +589,44 @@ void TileManager::AssignGpuMemoryToTiles(
 
   while (!raster_priority_queue_.IsEmpty()) {
     Tile* tile = raster_priority_queue_.Top();
+
+    // TODO(vmpstr): Remove this when the iterator returns the correct tiles
+    // to draw for GPU rasterization.
+    if (required_for_draw_only) {
+      if (!tile->required_for_draw()) {
+        raster_priority_queue_.Pop();
+        continue;
+      }
+    }
     TilePriority priority = tile->combined_priority();
 
     if (TilePriorityViolatesMemoryPolicy(priority)) {
       TRACE_EVENT_INSTANT0(
-          "cc",
-          "TileManager::AssignGpuMemory tile violates memory policy",
+          "cc", "TileManager::AssignGpuMemory tile violates memory policy",
           TRACE_EVENT_SCOPE_THREAD);
       break;
     }
 
     // We won't be able to schedule this tile, so break out early.
     if (tiles_that_need_to_be_rasterized->size() >=
-        scheduled_raster_task_limit_) {
+        scheduled_raster_task_limit) {
       all_tiles_that_need_to_be_rasterized_are_scheduled_ = false;
       break;
     }
 
-    ManagedTileState& mts = tile->managed_state();
-    mts.scheduled_priority = schedule_priority++;
-    mts.resolution = priority.resolution;
+    TileDrawInfo& draw_info = tile->draw_info();
+    tile->scheduled_priority_ = schedule_priority++;
 
-    DCHECK(mts.draw_info.mode() ==
-               ManagedTileState::DrawInfo::PICTURE_PILE_MODE ||
-           !mts.draw_info.IsReadyToDraw());
+    DCHECK(draw_info.mode() == TileDrawInfo::PICTURE_PILE_MODE ||
+           !draw_info.IsReadyToDraw());
 
     // If the tile already has a raster_task, then the memory used by it is
     // already accounted for in memory_usage. Otherwise, we'll have to acquire
     // more memory to create a raster task.
     MemoryUsage memory_required_by_tile_to_be_scheduled;
-    if (!mts.raster_task.get()) {
+    if (!tile->raster_task_.get()) {
       memory_required_by_tile_to_be_scheduled = MemoryUsage::FromConfig(
-          tile->size(), resource_pool_->resource_format());
+          tile->desired_texture_size(), resource_pool_->resource_format());
     }
 
     bool tile_is_needed_now = priority.priority_bin == TilePriority::NOW;
@@ -587,8 +640,7 @@ void TileManager::AssignGpuMemoryToTiles(
     bool memory_usage_is_within_limit =
         FreeTileResourcesWithLowerPriorityUntilUsageIsWithinLimit(
             tile_memory_limit - memory_required_by_tile_to_be_scheduled,
-            priority,
-            &memory_usage);
+            priority, &memory_usage);
 
     // If we couldn't fit the tile into our current memory limit, then we're
     // done.
@@ -621,8 +673,7 @@ void TileManager::AssignGpuMemoryToTiles(
 
   raster_priority_queue_.Reset();
 
-  TRACE_EVENT_END2("cc",
-                   "TileManager::AssignGpuMemoryToTiles",
+  TRACE_EVENT_END2("cc", "TileManager::AssignGpuMemoryToTiles",
                    "all_tiles_that_need_to_be_rasterized_are_scheduled",
                    all_tiles_that_need_to_be_rasterized_are_scheduled_,
                    "had_enough_memory_to_schedule_tiles_needed_now",
@@ -630,9 +681,9 @@ void TileManager::AssignGpuMemoryToTiles(
 }
 
 void TileManager::FreeResourcesForTile(Tile* tile) {
-  ManagedTileState& mts = tile->managed_state();
-  if (mts.draw_info.resource_)
-    resource_pool_->ReleaseResource(mts.draw_info.resource_.Pass());
+  TileDrawInfo& draw_info = tile->draw_info();
+  if (draw_info.resource_)
+    resource_pool_->ReleaseResource(draw_info.resource_.Pass());
 }
 
 void TileManager::FreeResourcesForTileAndNotifyClientIfTileWasReadyToDraw(
@@ -660,20 +711,22 @@ void TileManager::ScheduleTasks(
        it != tiles_that_need_to_be_rasterized.end();
        ++it) {
     Tile* tile = *it;
-    ManagedTileState& mts = tile->managed_state();
+    TileDrawInfo& draw_info = tile->draw_info();
 
-    DCHECK(mts.draw_info.requires_resource());
-    DCHECK(!mts.draw_info.resource_);
+    DCHECK(draw_info.requires_resource());
+    DCHECK(!draw_info.resource_);
 
-    if (!mts.raster_task.get())
-      mts.raster_task = CreateRasterTask(tile);
+    if (!tile->raster_task_.get())
+      tile->raster_task_ = CreateRasterTask(tile);
 
     TaskSetCollection task_sets;
     if (tile->required_for_activation())
       task_sets.set(REQUIRED_FOR_ACTIVATION);
+    if (tile->required_for_draw())
+      task_sets.set(REQUIRED_FOR_DRAW);
     task_sets.set(ALL);
     raster_queue_.items.push_back(
-        RasterTaskQueue::Item(mts.raster_task.get(), task_sets));
+        TileTaskQueue::Item(tile->raster_task_.get(), task_sets));
   }
 
   // We must reduce the amount of unused resoruces before calling
@@ -683,7 +736,7 @@ void TileManager::ScheduleTasks(
   // Schedule running of |raster_queue_|. This replaces any previously
   // scheduled tasks and effectively cancels all tasks not present
   // in |raster_queue_|.
-  rasterizer_->ScheduleTasks(&raster_queue_);
+  tile_task_runner_->ScheduleTasks(&raster_queue_);
 
   // It's now safe to clean up orphan tasks as raster worker pool is not
   // allowed to keep around unreferenced raster tasks after ScheduleTasks() has
@@ -699,7 +752,6 @@ scoped_refptr<ImageDecodeTask> TileManager::CreateImageDecodeTask(
   return make_scoped_refptr(new ImageDecodeTaskImpl(
       pixel_ref,
       tile->layer_id(),
-      rendering_stats_instrumentation_,
       base::Bind(&TileManager::OnImageDecodeTaskCompleted,
                  base::Unretained(this),
                  tile->layer_id(),
@@ -707,10 +759,8 @@ scoped_refptr<ImageDecodeTask> TileManager::CreateImageDecodeTask(
 }
 
 scoped_refptr<RasterTask> TileManager::CreateRasterTask(Tile* tile) {
-  ManagedTileState& mts = tile->managed_state();
-
   scoped_ptr<ScopedResource> resource =
-      resource_pool_->AcquireResource(tile->size());
+      resource_pool_->AcquireResource(tile->desired_texture_size());
   const ScopedResource* const_resource = resource.get();
 
   // Create and queue all image decode tasks that this tile depends on.
@@ -736,22 +786,14 @@ scoped_refptr<RasterTask> TileManager::CreateRasterTask(Tile* tile) {
     existing_pixel_refs[id] = decode_task;
   }
 
-  return make_scoped_refptr(
-      new RasterTaskImpl(const_resource,
-                         tile->raster_source(),
-                         tile->content_rect(),
-                         tile->contents_scale(),
-                         mts.resolution,
-                         tile->layer_id(),
-                         static_cast<const void*>(tile),
-                         tile->source_frame_number(),
-                         tile->use_picture_analysis(),
-                         rendering_stats_instrumentation_,
-                         base::Bind(&TileManager::OnRasterTaskCompleted,
-                                    base::Unretained(this),
-                                    tile->id(),
-                                    base::Passed(&resource)),
-                         &decode_tasks));
+  return make_scoped_refptr(new RasterTaskImpl(
+      const_resource, tile->raster_source(), tile->content_rect(),
+      tile->contents_scale(), tile->combined_priority().resolution,
+      tile->layer_id(), static_cast<const void*>(tile),
+      tile->source_frame_number(), tile->use_picture_analysis(),
+      base::Bind(&TileManager::OnRasterTaskCompleted, base::Unretained(this),
+                 tile->id(), base::Passed(&resource)),
+      &decode_tasks));
 }
 
 void TileManager::OnImageDecodeTaskCompleted(int layer_id,
@@ -782,10 +824,9 @@ void TileManager::OnRasterTaskCompleted(
   DCHECK(tiles_.find(tile_id) != tiles_.end());
 
   Tile* tile = tiles_[tile_id];
-  ManagedTileState& mts = tile->managed_state();
-  DCHECK(mts.raster_task.get());
-  orphan_raster_tasks_.push_back(mts.raster_task);
-  mts.raster_task = NULL;
+  DCHECK(tile->raster_task_.get());
+  orphan_raster_tasks_.push_back(tile->raster_task_);
+  tile->raster_task_ = nullptr;
 
   if (was_canceled) {
     ++update_visible_tiles_stats_.canceled_count;
@@ -793,37 +834,39 @@ void TileManager::OnRasterTaskCompleted(
     return;
   }
 
+  UpdateTileDrawInfo(tile, resource.Pass(), analysis);
+}
+
+void TileManager::UpdateTileDrawInfo(
+    Tile* tile,
+    scoped_ptr<ScopedResource> resource,
+    const RasterSource::SolidColorAnalysis& analysis) {
+  TileDrawInfo& draw_info = tile->draw_info();
+
   ++update_visible_tiles_stats_.completed_count;
 
   if (analysis.is_solid_color) {
-    mts.draw_info.set_solid_color(analysis.solid_color);
+    draw_info.set_solid_color(analysis.solid_color);
     resource_pool_->ReleaseResource(resource.Pass());
   } else {
-    mts.draw_info.set_use_resource();
-    mts.draw_info.resource_ = resource.Pass();
+    draw_info.set_use_resource();
+    draw_info.resource_ = resource.Pass();
   }
-
-  if (tile->priority(ACTIVE_TREE).distance_to_visible == 0.f)
-    did_initialize_visible_tile_ = true;
 
   client_->NotifyTileStateChanged(tile);
 }
 
-scoped_refptr<Tile> TileManager::CreateTile(RasterSource* raster_source,
-                                            const gfx::Size& tile_size,
-                                            const gfx::Rect& content_rect,
-                                            float contents_scale,
-                                            int layer_id,
-                                            int source_frame_number,
-                                            int flags) {
-  scoped_refptr<Tile> tile = make_scoped_refptr(new Tile(this,
-                                                         raster_source,
-                                                         tile_size,
-                                                         content_rect,
-                                                         contents_scale,
-                                                         layer_id,
-                                                         source_frame_number,
-                                                         flags));
+scoped_refptr<Tile> TileManager::CreateTile(
+    RasterSource* raster_source,
+    const gfx::Size& desired_texture_size,
+    const gfx::Rect& content_rect,
+    float contents_scale,
+    int layer_id,
+    int source_frame_number,
+    int flags) {
+  scoped_refptr<Tile> tile = make_scoped_refptr(
+      new Tile(this, raster_source, desired_texture_size, content_rect,
+               contents_scale, layer_id, source_frame_number, flags));
   DCHECK(tiles_.find(tile->id()) == tiles_.end());
 
   tiles_[tile->id()] = tile.get();
@@ -831,33 +874,140 @@ scoped_refptr<Tile> TileManager::CreateTile(RasterSource* raster_source,
   return tile;
 }
 
-void TileManager::SetRasterizerForTesting(Rasterizer* rasterizer) {
-  rasterizer_ = rasterizer;
-  rasterizer_->SetClient(this);
+void TileManager::SetTileTaskRunnerForTesting(
+    TileTaskRunner* tile_task_runner) {
+  tile_task_runner_ = tile_task_runner;
+  tile_task_runner_->SetClient(this);
 }
 
 bool TileManager::IsReadyToActivate() const {
   TRACE_EVENT0("cc", "TileManager::IsReadyToActivate");
   const std::vector<PictureLayerImpl*>& layers = client_->GetPictureLayers();
 
-  for (std::vector<PictureLayerImpl*>::const_iterator it = layers.begin();
-       it != layers.end();
-       ++it) {
-    if (!(*it)->AllTilesRequiredForActivationAreReadyToDraw())
+  for (const auto& layer : layers) {
+    if (!layer->AllTilesRequiredForActivationAreReadyToDraw())
       return false;
   }
 
   return true;
 }
 
+bool TileManager::IsReadyToDraw() const {
+  const std::vector<PictureLayerImpl*>& layers = client_->GetPictureLayers();
+
+  for (const auto& layer : layers) {
+    if (!layer->AllTilesRequiredForDrawAreReadyToDraw())
+      return false;
+  }
+
+  return true;
+}
+
+void TileManager::NotifyReadyToActivate() {
+  TRACE_EVENT0("cc", "TileManager::NotifyReadyToActivate");
+  if (did_notify_ready_to_activate_)
+    return;
+  client_->NotifyReadyToActivate();
+  did_notify_ready_to_activate_ = true;
+}
+
+void TileManager::NotifyReadyToDraw() {
+  TRACE_EVENT0("cc", "TileManager::NotifyReadyToDraw");
+  if (did_notify_ready_to_draw_)
+    return;
+  client_->NotifyReadyToDraw();
+  did_notify_ready_to_draw_ = true;
+}
+
 void TileManager::CheckIfReadyToActivate() {
   TRACE_EVENT0("cc", "TileManager::CheckIfReadyToActivate");
 
-  rasterizer_->CheckForCompletedTasks();
+  tile_task_runner_->CheckForCompletedTasks();
   did_check_for_completed_tasks_since_last_schedule_tasks_ = true;
 
-  if (IsReadyToActivate())
-    client_->NotifyReadyToActivate();
+  if (did_notify_ready_to_activate_)
+    return;
+  if (!IsReadyToActivate())
+    return;
+
+  NotifyReadyToActivate();
+}
+
+void TileManager::CheckIfReadyToDraw() {
+  TRACE_EVENT0("cc", "TileManager::CheckIfReadyToDraw");
+
+  tile_task_runner_->CheckForCompletedTasks();
+  did_check_for_completed_tasks_since_last_schedule_tasks_ = true;
+
+  if (did_notify_ready_to_draw_)
+    return;
+  if (!IsReadyToDraw())
+    return;
+
+  NotifyReadyToDraw();
+}
+
+void TileManager::CheckIfMoreTilesNeedToBePrepared() {
+  tile_task_runner_->CheckForCompletedTasks();
+  did_check_for_completed_tasks_since_last_schedule_tasks_ = true;
+
+  // When OOM, keep re-assigning memory until we reach a steady state
+  // where top-priority tiles are initialized.
+  TileVector tiles_that_need_to_be_rasterized;
+  AssignGpuMemoryToTiles(&tiles_that_need_to_be_rasterized,
+                         scheduled_raster_task_limit_, false);
+
+  // |tiles_that_need_to_be_rasterized| will be empty when we reach a
+  // steady memory state. Keep scheduling tasks until we reach this state.
+  if (!tiles_that_need_to_be_rasterized.empty()) {
+    ScheduleTasks(tiles_that_need_to_be_rasterized);
+    return;
+  }
+
+  FreeResourcesForReleasedTiles();
+
+  resource_pool_->ReduceResourceUsage();
+
+  // We don't reserve memory for required-for-activation tiles during
+  // accelerated gestures, so we just postpone activation when we don't
+  // have these tiles, and activate after the accelerated gesture.
+  // Likewise if we don't allow any tiles (as is the case when we're
+  // invisible), if we have tiles that aren't ready, then we shouldn't
+  // activate as activation can cause checkerboards.
+  bool allow_rasterize_on_demand =
+      global_state_.tree_priority != SMOOTHNESS_TAKES_PRIORITY &&
+      global_state_.memory_limit_policy != ALLOW_NOTHING;
+
+  // Use on-demand raster for any required-for-activation tiles that have
+  // not been been assigned memory after reaching a steady memory state. This
+  // ensures that we activate even when OOM. Note that we have to rebuilt the
+  // queue in case the last AssignGpuMemoryToTiles evicted some tiles that
+  // would otherwise not be picked up by the old raster queue.
+  client_->BuildRasterQueue(&raster_priority_queue_,
+                            global_state_.tree_priority);
+  bool ready_to_activate = true;
+  while (!raster_priority_queue_.IsEmpty()) {
+    Tile* tile = raster_priority_queue_.Top();
+    TileDrawInfo& draw_info = tile->draw_info();
+
+    if (tile->required_for_activation() && !draw_info.IsReadyToDraw()) {
+      // If we can't raster on demand, give up early (and don't activate).
+      if (!allow_rasterize_on_demand) {
+        ready_to_activate = false;
+        break;
+      }
+
+      draw_info.set_rasterize_on_demand();
+      client_->NotifyTileStateChanged(tile);
+    }
+    raster_priority_queue_.Pop();
+  }
+
+  if (ready_to_activate) {
+    DCHECK(IsReadyToActivate());
+    ready_to_activate_check_notifier_.Schedule();
+  }
+  raster_priority_queue_.Reset();
 }
 
 TileManager::MemoryUsage::MemoryUsage() : memory_bytes_(0), resource_count_(0) {
@@ -876,10 +1026,10 @@ TileManager::MemoryUsage TileManager::MemoryUsage::FromConfig(
 
 // static
 TileManager::MemoryUsage TileManager::MemoryUsage::FromTile(const Tile* tile) {
-  const ManagedTileState& mts = tile->managed_state();
-  if (mts.draw_info.resource_) {
-    return MemoryUsage::FromConfig(tile->size(),
-                                   mts.draw_info.resource_->format());
+  const TileDrawInfo& draw_info = tile->draw_info();
+  if (draw_info.resource_) {
+    return MemoryUsage::FromConfig(draw_info.resource_->size(),
+                                   draw_info.resource_->format());
   }
   return MemoryUsage();
 }

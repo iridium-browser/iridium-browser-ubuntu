@@ -38,7 +38,6 @@ extern const char kChromeUIDomainReliabilityInternalsURL[];
 extern const char kChromeUIDownloadsURL[];
 extern const char kChromeUIEditSearchEngineDialogURL[];
 extern const char kChromeUIExtensionIconURL[];
-extern const char kChromeUIExtensionInfoURL[];
 extern const char kChromeUIExtensionsFrameURL[];
 extern const char kChromeUIExtensionsURL[];
 extern const char kChromeUIFaviconURL[];
@@ -54,7 +53,6 @@ extern const char kChromeUIInspectURL[];
 extern const char kChromeUIInstantURL[];
 extern const char kChromeUIInterstitialURL[];
 extern const char kChromeUIInvalidationsURL[];
-extern const char kChromeUIIPCURL[];
 extern const char kChromeUIMemoryRedirectURL[];
 extern const char kChromeUIMemoryURL[];
 extern const char kChromeUIMetroFlowURL[];
@@ -99,7 +97,6 @@ extern const char kChromeUINativeRecentTabsURL[];
 extern const char kChromeUIActivationMessage[];
 extern const char kChromeUIBluetoothPairingURL[];
 extern const char kChromeUICertificateManagerDialogURL[];
-extern const char kChromeUIChargerReplacementURL[];
 extern const char kChromeUIChooseMobileNetworkURL[];
 extern const char kChromeUIDiagnosticsURL[];
 extern const char kChromeUIDiscardsURL[];
@@ -133,6 +130,11 @@ extern const char kChromeUISalsaHost[];
 
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
 extern const char kChromeUITabModalConfirmDialogURL[];
+#endif
+
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+extern const char kChromeUICopresenceURL[];
+extern const char kChromeUICopresenceHost[];
 #endif
 
 #if defined(ENABLE_WEBRTC)
@@ -170,7 +172,6 @@ extern const char kChromeUIDownloadsHost[];
 extern const char kChromeUIDriveInternalsHost[];
 extern const char kChromeUIEditSearchEngineDialogHost[];
 extern const char kChromeUIExtensionIconHost[];
-extern const char kChromeUIExtensionInfoHost[];
 extern const char kChromeUIExtensionsFrameHost[];
 extern const char kChromeUIExtensionsHost[];
 extern const char kChromeUIFaviconHost[];
@@ -188,8 +189,8 @@ extern const char kChromeUIInspectHost[];
 extern const char kChromeUIInstantHost[];
 extern const char kChromeUIInterstitialHost[];
 extern const char kChromeUIInvalidationsHost[];
-extern const char kChromeUIIPCHost[];
 extern const char kChromeUIKillHost[];
+extern const char kChromeUILocalStateHost[];
 extern const char kChromeUIMemoryHost[];
 extern const char kChromeUIMemoryInternalsHost[];
 extern const char kChromeUIMemoryRedirectHost[];
@@ -225,7 +226,6 @@ extern const char kChromeUISyncFileSystemInternalsHost[];
 extern const char kChromeUISyncInternalsHost[];
 extern const char kChromeUISyncResourcesHost[];
 extern const char kChromeUISystemInfoHost[];
-extern const char kChromeUITaskManagerHost[];
 extern const char kChromeUITermsHost[];
 extern const char kChromeUIThemeHost[];
 extern const char kChromeUIThumbnailHost[];
@@ -238,6 +238,7 @@ extern const char kChromeUIUberHost[];
 extern const char kChromeUIUserActionsHost[];
 extern const char kChromeUIVersionHost[];
 extern const char kChromeUIVoiceSearchHost[];
+extern const char kChromeUIWebRTCDeviceProviderHost[];
 extern const char kChromeUIWorkersHost[];
 
 extern const char kChromeUIScreenshotPath[];
@@ -261,9 +262,9 @@ extern const char kChromeUIActivationMessageHost[];
 extern const char kChromeUIAppLaunchHost[];
 extern const char kChromeUIBluetoothPairingHost[];
 extern const char kChromeUICertificateManagerHost[];
-extern const char kChromeUIChargerReplacementHost[];
 extern const char kChromeUIChooseMobileNetworkHost[];
 extern const char kChromeUICryptohomeHost[];
+extern const char kChromeUIDeviceLogHost[];
 extern const char kChromeUIDiagnosticsHost[];
 extern const char kChromeUIDiscardsHost[];
 extern const char kChromeUIFirstRunHost[];
@@ -439,6 +440,9 @@ extern const char kBlockedPluginLearnMoreURL[];
 
 // The URL for the "Learn more" page for hotword search voice trigger.
 extern const char kHotwordLearnMoreURL[];
+
+// The URL for managing a user's audio history.
+extern const char kManageAudioHistoryURL[];
 
 // The URL for the "Learn more" page for register protocol handler infobars.
 extern const char kLearnMoreRegisterProtocolHandlerURL[];

@@ -59,17 +59,19 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/metrics/chromeos_metrics_provider.h"
+#include "chrome/browser/metrics/signin_status_metrics_provider_chromeos.h"
 #endif
 
 #if defined(OS_WIN)
 #include <windows.h>
 #include "base/win/registry.h"
 #include "chrome/browser/metrics/google_update_metrics_provider_win.h"
+#include "components/browser_watcher/watcher_metrics_provider_win.h"
 #endif
 
 #if !defined(OS_CHROMEOS) && !defined(OS_IOS)
 #include "chrome/browser/metrics/signin_status_metrics_provider.h"
-#endif
+#endif  // !defined(OS_CHROMEOS) && !defined(OS_IOS)
 
 namespace {
 
@@ -316,6 +318,20 @@ void ChromeMetricsServiceClient::Initialize() {
   google_update_metrics_provider_ = new GoogleUpdateMetricsProviderWin;
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(google_update_metrics_provider_));
+
+  // Report exit funnels for canary and dev only.
+  bool report_exit_funnels = false;
+  switch (chrome::VersionInfo::GetChannel()) {
+    case chrome::VersionInfo::CHANNEL_CANARY:
+    case chrome::VersionInfo::CHANNEL_DEV:
+      report_exit_funnels = true;
+      break;
+  }
+
+  metrics_service_->RegisterMetricsProvider(
+      scoped_ptr<metrics::MetricsProvider>(
+          new browser_watcher::WatcherMetricsProviderWin(
+              chrome::kBrowserExitCodesRegistryPath, report_exit_funnels)));
 #endif  // defined(OS_WIN)
 
 #if defined(ENABLE_PLUGINS)
@@ -331,13 +347,18 @@ void ChromeMetricsServiceClient::Initialize() {
   chromeos_metrics_provider_ = chromeos_metrics_provider;
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(chromeos_metrics_provider));
+
+  SigninStatusMetricsProviderChromeOS* signin_metrics_provider_cros =
+      new SigninStatusMetricsProviderChromeOS;
+  metrics_service_->RegisterMetricsProvider(
+      scoped_ptr<metrics::MetricsProvider>(signin_metrics_provider_cros));
 #endif  // defined(OS_CHROMEOS)
 
 #if !defined(OS_CHROMEOS) && !defined(OS_IOS)
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(
           SigninStatusMetricsProvider::CreateInstance()));
-#endif
+#endif  // !defined(OS_CHROMEOS) && !defined(OS_IOS)
 }
 
 void ChromeMetricsServiceClient::OnInitTaskGotHardwareClass() {
@@ -438,7 +459,7 @@ void ChromeMetricsServiceClient::OnHistogramSynchronizationDone() {
 
 void ChromeMetricsServiceClient::RecordCommandLineMetrics() {
   // Get stats on use of command line.
-  const CommandLine* command_line(CommandLine::ForCurrentProcess());
+  const base::CommandLine* command_line(base::CommandLine::ForCurrentProcess());
   size_t common_commands = 0;
   if (command_line->HasSwitch(switches::kUserDataDir)) {
     ++common_commands;

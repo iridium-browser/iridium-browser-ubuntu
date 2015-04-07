@@ -7,11 +7,10 @@
 
 #include <string>
 
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/version_loader.h"
+#include "chromeos/system/version_loader.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
 
 namespace chromeos {
@@ -64,13 +63,6 @@ class VersionInfoUpdater : public policy::CloudPolicyStore::Observer {
 
   // Callback from chromeos::VersionLoader giving the version.
   void OnVersion(const std::string& version);
-
-  // Handles asynchronously loading the version.
-  VersionLoader version_loader_;
-  // Handles asynchronously loading the boot times.
-  BootTimesLoader boot_times_loader_;
-  // Used to request version and boot times.
-  base::CancelableTaskTracker tracker_;
 
   // Information pieces for version label.
   std::string version_text_;

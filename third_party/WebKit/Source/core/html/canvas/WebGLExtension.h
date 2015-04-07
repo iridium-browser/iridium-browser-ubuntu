@@ -26,6 +26,7 @@
 #ifndef WebGLExtension_h
 #define WebGLExtension_h
 
+#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/html/HTMLCanvasElement.h"
 #include "core/html/canvas/WebGLExtensionName.h"
 #include "core/html/canvas/WebGLRenderingContextBase.h"
@@ -50,7 +51,7 @@ private:
     RefPtrWillBeMember<WebGLRenderingContextBase> m_context;
 };
 
-class WebGLExtension : public RefCountedWillBeGarbageCollectedFinalized<WebGLExtension> {
+class WebGLExtension : public RefCountedWillBeGarbageCollectedFinalized<WebGLExtension>, public ScriptWrappable {
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
     virtual ~WebGLExtension();
@@ -67,6 +68,14 @@ public:
     bool isLost() { return !m_context; }
 
     virtual void trace(Visitor*);
+
+    // For use by V8 bindings only.
+    HTMLCanvasElement* canvas() const
+    {
+        if (m_context)
+            return m_context->canvas();
+        return nullptr;
+    }
 
 protected:
     explicit WebGLExtension(WebGLRenderingContextBase*);

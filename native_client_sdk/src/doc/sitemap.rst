@@ -38,6 +38,10 @@ Contents:
    devguide/coding/view-focus-input-events.rst
    devguide/distributing.rst
    io2014.rst
+   cds2014/index.rst
+   cds2014/python.rst
+   cds2014/cpp.rst
+   nacldev.rst
    community/index.rst
    community/security-contest/index.rst
    community/security-contest/contest-announcement.rst
@@ -51,6 +55,7 @@ Contents:
    cpp-api-dev.rst
    reference/index.rst
    reference/pnacl-bitcode-abi.rst
+   reference/pnacl-bitcode-manual.rst
    reference/pnacl-c-cpp-language-support.rst
    reference/pnacl-undefined-behavior.rst
    reference/nacl-manifest-format.rst

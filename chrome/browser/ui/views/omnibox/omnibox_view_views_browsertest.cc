@@ -9,12 +9,12 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/browser_window_testing_views.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
@@ -285,9 +285,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, CloseOmniboxPopupOnTextDrag) {
 IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, BackgroundIsOpaque) {
   // The omnibox text should be rendered on an opaque background. Otherwise, we
   // can't use subpixel rendering.
-  BrowserWindowTesting* window = browser()->window()->GetBrowserWindowTesting();
-  ASSERT_TRUE(window);
-  OmniboxViewViews* view = window->GetLocationBarView()->omnibox_view();
+  OmniboxViewViews* view = BrowserView::GetBrowserViewForBrowser(browser())->
+      toolbar()->location_bar()->omnibox_view();
   ASSERT_TRUE(view);
   EXPECT_FALSE(view->GetRenderText()->background_is_transparent());
 }
@@ -295,7 +294,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, BackgroundIsOpaque) {
 // Tests if executing a command hides touch editing handles.
 IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest,
                        DeactivateTouchEditingOnExecuteCommand) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnableTouchEditing);
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableTouchEditing);
 
   OmniboxView* view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxViewForBrowser(browser(), &view));

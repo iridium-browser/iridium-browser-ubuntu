@@ -31,9 +31,7 @@ class AppShimMenuControllerBrowserTest
         app_2_(NULL),
         initial_menu_item_count_(0) {}
 
-  virtual ~AppShimMenuControllerBrowserTest() {}
-
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     PlatformAppBrowserTest::SetUpCommandLine(command_line);
   }
 

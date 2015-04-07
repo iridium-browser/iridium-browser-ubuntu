@@ -105,6 +105,7 @@ add_subdirectory(hmac)
 
 # Level 3
 add_subdirectory(evp)
+add_subdirectory(hkdf)
 add_subdirectory(pem)
 add_subdirectory(x509)
 add_subdirectory(x509v3)
@@ -160,11 +161,20 @@ add_library(
 	$<TARGET_OBJECTS:ecdsa>
 	$<TARGET_OBJECTS:hmac>
 	$<TARGET_OBJECTS:evp>
+	$<TARGET_OBJECTS:hkdf>
 	$<TARGET_OBJECTS:pem>
 	$<TARGET_OBJECTS:x509>
 	$<TARGET_OBJECTS:x509v3>
 	$<TARGET_OBJECTS:pkcs8>
 )
+
+add_executable(
+	constant_time_test
+
+	constant_time_test.c
+)
+
+target_link_libraries(constant_time_test crypto)
 
 perlasm(cpu-x86_64-asm.${ASM_EXT} cpu-x86_64-asm.pl)
 perlasm(cpu-x86-asm.${ASM_EXT} cpu-x86-asm.pl)

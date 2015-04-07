@@ -42,7 +42,9 @@ class MockLayerTreeHost : public LayerTreeHost {
  public:
   explicit MockLayerTreeHost(FakeLayerTreeHostClient* client)
       : LayerTreeHost(client, nullptr, nullptr, LayerTreeSettings()) {
-    InitializeSingleThreaded(client, base::MessageLoopProxy::current());
+    InitializeSingleThreaded(client,
+                             base::MessageLoopProxy::current(),
+                             nullptr);
   }
 
   MOCK_METHOD0(SetNeedsCommit, void());
@@ -62,11 +64,11 @@ class LayerTest : public testing::Test {
         fake_client_(FakeLayerTreeHostClient::DIRECT_3D) {}
 
  protected:
-  virtual void SetUp() override {
+  void SetUp() override {
     layer_tree_host_.reset(new StrictMock<MockLayerTreeHost>(&fake_client_));
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     Mock::VerifyAndClearExpectations(layer_tree_host_.get());
     EXPECT_CALL(*layer_tree_host_, SetNeedsFullTreeSync()).Times(AnyNumber());
     parent_ = nullptr;
@@ -935,7 +937,8 @@ class LayerTreeHostFactory {
                shared_bitmap_manager_.get(),
                gpu_memory_buffer_manager_.get(),
                LayerTreeSettings(),
-               base::MessageLoopProxy::current()).Pass();
+               base::MessageLoopProxy::current(),
+               nullptr);
   }
 
   scoped_ptr<LayerTreeHost> Create(LayerTreeSettings settings) {
@@ -945,7 +948,8 @@ class LayerTreeHostFactory {
                shared_bitmap_manager_.get(),
                gpu_memory_buffer_manager_.get(),
                settings,
-               base::MessageLoopProxy::current()).Pass();
+               base::MessageLoopProxy::current(),
+               nullptr);
   }
 
  private:
@@ -1140,8 +1144,9 @@ TEST(LayerLayerTreeHostTest, DestroyHostWithNonNullRootLayer) {
 static bool AddTestAnimation(Layer* layer) {
   scoped_ptr<KeyframedFloatAnimationCurve> curve =
       KeyframedFloatAnimationCurve::Create();
-  curve->AddKeyframe(FloatKeyframe::Create(0.0, 0.3f, nullptr));
-  curve->AddKeyframe(FloatKeyframe::Create(1.0, 0.7f, nullptr));
+  curve->AddKeyframe(FloatKeyframe::Create(base::TimeDelta(), 0.3f, nullptr));
+  curve->AddKeyframe(
+      FloatKeyframe::Create(base::TimeDelta::FromSecondsD(1.0), 0.7f, nullptr));
   scoped_ptr<Animation> animation =
       Animation::Create(curve.Pass(), 0, 0, Animation::Opacity);
 

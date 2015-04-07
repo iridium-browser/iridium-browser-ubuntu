@@ -114,19 +114,20 @@ protected:
     RenderObject* m_renderer;
 };
 
+class Node;
+WILL_NOT_BE_EAGERLY_TRACED_CLASS(Node);
+
 #if ENABLE(OILPAN)
-#define NODE_BASE_CLASSES public GarbageCollectedFinalized<Node>, public EventTarget
+#define NODE_BASE_CLASSES public EventTarget
 #else
 // TreeShared should be the last to pack TreeShared::m_refCount and
 // Node::m_nodeFlags on 64bit platforms.
 #define NODE_BASE_CLASSES public EventTarget, public TreeShared<Node>
 #endif
 
-class Node : NODE_BASE_CLASSES {
+class GC_PLUGIN_IGNORE("crbug.com/443854") Node : NODE_BASE_CLASSES {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(TreeShared<Node>);
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Node);
-    friend class Document;
     friend class TreeScope;
     friend class TreeScopeAdopter;
 public:
@@ -163,7 +164,13 @@ public:
         DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 0x20,
     };
 
-#if !ENABLE(OILPAN)
+#if ENABLE(OILPAN)
+    // Node is now a GarbageCollected<EventTarget> instead of a GarbageCollected<Node>, which confuses Oilpan's
+    // static type dispatching of typed heap for Nodes. We override GarbageCollected<>'s operator new here, to put
+    // Node descendants into typed heap for Nodes. <http://crbug.com/443854>
+    using GarbageCollectedBase = EventTarget;
+    void* operator new(size_t size) { return Heap::allocate<Node>(size); }
+#else // !ENABLE(OILPAN)
     // All Nodes are placed in their own heap partition for security.
     // See http://crbug.com/246860 for detail.
     void* operator new(size_t);
@@ -234,6 +241,7 @@ public:
     bool isPseudoElement() const { return pseudoId() != NOPSEUDO; }
     bool isBeforePseudoElement() const { return pseudoId() == BEFORE; }
     bool isAfterPseudoElement() const { return pseudoId() == AFTER; }
+    bool isFirstLetterPseudoElement() const { return pseudoId() == FIRST_LETTER; }
     virtual PseudoId pseudoId() const { return NOPSEUDO; }
 
     bool isCustomElement() const { return getFlag(CustomElementFlag); }
@@ -272,6 +280,8 @@ public:
     bool isDocumentFragment() const { return getFlag(IsDocumentFragmentFlag); }
     bool isShadowRoot() const { return isDocumentFragment() && isTreeScope(); }
     bool isInsertionPoint() const { return getFlag(IsInsertionPointFlag); }
+
+    bool canParticipateInComposedTree() const;
 
     bool hasCustomStyleCallbacks() const { return getFlag(HasCustomStyleCallbacksFlag); }
 
@@ -479,7 +489,7 @@ public:
     Node* commonAncestor(const Node&, Node* (*parent)(const Node&));
 
     // Used to determine whether range offsets use characters or node indices.
-    virtual bool offsetInCharacters() const;
+    bool offsetInCharacters() const;
     // Number of DOM 16-bit units contained in node. Note that rendered text length can be different - e.g. because of
     // css-transform:capitalize breaking up precomposed characters and ligatures.
     virtual int maxCharacterOffset() const;
@@ -615,7 +625,7 @@ public:
     void dispatchScopedEvent(PassRefPtrWillBeRawPtr<Event>);
     void dispatchScopedEventDispatchMediator(PassRefPtrWillBeRawPtr<EventDispatchMediator>);
 
-    virtual void handleLocalEvents(Event*);
+    virtual void handleLocalEvents(Event&);
 
     void dispatchSubtreeModifiedEvent();
     bool dispatchDOMActivateEvent(int detail, PassRefPtrWillBeRawPtr<Event> underlyingEvent);
@@ -662,7 +672,7 @@ public:
     unsigned lengthOfContents() const;
 
     virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) override;
-    virtual v8::Handle<v8::Object> associateWithWrapper(const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper, v8::Isolate*) override;
+    virtual v8::Handle<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper) override;
 
 private:
     enum NodeFlags {
@@ -743,7 +753,7 @@ protected:
 
     virtual void didMoveToNewDocument(Document& oldDocument);
 
-    static void reattachWhitespaceSiblings(Text* start);
+    static void reattachWhitespaceSiblingsIfNeeded(Text* start);
 
 #if !ENABLE(OILPAN)
     void willBeDeletedFromDocument();
@@ -775,8 +785,6 @@ protected:
 private:
     friend class TreeShared<Node>;
     friend class WeakNodeMap;
-
-    unsigned styledSubtreeSize() const;
 
 #if !ENABLE(OILPAN)
     void removedLastRef();

@@ -87,6 +87,11 @@ void URLRequestFileJob::Kill() {
 bool URLRequestFileJob::ReadRawData(IOBuffer* dest,
                                     int dest_size,
                                     int* bytes_read) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 URLRequestFileJob::ReadRawData"));
+
   DCHECK_NE(dest_size, 0);
   DCHECK(bytes_read);
   DCHECK_GE(remaining_bytes_, 0);
@@ -106,6 +111,12 @@ bool URLRequestFileJob::ReadRawData(IOBuffer* dest,
                          base::Bind(&URLRequestFileJob::DidRead,
                                     weak_ptr_factory_.GetWeakPtr(),
                                     make_scoped_refptr(dest)));
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 URLRequestFileJob::ReadRawData1"));
+
   if (rv >= 0) {
     // Data is immediately available.
     *bytes_read = rv;

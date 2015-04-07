@@ -14,8 +14,6 @@
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "content/public/browser/cookie_store_factory.h"
 
-class ChromeSdchPolicy;
-
 namespace chrome_browser_net {
 class Predictor;
 }  // namespace chrome_browser_net
@@ -23,6 +21,11 @@ class Predictor;
 namespace content {
 class CookieCryptoDelegate;
 }  // namespace content
+
+namespace data_reduction_proxy {
+class DataReductionProxyConfigurator;
+class DataReductionProxyNetworkDelegate;
+}  // namespace data_reduction_proxy
 
 namespace domain_reliability {
 class DomainReliabilityMonitor;
@@ -34,7 +37,8 @@ class HttpServerProperties;
 class HttpServerPropertiesManager;
 class HttpTransactionFactory;
 class ProxyConfig;
-class SDCHManager;
+class SdchManager;
+class SdchOwner;
 }  // namespace net
 
 namespace storage {
@@ -66,12 +70,14 @@ class ProfileImplIOData : public ProfileIOData {
         scoped_ptr<domain_reliability::DomainReliabilityMonitor>
             domain_reliability_monitor,
         const base::Callback<void(bool)>& data_reduction_proxy_unavailable,
-        scoped_ptr<DataReductionProxyChromeConfigurator>
-            data_reduction_proxy_chrome_configurator,
+        scoped_ptr<data_reduction_proxy::DataReductionProxyConfigurator>
+            data_reduction_proxy_configurator,
         scoped_ptr<data_reduction_proxy::DataReductionProxyParams>
             data_reduction_proxy_params,
-        scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
-            data_reduction_proxy_statistics_prefs);
+        base::WeakPtr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
+            data_reduction_proxy_statistics_prefs,
+        scoped_ptr<data_reduction_proxy::DataReductionProxyEventStore>
+            data_reduction_proxy_event_store);
 
     // These Create*ContextGetter() functions are only exposed because the
     // circular relationship between Profile, ProfileIOData::Handle, and the
@@ -153,10 +159,6 @@ class ProfileImplIOData : public ProfileIOData {
 
   bool IsDataReductionProxyEnabled() const override;
 
-  BooleanPrefMember* data_reduction_proxy_enabled() const {
-    return &data_reduction_proxy_enabled_;
-  }
-
  private:
   friend class base::RefCountedThreadSafe<ProfileImplIOData>;
 
@@ -180,10 +182,12 @@ class ProfileImplIOData : public ProfileIOData {
   ProfileImplIOData();
   ~ProfileImplIOData() override;
 
-  void InitializeInternal(ProfileParams* profile_params,
-                          content::ProtocolHandlerMap* protocol_handlers,
-                          content::URLRequestInterceptorScopedVector
-                              request_interceptors) const override;
+  void InitializeInternal(
+      scoped_ptr<ChromeNetworkDelegate> chrome_network_delegate,
+      ProfileParams* profile_params,
+      content::ProtocolHandlerMap* protocol_handlers,
+      content::URLRequestInterceptorScopedVector
+          request_interceptors) const override;
   void InitializeExtensionsRequestContext(
       ProfileParams* profile_params) const override;
   net::URLRequestContext* InitializeAppRequestContext(
@@ -217,6 +221,9 @@ class ProfileImplIOData : public ProfileIOData {
   void ClearNetworkingHistorySinceOnIOThread(base::Time time,
                                              const base::Closure& completion);
 
+  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyNetworkDelegate>
+       network_delegate_;
+
   // Lazy initialization params.
   mutable scoped_ptr<LazyParams> lazy_params_;
 
@@ -238,7 +245,7 @@ class ProfileImplIOData : public ProfileIOData {
       domain_reliability_monitor_;
 
   mutable scoped_ptr<net::SdchManager> sdch_manager_;
-  mutable scoped_ptr<ChromeSdchPolicy> sdch_policy_;
+  mutable scoped_ptr<net::SdchOwner> sdch_policy_;
 
   mutable BooleanPrefMember data_reduction_proxy_enabled_;
 

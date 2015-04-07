@@ -23,6 +23,7 @@
 #include "third_party/skia/include/core/SkPicture.h"
 #include "ui/gfx/geometry/rect.h"
 
+class SkDrawPictureCallback;
 class SkPixelRef;
 
 namespace base {
@@ -65,8 +66,9 @@ class CC_EXPORT Picture
   // Has Record() been called yet?
   bool HasRecording() const { return picture_.get() != NULL; }
 
-  bool IsSuitableForGpuRasterization() const;
+  bool IsSuitableForGpuRasterization(const char** reason) const;
   int ApproximateOpCount() const;
+  size_t ApproximateMemoryUsage() const;
 
   bool HasText() const;
 

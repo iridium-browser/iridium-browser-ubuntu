@@ -44,6 +44,27 @@ remoting.SessionConnector.prototype.connectMe2Me =
              clientPairingId, clientPairedSecret) {};
 
 /**
+ * Retry connecting to a Me2Me host after a connection failure.
+ *
+ * @param {remoting.Host} host The Me2Me host to refresh.
+ * @return {void} Nothing.
+ */
+remoting.SessionConnector.prototype.retryConnectMe2Me = function(host) {};
+
+/**
+ * Initiate a Me2App connection.
+ *
+ * @param {remoting.Host} host The Me2Me host to which to connect.
+ * @param {function(string, string, string,
+ *                  function(string, string): void): void}
+ *     fetchThirdPartyToken Function to obtain a token from a third party
+ *     authentication server.
+ * @return {void} Nothing.
+ */
+remoting.SessionConnector.prototype.connectMe2App =
+    function(host, fetchThirdPartyToken) {};
+
+/**
  * Update the pairing info so that the reconnect function will work correctly.
  *
  * @param {string} clientId The paired client id.
@@ -101,10 +122,20 @@ remoting.SessionConnectorFactory = function() {};
  * @param {function(string, string):boolean} onExtensionMessage The handler for
  *     protocol extension messages. Returns true if a message is recognized;
  *     false otherwise.
+ * @param {function(string):void} onConnectionFailed Callback for when the
+ *     connection fails.
+ * @param {Array.<string>} requiredCapabilities Connector capabilities
+ *     required by this application.
+ * @param {string} defaultRemapKeys The default set of key mappings to use
+ *     in the client session.
  * @return {remoting.SessionConnector}
  */
 remoting.SessionConnectorFactory.prototype.createConnector =
-    function(clientContainer, onConnected, onError, onExtensionMessage) {};
+    // TODO(garykac): Can onExtensionMessage be removed from here? It's only
+    // needed to pass to the ClientSession. Investigate why ClientSession
+    // needs this.
+    function(clientContainer, onConnected, onError, onExtensionMessage,
+             onConnectionFailed, requiredCapabilities, defaultRemapKeys) {};
 
 /**
  * @type {remoting.SessionConnectorFactory}

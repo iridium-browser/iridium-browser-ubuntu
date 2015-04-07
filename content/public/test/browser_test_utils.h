@@ -19,6 +19,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/page_type.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "url/gurl.h"
@@ -55,13 +56,36 @@ class MessageLoopRunner;
 class RenderViewHost;
 class WebContents;
 
+// Navigate a frame with ID |iframe_id| to |url|, blocking until the navigation
+// finishes.  Uses a renderer-initiated navigation from script code in the
+// main frame.
+bool NavigateIframeToURL(WebContents* web_contents,
+                         std::string iframe_id,
+                         const GURL& url);
+
 // Generate a URL for a file path including a query string.
 GURL GetFileUrlWithQuery(const base::FilePath& path,
                          const std::string& query_string);
 
+// Checks whether the page type of the last committed navigation entry matches
+// |page_type|.
+bool IsLastCommittedEntryOfPageType(WebContents* web_contents,
+                                    content::PageType page_type);
+
 // Waits for a load stop for the specified |web_contents|'s controller, if the
-// tab is currently web_contents.  Otherwise returns immediately.
-void WaitForLoadStop(WebContents* web_contents);
+// tab is currently web_contents.  Otherwise returns immediately.  Tests should
+// use WaitForLoadStop instead and check that last navigation succeeds, and
+// this function should only be used if the navigation leads to web_contents
+// being destroyed.
+void WaitForLoadStopWithoutSuccessCheck(WebContents* web_contents);
+
+// Waits for a load stop for the specified |web_contents|'s controller, if the
+// tab is currently web_contents.  Otherwise returns immediately.  Returns true
+// if the last navigation succeeded (resulted in a committed navigation entry
+// of type PAGE_TYPE_NORMAL).
+// TODO(alexmos): tests that use this function to wait for successful
+// navigations should be refactored to do EXPECT_TRUE(WaitForLoadStop()).
+bool WaitForLoadStop(WebContents* web_contents);
 
 #if defined(USE_AURA)
 // If WebContent's view is currently being resized, this will wait for the ack
@@ -332,6 +356,35 @@ class DOMMessageQueue : public NotificationObserver {
   scoped_refptr<MessageLoopRunner> message_loop_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(DOMMessageQueue);
+};
+
+// Used to wait for a new WebContents to be created. Instantiate this object
+// before the operation that will create the window.
+class WebContentsAddedObserver {
+ public:
+  WebContentsAddedObserver();
+  ~WebContentsAddedObserver();
+
+  // Will run a message loop to wait for the new window if it hasn't been
+  // created since the constructor
+  WebContents* GetWebContents();
+
+  // Will tell whether RenderViewCreated Callback has invoked
+  bool RenderViewCreatedCalled();
+
+ private:
+  class RenderViewCreatedObserver;
+
+  void WebContentsCreated(WebContents* web_contents);
+
+  // Callback to WebContentCreated(). Cached so that we can unregister it.
+  base::Callback<void(WebContents*)> web_contents_created_callback_;
+
+  WebContents* web_contents_;
+  scoped_ptr<RenderViewCreatedObserver> child_observer_;
+  scoped_refptr<MessageLoopRunner> runner_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebContentsAddedObserver);
 };
 
 }  // namespace content

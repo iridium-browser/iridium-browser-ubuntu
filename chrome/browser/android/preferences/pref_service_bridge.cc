@@ -33,6 +33,7 @@
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/translate/core/browser/translate_prefs.h"
 #include "components/translate/core/common/translate_pref_names.h"
+#include "components/web_resource/web_resource_pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/user_agent.h"
 #include "jni/PrefServiceBridge_jni.h"
@@ -43,6 +44,7 @@ using base::android::CheckException;
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ScopedJavaLocalRef;
+using base::android::ScopedJavaGlobalRef;
 using content::BrowserThread;
 
 namespace {
@@ -81,6 +83,8 @@ std::string GetStringForContentSettingsType(
       return "ask";
     case CONTENT_SETTING_SESSION_ONLY:
       return "session";
+    case CONTENT_SETTING_DETECT_IMPORTANT_CONTENT:
+      return "detect";
     case CONTENT_SETTING_NUM_SETTINGS:
       return "num_settings";
     case CONTENT_SETTING_DEFAULT:
@@ -98,25 +102,30 @@ bool IsContentSettingManaged(HostContentSettingsMap* content_settings,
   return provider == HostContentSettingsMap::POLICY_PROVIDER;
 }
 
-void ReturnAbsoluteProfilePathValue(std::string path_value) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jstring> j_path_value =
-      ConvertUTF8ToJavaString(env, path_value);
-  Java_PrefServiceBridge_setProfilePathValue(env, j_path_value.obj());
+bool IsContentSettingUserModifiable(HostContentSettingsMap* content_settings,
+                                    ContentSettingsType content_settings_type) {
+  std::string source;
+  content_settings->GetDefaultContentSetting(content_settings_type, &source);
+  HostContentSettingsMap::ProviderType provider =
+      content_settings->GetProviderTypeFromSource(source);
+  return provider >= HostContentSettingsMap::PREF_PROVIDER;
 }
 
-void GetAbsolutePath(Profile* profile) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  if (profile) {
-    base::FilePath profile_path = profile->GetPath();
-    profile_path = base::MakeAbsoluteFilePath(profile_path);
-    if (!profile_path.empty()) {
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          base::Bind(&ReturnAbsoluteProfilePathValue, profile_path.value()));
-    }
-  }
+void OnGotProfilePath(ScopedJavaGlobalRef<jobject>* callback,
+                      std::string path) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> j_path = ConvertUTF8ToJavaString(env, path);
+  Java_PrefServiceBridge_onGotProfilePath(env, j_path.obj(), callback->obj());
+}
+
+std::string GetProfilePathOnFileThread(Profile* profile) {
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
+  if (!profile)
+    return std::string();
+
+  base::FilePath profile_path = profile->GetPath();
+  return base::MakeAbsoluteFilePath(profile_path).value();
 }
 
 PrefService* GetPrefService() {
@@ -254,19 +263,42 @@ static jboolean GetSearchSuggestManaged(JNIEnv* env, jobject obj) {
 static jboolean GetProtectedMediaIdentifierEnabled(JNIEnv* env, jobject obj) {
   Profile* profile = GetOriginalProfile();
   EnsureConsistentProtectedMediaIdentifierPreferences(profile);
-  return GetPrefService()->GetBoolean(prefs::kProtectedMediaIdentifierEnabled);
+  HostContentSettingsMap* content_settings =
+      profile->GetHostContentSettingsMap();
+  return GetBooleanForContentSetting(
+             content_settings,
+             CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER) &&
+         GetPrefService()->GetBoolean(prefs::kProtectedMediaIdentifierEnabled);
+}
+
+static jboolean GetPushNotificationsEnabled(JNIEnv* env, jobject obj) {
+  HostContentSettingsMap* content_settings =
+      GetOriginalProfile()->GetHostContentSettingsMap();
+  return GetBooleanForContentSetting(content_settings,
+                                     CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
 }
 
 static jboolean GetAllowLocationEnabled(JNIEnv* env, jobject obj) {
   Profile* profile = GetOriginalProfile();
   EnsureConsistentGeolocationPreferences(profile);
-  return GetPrefService()->GetBoolean(prefs::kGeolocationEnabled);
+  HostContentSettingsMap* content_settings =
+      profile->GetHostContentSettingsMap();
+  return GetBooleanForContentSetting(content_settings,
+                                     CONTENT_SETTINGS_TYPE_GEOLOCATION) &&
+         GetPrefService()->GetBoolean(prefs::kGeolocationEnabled);
 }
 
-static jboolean GetAllowLocationManaged(JNIEnv* env, jobject obj) {
-  return IsContentSettingManaged(
-      GetOriginalProfile()->GetHostContentSettingsMap(),
-      CONTENT_SETTINGS_TYPE_GEOLOCATION);
+static jboolean GetAllowLocationUserModifiable(JNIEnv* env, jobject obj) {
+  return IsContentSettingUserModifiable(
+             GetOriginalProfile()->GetHostContentSettingsMap(),
+             CONTENT_SETTINGS_TYPE_GEOLOCATION) &&
+         GetPrefService()->IsUserModifiablePreference(
+             prefs::kGeolocationEnabled);
+}
+
+static jboolean GetAllowLocationManagedByCustodian(JNIEnv* env, jobject obj) {
+  return GetPrefService()->IsPreferenceManagedByCustodian(
+      prefs::kGeolocationEnabled);
 }
 
 static jboolean GetResolveNavigationErrorEnabled(JNIEnv* env, jobject obj) {
@@ -396,6 +428,24 @@ static void SetAllowLocationEnabled(JNIEnv* env, jobject obj, jboolean allow) {
   GetPrefService()->SetBoolean(prefs::kGeolocationEnabled, allow);
 }
 
+static void SetCameraMicEnabled(JNIEnv* env, jobject obj, jboolean allow) {
+  HostContentSettingsMap* host_content_settings_map =
+      GetOriginalProfile()->GetHostContentSettingsMap();
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_MEDIASTREAM,
+      allow ? CONTENT_SETTING_ASK : CONTENT_SETTING_BLOCK);
+}
+
+static void SetPushNotificationsEnabled(JNIEnv* env,
+                                        jobject obj,
+                                        jboolean allow) {
+  HostContentSettingsMap* host_content_settings_map =
+      GetOriginalProfile()->GetHostContentSettingsMap();
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+      allow ? CONTENT_SETTING_ASK : CONTENT_SETTING_BLOCK);
+}
+
 static void SetCrashReporting(JNIEnv* env, jobject obj, jboolean reporting) {
   PrefService* local_state = g_browser_process->local_state();
   local_state->SetBoolean(prefs::kCrashReportingEnabled, reporting);
@@ -479,6 +529,34 @@ static void SetAllowPopupsEnabled(JNIEnv* env, jobject obj, jboolean allow) {
   host_content_settings_map->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_POPUPS,
       allow ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
+}
+
+static jboolean GetCameraMicEnabled(JNIEnv* env, jobject obj) {
+  HostContentSettingsMap* content_settings =
+      GetOriginalProfile()->GetHostContentSettingsMap();
+  PrefService* prefs = GetPrefService();
+  return GetBooleanForContentSetting(content_settings,
+                                     CONTENT_SETTINGS_TYPE_MEDIASTREAM) &&
+         prefs->GetBoolean(prefs::kAudioCaptureAllowed) &&
+         prefs->GetBoolean(prefs::kVideoCaptureAllowed);
+}
+
+static jboolean GetCameraMicUserModifiable(JNIEnv* env, jobject obj) {
+  PrefService* prefs = GetPrefService();
+  return IsContentSettingUserModifiable(
+             GetOriginalProfile()->GetHostContentSettingsMap(),
+             CONTENT_SETTINGS_TYPE_MEDIASTREAM) &&
+         prefs->IsUserModifiablePreference(prefs::kAudioCaptureAllowed) &&
+         prefs->IsUserModifiablePreference(prefs::kVideoCaptureAllowed);
+}
+
+static jboolean GetCameraMicManagedByCustodian(JNIEnv* env, jobject obj) {
+  PrefService* prefs = GetPrefService();
+  if (prefs->IsPreferenceManagedByCustodian(prefs::kVideoCaptureAllowed))
+    return true;
+  if (prefs->IsPreferenceManagedByCustodian(prefs::kAudioCaptureAllowed))
+    return true;
+  return false;
 }
 
 static jboolean GetAutologinEnabled(JNIEnv* env, jobject obj) {
@@ -657,9 +735,13 @@ static jobject GetAboutVersionStrings(JNIEnv* env, jobject obj) {
       ConvertUTF8ToJavaString(env, os_version).obj()).Release();
 }
 
-static void SetPathValuesForAboutChrome(JNIEnv* env, jobject obj) {
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                          base::Bind(&GetAbsolutePath, GetOriginalProfile()));
+static void GetProfilePath(JNIEnv* env, jobject obj, jobject j_callback) {
+  ScopedJavaGlobalRef<jobject>* callback = new ScopedJavaGlobalRef<jobject>();
+  callback->Reset(env, j_callback);
+  BrowserThread::PostTaskAndReplyWithResult(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&GetProfilePathOnFileThread, GetOriginalProfile()),
+      base::Bind(&OnGotProfilePath, base::Owned(callback)));
 }
 
 static jstring GetSupervisedUserCustodianName(JNIEnv* env, jobject obj) {

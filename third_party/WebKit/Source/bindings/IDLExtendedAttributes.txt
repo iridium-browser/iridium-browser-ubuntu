@@ -42,8 +42,8 @@ Conditional=*
 Constructor
 # FIXME: remove [ConstructorCallWith=Document], as can instead use
 # [ConstructorCallWith=ExecutionContext] + toDocument(executionContext)
-ConstructorCallWith=ExecutionContext|Document
-Custom=|Getter|Setter|LegacyCallAsFunction|ToV8|VisitDOMWrapper|Wrap|PropertyGetter|PropertyEnumerator|PropertyQuery
+ConstructorCallWith=ExecutionContext|ScriptState|Document
+Custom=|Getter|Setter|LegacyCallAsFunction|ToV8|VisitDOMWrapper|PropertyGetter|PropertyEnumerator|PropertyQuery
 CustomConstructor
 CustomElementCallbacks
 Default=Undefined
@@ -71,13 +71,13 @@ NamedConstructor=*
 NoImplHeader
 NoInterfaceObject
 NotEnumerable
-NotScriptWrappable
 OnlyExposedToPrivateScript
 OverrideBuiltins
 PartialInterfaceImplementedAs=*
 # Valid values for [PerContextEnabled] are Context Features, in
 # ContextFeatures::FeatureType in Source/core/dom/ContextFeatures.h
 PerContextEnabled=*
+PermissiveDictionaryConversion
 PerWorldBindings
 PrimaryGlobal=|*
 PutForwards=*

@@ -37,12 +37,14 @@
 #include "storage/browser/fileapi/file_writer_delegate.h"
 #include "storage/browser/fileapi/local_file_stream_writer.h"
 #include "storage/common/database/database_identifier.h"
+#include "storage/common/fileapi/file_system_mount_option.h"
 #include "third_party/WebKit/public/platform/WebIDBTypes.h"
 #include "third_party/WebKit/public/web/WebSerializedScriptValueVersion.h"
 #include "third_party/leveldatabase/env_chromium.h"
 
 using base::FilePath;
 using base::StringPiece;
+using std::string;
 using storage::FileWriterDelegate;
 
 namespace content {
@@ -744,6 +746,7 @@ IndexedDBBackingStore::RecordIdentifier::~RecordIdentifier() {}
 IndexedDBBackingStore::Cursor::CursorOptions::CursorOptions() {}
 IndexedDBBackingStore::Cursor::CursorOptions::~CursorOptions() {}
 
+// Values match entries in tools/metrics/histograms/histograms.xml
 enum IndexedDBBackingStoreOpenResult {
   INDEXED_DB_BACKING_STORE_OPEN_MEMORY_SUCCESS,
   INDEXED_DB_BACKING_STORE_OPEN_SUCCESS,
@@ -753,7 +756,7 @@ enum IndexedDBBackingStoreOpenResult {
   INDEXED_DB_BACKING_STORE_OPEN_CLEANUP_REOPEN_FAILED,
   INDEXED_DB_BACKING_STORE_OPEN_CLEANUP_REOPEN_SUCCESS,
   INDEXED_DB_BACKING_STORE_OPEN_FAILED_IO_ERROR_CHECKING_SCHEMA,
-  INDEXED_DB_BACKING_STORE_OPEN_FAILED_UNKNOWN_ERR,
+  INDEXED_DB_BACKING_STORE_OPEN_FAILED_UNKNOWN_ERR_DEPRECATED,
   INDEXED_DB_BACKING_STORE_OPEN_MEMORY_FAILED,
   INDEXED_DB_BACKING_STORE_OPEN_ATTEMPT_NON_ASCII,
   INDEXED_DB_BACKING_STORE_OPEN_DISK_FULL_DEPRECATED,
@@ -975,7 +978,7 @@ scoped_refptr<IndexedDBBackingStore> IndexedDBBackingStore::Open(
   if (!status->ok()) {
     if (leveldb_env::IndicatesDiskFull(*status)) {
       *is_disk_full = true;
-    } else if (leveldb_env::IsCorruption(*status)) {
+    } else if (status->IsCorruption()) {
       *data_loss = blink::WebIDBDataLossTotal;
       *data_loss_message = leveldb_env::GetCorruptionMessage(*status);
     }
@@ -1013,18 +1016,18 @@ scoped_refptr<IndexedDBBackingStore> IndexedDBBackingStore::Open(
     }
   }
 
-  DCHECK(status->ok() || !is_schema_known || leveldb_env::IsIOError(*status) ||
-         leveldb_env::IsCorruption(*status));
+  DCHECK(status->ok() || !is_schema_known || status->IsIOError() ||
+         status->IsCorruption());
 
   if (db) {
     HistogramOpenStatus(INDEXED_DB_BACKING_STORE_OPEN_SUCCESS, origin_url);
-  } else if (leveldb_env::IsIOError(*status)) {
+  } else if (status->IsIOError()) {
     LOG(ERROR) << "Unable to open backing store, not trying to recover - "
                << status->ToString();
     HistogramOpenStatus(INDEXED_DB_BACKING_STORE_OPEN_NO_RECOVERY, origin_url);
     return scoped_refptr<IndexedDBBackingStore>();
   } else {
-    DCHECK(!is_schema_known || leveldb_env::IsCorruption(*status));
+    DCHECK(!is_schema_known || status->IsCorruption());
     LOG(ERROR) << "IndexedDB backing store open failed, attempting cleanup";
     *status = leveldb_factory->DestroyLevelDB(file_path);
     if (!status->ok()) {
@@ -1044,13 +1047,6 @@ scoped_refptr<IndexedDBBackingStore> IndexedDBBackingStore::Open(
     }
     HistogramOpenStatus(INDEXED_DB_BACKING_STORE_OPEN_CLEANUP_REOPEN_SUCCESS,
                         origin_url);
-  }
-
-  if (!db) {
-    NOTREACHED();
-    HistogramOpenStatus(INDEXED_DB_BACKING_STORE_OPEN_FAILED_UNKNOWN_ERR,
-                        origin_url);
-    return scoped_refptr<IndexedDBBackingStore>();
   }
 
   scoped_refptr<IndexedDBBackingStore> backing_store =
@@ -2293,17 +2289,26 @@ class LocalWriteClosure : public FileWriterDelegate::DelegateWriteCallback,
       DCHECK(write_status == FileWriterDelegate::ERROR_WRITE_STARTED ||
              write_status == FileWriterDelegate::ERROR_WRITE_NOT_STARTED);
     }
-    task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&IndexedDBBackingStore::Transaction::ChainedBlobWriter::
-                       ReportWriteCompletion,
-                   chained_blob_writer_,
-                   write_status == FileWriterDelegate::SUCCESS_COMPLETED,
-                   bytes_written_));
+
+    bool success = write_status == FileWriterDelegate::SUCCESS_COMPLETED;
+
+    if (success && !last_modified_.is_null()) {
+      task_runner_->PostTask(
+          FROM_HERE, base::Bind(&LocalWriteClosure::UpdateTimeStamp, this));
+    } else {
+      task_runner_->PostTask(
+          FROM_HERE,
+          base::Bind(&IndexedDBBackingStore::Transaction::ChainedBlobWriter::
+                     ReportWriteCompletion,
+                     chained_blob_writer_,
+                     success,
+                     bytes_written_));
+    }
   }
 
-  void writeBlobToFileOnIOThread(const FilePath& file_path,
+  void WriteBlobToFileOnIOThread(const FilePath& file_path,
                                  const GURL& blob_url,
+                                 const base::Time& last_modified,
                                  net::URLRequestContext* request_context) {
     DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
     scoped_ptr<storage::FileStreamWriter> writer(
@@ -2312,13 +2317,15 @@ class LocalWriteClosure : public FileWriterDelegate::DelegateWriteCallback,
             file_path,
             0,
             storage::FileStreamWriter::CREATE_NEW_FILE));
-    scoped_ptr<FileWriterDelegate> delegate(
-        new FileWriterDelegate(writer.Pass(),
-                               FileWriterDelegate::FLUSH_ON_COMPLETION));
+    scoped_ptr<FileWriterDelegate> delegate(new FileWriterDelegate(
+        writer.Pass(), storage::FlushPolicy::FLUSH_ON_COMPLETION));
 
     DCHECK(blob_url.is_valid());
     scoped_ptr<net::URLRequest> blob_request(request_context->CreateRequest(
         blob_url, net::DEFAULT_PRIORITY, delegate.get(), NULL));
+
+    this->file_path_ = file_path;
+    this->last_modified_ = last_modified;
 
     delegate->Start(blob_request.Pass(),
                     base::Bind(&LocalWriteClosure::Run, this));
@@ -2338,10 +2345,23 @@ class LocalWriteClosure : public FileWriterDelegate::DelegateWriteCallback,
   }
   friend class base::RefCountedThreadSafe<LocalWriteClosure>;
 
+  // If necessary, update the timestamps on the file as a final
+  // step before reporting success.
+  void UpdateTimeStamp() {
+    DCHECK(task_runner_->RunsTasksOnCurrentThread());
+    if (!base::TouchFile(file_path_, last_modified_, last_modified_)) {
+      // TODO(ericu): Complain quietly; timestamp's probably not vital.
+    }
+    chained_blob_writer_->ReportWriteCompletion(true, bytes_written_);
+  }
+
   scoped_refptr<IndexedDBBackingStore::Transaction::ChainedBlobWriter>
       chained_blob_writer_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   int64 bytes_written_;
+
+  base::FilePath file_path_;
+  base::Time last_modified_;
 
   DISALLOW_COPY_AND_ASSIGN(LocalWriteClosure);
 };
@@ -2356,8 +2376,7 @@ bool IndexedDBBackingStore::WriteBlobFile(
 
   FilePath path = GetBlobFileName(database_id, descriptor.key());
 
-  if (descriptor.is_file()) {
-    DCHECK(!descriptor.file_path().empty());
+  if (descriptor.is_file() && !descriptor.file_path().empty()) {
     if (!base::CopyFile(descriptor.file_path(), path))
       return false;
 
@@ -2392,10 +2411,11 @@ bool IndexedDBBackingStore::WriteBlobFile(
     content::BrowserThread::PostTask(
         content::BrowserThread::IO,
         FROM_HERE,
-        base::Bind(&LocalWriteClosure::writeBlobToFileOnIOThread,
+        base::Bind(&LocalWriteClosure::WriteBlobToFileOnIOThread,
                    write_closure.get(),
                    path,
                    descriptor.url(),
+                   descriptor.last_modified(),
                    request_context_));
   }
   return true;
@@ -2688,7 +2708,7 @@ leveldb::Status IndexedDBBackingStore::Transaction::GetBlobInfoForRecord(
       entry.set_release_callback(
           backing_store_->active_blob_registry()->GetFinalReleaseCallback(
               database_id, entry.key()));
-      if (entry.is_file()) {
+      if (entry.is_file() && !entry.file_path().empty()) {
         base::File::Info info;
         if (base::GetFileInfo(entry.file_path(), &info)) {
           // This should always work, but it isn't fatal if it doesn't; it just
@@ -3913,7 +3933,7 @@ leveldb::Status IndexedDBBackingStore::Transaction::HandleBlobPreTransaction(
         BlobJournalEntryType journal_entry =
             std::make_pair(database_id_, next_blob_key);
         journal.push_back(journal_entry);
-        if (entry.is_file()) {
+        if (entry.is_file() && !entry.file_path().empty()) {
           new_files_to_write->push_back(
               WriteDescriptor(entry.file_path(),
                               next_blob_key,
@@ -3923,7 +3943,8 @@ leveldb::Status IndexedDBBackingStore::Transaction::HandleBlobPreTransaction(
           new_files_to_write->push_back(
               WriteDescriptor(getURLFromUUID(entry.uuid()),
                               next_blob_key,
-                              entry.size()));
+                              entry.size(),
+                              entry.last_modified()));
         }
         entry.set_key(next_blob_key);
         new_blob_keys.push_back(&entry);
@@ -4247,8 +4268,13 @@ void IndexedDBBackingStore::Transaction::PutBlobInfo(
 IndexedDBBackingStore::Transaction::WriteDescriptor::WriteDescriptor(
     const GURL& url,
     int64_t key,
-    int64_t size)
-    : is_file_(false), url_(url), key_(key), size_(size) {
+    int64_t size,
+    base::Time last_modified)
+    : is_file_(false),
+      url_(url),
+      key_(key),
+      size_(size),
+      last_modified_(last_modified) {
 }
 
 IndexedDBBackingStore::Transaction::WriteDescriptor::WriteDescriptor(

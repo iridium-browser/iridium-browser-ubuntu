@@ -9,11 +9,10 @@ namespace nacl {
 
 NaClStartParams::NaClStartParams()
     : nexe_file(IPC::InvalidPlatformFileForTransit()),
-      nexe_token_lo(0),
-      nexe_token_hi(0),
       validation_cache_enabled(false),
       enable_debug_stub(false),
       enable_ipc_proxy(false),
+      enable_mojo(false),
       process_type(kUnknownNaClProcessType),
       crash_info_shmem_handle(base::SharedMemory::NULLHandle()) {
 }

@@ -37,8 +37,6 @@ class SpdyNetworkTransactionTest;
 class SpdyProxyClientSocketTest;
 class SpdySessionTest;
 class SpdyStreamTest;
-class SpdyWebSocketStreamTest;
-class WebSocketJobTest;
 
 class SpdyFramer;
 class SpdyFrameBuilder;
@@ -496,7 +494,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
 
   // Serializes a PRIORITY frame. The PRIORITY frame advises a change in
   // the relative priority of the given stream.
-  SpdySerializedFrame* SerializePriority(const SpdyPriorityIR& priority);
+  SpdySerializedFrame* SerializePriority(const SpdyPriorityIR& priority) const;
 
   // Serialize a frame of unknown type.
   SpdySerializedFrame* SerializeFrame(const SpdyFrameIR& frame);
@@ -581,8 +579,8 @@ class NET_EXPORT_PRIVATE SpdyFramer {
 
   // Interpolates SpdyPriority values into SPDY4/HTTP2 priority weights,
   // and vice versa.
-  uint8 MapPriorityToWeight(SpdyPriority priority);
-  SpdyPriority MapWeightToPriority(uint8 weight);
+  static uint8 MapPriorityToWeight(SpdyPriority priority);
+  static SpdyPriority MapWeightToPriority(uint8 weight);
 
   // Deliver the given control frame's compressed headers block to the visitor
   // in decompressed form, in chunks. Returns true if the visitor has
@@ -616,16 +614,14 @@ class NET_EXPORT_PRIVATE SpdyFramer {
                            TooLargeHeadersFrameUsesContinuation);
   FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest,
                            TooLargePushPromiseFrameUsesContinuation);
-  friend class net::HttpNetworkLayer;  // This is temporary for the server.
-  friend class net::HttpNetworkTransactionTest;
-  friend class net::HttpProxyClientSocketPoolTest;
-  friend class net::SpdyHttpStreamTest;
-  friend class net::SpdyNetworkTransactionTest;
-  friend class net::SpdyProxyClientSocketTest;
-  friend class net::SpdySessionTest;
-  friend class net::SpdyStreamTest;
-  friend class net::SpdyWebSocketStreamTest;
-  friend class net::WebSocketJobTest;
+  friend class HttpNetworkLayer;  // This is temporary for the server.
+  friend class HttpNetworkTransactionTest;
+  friend class HttpProxyClientSocketPoolTest;
+  friend class SpdyHttpStreamTest;
+  friend class SpdyNetworkTransactionTest;
+  friend class SpdyProxyClientSocketTest;
+  friend class SpdySessionTest;
+  friend class SpdyStreamTest;
   friend class test::TestSpdyVisitor;
 
  private:
@@ -657,7 +653,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   void DeliverHpackBlockAsSpdy3Block();
 
   // Helpers for above internal breakouts from ProcessInput.
-  void ProcessControlFrameHeader(uint16 control_frame_type_field);
+  void ProcessControlFrameHeader(int control_frame_type_field);
   // Always passed exactly 1 setting's worth of data.
   bool ProcessSetting(const char* data);
 

@@ -109,12 +109,6 @@ extern const char kYoutubeAppId[];
 // The extension id of the in-app payments support application.
 extern const char kInAppPaymentsSupportAppId[];
 
-// The name of the app launch histogram.
-extern const char kAppLaunchHistogram[];
-
-// The name of the app launch histogram for platform apps.
-extern const char kPlatformAppLaunchHistogram[];
-
 // The buckets used for app launches.
 enum AppLaunchBucket {
   // Launch from NTP apps section while maximized.
@@ -212,10 +206,6 @@ extern const char kChromeVoxExtensionPath[];
 extern const char kChromeVoxManifestFilename[];
 // Name of ChromeVox guest manifest file.
 extern const char kChromeVoxGuestManifestFilename[];
-// Name of ChromeVox next manifest file.
-extern const char kChromeVoxNextManifestFilename[];
-// Name of ChromeVox next guest manifest file.
-extern const char kChromeVoxNextGuestManifestFilename[];
 // Extension id, path (relative to |chrome::DIR_RESOURCES|) and IME engine
 // id for the builtin-in Braille IME extension.
 extern const char kBrailleImeExtensionId[];

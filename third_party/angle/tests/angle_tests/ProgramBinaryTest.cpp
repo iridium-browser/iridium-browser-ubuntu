@@ -3,14 +3,13 @@
 #include <stdint.h>
 
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
-typedef ::testing::Types<TFT<Gles::Two, Rend::D3D11>, TFT<Gles::Two, Rend::D3D9>> TestFixtureTypes;
-TYPED_TEST_CASE(ProgramBinaryTest, TestFixtureTypes);
+ANGLE_TYPED_TEST_CASE(ProgramBinaryTest, ES2_D3D9, ES2_D3D11);
 
 template<typename T>
 class ProgramBinaryTest : public ANGLETest
 {
-protected:
-    ProgramBinaryTest() : ANGLETest(T::GetGlesMajorVersion(), T::GetRequestedRenderer())
+  protected:
+    ProgramBinaryTest() : ANGLETest(T::GetGlesMajorVersion(), T::GetPlatform())
     {
         setWindowWidth(128);
         setWindowHeight(128);
@@ -127,10 +126,16 @@ TYPED_TEST(ProgramBinaryTest, SaveAndLoadBinary)
             GLint infoLogLength;
             glGetProgramiv(program2, GL_INFO_LOG_LENGTH, &infoLogLength);
 
-            std::vector<GLchar> infoLog(infoLogLength);
-            glGetProgramInfoLog(program2, infoLog.size(), NULL, &infoLog[0]);
-
-            FAIL() << "program link failed: " << &infoLog[0];
+            if (infoLogLength > 0)
+            {
+                std::vector<GLchar> infoLog(infoLogLength);
+                glGetProgramInfoLog(program2, infoLog.size(), NULL, &infoLog[0]);
+                FAIL() << "program link failed: " << &infoLog[0];
+            }
+            else
+            {
+                FAIL() << "program link failed.";
+            }
         }
         else
         {

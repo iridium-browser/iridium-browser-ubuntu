@@ -8,6 +8,7 @@
 
 #include "base/prefs/overlay_user_pref_store.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -16,7 +17,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
-#include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/common/pref_font_webkit_names.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_names_util.h"
@@ -92,7 +92,6 @@ const int kPrefsToObserveLength = arraysize(kPrefsToObserve);
 // API cannot be used), so we can avoid registering them altogether.
 void RegisterFontFamilyPrefs(user_prefs::PrefRegistrySyncable* registry,
                              const std::set<std::string>& fonts_with_defaults) {
-
   // Expand the font concatenated with script name so this stays at RO memory
   // rather than allocated in heap.
   static const char* const kFontFamilyMap[] = {
@@ -133,10 +132,10 @@ void RegisterFontFamilyMapObserver(
     const char* map_name,
     const PrefChangeRegistrar::NamedChangeCallback& obs) {
   DCHECK(StartsWithASCII(map_name, "webkit.webprefs.", true));
+
   for (size_t i = 0; i < prefs::kWebKitScriptsForFontFamilyMapsLength; ++i) {
     const char* script = prefs::kWebKitScriptsForFontFamilyMaps[i];
-    std::string pref_name = base::StringPrintf("%s.%s", map_name, script);
-    registrar->Add(pref_name.c_str(), obs);
+    registrar->Add(base::StringPrintf("%s.%s", map_name, script), obs);
   }
 }
 
@@ -315,6 +314,18 @@ void OverrideFontFamily(WebPreferences* prefs,
   (*map)[script] = base::UTF8ToUTF16(pref_value);
 }
 
+void RegisterLocalizedFontPref(
+    user_prefs::PrefRegistrySyncable* registry,
+    const char* path,
+    int default_message_id,
+    user_prefs::PrefRegistrySyncable::PrefSyncStatus status) {
+  int val = 0;
+  bool success = base::StringToInt(l10n_util::GetStringUTF8(
+      default_message_id), &val);
+  DCHECK(success);
+  registry->RegisterIntegerPref(path, val, status);
+}
+
 }  // namespace
 
 PrefsTabHelper::PrefsTabHelper(WebContents* contents)
@@ -323,15 +334,15 @@ PrefsTabHelper::PrefsTabHelper(WebContents* contents)
   PrefService* prefs = GetProfile()->GetPrefs();
   pref_change_registrar_.Init(prefs);
   if (prefs) {
-    // TODO(wjmaclean): Convert this to use the content-specific zoom-level
-    // prefs when HostZoomMap moves to StoragePartition.
+    // If the tab is in an incognito profile, we track changes in the default
+    // zoom level of the parent profile instead.
+    Profile* profile_to_track = GetProfile()->GetOriginalProfile();
     chrome::ChromeZoomLevelPrefs* zoom_level_prefs =
-        GetProfile()->GetZoomLevelPrefs();
+        profile_to_track->GetZoomLevelPrefs();
 
     base::Closure renderer_callback = base::Bind(
         &PrefsTabHelper::UpdateRendererPreferences, base::Unretained(this));
-    // Incognito mode does not have a zoom_level_prefs, and not all tests
-    // should need to create one either.
+    // Tests should not need to create a ZoomLevelPrefs.
     if (zoom_level_prefs) {
       default_zoom_level_subscription_ =
           zoom_level_prefs->RegisterDefaultZoomLevelCallback(renderer_callback);
@@ -479,13 +490,13 @@ void PrefsTabHelper::RegisterProfilePrefs(
       pref_defaults.password_echo_enabled,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 #endif
-  registry->RegisterLocalizedStringPref(
+  registry->RegisterStringPref(
       prefs::kAcceptLanguages,
-      IDS_ACCEPT_LANGUAGES,
+      l10n_util::GetStringUTF8(IDS_ACCEPT_LANGUAGES),
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterLocalizedStringPref(
+  registry->RegisterStringPref(
       prefs::kDefaultCharset,
-      IDS_DEFAULT_ENCODING,
+      l10n_util::GetStringUTF8(IDS_DEFAULT_ENCODING),
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 
   // Register font prefs that have defaults.
@@ -517,9 +528,9 @@ void PrefsTabHelper::RegisterProfilePrefs(
     // prefs (e.g., via the extensions workflow), or the problem turns out to
     // not be really critical after all.
     if (browser_script != pref_script) {
-      registry->RegisterLocalizedStringPref(
+      registry->RegisterStringPref(
           pref.pref_name,
-          pref.resource_id,
+          l10n_util::GetStringUTF8(pref.resource_id),
           user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
       fonts_with_defaults.insert(pref.pref_name);
     }
@@ -530,29 +541,33 @@ void PrefsTabHelper::RegisterProfilePrefs(
   RegisterFontFamilyPrefs(registry, fonts_with_defaults);
 #endif
 
-  registry->RegisterLocalizedIntegerPref(
+  RegisterLocalizedFontPref(
+      registry,
       prefs::kWebKitDefaultFontSize,
       IDS_DEFAULT_FONT_SIZE,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterLocalizedIntegerPref(
+  RegisterLocalizedFontPref(
+      registry,
       prefs::kWebKitDefaultFixedFontSize,
       IDS_DEFAULT_FIXED_FONT_SIZE,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterLocalizedIntegerPref(
+  RegisterLocalizedFontPref(
+      registry,
       prefs::kWebKitMinimumFontSize,
       IDS_MINIMUM_FONT_SIZE,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterLocalizedIntegerPref(
+  RegisterLocalizedFontPref(
+      registry,
       prefs::kWebKitMinimumLogicalFontSize,
       IDS_MINIMUM_LOGICAL_FONT_SIZE,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterLocalizedBooleanPref(
+  registry->RegisterBooleanPref(
       prefs::kWebKitUsesUniversalDetector,
-      IDS_USES_UNIVERSAL_DETECTOR,
+      l10n_util::GetStringUTF8(IDS_USES_UNIVERSAL_DETECTOR) == "true",
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterLocalizedStringPref(
+  registry->RegisterStringPref(
       prefs::kStaticEncodings,
-      IDS_STATIC_ENCODING_LIST,
+      l10n_util::GetStringUTF8(IDS_STATIC_ENCODING_LIST),
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterStringPref(
       prefs::kRecentlySelectedEncoding,
@@ -616,7 +631,7 @@ void PrefsTabHelper::OnFontFamilyPrefChanged(const std::string& pref_name) {
                                              &generic_family,
                                              &script)) {
     PrefService* prefs = GetProfile()->GetPrefs();
-    std::string pref_value = prefs->GetString(pref_name.c_str());
+    std::string pref_value = prefs->GetString(pref_name);
     if (pref_value.empty()) {
       WebPreferences web_prefs =
           web_contents_->GetRenderViewHost()->GetWebkitPreferences();

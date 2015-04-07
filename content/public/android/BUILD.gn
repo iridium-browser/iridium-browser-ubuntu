@@ -6,9 +6,9 @@ import("//build/config/android/config.gni")
 import("//build/config/android/rules.gni")
 
 content_jni_gypi_values = exec_script("//build/gypi_to_gn.py",
-    [ rebase_path("../../content_jni.gypi") ],
-    "scope",
-    [ "../../content_jni.gypi" ])
+                                      [ rebase_path("../../content_jni.gypi") ],
+                                      "scope",
+                                      [ "../../content_jni.gypi" ])
 
 android_aidl("common_aidl") {
   interface_file = "java/src/org/chromium/content/common/common.aidl"
@@ -32,6 +32,8 @@ android_library("content_java") {
   deps = [
     ":content_java_resources",
     "//base:base_java",
+    "//device/battery/android:battery_monitor_android",
+    "//device/battery:mojo_bindings_java",
     "//media/base/android:media_java",
     "//mojo/android:system_java",
     "//mojo/public/java:bindings",
@@ -40,20 +42,16 @@ android_library("content_java") {
     "//ui/android:ui_java",
     "//third_party/jsr-305:jsr_305_javalib",
 
-#"//content:content_common",
+    #"//content:content_common",
   ]
 
   srcjar_deps = [
     ":common_aidl",
     ":content_public_android_java_enums_srcjar",
+    "//ui/touch_selection:ui_touch_selection_enums_srcjar",
   ]
 
   DEPRECATED_java_in_dir = "java/src"
-  if (!is_android_webview_build) {
-    deps += [
-      "//third_party/eyesfree:eyesfree_java",
-    ]
-  }
 }
 
 java_strings_grd("content_strings_grd") {
@@ -110,7 +108,6 @@ java_cpp_enum("content_public_android_java_enums_srcjar") {
   sources = [
     "//content/browser/android/content_view_core_impl.cc",
     "//content/browser/android/gesture_event_type.h",
-    "//content/browser/renderer_host/input/selection_event_type.h",
     "//content/browser/gamepad/gamepad_standard_mappings.h",
     "//content/public/common/result_codes.h",
     "//content/public/common/screen_orientation_values.h",
@@ -122,7 +119,6 @@ java_cpp_enum("content_public_android_java_enums_srcjar") {
     "org/chromium/content/browser/input/CanonicalAxisIndex.java",
     "org/chromium/content/browser/input/CanonicalButtonIndex.java",
     "org/chromium/content/browser/input/PopupItemType.java",
-    "org/chromium/content/browser/input/SelectionEventType.java",
     "org/chromium/content_public/common/ResultCode.java",
     "org/chromium/content_public/common/ScreenOrientationValues.java",
     "org/chromium/content_public/common/SpeechRecognitionErrorCode.java",
@@ -173,6 +169,4 @@ android_library("content_javatests") {
 
   DEPRECATED_java_in_dir = "javatests/src"
 }
-
-
 # TODO(GYP): content_icudata

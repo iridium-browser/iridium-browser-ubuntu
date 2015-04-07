@@ -5,6 +5,8 @@
 
 """Unit tests for gather_builder_stats."""
 
+# pylint: disable=bad-continuation,protected-access
+
 from __future__ import print_function
 
 import datetime
@@ -12,11 +14,12 @@ import itertools
 import os
 import random
 import sys
-import unittest
 
 sys.path.insert(0, os.path.abspath('%s/../..' % os.path.dirname(__file__)))
+from chromite.lib import clactions
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_test_lib
+from chromite.lib import fake_cidb
 from chromite.scripts import gather_builder_stats
 from chromite.cbuildbot import metadata_lib
 from chromite.cbuildbot import constants
@@ -29,8 +32,35 @@ CQ = constants.CQ
 PRE_CQ = constants.PRE_CQ
 
 
-class TestCLActionLogic(unittest.TestCase):
+class TestHelperMethods(cros_test_lib.TestCase):
+  """Test helper methods not in a class."""
+
+  def testRemoveBuildsWithNoBuildId(self):
+    good_build1 = metadata_lib.BuildData('url', {'build_id': 1})
+    good_build2 = metadata_lib.BuildData('url', {'build_id': 2})
+    bad_build = metadata_lib.BuildData('url', {})
+
+    # Test No Builds.
+    result = gather_builder_stats._RemoveBuildsWithNoBuildId(
+        [], 'Test No Builds')
+    self.assertEqual(result, [])
+
+    # Test Good Builds.
+    result = gather_builder_stats._RemoveBuildsWithNoBuildId(
+        [good_build1, good_build2], 'Test No Builds')
+    self.assertEqual(result, [good_build1, good_build2])
+
+    # Test No Builds.
+    result = gather_builder_stats._RemoveBuildsWithNoBuildId(
+        [good_build1, good_build2, bad_build], 'Test No Builds')
+    self.assertEqual(result, [good_build1, good_build2])
+
+
+class TestCLActionLogic(cros_test_lib.TestCase):
   """Ensures that CL action analysis logic is correct."""
+
+  def setUp(self):
+    self.fake_db = fake_cidb.FakeCIDBConnection()
 
   def _getTestBuildData(self, cq):
     """Generate a return test data.
@@ -57,7 +87,7 @@ class TestCLActionLogic(unittest.TestCase):
 
     t = itertools.count()
     bot_config = (constants.CQ_MASTER if cq
-                  else constants.PRE_CQ_GROUP_GS_LOCATION)
+                  else constants.PRE_CQ_GROUP_CONFIG)
 
     # pylint: disable=W0212
     TEST_METADATA = [
@@ -89,19 +119,21 @@ class TestCLActionLogic(unittest.TestCase):
           ).RecordCLAction(c1p1, constants.CL_ACTION_KICKED_OUT, t.next()
           ).RecordCLAction(c2p1, constants.CL_ACTION_KICKED_OUT, t.next()
           ).RecordCLAction(c3p1, constants.CL_ACTION_KICKED_OUT, t.next()),
-      # Build 4 picks up c4p1 and rejects it.
+      # Build 4 picks up c4p1 and does nothing with it.
+      # c4p2 isn't picked up because it fails to apply.
       metadata_lib.CBuildbotMetadata(
           ).UpdateWithDict({'build-number' : 3,
                             'bot-config' : bot_config,
                             'results' : [],
                             'status' : failed_status,
                             'changes': [c4p1._asdict()]}
-          ).RecordCLAction(c4p2, constants.CL_ACTION_PICKED_UP, t.next()
+          ).RecordCLAction(c4p1, constants.CL_ACTION_PICKED_UP, t.next()
           ).RecordCLAction(c4p2, constants.CL_ACTION_KICKED_OUT, t.next()),
     ]
     if cq:
       TEST_METADATA += [
-        # Build 4 picks up c1p1 and c2p2 and submits both.
+        # Build 4 picks up c1p1, c2p2, c3p2, c4p1 and submits the first three.
+        # c4p2 is submitted without being tested.
         # So  c1p1 should be detected as a 1-time rejected good patch,
         # and c2p1 should be detected as a possibly bad patch.
         metadata_lib.CBuildbotMetadata(
@@ -147,12 +179,21 @@ class TestCLActionLogic(unittest.TestCase):
     random.seed(0)
     random.shuffle(TEST_METADATA)
 
+    for m in TEST_METADATA:
+      build_id = self.fake_db.InsertBuild(m.GetValue('bot-config'),
+          constants.WATERFALL_INTERNAL, m.GetValue('build-number'),
+          m.GetValue('bot-config'), 'bot-hostname')
+      m.UpdateWithDict({'build_id': build_id})
+      actions = []
+      for action_metadata in m.GetDict()['cl_actions']:
+        actions.append(clactions.CLAction.FromMetadataEntry(action_metadata))
+      self.fake_db.InsertCLActions(build_id, actions)
+
     # Wrap the test metadata into BuildData objects.
     TEST_BUILDDATA = [metadata_lib.BuildData('', d.GetDict())
                       for d in TEST_METADATA]
 
     return TEST_BUILDDATA
-
 
   def testCLStatsSummary(self):
     with cros_build_lib.ContextManagerStack() as stack:
@@ -164,10 +205,11 @@ class TestCLActionLogic(unittest.TestCase):
       stack.Add(mock.patch.object, gather_builder_stats.CLStats,
                 'GatherFailureReasons')
       cl_stats = gather_builder_stats.CLStats('foo@bar.com')
-      cl_stats.Gather(datetime.date.today())
+      cl_stats.db = self.fake_db
+      cl_stats.Gather(datetime.date.today(), datetime.date.today())
       cl_stats.reasons = {1: '', 2: '', 3: REASON_BAD_CL, 4: REASON_BAD_CL}
-      cl_stats.blames =  {1: '', 2: '', 3: 'crosreview.com/1',
-                          4: 'crosreview.com/1'}
+      cl_stats.blames = {1: '', 2: '', 3: 'crosreview.com/1',
+                         4: 'crosreview.com/1'}
       summary = cl_stats.Summarize()
 
       expected = {

@@ -6,28 +6,28 @@
  */
 
 #include "GrGLNvprProgramBuilder.h"
-#include "../GrGpuGL.h"
+#include "../GrGLGpu.h"
 
 #define GL_CALL(X) GR_GL_CALL(this->gpu()->glInterface(), X)
 #define GL_CALL_RET(R, X) GR_GL_CALL_RET(this->gpu()->glInterface(), R, X)
 
-GrGLNvprProgramBuilder::GrGLNvprProgramBuilder(GrGpuGL* gpu,
+GrGLNvprProgramBuilder::GrGLNvprProgramBuilder(GrGLGpu* gpu,
                                                const GrOptDrawState& optState)
         : INHERITED(gpu, optState)
         , fSeparableVaryingInfos(kVarsPerBlock) {
 }
 
-void GrGLNvprProgramBuilder::emitTransforms(const GrFragmentStage& processorStage,
+void GrGLNvprProgramBuilder::emitTransforms(const GrPendingFragmentStage& processorStage,
                                             GrGLProcessor::TransformedCoordsArray* outCoords,
                                             GrGLInstalledFragProc* ifp) {
-    const GrFragmentProcessor* effect = processorStage.getProcessor();
+    const GrFragmentProcessor* effect = processorStage.processor();
     int numTransforms = effect->numTransforms();
 
     ifp->fTransforms.push_back_n(numTransforms);
 
     for (int t = 0; t < numTransforms; t++) {
         GrSLType varyingType =
-                processorStage.isPerspectiveCoordTransform(t, false) ?
+                processorStage.isPerspectiveCoordTransform(t) ?
                         kVec3f_GrSLType :
                         kVec2f_GrSLType;
 
@@ -72,5 +72,7 @@ GrGLProgram* GrGLNvprProgramBuilder::createProgram(GrGLuint programID) {
     // building
     this->resolveSeparableVaryings(programID);
     return SkNEW_ARGS(GrGLNvprProgram, (fGpu, fDesc, fUniformHandles, programID, fUniforms,
-                                        fFragmentProcessors.get(), fSeparableVaryingInfos));
+                                        fGeometryProcessor,
+                                        fXferProcessor, fFragmentProcessors.get(),
+                                        fSeparableVaryingInfos));
 }

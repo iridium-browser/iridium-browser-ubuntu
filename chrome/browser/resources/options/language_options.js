@@ -205,6 +205,8 @@ cr.define('options', function() {
           this.addBlockedLanguage_(addLanguageCode);
         } else {
           PageManager.showPageByName('addLanguage');
+          chrome.send('coreOptionsUserMetricsAction',
+                      ['Options_Languages_Add']);
         }
       };
       $('language-options-add-button').onclick = onclick.bind(this);
@@ -846,6 +848,10 @@ cr.define('options', function() {
       } else {
         this.handleCheckboxUpdate_(checkbox);
       }
+
+      chrome.send('coreOptionsUserMetricsAction',
+                  ['Options_Languages_InputMethodCheckbox' +
+                   (checkbox.checked ? '_Enable' : '_Disable')]);
     },
 
     /**
@@ -967,6 +973,8 @@ cr.define('options', function() {
       Preferences.setStringPref(SPELL_CHECK_DICTIONARY_PREF,
                                 languageCode, true);
       chrome.send('spellCheckLanguageChange', [languageCode]);
+      chrome.send('coreOptionsUserMetricsAction',
+                  ['Options_Languages_SpellCheck']);
     },
 
     /**
@@ -1316,12 +1324,15 @@ cr.define('options', function() {
       var tokens = languageCode.split('-');
       var main = tokens[0];
 
-      // See also: chrome/renderer/translate/translate_helper.cc.
+      // See also: components/translate/core/browser/common/translate_util.cc
       var synonyms = {
         'nb': 'no',
         'he': 'iw',
         'jv': 'jw',
         'fil': 'tl',
+        'zh-HK': 'zh-TW',
+        'zh-MO': 'zh-TW',
+        'zh-SG': 'zh-CN',
       };
 
       if (main in synonyms) {

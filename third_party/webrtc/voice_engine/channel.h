@@ -59,7 +59,6 @@ class RtpRtcp;
 class TelephoneEventHandler;
 class ViENetwork;
 class VoEMediaProcess;
-class VoERTCPObserver;
 class VoERTPObserver;
 class VoiceEngineObserver;
 
@@ -156,7 +155,6 @@ private:
 class Channel:
     public RtpData,
     public RtpFeedback,
-    public RtcpFeedback,
     public FileCallback, // receiving notification from file player & recorder
     public Transport,
     public RtpAudioFeedback,
@@ -216,9 +214,9 @@ public:
     // VoENetwork
     int32_t RegisterExternalTransport(Transport& transport);
     int32_t DeRegisterExternalTransport();
-    int32_t ReceivedRTPPacket(const int8_t* data, int32_t length,
+    int32_t ReceivedRTPPacket(const int8_t* data, size_t length,
                               const PacketTime& packet_time);
-    int32_t ReceivedRTCPPacket(const int8_t* data, int32_t length);
+    int32_t ReceivedRTCPPacket(const int8_t* data, size_t length);
 
     // VoEFile
     int StartPlayingFileLocally(const char* fileName, bool loop,
@@ -314,8 +312,6 @@ public:
 #endif
 
     // VoERTP_RTCP
-    int RegisterRTCPObserver(VoERTCPObserver& observer);
-    int DeRegisterRTCPObserver();
     int SetLocalSSRC(unsigned int ssrc);
     int GetLocalSSRC(unsigned int& ssrc);
     int GetRemoteSSRC(unsigned int& ssrc);
@@ -323,7 +319,7 @@ public:
     int SetReceiveAudioLevelIndicationStatus(bool enable, unsigned char id);
     int SetSendAbsoluteSenderTimeStatus(bool enable, unsigned char id);
     int SetReceiveAbsoluteSenderTimeStatus(bool enable, unsigned char id);
-    int SetRTCPStatus(bool enable);
+    void SetRTCPStatus(bool enable);
     int GetRTCPStatus(bool& enabled);
     int SetRTCP_CNAME(const char cName[256]);
     int GetRemoteRTCP_CNAME(char cName[256]);
@@ -356,7 +352,7 @@ public:
         uint8_t payloadType,
         uint32_t timeStamp,
         const uint8_t* payloadData,
-        uint16_t payloadSize,
+        size_t payloadSize,
         const RTPFragmentationHeader* fragmentation) OVERRIDE;
 
     // From ACMVADCallback in the ACM
@@ -367,10 +363,10 @@ public:
     // From RtpData in the RTP/RTCP module
     virtual int32_t OnReceivedPayloadData(
         const uint8_t* payloadData,
-        uint16_t payloadSize,
+        size_t payloadSize,
         const WebRtcRTPHeader* rtpHeader) OVERRIDE;
     virtual bool OnRecoveredPacket(const uint8_t* packet,
-                                   int packet_length) OVERRIDE;
+                                   size_t packet_length) OVERRIDE;
 
     // From RtpFeedback in the RTP/RTCP module
     virtual int32_t OnInitializeDecoder(
@@ -386,13 +382,6 @@ public:
                                        uint32_t CSRC, bool added) OVERRIDE;
     virtual void ResetStatistics(uint32_t ssrc) OVERRIDE;
 
-    // From RtcpFeedback in the RTP/RTCP module
-    virtual void OnApplicationDataReceived(int32_t id,
-                                           uint8_t subType,
-                                           uint32_t name,
-                                           uint16_t length,
-                                           const uint8_t* data) OVERRIDE;
-
     // From RtpAudioFeedback in the RTP/RTCP module
     virtual void OnPlayTelephoneEvent(int32_t id,
                                       uint8_t event,
@@ -400,10 +389,12 @@ public:
                                       uint8_t volume) OVERRIDE;
 
     // From Transport (called by the RTP/RTCP module)
-    virtual int SendPacket(int /*channel*/, const void *data, int len) OVERRIDE;
+    virtual int SendPacket(int /*channel*/,
+                           const void *data,
+                           size_t len) OVERRIDE;
     virtual int SendRTCPPacket(int /*channel*/,
                                const void *data,
-                               int len) OVERRIDE;
+                               size_t len) OVERRIDE;
 
     // From MixerParticipant
     virtual int32_t GetAudioFrame(int32_t id, AudioFrame& audioFrame) OVERRIDE;
@@ -469,10 +460,10 @@ public:
                           const uint32_t rtt);
 
 private:
-    bool ReceivePacket(const uint8_t* packet, int packet_length,
+    bool ReceivePacket(const uint8_t* packet, size_t packet_length,
                        const RTPHeader& header, bool in_order);
     bool HandleEncapsulation(const uint8_t* packet,
-                             int packet_length,
+                             size_t packet_length,
                              const RTPHeader& header);
     bool IsPacketInOrder(const RTPHeader& header) const;
     bool IsPacketRetransmitted(const RTPHeader& header, bool in_order) const;
@@ -480,7 +471,7 @@ private:
     int InsertInbandDtmfTone();
     int32_t MixOrReplaceAudioWithFile(int mixingFrequency);
     int32_t MixAudioWithFile(AudioFrame& audioFrame, int mixingFrequency);
-    int32_t SendPacketRaw(const void *data, int len, bool RTCP);
+    int32_t SendPacketRaw(const void *data, size_t len, bool RTCP);
     void UpdatePacketDelay(uint32_t timestamp,
                            uint16_t sequenceNumber);
     void RegisterReceiveCodecsToRTPModule();
@@ -565,11 +556,9 @@ private:
     VoERxVadCallback* _rxVadObserverPtr;
     int32_t _oldVadDecision;
     int32_t _sendFrameType; // Send data is voice, 1-voice, 0-otherwise
-    VoERTCPObserver* _rtcpObserverPtr;
     // VoEBase
     bool _externalMixing;
     bool _mixFileWithMicrophone;
-    bool _rtcpObserver;
     // VoEVolumeControl
     bool _mute;
     float _panLeft;

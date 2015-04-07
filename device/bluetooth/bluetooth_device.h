@@ -13,6 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
 #include "base/strings/string16.h"
+#include "device/bluetooth/bluetooth_export.h"
 #include "device/bluetooth/bluetooth_uuid.h"
 #include "net/base/net_log.h"
 
@@ -34,7 +35,7 @@ class BluetoothUUID;
 // Since the lifecycle of BluetoothDevice instances is managed by
 // BluetoothAdapter, that class rather than this provides observer methods
 // for devices coming and going, as well as properties being updated.
-class BluetoothDevice {
+class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
  public:
   // Possible values that may be returned by GetVendorIDSource(),
   // indicating different organisations that allocate the identifiers returned
@@ -67,6 +68,16 @@ class BluetoothDevice {
 
   // The value returned if the RSSI or transmit power cannot be read.
   static const int kUnknownPower = 127;
+
+  struct ConnectionInfo {
+    int rssi;
+    int transmit_power;
+    int max_transmit_power;
+
+    ConnectionInfo();
+    ConnectionInfo(int rssi, int transmit_power, int max_transmit_power);
+    ~ConnectionInfo();
+  };
 
   // Possible errors passed back to an error callback function in case of a
   // failed call to Connect().
@@ -203,28 +214,6 @@ class BluetoothDevice {
   // DEVICE_PERIPHERAL.
   DeviceType GetDeviceType() const;
 
-  // Gets the "received signal strength indication" (RSSI) of the current
-  // connection to the device. The RSSI indicates the power present in the
-  // received radio signal, measured in dBm, to a resolution of 1dBm. Larger
-  // (typically, less negative) values indicate a stronger signal.
-  // If the device is not currently connected, then returns the RSSI read from
-  // the last inquiry that returned the device, where available. In case of an
-  // error, returns |kUnknownPower|. Otherwise, returns the connection's RSSI.
-  virtual int GetRSSI() const = 0;
-
-  // These two methods are used to read the current or maximum transmit power
-  // ("Tx power") of the current connection to the device. The transmit power
-  // indicates the strength of the signal broadcast from the host's Bluetooth
-  // antenna when communicating with the device, measured in dBm, to a
-  // resolution of 1dBm. Larger (typically, less negative) values
-  // indicate a stronger signal.
-  // It is only meaningful to call this method when there is a connection
-  // established to the device. If there is no connection, or in case of an
-  // error, returns |kUnknownPower|. Otherwise, returns the connection's
-  // transmit power.
-  virtual int GetCurrentHostTransmitPower() const = 0;
-  virtual int GetMaximumHostTransmitPower() const = 0;
-
   // Indicates whether the device is known to support pairing based on its
   // device class and address.
   bool IsPairable() const;
@@ -269,6 +258,8 @@ class BluetoothDevice {
   // In the success case this callback is not called.
   typedef base::Callback<void(enum ConnectErrorCode)> ConnectErrorCallback;
 
+  typedef base::Callback<void(const ConnectionInfo&)> ConnectionInfoCallback;
+
   // Indicates whether the device is currently pairing and expecting a
   // PIN Code to be returned.
   virtual bool ExpectingPinCode() const = 0;
@@ -280,6 +271,21 @@ class BluetoothDevice {
   // Indicates whether the device is currently pairing and expecting
   // confirmation of a displayed passkey.
   virtual bool ExpectingConfirmation() const = 0;
+
+  // Returns the RSSI and TX power of the active connection to the device:
+  //
+  // The RSSI indicates the power present in the received radio signal, measured
+  // in dBm, to a resolution of 1dBm. Larger (typically, less negative) values
+  // indicate a stronger signal.
+  //
+  // The transmit power indicates the strength of the signal broadcast from the
+  // host's Bluetooth antenna when communicating with the device, measured in
+  // dBm, to a resolution of 1dBm. Larger (typically, less negative) values
+  // indicate a stronger signal.
+  //
+  // If the device isn't connected, then the ConnectionInfo struct passed into
+  // the callback will be populated with |kUnknownPower|.
+  virtual void GetConnectionInfo(const ConnectionInfoCallback& callback) = 0;
 
   // Initiates a connection to the device, pairing first if necessary.
   //
@@ -383,12 +389,6 @@ class BluetoothDevice {
   virtual void CreateGattConnection(
       const GattConnectionCallback& callback,
       const ConnectErrorCallback& error_callback) = 0;
-
-  // Starts monitoring the connection properties, RSSI and TX power. These
-  // properties will be tracked, and updated when their values change. Exactly
-  // one of |callback| or |error_callback| will be run.
-  virtual void StartConnectionMonitor(const base::Closure& callback,
-                                      const ErrorCallback& error_callback) = 0;
 
   // Returns the list of discovered GATT services.
   virtual std::vector<BluetoothGattService*> GetGattServices() const;

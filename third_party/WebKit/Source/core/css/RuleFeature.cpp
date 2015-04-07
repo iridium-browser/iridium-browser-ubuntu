@@ -32,7 +32,9 @@
 #include "core/HTMLNames.h"
 #include "core/css/CSSSelector.h"
 #include "core/css/CSSSelectorList.h"
+#include "core/css/CSSValueList.h"
 #include "core/css/RuleSet.h"
+#include "core/css/StylePropertySet.h"
 #include "core/css/StyleRule.h"
 #include "core/css/invalidation/DescendantInvalidationSet.h"
 #include "core/dom/Element.h"
@@ -138,10 +140,14 @@ static bool supportsInvalidation(CSSSelector::PseudoType type)
     case CSSSelector::PseudoInRange:
     case CSSSelector::PseudoOutOfRange:
     case CSSSelector::PseudoWebKitCustomElement:
+    case CSSSelector::PseudoCue:
+    case CSSSelector::PseudoFutureCue:
+    case CSSSelector::PseudoPastCue:
     case CSSSelector::PseudoUnresolved:
     case CSSSelector::PseudoContent:
     case CSSSelector::PseudoHost:
     case CSSSelector::PseudoShadow:
+    case CSSSelector::PseudoSpatialNavigationFocus:
     case CSSSelector::PseudoListBox:
         return true;
     case CSSSelector::PseudoNotParsed:
@@ -159,6 +165,15 @@ static bool supportsInvalidation(CSSSelector::PseudoType type)
     }
 }
 
+static bool supportsInvalidationWithSelectorList(CSSSelector::PseudoType pseudo)
+{
+    return pseudo == CSSSelector::PseudoAny
+        || pseudo == CSSSelector::PseudoCue
+        || pseudo == CSSSelector::PseudoHost
+        || pseudo == CSSSelector::PseudoHostContext
+        || pseudo == CSSSelector::PseudoNot;
+}
+
 #endif // ENABLE(ASSERT)
 
 static bool requiresSubtreeInvalidation(const CSSSelector& selector)
@@ -171,10 +186,6 @@ static bool requiresSubtreeInvalidation(const CSSSelector& selector)
     switch (selector.pseudoType()) {
     case CSSSelector::PseudoFirstLine:
     case CSSSelector::PseudoFirstLetter:
-    case CSSSelector::PseudoCue:
-    case CSSSelector::PseudoFutureCue:
-    case CSSSelector::PseudoPastCue:
-    case CSSSelector::PseudoSpatialNavigationFocus:
         // FIXME: Most pseudo classes/elements above can be supported and moved
         // to assertSupportedPseudo(). Move on a case-by-case basis. If they
         // require subtree invalidation, document why.
@@ -200,71 +211,9 @@ void RuleFeature::trace(Visitor* visitor)
     visitor->trace(rule);
 }
 
-// This method is somewhat conservative in what it accepts.
-RuleFeatureSet::InvalidationSetMode RuleFeatureSet::invalidationSetModeForSelector(const CSSSelector& selector)
+bool RuleFeatureSet::extractInvalidationSetFeature(const CSSSelector& selector, InvalidationSetFeatures& features)
 {
-    bool foundCombinator = false;
-    bool foundIdent = false;
-    for (const CSSSelector* component = &selector; component; component = component->tagHistory()) {
-
-        if (component->match() == CSSSelector::Class || component->match() == CSSSelector::Id
-            || (component->match() == CSSSelector::Tag && component->tagQName().localName() != starAtom)
-            || component->isAttributeSelector() || component->isCustomPseudoElement()) {
-            if (!foundCombinator) {
-                // We have found an invalidation set feature in the rightmost compound selector.
-                foundIdent = true;
-            }
-        } else if (component->pseudoType() == CSSSelector::PseudoNot
-            || component->pseudoType() == CSSSelector::PseudoHost
-            || component->pseudoType() == CSSSelector::PseudoAny) {
-            if (const CSSSelectorList* selectorList = component->selectorList()) {
-                // Features inside :not() are not added to the feature set, so consider it a universal selector.
-                bool foundUniversal = component->pseudoType() == CSSSelector::PseudoNot;
-                for (const CSSSelector* selector = selectorList->first(); selector; selector = CSSSelectorList::next(*selector)) {
-                    // Find the invalidation set mode for each of the selectors in the selector list
-                    // of a :not(), :host(), etc. For instance, ".x :-webkit-any(.a, .b)" yields an
-                    // AddFeatures mode for both ".a" and ".b". ":-webkit-any(.a, *)" yields AddFeatures
-                    // for ".a", but UseSubtreeStyleChange for "*". One sub-selector without invalidation
-                    // set features is sufficient to cause the selector to be a universal selector as far
-                    // the invalidation set is concerned.
-                    InvalidationSetMode subSelectorMode = invalidationSetModeForSelector(*selector);
-
-                    // The sub-selector contained something unskippable, fall back to whole subtree
-                    // recalcs in collectFeaturesFromSelector. subSelectorMode will return
-                    // UseSubtreeStyleChange since there are no combinators inside the selector list,
-                    // so translate it to UseLocalStyleChange if a combinator has been seen in the
-                    // outer context.
-                    //
-                    // FIXME: Is UseSubtreeStyleChange ever needed as input to collectFeaturesFromSelector?
-                    // That is, are there any selectors for which we need to use SubtreeStyleChange for
-                    // changing features when present in the rightmost compound selector?
-                    if (subSelectorMode == UseSubtreeStyleChange)
-                        return foundCombinator ? UseLocalStyleChange : UseSubtreeStyleChange;
-
-                    // We found no features in the sub-selector, only skippable ones (foundIdent was
-                    // false at the end of this method). That is a universal selector as far as the
-                    // invalidation set is concerned.
-                    if (subSelectorMode == UseLocalStyleChange)
-                        foundUniversal = true;
-                }
-                if (!foundUniversal && !foundCombinator) {
-                    // All sub-selectors contained invalidation set features and
-                    // we are in the rightmost compound selector.
-                    foundIdent = true;
-                }
-            }
-        } else if (requiresSubtreeInvalidation(*component)) {
-            return foundCombinator ? UseLocalStyleChange : UseSubtreeStyleChange;
-        }
-        if (component->relation() != CSSSelector::SubSelector)
-            foundCombinator = true;
-    }
-    return foundIdent ? AddFeatures : UseLocalStyleChange;
-}
-
-void RuleFeatureSet::extractInvalidationSetFeature(const CSSSelector& selector, InvalidationSetFeatures& features)
-{
-    if (selector.match() == CSSSelector::Tag)
+    if (selector.match() == CSSSelector::Tag && selector.tagQName().localName() != starAtom)
         features.tagName = selector.tagQName().localName();
     else if (selector.match() == CSSSelector::Id)
         features.id = selector.value();
@@ -274,6 +223,11 @@ void RuleFeatureSet::extractInvalidationSetFeature(const CSSSelector& selector, 
         features.attributes.append(selector.attribute().localName());
     else if (selector.isCustomPseudoElement())
         features.customPseudoElement = true;
+    else if (selector.pseudoType() == CSSSelector::PseudoBefore || selector.pseudoType() == CSSSelector::PseudoAfter)
+        features.hasBeforeOrAfter = true;
+    else
+        return false;
+    return true;
 }
 
 RuleFeatureSet::RuleFeatureSet()
@@ -297,6 +251,7 @@ DescendantInvalidationSet* RuleFeatureSet::invalidationSetForSelector(const CSSS
         case CSSSelector::PseudoEmpty:
         case CSSSelector::PseudoLink:
         case CSSSelector::PseudoVisited:
+        case CSSSelector::PseudoAnyLink:
         case CSSSelector::PseudoAutofill:
         case CSSSelector::PseudoHover:
         case CSSSelector::PseudoFocus:
@@ -315,38 +270,90 @@ DescendantInvalidationSet* RuleFeatureSet::invalidationSetForSelector(const CSSS
             break;
         }
     }
-    return 0;
+    return nullptr;
 }
 
-// Given a selector, update the descendant invalidation sets for the features found
-// in the selector. The first step is to extract the features from the rightmost
-// compound selector (extractInvalidationSetFeatures). Secondly, those features will be
-// added to the invalidation sets for the features found in the other compound selectors
-// (addFeaturesToInvalidationSets).
+// Given a rule, update the descendant invalidation sets for the features found
+// in its selector. The first step is to extract the features from the rightmost
+// compound selector (extractInvalidationSetFeatures). Secondly, add those features
+// to the invalidation sets for the features found in the other compound selectors
+// (addFeaturesToInvalidationSets). If we find a feature in the right-most compound
+// selector that requires a subtree recalc, we addFeaturesToInvalidationSets for the
+// rightmost compound selector as well.
 
-RuleFeatureSet::InvalidationSetMode RuleFeatureSet::updateInvalidationSets(const CSSSelector& selector)
+void RuleFeatureSet::updateInvalidationSets(const RuleData& ruleData)
 {
-    InvalidationSetMode mode = invalidationSetModeForSelector(selector);
-    if (mode != AddFeatures)
-        return mode;
-
     InvalidationSetFeatures features;
-    if (const CSSSelector* current = extractInvalidationSetFeatures(selector, features, false))
-        addFeaturesToInvalidationSets(*current, features);
-    return AddFeatures;
+    auto result = extractInvalidationSetFeatures(ruleData.selector(), features, false);
+    if (result.first) {
+        features.forceSubtree = result.second == ForceSubtree;
+        addFeaturesToInvalidationSets(*result.first, features);
+    }
+
+    // If any ::before and ::after rules specify 'content: attr(...)', we
+    // need to create invalidation sets for those attributes.
+    if (features.hasBeforeOrAfter)
+        updateInvalidationSetsForContentAttribute(ruleData);
 }
 
-const CSSSelector* RuleFeatureSet::extractInvalidationSetFeatures(const CSSSelector& selector, InvalidationSetFeatures& features, bool negated)
+void RuleFeatureSet::updateInvalidationSetsForContentAttribute(const RuleData& ruleData)
 {
+    const StylePropertySet& propertySet = ruleData.rule()->properties();
+
+    int propertyIndex = propertySet.findPropertyIndex(CSSPropertyContent);
+
+    if (propertyIndex == -1)
+        return;
+
+    StylePropertySet::PropertyReference contentProperty = propertySet.propertyAt(propertyIndex);
+    CSSValue* contentValue = contentProperty.value();
+
+    if (!contentValue->isValueList())
+        return;
+
+    for (CSSValueListIterator i = contentValue; i.hasMore(); i.advance()) {
+        CSSValue* item = i.value();
+        if (!item->isPrimitiveValue())
+            continue;
+        CSSPrimitiveValue* primitiveItem = toCSSPrimitiveValue(item);
+        if (!primitiveItem->isAttr())
+            continue;
+        ensureAttributeInvalidationSet(AtomicString(primitiveItem->getStringValue()));
+    }
+}
+
+std::pair<const CSSSelector*, RuleFeatureSet::UseFeaturesType>
+RuleFeatureSet::extractInvalidationSetFeatures(const CSSSelector& selector, InvalidationSetFeatures& features, bool negated)
+{
+    bool foundFeatures = false;
     for (const CSSSelector* current = &selector; current; current = current->tagHistory()) {
         if (!negated)
-            extractInvalidationSetFeature(*current, features);
+            foundFeatures |= extractInvalidationSetFeature(*current, features);
         // Initialize the entry in the invalidation set map, if supported.
-        invalidationSetForSelector(*current);
-        if (current->pseudoType() == CSSSelector::PseudoHost || current->pseudoType() == CSSSelector::PseudoAny || current->pseudoType() == CSSSelector::PseudoNot) {
+        if (!invalidationSetForSelector(*current)) {
+            if (requiresSubtreeInvalidation(*current)) {
+                // Fall back to use subtree invalidations, even for features in the
+                // rightmost compound selector. Returning the start &selector here
+                // will make addFeaturesToInvalidationSets start marking invalidation
+                // sets for subtree recalc for features in the rightmost compound
+                // selector.
+                return std::make_pair(&selector, ForceSubtree);
+            }
             if (const CSSSelectorList* selectorList = current->selectorList()) {
-                for (const CSSSelector* selector = selectorList->first(); selector; selector = CSSSelectorList::next(*selector))
-                    extractInvalidationSetFeatures(*selector, features, current->pseudoType() == CSSSelector::PseudoNot);
+                ASSERT(supportsInvalidationWithSelectorList(current->pseudoType()));
+                const CSSSelector* subSelector = selectorList->first();
+                bool allSubSelectorsHaveFeatures = !!subSelector;
+                for (; subSelector; subSelector = CSSSelectorList::next(*subSelector)) {
+                    auto result = extractInvalidationSetFeatures(*subSelector, features, current->pseudoType() == CSSSelector::PseudoNot);
+                    if (result.first) {
+                        // A non-null selector return means the sub-selector contained a
+                        // selector which requiresSubtreeInvalidation(). Return the rightmost
+                        // selector to mark for subtree recalcs like above.
+                        return std::make_pair(&selector, ForceSubtree);
+                    }
+                    allSubSelectorsHaveFeatures &= result.second == UseFeatures;
+                }
+                foundFeatures |= allSubSelectorsHaveFeatures;
             }
         }
 
@@ -355,9 +362,9 @@ const CSSSelector* RuleFeatureSet::extractInvalidationSetFeatures(const CSSSelec
 
         features.treeBoundaryCrossing = current->isShadowSelector();
         features.adjacent = current->isAdjacentSelector();
-        return current->tagHistory();
+        return std::make_pair(current->tagHistory(), foundFeatures ? UseFeatures : ForceSubtree);
     }
-    return 0;
+    return std::make_pair(nullptr,  foundFeatures ? UseFeatures : ForceSubtree);
 }
 
 // Add features extracted from the rightmost compound selector to descendant invalidation
@@ -378,7 +385,7 @@ void RuleFeatureSet::addFeaturesToInvalidationSet(DescendantInvalidationSet& inv
         invalidationSet.setTreeBoundaryCrossing();
     if (features.insertionPointCrossing)
         invalidationSet.setInsertionPointCrossing();
-    if (features.adjacent) {
+    if (features.useSubtreeInvalidation()) {
         invalidationSet.setWholeSubtreeInvalid();
         return;
     }
@@ -405,7 +412,7 @@ void RuleFeatureSet::addFeaturesToInvalidationSets(const CSSSelector& selector, 
             if (current->isInsertionPointCrossing())
                 features.insertionPointCrossing = true;
             if (const CSSSelectorList* selectorList = current->selectorList()) {
-                ASSERT(current->pseudoType() == CSSSelector::PseudoHost || current->pseudoType() == CSSSelector::PseudoAny || current->pseudoType() == CSSSelector::PseudoNot);
+                ASSERT(supportsInvalidationWithSelectorList(current->pseudoType()));
                 for (const CSSSelector* selector = selectorList->first(); selector; selector = CSSSelectorList::next(*selector))
                     addFeaturesToInvalidationSets(*selector, features);
             }
@@ -421,17 +428,12 @@ void RuleFeatureSet::addFeaturesToInvalidationSets(const CSSSelector& selector, 
     }
 }
 
-void RuleFeatureSet::addContentAttr(const AtomicString& attributeName)
-{
-    ensureAttributeInvalidationSet(attributeName);
-}
-
 void RuleFeatureSet::collectFeaturesFromRuleData(const RuleData& ruleData)
 {
-    FeatureMetadata metadata;
-    InvalidationSetMode mode = updateInvalidationSets(ruleData.selector());
+    updateInvalidationSets(ruleData);
 
-    collectFeaturesFromSelector(ruleData.selector(), metadata, mode);
+    FeatureMetadata metadata;
+    collectFeaturesFromSelector(ruleData.selector(), metadata);
     m_metadata.add(metadata);
 
     if (metadata.foundSiblingSelector)
@@ -472,17 +474,11 @@ DescendantInvalidationSet& RuleFeatureSet::ensurePseudoInvalidationSet(CSSSelect
     return *addResult.storedValue->value;
 }
 
-void RuleFeatureSet::collectFeaturesFromSelector(const CSSSelector& selector, RuleFeatureSet::FeatureMetadata& metadata, InvalidationSetMode mode)
+void RuleFeatureSet::collectFeaturesFromSelector(const CSSSelector& selector, RuleFeatureSet::FeatureMetadata& metadata)
 {
     unsigned maxDirectAdjacentSelectors = 0;
 
     for (const CSSSelector* current = &selector; current; current = current->tagHistory()) {
-        if (mode != AddFeatures) {
-            if (DescendantInvalidationSet* invalidationSet = invalidationSetForSelector(*current)) {
-                if (mode == UseSubtreeStyleChange)
-                    invalidationSet->setWholeSubtreeInvalid();
-            }
-        }
         if (current->pseudoType() == CSSSelector::PseudoFirstLine)
             metadata.usesFirstLineRules = true;
         if (current->isDirectAdjacentSelector()) {
@@ -495,22 +491,15 @@ void RuleFeatureSet::collectFeaturesFromSelector(const CSSSelector& selector, Ru
         if (current->isSiblingSelector())
             metadata.foundSiblingSelector = true;
 
-        collectFeaturesFromSelectorList(current->selectorList(), metadata, mode);
+        const CSSSelectorList* selectorList = current->selectorList();
+        if (!selectorList)
+            continue;
 
-        if (mode == UseLocalStyleChange && current->relation() != CSSSelector::SubSelector)
-            mode = UseSubtreeStyleChange;
+        for (const CSSSelector* selector = selectorList->first(); selector; selector = CSSSelectorList::next(*selector))
+            collectFeaturesFromSelector(*selector, metadata);
     }
 
     ASSERT(!maxDirectAdjacentSelectors);
-}
-
-void RuleFeatureSet::collectFeaturesFromSelectorList(const CSSSelectorList* selectorList, RuleFeatureSet::FeatureMetadata& metadata, InvalidationSetMode mode)
-{
-    if (!selectorList)
-        return;
-
-    for (const CSSSelector* selector = selectorList->first(); selector; selector = CSSSelectorList::next(*selector))
-        collectFeaturesFromSelector(*selector, metadata, mode);
 }
 
 void RuleFeatureSet::FeatureMetadata::add(const FeatureMetadata& other)

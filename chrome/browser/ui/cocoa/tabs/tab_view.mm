@@ -9,7 +9,7 @@
 #include "base/mac/sdk_forward_declarations.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/themes/theme_service.h"
-#import "chrome/browser/ui/cocoa/tabs/media_indicator_button.h"
+#import "chrome/browser/ui/cocoa/tabs/media_indicator_button_cocoa.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_window_controller.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
@@ -136,9 +136,10 @@ const CGFloat kRapidCloseDist = 2.5;
 }
 
 - (void)mouseMoved:(NSEvent*)theEvent {
-  hoverPoint_ = [self convertPoint:[theEvent locationInWindow]
-                          fromView:nil];
-  [self setNeedsDisplay:YES];
+  if (state_ == NSOffState) {
+    hoverPoint_ = [self convertPoint:[theEvent locationInWindow] fromView:nil];
+    [self setNeedsDisplay:YES];
+  }
 }
 
 - (void)mouseExited:(NSEvent*)theEvent {

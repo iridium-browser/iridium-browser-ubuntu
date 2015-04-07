@@ -39,7 +39,6 @@
 <translation id="3883381313049582448">Sử dụng mật khẩu do Chromium tạo</translation>
 <translation id="3549345495227188780">Bắt đầu với Chromium OS</translation>
 <translation id="1668054258064581266">Sau khi xóa tài khoản khỏi Chromium, bạn có thể cần tải lại các tab đang mở của mình để tác vụ có hiệu lực.</translation>
-<translation id="6953661834318318668">Thanh công cụ của Chromium</translation>
 <translation id="4285930937574705105">Không thể cài đặt do lỗi chưa xác định. Nếu Chromium hiện đang chạy, hãy đóng Chromium và thử lại.</translation>
 <translation id="1396446129537741364">Chromium đang cố gắng hiển thị mật khẩu.</translation>
 <translation id="8987477933582888019">Trình duyệt web</translation>
@@ -94,6 +93,7 @@
 <translation id="7473891865547856676">Không, cảm ơn</translation>
 <translation id="9191268552238695869">Một quản trị viên đã cài đặt Chromium trên hệ thống này và Chromium hiện khả dụng cho tất cả người dùng. Chromium cấp hệ thống sẽ thay thế cài đặt cấp người dùng của bạn ngay bây giờ.</translation>
 <translation id="3509308970982693815">Hãy đóng tất cả cửa sổ Chromium và thử lại.</translation>
+<translation id="8851136666856101339">chính</translation>
 <translation id="4077262827416206768">Hãy đóng tất cả cửa sổ Chromium và chạy lại Chromium để thay đổi này có hiệu lực.</translation>
 <translation id="6475912303565314141">Tiện ích này cũng điều khiển trang nào được hiển thị khi bạn khởi động Chromium.</translation>
 <translation id="1725059042853530269"><ph name="FILE_NAME"/> có thể gây hại cho trải nghiệm duyệt web của bạn, vì vậy Chromium đã chặn tệp đó.</translation>
@@ -156,6 +156,7 @@
 <translation id="275588974610408078">Báo cáo sự cố hiện không khả dụng trong Chromium.</translation>
 <translation id="5909170354645388250">Không được sử dụng trong Chromium. Phần giữ chỗ để duy trì các bản đồ tài nguyên ở trạng thái đồng bộ hóa. Phần này mong đợi một đối số: $1.</translation>
 <translation id="1144202035120576837"><ph name="SITE"/> thường sử dụng mã hóa để bảo vệ thông tin của bạn. Khi Chromium cố gắng kết nối với <ph name="SITE"/> vào lần này, trang web đã gửi lại thông tin đăng nhập bất thường và không đúng. Một kẻ tấn công đang tìm cách giả mạo là <ph name="SITE"/> hoặc màn hình đăng nhập Wi-Fi đã làm gián đoạn kết nối. Thông tin của bạn vẫn an toàn vì Chromium đã dừng kết nối trước khi bất kỳ dữ liệu nào bị trao đổi.</translation>
+<translation id="2316129865977710310">Không, cảm ơn</translation>
 <translation id="7937630085815544518">Bạn đã đăng nhập vào Chromium là <ph name="USER_EMAIL_ADDRESS"/>. Vui lòng sử dụng cùng tài khoản để đăng nhập lại.</translation>
 <translation id="2685838254101182273">Chromium đã ngừng cập nhật và không còn hỗ trợ phiên bản hệ điều hành này của bạn.</translation>
 <translation id="8684913864886094367">Chromium không tắt đúng cách.</translation>
@@ -169,6 +170,7 @@
 <translation id="2648074677641340862">Đã xảy ra lỗi hệ điều hành khi cài đặt. Hãy tải xuống Chromium lại lần nữa.</translation>
 <translation id="5942520288919337908">Đã thêm <ph name="EXTENSION_NAME"/> vào  Chromium.</translation>
 <translation id="549669000822060376">Vui lòng đợi khi Chromium cài đặt các bản cập nhật hệ thống mới nhất.</translation>
+<translation id="1240763998429950591">Chromium không thể cập nhật lên phiên bản mới nhất, do đó, bạn đang bỏ lỡ các tính năng và bản sửa lỗi bảo mật mới. Bạn cần cập nhật Chromium.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">gửi từ và ngữ cảnh xung quanh từ đó tới Google Tìm kiếm, trả về định nghĩa, hình ảnh, kết quả tìm kiếm và các chi tiết khác.</translation>
 <translation id="4559775032954821361">Đi tới
@@ -208,6 +210,7 @@ Một số tính năng có thể không khả dụng. Hãy chỉ định thư m�
 <translation id="2966088006374919794">Chromium cần chạy ứng dụng bên ngoài để xử lý các liên kết <ph name="SCHEME"/>. Liên kết được yêu cầu là <ph name="PROTOLINK"/>.</translation>
 <translation id="2558235863893655150">Bạn có muốn Chromium lưu mật khẩu của bạn không?</translation>
 <translation id="6485906693002546646">Bạn đang sử dụng <ph name="PROFILE_EMAIL"/> để đồng bộ hóa nội dung Chromium của mình. Để cập nhật tùy chọn đồng bộ hóa hoặc sử dụng Chromium mà không cần tài khoản Google, hãy truy cập <ph name="SETTINGS_LINK"/>.</translation>
+<translation id="705851970750939768">Cập nhật Chromium</translation>
 <translation id="5772805321386874569">(yêu cầu Chromium <ph name="BEGIN_BUTTON"/>khởi động lại<ph name="END_BUTTON"/>)</translation>
 <translation id="1688750314291223739">Thiết lập đồng bộ hóa để lưu các tính năng trình duyệt được cá nhân hóa của bạn vào web và truy cập chúng từ Chromium trên bất kỳ máy tính nào.</translation>
 <translation id="8610831143142469229">Cho phép Chrome truy cập mạng trong cài đặt tường lửa hoặc diệt vi-rút 

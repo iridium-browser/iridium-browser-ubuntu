@@ -73,11 +73,6 @@ class ExtensionServiceInterface
  public:
   virtual ~ExtensionServiceInterface() {}
 
-  // DEPRECATED: Use ExtensionRegistry::enabled_extensions() instead.
-  //
-  // ExtensionRegistry also has the disabled, terminated and blacklisted sets.
-  virtual const extensions::ExtensionSet* extensions() const = 0;
-
   // Gets the object managing the set of pending extensions.
   virtual extensions::PendingExtensionManager* pending_extension_manager() = 0;
 
@@ -205,7 +200,6 @@ class ExtensionService
   // ExtensionServiceInterface implementation.
   //
   // NOTE: Many of these methods are DEPRECATED. See the interface for details.
-  const extensions::ExtensionSet* extensions() const override;
   extensions::PendingExtensionManager* pending_extension_manager() override;
   const extensions::Extension* GetExtensionById(
       const std::string& id,
@@ -238,7 +232,8 @@ class ExtensionService
                                     const base::FilePath& path,
                                     extensions::Manifest::Location location,
                                     int creation_flags,
-                                    bool mark_acknowledged) override;
+                                    bool mark_acknowledged,
+                                    bool install_immediately) override;
   bool OnExternalExtensionUpdateUrlFound(
       const std::string& id,
       const std::string& install_parameter,
@@ -294,6 +289,18 @@ class ExtensionService
   // |except_ids|. Default extensions are those from the Web Store with
   // |was_installed_by_default| flag.
   void DisableUserExtensions(const std::vector<std::string>& except_ids);
+
+  // Puts all extensions in a blocked state: Unloading every extension, and
+  // preventing them from ever loading until UnblockAllExtensions is called.
+  // This state is stored in preferences, so persists until Chrome restarts.
+  //
+  // Component, external component and whitelisted policy installed extensions
+  // are exempt from being Blocked (see CanBlockExtension).
+  void BlockAllExtensions();
+
+  // All blocked extensions are reverted to their previous state, and are
+  // reloaded. Newly added extensions are no longer automatically blocked.
+  void UnblockAllExtensions();
 
   // Updates the |extension|'s granted permissions lists to include all
   // permissions in the |extension|'s manifest and re-enables the
@@ -547,9 +554,13 @@ class ExtensionService
   // Helper that updates the active extension list used for crash reporting.
   void UpdateActiveExtensionsInCrashReporter();
 
-  // Helper to determine whether we should initially enable an installed
-  // (or upgraded) extension.
-  bool ShouldEnableOnInstall(const extensions::Extension* extension);
+  // Helper to get the disable reasons for an installed (or upgraded) extension.
+  // A return value of Extension::DISABLE_NONE indicates that we should enable
+  // this extension initially.
+  int GetDisableReasonsOnInstalled(const extensions::Extension* extension);
+
+  // Helper method to determine if an extension can be blocked.
+  bool CanBlockExtension(const extensions::Extension* extension) const;
 
   // Helper to determine if updating an extensions should proceed immediately,
   // or if we should delay the update until further notice.
@@ -561,10 +572,11 @@ class ExtensionService
   void ManageBlacklist(
       const extensions::Blacklist::BlacklistStateMap& blacklisted_ids);
 
-  // Add extensions in |blocked| to blacklisted_extensions, remove extensions
-  // that are neither in |blocked|, nor in |unchanged|.
-  void UpdateBlockedExtensions(const extensions::ExtensionIdSet& blocked,
-                               const extensions::ExtensionIdSet& unchanged);
+  // Add extensions in |blacklisted| to blacklisted_extensions, remove
+  // extensions that are neither in |blacklisted|, nor in |unchanged|.
+  void UpdateBlacklistedExtensions(
+      const extensions::ExtensionIdSet& to_blacklist,
+      const extensions::ExtensionIdSet& unchanged);
 
   void UpdateGreylistedExtensions(
       const extensions::ExtensionIdSet& greylist,
@@ -689,6 +701,9 @@ class ExtensionService
   // first time.
   bool is_first_run_;
 
+  // Set to true if extensions are all to be blocked.
+  bool block_extensions_;
+
   // Store the ids of reloading extensions. We use this to re-enable extensions
   // which were disabled for a reload.
   std::set<std::string> reloading_extensions_;
@@ -735,6 +750,10 @@ class ExtensionService
                            GreylistDontEnableManuallyDisabled);
   FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
                            GreylistUnknownDontChange);
+  FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
+                           ManagementPolicyProhibitsEnableOnInstalled);
+  FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
+                           BlockAndUnblockBlacklistedExtension);
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionService);
 };

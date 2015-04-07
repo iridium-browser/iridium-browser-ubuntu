@@ -9,8 +9,10 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/chrome_metrics_service_client.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
+#include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/installer/util/google_update_settings.h"
@@ -37,8 +39,11 @@ metrics::MetricsService* MetricsServicesManager::GetMetricsService() {
 
 rappor::RapporService* MetricsServicesManager::GetRapporService() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!rappor_service_)
-    rappor_service_.reset(new rappor::RapporService(local_state_));
+  if (!rappor_service_) {
+    rappor_service_.reset(new rappor::RapporService(
+        local_state_, base::Bind(&chrome::IsOffTheRecordSessionActive)));
+    rappor_service_->Initialize(g_browser_process->system_request_context());
+  }
   return rappor_service_.get();
 }
 
@@ -81,13 +86,47 @@ metrics::MetricsStateManager* MetricsServicesManager::GetMetricsStateManager() {
   return metrics_state_manager_.get();
 }
 
+void MetricsServicesManager::UpdatePermissions(bool may_record,
+                                               bool may_upload) {
+  metrics::MetricsService* metrics = GetMetricsService();
+
+  const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
+
+  const bool only_do_metrics_recording =
+      cmdline->HasSwitch(switches::kMetricsRecordingOnly) ||
+      cmdline->HasSwitch(switches::kEnableBenchmarking);
+
+  if (only_do_metrics_recording) {
+    metrics->StartRecordingForTests();
+    GetRapporService()->Update(rappor::FINE_LEVEL, false);
+    return;
+  }
+
+  if (may_record) {
+    if (!metrics->recording_active())
+      metrics->Start();
+
+    if (may_upload)
+      metrics->EnableReporting();
+    else
+      metrics->DisableReporting();
+  } else if (metrics->recording_active() || metrics->reporting_active()) {
+    metrics->Stop();
+  }
+
+  rappor::RecordingLevel recording_level = may_record ?
+      rappor::FINE_LEVEL : rappor::RECORDING_DISABLED;
+  GetRapporService()->Update(recording_level, may_upload);
+}
+
 // TODO(asvitkine): This function does not report the correct value on Android,
 // see http://crbug.com/362192.
 bool MetricsServicesManager::IsMetricsReportingEnabled() const {
   // If the user permits metrics reporting with the checkbox in the
   // prefs, we turn on recording.  We disable metrics completely for
   // non-official builds, or when field trials are forced.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceFieldTrials))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kForceFieldTrials))
     return false;
 
   bool enabled = false;

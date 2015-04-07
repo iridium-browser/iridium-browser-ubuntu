@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 var GuestViewInternal =
     require('binding').Binding.create('guestViewInternal').generate();
-var WebView = require('webView').WebView;
+var WebViewImpl = require('webView').WebViewImpl;
 var WebViewConstants = require('webViewConstants').WebViewConstants;
 var WebViewInternal = require('webViewInternal').WebViewInternal;
 
@@ -24,24 +24,24 @@ function WebViewAttribute(name, webViewImpl) {
 
 // Retrieves and returns the attribute's value.
 WebViewAttribute.prototype.getValue = function() {
-  return this.webViewImpl.webviewNode.getAttribute(this.name) || '';
+  return this.webViewImpl.element.getAttribute(this.name) || '';
 };
 
 // Sets the attribute's value.
 WebViewAttribute.prototype.setValue = function(value) {
-  this.webViewImpl.webviewNode.setAttribute(this.name, value || '');
+  this.webViewImpl.element.setAttribute(this.name, value || '');
 };
 
 // Changes the attribute's value without triggering its mutation handler.
 WebViewAttribute.prototype.setValueIgnoreMutation = function(value) {
   this.ignoreMutation = true;
-  this.webViewImpl.webviewNode.setAttribute(this.name, value || '');
+  this.webViewImpl.element.setAttribute(this.name, value || '');
   this.ignoreMutation = false;
 }
 
 // Defines this attribute as a property on the webview node.
 WebViewAttribute.prototype.defineProperty = function() {
-  Object.defineProperty(this.webViewImpl.webviewNode, this.name, {
+  Object.defineProperty(this.webViewImpl.element, this.name, {
     get: function() {
       return this.getValue();
     }.bind(this),
@@ -63,14 +63,14 @@ function BooleanAttribute(name, webViewImpl) {
 BooleanAttribute.prototype.__proto__ = WebViewAttribute.prototype;
 
 BooleanAttribute.prototype.getValue = function() {
-  return this.webViewImpl.webviewNode.hasAttribute(this.name);
+  return this.webViewImpl.element.hasAttribute(this.name);
 };
 
 BooleanAttribute.prototype.setValue = function(value) {
   if (!value) {
-    this.webViewImpl.webviewNode.removeAttribute(this.name);
+    this.webViewImpl.element.removeAttribute(this.name);
   } else {
-    this.webViewImpl.webviewNode.setAttribute(this.name, '');
+    this.webViewImpl.element.setAttribute(this.name, '');
   }
 };
 
@@ -84,14 +84,12 @@ AllowTransparencyAttribute.prototype.__proto__ = BooleanAttribute.prototype;
 
 AllowTransparencyAttribute.prototype.handleMutation = function(oldValue,
                                                                newValue) {
-  if (!this.webViewImpl.guestInstanceId) {
+  if (!this.webViewImpl.guest.getId()) {
     return;
   }
 
-  WebViewInternal.setAllowTransparency(
-      this.webViewImpl.guestInstanceId,
-      this.webViewImpl.attributes[
-          WebViewConstants.ATTRIBUTE_ALLOWTRANSPARENCY].getValue());
+  WebViewInternal.setAllowTransparency(this.webViewImpl.guest.getId(),
+                                       this.getValue());
 };
 
 // Attribute used to define the demension limits of autosizing.
@@ -102,28 +100,28 @@ function AutosizeDimensionAttribute(name, webViewImpl) {
 AutosizeDimensionAttribute.prototype.__proto__ = WebViewAttribute.prototype;
 
 AutosizeDimensionAttribute.prototype.getValue = function() {
-  return parseInt(this.webViewImpl.webviewNode.getAttribute(this.name)) || 0;
+  return parseInt(this.webViewImpl.element.getAttribute(this.name)) || 0;
 };
 
 AutosizeDimensionAttribute.prototype.handleMutation = function(
     oldValue, newValue) {
-  if (!this.webViewImpl.guestInstanceId) {
+  if (!this.webViewImpl.guest.getId()) {
     return;
   }
-  GuestViewInternal.setAutoSize(this.webViewImpl.guestInstanceId, {
+  this.webViewImpl.guest.setAutoSize({
     'enableAutoSize': this.webViewImpl.attributes[
       WebViewConstants.ATTRIBUTE_AUTOSIZE].getValue(),
     'min': {
       'width': this.webViewImpl.attributes[
-          WebViewConstants.ATTRIBUTE_MINWIDTH].getValue(),
+        WebViewConstants.ATTRIBUTE_MINWIDTH].getValue(),
       'height': this.webViewImpl.attributes[
-          WebViewConstants.ATTRIBUTE_MINHEIGHT].getValue()
+        WebViewConstants.ATTRIBUTE_MINHEIGHT].getValue()
     },
     'max': {
       'width': this.webViewImpl.attributes[
-          WebViewConstants.ATTRIBUTE_MAXWIDTH].getValue(),
+        WebViewConstants.ATTRIBUTE_MAXWIDTH].getValue(),
       'height': this.webViewImpl.attributes[
-          WebViewConstants.ATTRIBUTE_MAXHEIGHT].getValue()
+        WebViewConstants.ATTRIBUTE_MAXHEIGHT].getValue()
     }
   });
   return;
@@ -149,11 +147,11 @@ NameAttribute.prototype.__proto__ = WebViewAttribute.prototype
 NameAttribute.prototype.handleMutation = function(oldValue, newValue) {
   oldValue = oldValue || '';
   newValue = newValue || '';
-  if (oldValue === newValue || !this.webViewImpl.guestInstanceId) {
+  if (oldValue === newValue || !this.webViewImpl.guest.getId()) {
     return;
   }
 
-  WebViewInternal.setName(this.webViewImpl.guestInstanceId, newValue);
+  WebViewInternal.setName(this.webViewImpl.guest.getId(), newValue);
 };
 
 // Attribute representing the state of the storage partition.
@@ -189,6 +187,17 @@ function SrcAttribute(webViewImpl) {
 
 SrcAttribute.prototype.__proto__ = WebViewAttribute.prototype;
 
+SrcAttribute.prototype.setValueIgnoreMutation = function(value) {
+  // takeRecords() is needed to clear queued up src mutations. Without it, it is
+  // possible for this change to get picked up asyncronously by src's mutation
+  // observer |observer|, and then get handled even though we do not want to
+  // handle this mutation.
+  this.observer.takeRecords();
+  this.ignoreMutation = true;
+  this.webViewImpl.element.setAttribute(this.name, value || '');
+  this.ignoreMutation = false;
+}
+
 SrcAttribute.prototype.handleMutation = function(oldValue, newValue) {
   // Once we have navigated, we don't allow clearing the src attribute.
   // Once <webview> enters a navigated state, it cannot return to a
@@ -200,7 +209,7 @@ SrcAttribute.prototype.handleMutation = function(oldValue, newValue) {
     this.setValueIgnoreMutation(oldValue);
     return;
   }
-  this.webViewImpl.parseSrcAttribute();
+  this.parse();
 };
 
 // The purpose of this mutation observer is to catch assignment to the src
@@ -224,13 +233,33 @@ SrcAttribute.prototype.setupMutationObserver =
     attributeOldValue: true,
     attributeFilter: [this.name]
   };
-  this.observer.observe(this.webViewImpl.webviewNode, params);
+  this.observer.observe(this.webViewImpl.element, params);
+};
+
+SrcAttribute.prototype.parse = function() {
+  if (!this.webViewImpl.elementAttached ||
+      !this.webViewImpl.attributes[
+        WebViewConstants.ATTRIBUTE_PARTITION].validPartitionId ||
+      !this.getValue()) {
+    return;
+  }
+
+  if (!this.webViewImpl.guest.getId()) {
+    if (this.webViewImpl.beforeFirstNavigation) {
+      this.webViewImpl.beforeFirstNavigation = false;
+      this.webViewImpl.createGuest();
+    }
+    return;
+  }
+
+  // Navigate to |src|.
+  WebViewInternal.navigate(this.webViewImpl.guest.getId(), this.getValue());
 };
 
 // -----------------------------------------------------------------------------
 
 // Sets up all of the webview attributes.
-WebView.prototype.setupWebViewAttributes = function() {
+WebViewImpl.prototype.setupWebViewAttributes = function() {
   this.attributes = {};
 
   this.attributes[WebViewConstants.ATTRIBUTE_ALLOWTRANSPARENCY] =

@@ -43,6 +43,24 @@ static void initialize_dec() {
   }
 }
 
+static void vp9_dec_setup_mi(VP9_COMMON *cm) {
+  cm->mi = cm->mip + cm->mi_stride + 1;
+  vpx_memset(cm->mip, 0, cm->mi_stride * (cm->mi_rows + 1) * sizeof(*cm->mip));
+}
+
+static int vp9_dec_alloc_mi(VP9_COMMON *cm, int mi_size) {
+  cm->mip = vpx_calloc(mi_size, sizeof(*cm->mip));
+  if (!cm->mip)
+    return 1;
+  cm->mi_alloc_size = mi_size;
+  return 0;
+}
+
+static void vp9_dec_free_mi(VP9_COMMON *cm) {
+  vpx_free(cm->mip);
+  cm->mip = NULL;
+}
+
 VP9Decoder *vp9_decoder_create() {
   VP9Decoder *const pbi = vpx_memalign(32, sizeof(*pbi));
   VP9_COMMON *const cm = pbi ? &pbi->common : NULL;
@@ -59,6 +77,13 @@ VP9Decoder *vp9_decoder_create() {
   }
 
   cm->error.setjmp = 1;
+
+  CHECK_MEM_ERROR(cm, cm->fc,
+                  (FRAME_CONTEXT *)vpx_calloc(1, sizeof(*cm->fc)));
+  CHECK_MEM_ERROR(cm, cm->frame_contexts,
+                  (FRAME_CONTEXT *)vpx_calloc(FRAME_CONTEXTS,
+                  sizeof(*cm->frame_contexts)));
+
   pbi->need_resync = 1;
   initialize_dec();
 
@@ -69,6 +94,10 @@ VP9Decoder *vp9_decoder_create() {
   pbi->ready_for_new_data = 1;
   cm->bit_depth = VPX_BITS_8;
   cm->dequant_bit_depth = VPX_BITS_8;
+
+  cm->alloc_mi = vp9_dec_alloc_mi;
+  cm->free_mi = vp9_dec_free_mi;
+  cm->setup_mi = vp9_dec_setup_mi;
 
   // vp9_init_dequantizer() is first called here. Add check in
   // frame_init_dequantizer() to avoid unnecessary calling of
@@ -94,9 +123,9 @@ void vp9_decoder_remove(VP9Decoder *pbi) {
   for (i = 0; i < pbi->num_tile_workers; ++i) {
     VP9Worker *const worker = &pbi->tile_workers[i];
     vp9_get_worker_interface()->end(worker);
-    vpx_free(worker->data1);
-    vpx_free(worker->data2);
   }
+  vpx_free(pbi->tile_worker_data);
+  vpx_free(pbi->tile_worker_info);
   vpx_free(pbi->tile_workers);
 
   if (pbi->num_tile_workers > 0) {
@@ -240,6 +269,9 @@ int vp9_receive_compressed_data(VP9Decoder *pbi,
                       &cm->frame_bufs[cm->new_fb_idx].raw_frame_buffer);
   cm->new_fb_idx = get_free_fb(cm);
 
+  // Assign a MV array to the frame buffer.
+  cm->cur_frame = &cm->frame_bufs[cm->new_fb_idx];
+
   if (setjmp(cm->error.jmp)) {
     const VP9WorkerInterface *const winterface = vp9_get_worker_interface();
     int i;
@@ -283,14 +315,13 @@ int vp9_receive_compressed_data(VP9Decoder *pbi,
   cm->last_width = cm->width;
   cm->last_height = cm->height;
 
-  if (!cm->show_existing_frame)
+  if (!cm->show_existing_frame) {
     cm->last_show_frame = cm->show_frame;
-  if (cm->show_frame) {
-    if (!cm->show_existing_frame)
-      vp9_swap_mi_and_prev_mi(cm);
-
-    cm->current_video_frame++;
+    cm->prev_frame = cm->cur_frame;
   }
+
+  if (cm->show_frame)
+    cm->current_video_frame++;
 
   cm->error.setjmp = 0;
   return retcode;

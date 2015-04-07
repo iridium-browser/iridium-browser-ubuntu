@@ -56,6 +56,10 @@ type Conn struct {
 
 	channelID *ecdsa.PublicKey
 
+	srtpProtectionProfile uint16
+
+	clientVersion uint16
+
 	// input/output
 	in, out  halfConn     // in.Mutex < out.Mutex
 	rawInput *block       // raw input, right off the wire
@@ -69,6 +73,13 @@ type Conn struct {
 	handMsgLen       int    // handshake message length, not including the header
 
 	tmp [16]byte
+}
+
+func (c *Conn) init() {
+	c.in.isDTLS = c.isDTLS
+	c.out.isDTLS = c.isDTLS
+	c.in.config = c.config
+	c.out.config = c.config
 }
 
 // Access to net.Conn methods.
@@ -164,23 +175,29 @@ func (hc *halfConn) changeCipherSpec(config *Config) error {
 }
 
 // incSeq increments the sequence number.
-func (hc *halfConn) incSeq() {
+func (hc *halfConn) incSeq(isOutgoing bool) {
 	limit := 0
+	increment := uint64(1)
 	if hc.isDTLS {
 		// Increment up to the epoch in DTLS.
 		limit = 2
+
+		if isOutgoing && hc.config.Bugs.SequenceNumberIncrement != 0 {
+			increment = hc.config.Bugs.SequenceNumberIncrement
+		}
 	}
 	for i := 7; i >= limit; i-- {
-		hc.seq[i]++
-		if hc.seq[i] != 0 {
-			return
-		}
+		increment += uint64(hc.seq[i])
+		hc.seq[i] = byte(increment)
+		increment >>= 8
 	}
 
 	// Not allowed to let sequence number wrap.
 	// Instead, must renegotiate before it does.
 	// Not likely enough to bother.
-	panic("TLS: sequence number wraparound")
+	if increment != 0 {
+		panic("TLS: sequence number wraparound")
+	}
 }
 
 // incEpoch resets the sequence number. In DTLS, it increments the
@@ -380,7 +397,7 @@ func (hc *halfConn) decrypt(b *block) (ok bool, prefixLen int, alertValue alert)
 		}
 		hc.inDigestBuf = localMAC
 	}
-	hc.incSeq()
+	hc.incSeq(false)
 
 	return true, recordHeaderLen + explicitIVLen, 0
 }
@@ -467,7 +484,7 @@ func (hc *halfConn) encrypt(b *block, explicitIVLen int) (bool, alert) {
 	n := len(b.data) - recordHeaderLen
 	b.data[recordHeaderLen-2] = byte(n >> 8)
 	b.data[recordHeaderLen-1] = byte(n)
-	hc.incSeq()
+	hc.incSeq(true)
 
 	return true, 0
 }
@@ -608,9 +625,16 @@ func (c *Conn) doReadRecord(want recordType) (recordType, *block, error) {
 
 	vers := uint16(b.data[1])<<8 | uint16(b.data[2])
 	n := int(b.data[3])<<8 | int(b.data[4])
-	if c.haveVers && vers != c.vers {
-		c.sendAlert(alertProtocolVersion)
-		return 0, nil, c.in.setErrorLocked(fmt.Errorf("tls: received record with version %x when expecting version %x", vers, c.vers))
+	if c.haveVers {
+		if vers != c.vers {
+			c.sendAlert(alertProtocolVersion)
+			return 0, nil, c.in.setErrorLocked(fmt.Errorf("tls: received record with version %x when expecting version %x", vers, c.vers))
+		}
+	} else {
+		if expect := c.config.Bugs.ExpectInitialRecordVersion; expect != 0 && vers != expect {
+			c.sendAlert(alertProtocolVersion)
+			return 0, nil, c.in.setErrorLocked(fmt.Errorf("tls: received record with version %x when expecting version %x", vers, expect))
+		}
 	}
 	if n > maxCiphertext {
 		c.sendAlert(alertRecordOverflow)
@@ -756,7 +780,12 @@ func (c *Conn) sendAlertLocked(err alert) error {
 		c.tmp[0] = alertLevelError
 	}
 	c.tmp[1] = byte(err)
-	c.writeRecord(recordTypeAlert, c.tmp[0:2])
+	if c.config.Bugs.FragmentAlert {
+		c.writeRecord(recordTypeAlert, c.tmp[0:1])
+		c.writeRecord(recordTypeAlert, c.tmp[1:2])
+	} else {
+		c.writeRecord(recordTypeAlert, c.tmp[0:2])
+	}
 	// closeNotify is a special case in that it isn't an error:
 	if err != alertCloseNotify {
 		return c.out.setErrorLocked(&net.OpError{Op: "local error", Err: err})
@@ -988,6 +1017,10 @@ func (c *Conn) Write(b []byte) (int, error) {
 		return 0, alertInternalError
 	}
 
+	if c.config.Bugs.SendSpuriousAlert {
+		c.sendAlertLocked(alertRecordOverflow)
+	}
+
 	// SSL 3.0 and TLS 1.0 are susceptible to a chosen-plaintext
 	// attack when using block mode ciphers due to predictable IVs.
 	// This can be prevented by splitting each Application Data
@@ -1162,6 +1195,7 @@ func (c *Conn) ConnectionState() ConnectionState {
 		state.VerifiedChains = c.verifiedChains
 		state.ServerName = c.serverName
 		state.ChannelID = c.channelID
+		state.SRTPProtectionProfile = c.srtpProtectionProfile
 	}
 
 	return state

@@ -49,6 +49,7 @@ class EventRouterForwarder;
 }
 
 namespace net {
+class CertPolicyEnforcer;
 class CertVerifier;
 class ChannelIDService;
 class CookieStore;
@@ -132,6 +133,7 @@ class IOThread : public content::BrowserThreadDelegate {
     // pins.
     scoped_ptr<net::TransportSecurityState> transport_security_state;
     scoped_ptr<net::CTVerifier> cert_transparency_verifier;
+    scoped_ptr<net::CertPolicyEnforcer> cert_policy_enforcer;
     scoped_refptr<net::SSLConfigService> ssl_config_service;
     scoped_ptr<net::HttpAuthHandlerFactory> http_auth_handler_factory;
     scoped_ptr<net::HttpServerProperties> http_server_properties;
@@ -178,19 +180,21 @@ class IOThread : public content::BrowserThreadDelegate {
     Optional<bool> enable_spdy_ping_based_connection_checking;
     Optional<net::NextProto> spdy_default_protocol;
     net::NextProtoVector next_protos;
-    Optional<string> trusted_spdy_proxy;
+    Optional<std::string> trusted_spdy_proxy;
     Optional<bool> force_spdy_over_ssl;
     Optional<bool> force_spdy_always;
     std::set<net::HostPortPair> forced_spdy_exclusions;
     Optional<bool> use_alternate_protocols;
     Optional<double> alternate_protocol_probability_threshold;
-    Optional<bool> enable_websocket_over_spdy;
 
     Optional<bool> enable_quic;
     Optional<bool> enable_quic_port_selection;
     Optional<bool> quic_always_require_handshake_confirmation;
     Optional<bool> quic_disable_connection_pooling;
     Optional<int> quic_load_server_info_timeout_ms;
+    Optional<bool> quic_disable_loading_server_info_for_new_servers;
+    Optional<float> quic_load_server_info_timeout_srtt_multiplier;
+    Optional<bool> quic_enable_truncated_connection_ids;
     Optional<size_t> quic_max_packet_length;
     net::QuicTagVector quic_connection_options;
     Optional<std::string> quic_user_agent_id;
@@ -318,7 +322,7 @@ class IOThread : public content::BrowserThreadDelegate {
   void ConfigureQuic(const base::CommandLine& command_line);
 
   // Set up data reduction proxy related objects on IO thread globals.
-  void SetupDataReductionProxy(ChromeNetworkDelegate* network_delegate);
+  void SetupDataReductionProxy();
 
   extensions::EventRouterForwarder* extension_event_router_forwarder() {
 #if defined(ENABLE_EXTENSIONS)
@@ -365,9 +369,23 @@ class IOThread : public content::BrowserThreadDelegate {
       const VariationParameters& quic_trial_params);
 
   // Returns the timeout value for loading of QUIC sever information from disk
-  // cache base on field trial. Returns 0 if there is an error parsing the
+  // cache based on field trial. Returns 0 if there is an error parsing the
   // field trial params, or if the default value should be used.
   static int GetQuicLoadServerInfoTimeout(
+      const VariationParameters& quic_trial_params);
+
+  // Returns true if QUIC sever information shouldn't be loaded for new servers.
+  static bool ShouldDisableLoadingServerInfoForNewServers(
+      const VariationParameters& quic_trial_params);
+
+  // Returns the ratio of time to load QUIC sever information from disk cache to
+  // 'smoothed RTT' based on field trial. Returns 0 if there is an error parsing
+  // the field trial params, or if the default value should be used.
+  static float GetQuicLoadServerInfoTimeoutSrttMultiplier(
+      const VariationParameters& quic_trial_params);
+
+  // Returns true if QUIC's TruncatedConnectionIds should be enabled.
+  static bool ShouldQuicEnableTruncatedConnectionIds(
       const VariationParameters& quic_trial_params);
 
   // Returns the maximum length for QUIC packets, based on any flags in
@@ -393,11 +411,6 @@ class IOThread : public content::BrowserThreadDelegate {
   static net::QuicTagVector GetQuicConnectionOptions(
       const base::CommandLine& command_line,
       const VariationParameters& quic_trial_params);
-
-  // Returns the list of QUIC tags represented by the comma separated
-  // string in |connection_options|.
-  static net::QuicTagVector ParseQuicConnectionOptions(
-      const std::string& connection_options);
 
   // Returns the alternate protocol probability threshold specified by
   // any flags in |command_line| or |quic_trial_params|.

@@ -128,9 +128,17 @@ def KindFromData(kinds, data, scope):
   elif data.startswith('r:'):
     kind = mojom.InterfaceRequest(KindFromData(kinds, data[2:], scope))
   elif data.startswith('m['):
-    # Isolate the two types from their brackets
-    first_kind = data[2:data.find(']')]
-    second_kind = data[data.rfind('[')+1:data.rfind(']')]
+    # Isolate the two types from their brackets.
+
+    # It is not allowed to use map as key, so there shouldn't be nested ']'s
+    # inside the key type spec.
+    key_end = data.find(']')
+    assert key_end != -1 and key_end < len(data) - 1
+    assert data[key_end+1] == '[' and data[-1] == ']'
+
+    first_kind = data[2:key_end]
+    second_kind = data[key_end+2:-1]
+
     kind = mojom.Map(KindFromData(kinds, first_kind, scope),
                      KindFromData(kinds, second_kind, scope))
   else:
@@ -141,7 +149,7 @@ def KindFromData(kinds, data, scope):
 
 def KindFromImport(original_kind, imported_from):
   """Used with 'import module' - clones the kind imported from the given
-  module's namespace. Only used with Structs, Interfaces and Enums."""
+  module's namespace. Only used with Structs, Unions, Interfaces and Enums."""
   kind = copy.copy(original_kind)
   # |shared_definition| is used to store various properties (see
   # |AddSharedProperty()| in module.py), including |imported_from|. We don't
@@ -160,8 +168,9 @@ def ImportFromData(module, data):
   import_item['module'] = import_module
 
   # Copy the struct kinds from our imports into the current module.
+  importable_kinds = (mojom.Struct, mojom.Union, mojom.Enum, mojom.Interface)
   for kind in import_module.kinds.itervalues():
-    if (isinstance(kind, (mojom.Struct, mojom.Enum, mojom.Interface)) and
+    if (isinstance(kind, importable_kinds) and
         kind.imported_from is None):
       kind = KindFromImport(kind, import_item)
       module.kinds[kind.spec] = kind
@@ -195,6 +204,21 @@ def StructFromData(module, data):
   # Stash fields data here temporarily.
   struct.fields_data = data['fields']
   return struct
+
+def UnionToData(union):
+  return {
+    istr(0, 'name'): union.name,
+    istr(1, 'fields'): map(FieldToData, union.fields)
+  }
+
+def UnionFromData(module, data):
+  union = mojom.Union(module=module)
+  union.name = data['name']
+  union.spec = 'x:' + module.namespace + '.' + union.name
+  module.kinds[union.spec] = union
+  # Stash fields data here temporarily.
+  union.fields_data = data['fields']
+  return union
 
 def FieldToData(field):
   data = {
@@ -333,7 +357,8 @@ def ModuleToData(module):
     istr(0, 'name'):       module.name,
     istr(1, 'namespace'):  module.namespace,
     istr(2, 'structs'):    map(StructToData, module.structs),
-    istr(3, 'interfaces'): map(InterfaceToData, module.interfaces)
+    istr(3, 'interfaces'): map(InterfaceToData, module.interfaces),
+    istr(4, 'unions'):     map(UnionToData, module.unions),
   }
 
 def ModuleFromData(data):
@@ -358,6 +383,8 @@ def ModuleFromData(data):
       lambda enum: EnumFromData(module, enum, None), data['enums'])
   module.structs = map(
       lambda struct: StructFromData(module, struct), data['structs'])
+  module.unions = map(
+      lambda union: UnionFromData(module, struct), data.get('unions', []))
   module.interfaces = map(
       lambda interface: InterfaceFromData(module, interface),
       data['interfaces'])
@@ -371,6 +398,10 @@ def ModuleFromData(data):
     struct.fields = map(lambda field:
         FieldFromData(module, field, struct), struct.fields_data)
     del struct.fields_data
+  for union in module.unions:
+    union.fields = map(lambda field:
+        FieldFromData(module, field, union), union.fields_data)
+    del union.fields_data
   for interface in module.interfaces:
     interface.methods = map(lambda method:
         MethodFromData(module, method, interface), interface.methods_data)

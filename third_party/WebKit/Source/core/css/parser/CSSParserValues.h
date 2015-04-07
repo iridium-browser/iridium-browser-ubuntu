@@ -31,6 +31,7 @@
 namespace blink {
 
 class QualifiedName;
+class CSSParserTokenRange;
 
 struct CSSParserString {
     void init(const LChar* characters, unsigned length)
@@ -49,22 +50,17 @@ struct CSSParserString {
 
     void init(const String& string)
     {
-        init(string, 0, string.length());
-    }
-
-    void init(const String& string, unsigned startOffset, unsigned length)
-    {
-        m_length = length;
-        if (!m_length) {
+        m_length = string.length();
+        if (string.isNull()) {
             m_data.characters8 = 0;
             m_is8Bit = true;
             return;
         }
         if (string.is8Bit()) {
-            m_data.characters8 = const_cast<LChar*>(string.characters8()) + startOffset;
+            m_data.characters8 = const_cast<LChar*>(string.characters8());
             m_is8Bit = true;
         } else {
-            m_data.characters16 = const_cast<UChar*>(string.characters16()) + startOffset;
+            m_data.characters16 = const_cast<UChar*>(string.characters16());
             m_is8Bit = false;
         }
     }
@@ -156,6 +152,7 @@ struct CSSParserValue {
     int unit;
 
     inline void setFromNumber(double value, int unit = CSSPrimitiveValue::CSS_NUMBER);
+    inline void setFromOperator(UChar);
     inline void setFromFunction(CSSParserFunction*);
     inline void setFromValueList(PassOwnPtr<CSSParserValueList>);
 };
@@ -167,6 +164,7 @@ public:
         : m_current(0)
     {
     }
+    CSSParserValueList(CSSParserTokenRange);
     ~CSSParserValueList();
 
     void addValue(const CSSParserValue&);
@@ -213,6 +211,10 @@ class CSSParserSelector {
 public:
     CSSParserSelector();
     explicit CSSParserSelector(const QualifiedName&);
+
+    static PassOwnPtr<CSSParserSelector> create() { return adoptPtr(new CSSParserSelector); }
+    static PassOwnPtr<CSSParserSelector> create(const QualifiedName& name) { return adoptPtr(new CSSParserSelector(name)); }
+
     ~CSSParserSelector();
 
     PassOwnPtr<CSSSelector> releaseSelector() { return m_selector.release(); }
@@ -228,6 +230,7 @@ public:
     bool relationIsAffectedByPseudoContent() const { return m_selector->relationIsAffectedByPseudoContent(); }
 
     void adoptSelectorVector(Vector<OwnPtr<CSSParserSelector> >& selectorVector);
+    void setSelectorList(PassOwnPtr<CSSSelectorList>);
 
     bool hasHostPseudoSelector() const;
     bool isContentPseudoElement() const { return m_selector->isContentPseudoElement(); }
@@ -265,6 +268,14 @@ inline void CSSParserValue::setFromNumber(double value, int unit)
     else
         fValue = 0;
     this->unit = unit;
+}
+
+inline void CSSParserValue::setFromOperator(UChar c)
+{
+    id = CSSValueInvalid;
+    unit = Operator;
+    iValue = c;
+    isInt = false;
 }
 
 inline void CSSParserValue::setFromFunction(CSSParserFunction* function)

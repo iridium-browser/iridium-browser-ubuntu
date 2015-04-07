@@ -47,6 +47,7 @@ class MockRenderProcessHost : public RenderProcessHost {
   bool IsIsolatedGuest() const override;
   StoragePartition* GetStoragePartition() const override;
   virtual void AddWord(const base::string16& word);
+  bool Shutdown(int exit_code, bool wait) override;
   bool FastShutdownIfPossible() override;
   bool FastShutdownStarted() const override;
   void DumpHandles() override;
@@ -82,6 +83,11 @@ class MockRenderProcessHost : public RenderProcessHost {
   void NotifyTimezoneChange() override;
   ServiceRegistry* GetServiceRegistry() override;
   const base::TimeTicks& GetInitTimeForNavigationMetrics() const override;
+  bool SubscribeUniformEnabled() const override;
+  void OnAddSubscription(unsigned int target) override;
+  void OnRemoveSubscription(unsigned int target) override;
+  void SendUpdateValueState(
+      unsigned int target, const gpu::ValueState& state) override;
 
   // IPC::Sender via RenderProcessHost.
   bool Send(IPC::Message* msg) override;

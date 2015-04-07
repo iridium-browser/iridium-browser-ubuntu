@@ -22,7 +22,6 @@
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/default_clock.h"
-#include "base/timer/timer.h"
 #include "base/values.h"
 #include "google_apis/gcm/base/fake_encryptor.h"
 #include "google_apis/gcm/base/mcs_message.h"
@@ -188,7 +187,7 @@ class MyTestCertVerifier : public net::CertVerifier {
 class MCSProbe {
  public:
   MCSProbe(
-      const CommandLine& command_line,
+      const base::CommandLine& command_line,
       scoped_refptr<net::URLRequestContextGetter> url_request_context_getter);
   ~MCSProbe();
 
@@ -211,7 +210,7 @@ class MCSProbe {
 
   base::DefaultClock clock_;
 
-  CommandLine command_line_;
+  base::CommandLine command_line_;
 
   base::FilePath gcm_store_path_;
   uint64 android_id_;
@@ -247,7 +246,7 @@ class MCSProbe {
 };
 
 MCSProbe::MCSProbe(
-    const CommandLine& command_line,
+    const base::CommandLine& command_line,
     scoped_refptr<net::URLRequestContextGetter> url_request_context_getter)
     : command_line_(command_line),
       gcm_store_path_(base::FilePath(FILE_PATH_LITERAL("gcm_store"))),
@@ -305,9 +304,7 @@ void MCSProbe::Start() {
                                   &clock_,
                                   connection_factory_.get(),
                                   gcm_store_.get(),
-                                  &recorder_,
-                                  make_scoped_ptr(new base::Timer(true,
-                                                                  false))));
+                                  &recorder_));
   run_loop_.reset(new base::RunLoop());
   gcm_store_->Load(base::Bind(&MCSProbe::LoadCallback,
                               base::Unretained(this)));
@@ -473,7 +470,7 @@ void MCSProbe::StartMCSLogin() {
 int MCSProbeMain(int argc, char* argv[]) {
   base::AtExitManager exit_manager;
 
-  CommandLine::Init(argc, argv);
+  base::CommandLine::Init(argc, argv);
   logging::LoggingSettings settings;
   settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
   logging::InitLogging(settings);
@@ -485,7 +482,8 @@ int MCSProbeMain(int argc, char* argv[]) {
       new MyTestURLRequestContextGetter(
           base::MessageLoop::current()->message_loop_proxy());
 
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
 
   MCSProbe mcs_probe(command_line, context_getter);
   mcs_probe.Start();

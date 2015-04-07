@@ -98,9 +98,6 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kDisableLocalStorage))
     WebRuntimeFeatures::enableLocalStorage(false);
 
-  if (command_line.HasSwitch(switches::kDisableSessionStorage))
-    WebRuntimeFeatures::enableSessionStorage(false);
-
   if (command_line.HasSwitch(switches::kDisableMediaSource))
     WebRuntimeFeatures::enableMediaSource(false);
 
@@ -110,9 +107,6 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
 #if defined(OS_ANDROID)
   if (command_line.HasSwitch(switches::kDisableWebRTC))
     WebRuntimeFeatures::enablePeerConnection(false);
-
-  if (!command_line.HasSwitch(switches::kEnableSpeechRecognition))
-    WebRuntimeFeatures::enableScriptedSpeech(false);
 
   if (command_line.HasSwitch(switches::kEnableExperimentalWebPlatformFeatures))
     WebRuntimeFeatures::enableNotifications(true);
@@ -142,18 +136,17 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kEnableExperimentalCanvasFeatures))
     WebRuntimeFeatures::enableExperimentalCanvasFeatures(true);
 
-  if (command_line.HasSwitch(switches::kEnableAcceleratedJpegDecoding))
+  if (!command_line.HasSwitch(switches::kDisableAcceleratedJpegDecoding))
     WebRuntimeFeatures::enableDecodeToYUV(true);
 
-  if (command_line.HasSwitch(switches::kDisableDisplayList2dCanvas)) {
-    WebRuntimeFeatures::enableDisplayList2dCanvas(false);
-  } else if (command_line.HasSwitch(switches::kEnableDisplayList2dCanvas)) {
+  if (command_line.HasSwitch(switches::kEnableDisplayList2dCanvas))
     WebRuntimeFeatures::enableDisplayList2dCanvas(true);
-  } else {
-    WebRuntimeFeatures::enableDisplayList2dCanvas(
-        base::FieldTrialList::FindFullName("DisplayList2dCanvas") == "Enabled"
-    );
-  }
+
+  if (command_line.HasSwitch(switches::kDisableDisplayList2dCanvas))
+    WebRuntimeFeatures::enableDisplayList2dCanvas(false);
+
+  if (command_line.HasSwitch(switches::kForceDisplayList2dCanvas))
+    WebRuntimeFeatures::forceDisplayList2dCanvas(true);
 
   if (command_line.HasSwitch(switches::kEnableWebGLDraftExtensions))
     WebRuntimeFeatures::enableWebGLDraftExtensions(true);
@@ -173,9 +166,6 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kEnablePreciseMemoryInfo))
     WebRuntimeFeatures::enablePreciseMemoryInfo(true);
 
-  if (command_line.HasSwitch(switches::kEnableLayerSquashing))
-    WebRuntimeFeatures::enableLayerSquashing(true);
-
   if (command_line.HasSwitch(switches::kEnableNetworkInformation) ||
       command_line.HasSwitch(
           switches::kEnableExperimentalWebPlatformFeatures)) {
@@ -185,12 +175,17 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kEnableCredentialManagerAPI))
     WebRuntimeFeatures::enableCredentialManagerAPI(true);
 
-  if (command_line.HasSwitch(switches::kEnableViewport))
-    WebRuntimeFeatures::enableCSSViewport(true);
-
   if (command_line.HasSwitch(switches::kDisableSVG1DOM)) {
     WebRuntimeFeatures::enableSVG1DOM(false);
   }
+
+  if (command_line.HasSwitch(switches::kReducedReferrerGranularity))
+    WebRuntimeFeatures::enableReducedReferrerGranularity(true);
+
+  if (command_line.HasSwitch(switches::kDisableV8IdleTasks))
+    WebRuntimeFeatures::enableV8IdleTasks(false);
+  else
+    WebRuntimeFeatures::enableV8IdleTasks(true);
 }
 
 }  // namespace content

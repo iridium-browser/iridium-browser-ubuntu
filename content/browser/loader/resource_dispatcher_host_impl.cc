@@ -65,6 +65,7 @@
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/download_url_parameters.h"
 #include "content/public/browser/global_request_id.h"
+#include "content/public/browser/plugin_service.h"
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
 #include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/resource_throttle.h"
@@ -98,10 +99,6 @@
 #include "storage/common/blob/blob_data.h"
 #include "storage/common/blob/shareable_file_reference.h"
 #include "url/url_constants.h"
-
-#if defined(ENABLE_PLUGINS)
-#include "content/browser/plugin_service_impl.h"
-#endif
 
 using base::Time;
 using base::TimeDelta;
@@ -231,9 +228,9 @@ void AbortRequestBeforeItStarts(ResourceMessageFilter* filter,
 }
 
 void SetReferrerForRequest(net::URLRequest* request, const Referrer& referrer) {
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (!referrer.url.is_valid() ||
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kNoReferrers)) {
+      command_line->HasSwitch(switches::kNoReferrers)) {
     request->SetReferrer(std::string());
   } else {
     request->SetReferrer(referrer.url.spec());
@@ -242,14 +239,27 @@ void SetReferrerForRequest(net::URLRequest* request, const Referrer& referrer) {
   net::URLRequest::ReferrerPolicy net_referrer_policy =
       net::URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
   switch (referrer.policy) {
-    case blink::WebReferrerPolicyDefault:
-      net_referrer_policy =
-          net::URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
-      break;
     case blink::WebReferrerPolicyAlways:
     case blink::WebReferrerPolicyNever:
     case blink::WebReferrerPolicyOrigin:
       net_referrer_policy = net::URLRequest::NEVER_CLEAR_REFERRER;
+      break;
+    case blink::WebReferrerPolicyNoReferrerWhenDowngrade:
+      net_referrer_policy =
+          net::URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
+      break;
+    case blink::WebReferrerPolicyOriginWhenCrossOrigin:
+      net_referrer_policy =
+          net::URLRequest::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN;
+      break;
+    case blink::WebReferrerPolicyDefault:
+    default:
+      net_referrer_policy =
+          command_line->HasSwitch(switches::kReducedReferrerGranularity)
+              ? net::URLRequest::
+                    REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN
+              : net::URLRequest::
+                    CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
       break;
   }
   request->set_referrer_policy(net_referrer_policy);
@@ -340,8 +350,7 @@ void NotifyRedirectOnUI(int render_process_id,
       static_cast<WebContentsImpl*>(WebContents::FromRenderFrameHost(host));
   if (!web_contents)
     return;
-  web_contents->DidGetRedirectForResourceRequest(
-      host->render_view_host(), *details.get());
+  web_contents->DidGetRedirectForResourceRequest(host, *details.get());
 }
 
 void NotifyResponseOnUI(int render_process_id,
@@ -756,16 +765,6 @@ ResourceDispatcherHostImpl::MaybeInterceptAsStream(net::URLRequest* request,
   return handler.Pass();
 }
 
-void ResourceDispatcherHostImpl::ClearSSLClientAuthHandlerForRequest(
-    net::URLRequest* request) {
-  ResourceRequestInfoImpl* info = ResourceRequestInfoImpl::ForRequest(request);
-  if (info) {
-    ResourceLoader* loader = GetLoader(info->GetGlobalRequestID());
-    if (loader)
-      loader->ClearSSLClientAuthHandler();
-  }
-}
-
 ResourceDispatcherHostLoginDelegate*
 ResourceDispatcherHostImpl::CreateLoginDelegate(
     ResourceLoader* loader,
@@ -899,7 +898,6 @@ void ResourceDispatcherHostImpl::DidFinishLoading(ResourceLoader* loader) {
 
 void ResourceDispatcherHostImpl::OnInit() {
   scheduler_.reset(new ResourceScheduler);
-  AppCacheInterceptor::EnsureRegistered();
 }
 
 void ResourceDispatcherHostImpl::OnShutdown() {
@@ -1073,6 +1071,13 @@ void ResourceDispatcherHostImpl::UpdateRequestForTransfer(
       loader->request(),
       child_id,
       request_data.appcache_host_id);
+
+  ServiceWorkerRequestHandler* handler =
+      ServiceWorkerRequestHandler::GetHandler(loader->request());
+  if (handler) {
+    handler->CompleteCrossSiteTransfer(
+        child_id, request_data.service_worker_provider_id);
+  }
 
   // We should have a CrossSiteResourceHandler to finish the transfer.
   DCHECK(info->cross_site_handler());
@@ -1271,7 +1276,8 @@ void ResourceDispatcherHostImpl::BeginRequest(
   // Have the appcache associate its extra info with the request.
   AppCacheInterceptor::SetExtraRequestInfo(
       new_request.get(), filter_->appcache_service(), child_id,
-      request_data.appcache_host_id, request_data.resource_type);
+      request_data.appcache_host_id, request_data.resource_type,
+      request_data.should_reset_appcache);
 
   scoped_ptr<ResourceHandler> handler(
        CreateResourceHandler(
@@ -1355,9 +1361,15 @@ scoped_ptr<ResourceHandler> ResourceDispatcherHostImpl::AddStandardHandlers(
     int child_id,
     int route_id,
     scoped_ptr<ResourceHandler> handler) {
+
+  PluginService* plugin_service = nullptr;
+#if defined(ENABLE_PLUGINS)
+  plugin_service = PluginService::GetInstance();
+#endif
   // Insert a buffered event handler before the actual one.
   handler.reset(
-      new BufferedResourceHandler(handler.Pass(), this, request));
+      new BufferedResourceHandler(
+          handler.Pass(), this, plugin_service, request));
 
   ScopedVector<ResourceThrottle> throttles;
   if (delegate_) {
@@ -1959,7 +1971,7 @@ void ResourceDispatcherHostImpl::BeginNavigationRequest(
   }
 
   // TODO(davidben): Attach ServiceWorkerRequestHandler.
-
+  // TODO(michaeln): Help out with this and that.
   // TODO(davidben): Attach AppCacheInterceptor.
 
   scoped_ptr<ResourceHandler> handler(new NavigationResourceHandler(

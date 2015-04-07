@@ -29,8 +29,10 @@
 #include "core/HTMLNames.h"
 #include "core/SVGNames.h"
 #include "core/css/resolver/StyleResolver.h"
+#include "core/dom/FirstLetterPseudoElement.h"
 #include "core/dom/Fullscreen.h"
 #include "core/dom/Node.h"
+#include "core/dom/PseudoElement.h"
 #include "core/dom/Text.h"
 #include "core/rendering/RenderFullScreen.h"
 #include "core/rendering/RenderObject.h"
@@ -41,79 +43,81 @@
 
 namespace blink {
 
-RenderObject* RenderTreeBuilder::nextRenderer() const
+RenderTreeBuilderForElement::RenderTreeBuilderForElement(Element& element, RenderStyle* style)
+    : RenderTreeBuilder(element, nullptr)
+    , m_style(style)
 {
-    ASSERT(m_renderingParent);
-
-    Element* element = m_node->isElementNode() ? toElement(m_node) : 0;
-
-    if (element && element->isInTopLayer())
-        return NodeRenderingTraversal::nextInTopLayer(element);
-
-    // Avoid an O(N^2) walk over the children when reattaching all children of a node.
-    if (m_renderingParent->needsAttach())
-        return 0;
-
-    return NodeRenderingTraversal::nextSiblingRenderer(m_node);
+    if (element.isFirstLetterPseudoElement()) {
+        if (RenderObject* nextRenderer = FirstLetterPseudoElement::firstLetterTextRenderer(element))
+            m_renderingParent = nextRenderer->parent();
+    } else if (ContainerNode* containerNode = NodeRenderingTraversal::parent(element)) {
+        m_renderingParent = containerNode->renderer();
+    }
 }
 
-RenderObject* RenderTreeBuilder::parentRenderer() const
+RenderObject* RenderTreeBuilderForElement::nextRenderer() const
 {
     ASSERT(m_renderingParent);
 
-    Element* element = m_node->isElementNode() ? toElement(m_node) : 0;
+    if (m_node->isInTopLayer())
+        return NodeRenderingTraversal::nextInTopLayer(*m_node);
 
-    if (element && m_renderingParent->renderer()) {
-        // FIXME: Guarding this by m_renderingParent->renderer() isn't quite right as the spec for
+    if (m_node->isFirstLetterPseudoElement())
+        return FirstLetterPseudoElement::firstLetterTextRenderer(*m_node);
+
+    return RenderTreeBuilder::nextRenderer();
+}
+
+RenderObject* RenderTreeBuilderForElement::parentRenderer() const
+{
+    RenderObject* parentRenderer = RenderTreeBuilder::parentRenderer();
+
+    if (parentRenderer) {
+        // FIXME: Guarding this by parentRenderer isn't quite right as the spec for
         // top layer only talks about display: none ancestors so putting a <dialog> inside an
         // <optgroup> seems like it should still work even though this check will prevent it.
-        if (element->isInTopLayer())
+        if (m_node->isInTopLayer())
             return m_node->document().renderView();
     }
 
-    return m_renderingParent->renderer();
+    return parentRenderer;
 }
 
-bool RenderTreeBuilder::shouldCreateRenderer() const
+bool RenderTreeBuilderForElement::shouldCreateRenderer() const
 {
     if (!m_renderingParent)
         return false;
+
+    // FIXME: Should the following be in SVGElement::rendererIsNeeded()?
     if (m_node->isSVGElement()) {
         // SVG elements only render when inside <svg>, or if the element is an <svg> itself.
-        if (!isSVGSVGElement(*m_node) && !m_renderingParent->isSVGElement())
+        if (!isSVGSVGElement(*m_node) && (!m_renderingParent->node() || !m_renderingParent->node()->isSVGElement()))
             return false;
         if (!toSVGElement(m_node)->isValid())
             return false;
     }
+
     RenderObject* parentRenderer = this->parentRenderer();
     if (!parentRenderer)
         return false;
     if (!parentRenderer->canHaveChildren())
         return false;
-    return true;
+
+    return m_node->rendererIsNeeded(style());
 }
 
-RenderStyle& RenderTreeBuilder::style() const
+RenderStyle& RenderTreeBuilderForElement::style() const
 {
     if (!m_style)
-        m_style = toElement(m_node)->styleForRenderer();
+        m_style = m_node->styleForRenderer();
     return *m_style;
 }
 
-void RenderTreeBuilder::createRendererForElementIfNeeded()
+void RenderTreeBuilderForElement::createRenderer()
 {
-    ASSERT(!m_node->renderer());
-
-    if (!shouldCreateRenderer())
-        return;
-
-    Element* element = toElement(m_node);
     RenderStyle& style = this->style();
 
-    if (!element->rendererIsNeeded(style))
-        return;
-
-    RenderObject* newRenderer = element->createRenderer(&style);
+    RenderObject* newRenderer = m_node->createRenderer(&style);
     if (!newRenderer)
         return;
 
@@ -129,11 +133,11 @@ void RenderTreeBuilder::createRendererForElementIfNeeded()
     newRenderer->setFlowThreadState(parentRenderer->flowThreadState());
 
     RenderObject* nextRenderer = this->nextRenderer();
-    element->setRenderer(newRenderer);
+    m_node->setRenderer(newRenderer);
     newRenderer->setStyle(&style); // setStyle() can depend on renderer() already being set.
 
-    if (Fullscreen::isActiveFullScreenElement(*element)) {
-        newRenderer = RenderFullScreen::wrapRenderer(newRenderer, parentRenderer, &element->document());
+    if (Fullscreen::isActiveFullScreenElement(*m_node)) {
+        newRenderer = RenderFullScreen::wrapRenderer(newRenderer, parentRenderer, &m_node->document());
         if (!newRenderer)
             return;
     }
@@ -142,23 +146,15 @@ void RenderTreeBuilder::createRendererForElementIfNeeded()
     parentRenderer->addChild(newRenderer, nextRenderer);
 }
 
-void RenderTreeBuilder::createRendererForTextIfNeeded()
+void RenderTreeBuilderForText::createRenderer()
 {
-    ASSERT(!m_node->renderer());
-
-    if (!shouldCreateRenderer())
-        return;
-
-    Text* textNode = toText(m_node);
     RenderObject* parentRenderer = this->parentRenderer();
+    RenderStyle* style = parentRenderer->style();
 
-    m_style = parentRenderer->style();
+    ASSERT(m_node->textRendererIsNeeded(*style, *parentRenderer));
 
-    if (!textNode->textRendererIsNeeded(*m_style, *parentRenderer))
-        return;
-
-    RenderText* newRenderer = textNode->createTextRenderer(m_style.get());
-    if (!parentRenderer->isChildAllowed(newRenderer, m_style.get())) {
+    RenderText* newRenderer = m_node->createTextRenderer(style);
+    if (!parentRenderer->isChildAllowed(newRenderer, style)) {
         newRenderer->destroy();
         return;
     }
@@ -168,9 +164,9 @@ void RenderTreeBuilder::createRendererForTextIfNeeded()
     newRenderer->setFlowThreadState(parentRenderer->flowThreadState());
 
     RenderObject* nextRenderer = this->nextRenderer();
-    textNode->setRenderer(newRenderer);
+    m_node->setRenderer(newRenderer);
     // Parent takes care of the animations, no need to call setAnimatableStyle.
-    newRenderer->setStyle(m_style.release());
+    newRenderer->setStyle(style);
     parentRenderer->addChild(newRenderer, nextRenderer);
 }
 

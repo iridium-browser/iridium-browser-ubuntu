@@ -7,8 +7,9 @@
 namespace proximity_auth {
 namespace switches {
 
-// Disable Easy sign-in.
-const char kDisableEasySignin[] = "disable-easy-signin";
+// Overrides the default URL for Google APIs (https://www.googleapis.com) used
+// by CryptAuth.
+const char kCryptAuthHTTPHost[] = "cryptauth-http-host";
 
 // Disable Easy unlock.
 const char kDisableEasyUnlock[] = "disable-easy-unlock";
@@ -19,6 +20,11 @@ const char kDisableEasyUnlock[] = "disable-easy-unlock";
 // security.
 const char kEnableProximityDetection[] =
     "enable-proximity-auth-proximity-detection";
+
+// Force easy unlock app loading in test.
+// TODO(xiyuan): Remove this when app could be bundled with Chrome.
+const char kForceLoadEasyUnlockAppInTests[] =
+    "force-load-easy-unlock-app-in-tests";
 
 }  // namespace switches
 }  // namespace proximity_auth

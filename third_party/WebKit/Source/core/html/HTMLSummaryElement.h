@@ -33,6 +33,8 @@ public:
     bool isMainSummary() const;
     virtual bool willRespondToMouseClickEvents() override;
 
+    Element* markerControl();
+
 private:
     explicit HTMLSummaryElement(Document&);
 

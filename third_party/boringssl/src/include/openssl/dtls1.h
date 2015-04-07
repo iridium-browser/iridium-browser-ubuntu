@@ -69,8 +69,6 @@ extern "C" {
 
 #define DTLS1_VERSION			0xFEFF
 #define DTLS1_2_VERSION			0xFEFD
-/* Special value for method supporting multiple versions */
-#define DTLS_ANY_VERSION		0x1FFFF
 
 /* lengths of messages */
 #define DTLS1_COOKIE_LENGTH                     256
@@ -103,11 +101,12 @@ typedef struct timeval OPENSSL_timeval;
 
 typedef struct dtls1_bitmap_st
 	{
-	unsigned long map;		/* track 32 packets on 32-bit systems
-					   and 64 - on 64-bit systems */
-	unsigned char max_seq_num[8];	/* max record number seen so far,
-					   64-bit value in big-endian
-					   encoding */
+	/* map is a bit mask of the last 64 sequence numbers. Bit
+	 * |1<<i| corresponds to |max_seq_num - i|. */
+	uint64_t map;
+	/* max_seq_num is the largest sequence number seen so far. It
+	 * is a 64-bit value in big-endian encoding. */
+	uint8_t max_seq_num[8];
 	} DTLS1_BITMAP;
 
 struct dtls1_retransmit_state
@@ -209,9 +208,6 @@ typedef struct dtls1_state_st
 	 */
 	record_pqueue buffered_app_data;
 
-	/* Is set when listening for new connections with dtls1_listen() */
-	unsigned int listen;
-
 	unsigned int mtu; /* max DTLS packet size */
 
 	struct hm_header_st w_msg_hdr;
@@ -234,7 +230,6 @@ typedef struct dtls1_state_st
 	unsigned char handshake_fragment[DTLS1_HM_HEADER_LENGTH];
 	unsigned int handshake_fragment_len;
 
-	unsigned int retransmitting;
 	unsigned int change_cipher_spec_ok;
 	} DTLS1_STATE;
 

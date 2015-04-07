@@ -40,7 +40,8 @@ bool got_message = false;
 bool GetResource(const std::string& id,
                  const WebUIDataSource::GotDataCallback& callback) {
   // These are handled by the WebUIDataSource that AddMojoDataSource() creates.
-  if (id == mojo::kBufferModuleName ||
+  if (id == mojo::kBindingsModuleName ||
+      id == mojo::kBufferModuleName ||
       id == mojo::kCodecModuleName ||
       id == mojo::kConnectionModuleName ||
       id == mojo::kConnectorModuleName ||
@@ -81,9 +82,6 @@ class PingBrowserTargetImpl : public BrowserTargetImpl {
       : BrowserTargetImpl(run_loop) {}
 
   ~PingBrowserTargetImpl() override {}
-
-  // mojo::InterfaceImpl<BrowserTarget> overrides:
-  void OnConnectionEstablished() override { client()->Ping(); }
 
   // Quit the RunLoop when called.
   void PingResponse() override {
@@ -134,6 +132,7 @@ class PingTestWebUIController : public TestWebUIController {
   void CreateHandler(mojo::InterfaceRequest<BrowserTarget> request) {
     browser_target_.reset(mojo::WeakBindToRequest(
         new PingBrowserTargetImpl(run_loop_), &request));
+    browser_target_->client()->Ping();
   }
 
  private:

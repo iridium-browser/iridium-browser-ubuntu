@@ -8,10 +8,9 @@
 #include "content/browser/service_worker/service_worker_dispatcher_host.h"
 #include "content/browser/service_worker/service_worker_handle.h"
 #include "content/common/service_worker/service_worker_messages.h"
+#include "content/common/service_worker/service_worker_types.h"
 
 namespace content {
-
-static const int kDocumentMainThreadId = 0;
 
 ServiceWorkerRegistrationHandle::ServiceWorkerRegistrationHandle(
     base::WeakPtr<ServiceWorkerContextCore> context,
@@ -43,23 +42,6 @@ ServiceWorkerRegistrationHandle::GetObjectInfo() {
   info.handle_id = handle_id_;
   info.scope = registration_->pattern();
   info.registration_id = registration_->id();
-  return info;
-}
-
-ServiceWorkerObjectInfo
-ServiceWorkerRegistrationHandle::CreateServiceWorkerHandleAndPass(
-    ServiceWorkerVersion* version) {
-  ServiceWorkerObjectInfo info;
-  if (context_ && version) {
-    scoped_ptr<ServiceWorkerHandle> handle =
-        ServiceWorkerHandle::Create(context_,
-                                    dispatcher_host_,
-                                    kDocumentMainThreadId,
-                                    provider_id_,
-                                    version);
-    info = handle->GetObjectInfo();
-    dispatcher_host_->RegisterServiceWorkerHandle(handle.Pass());
-  }
   return info;
 }
 
@@ -124,15 +106,16 @@ void ServiceWorkerRegistrationHandle::SetVersionAttributes(
   ServiceWorkerVersionAttributes attributes;
   if (mask.installing_changed()) {
     attributes.installing =
-        CreateServiceWorkerHandleAndPass(installing_version);
+        dispatcher_host_->CreateAndRegisterServiceWorkerHandle(
+            installing_version);
   }
   if (mask.waiting_changed()) {
     attributes.waiting =
-        CreateServiceWorkerHandleAndPass(waiting_version);
+        dispatcher_host_->CreateAndRegisterServiceWorkerHandle(waiting_version);
   }
   if (mask.active_changed()) {
     attributes.active =
-        CreateServiceWorkerHandleAndPass(active_version);
+        dispatcher_host_->CreateAndRegisterServiceWorkerHandle(active_version);
   }
 
   dispatcher_host_->Send(new ServiceWorkerMsg_SetVersionAttributes(

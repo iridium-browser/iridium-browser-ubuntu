@@ -21,10 +21,10 @@
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/gfx/animation/linear_animation.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/path.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/rect_conversions.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/native_widget_aura.h"
 #include "ui/wm/core/coordinate_conversion.h"
@@ -432,9 +432,9 @@ void DragDropController::OnGestureEvent(ui::GestureEvent* event) {
       DragUpdate(translated_target, *translated_event.get());
       break;
     case ui::ET_GESTURE_SCROLL_END:
+    case ui::ET_SCROLL_FLING_START:
       Drop(translated_target, *translated_event.get());
       break;
-    case ui::ET_SCROLL_FLING_START:
     case ui::ET_GESTURE_LONG_TAP:
       // Ideally we would want to just forward this long tap event to the
       // |drag_source_window_|. However, webkit does not accept events while a

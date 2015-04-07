@@ -11,10 +11,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image_png_rep.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_source.h"
-#include "ui/gfx/size.h"
 
 #if !defined(OS_IOS)
 #include "ui/gfx/codec/png_codec.h"
@@ -24,6 +24,7 @@
 #include "base/mac/foundation_util.h"
 #include "ui/gfx/image/image_skia_util_ios.h"
 #elif defined(OS_MACOSX)
+#include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
 #endif

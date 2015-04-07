@@ -26,11 +26,11 @@ extern NSString* const kBrowserActionButtonDragEndNotification;
   // Used to move the button and query whether a button is currently animating.
   base::scoped_nsobject<NSViewAnimation> moveAnimation_;
 
+  // The controller that handles most non-view logic.
+  ToolbarActionViewController* viewController_;
+
   // The bridge between the view controller and this object.
   scoped_ptr<ToolbarActionViewDelegateBridge> viewControllerDelegate_;
-
-  // The controller that handles most non-view logic.
-  scoped_ptr<ToolbarActionViewController> viewController_;
 
   // The controller for the browser actions bar that owns this button. Weak.
   BrowserActionsController* browserActionsController_;
@@ -43,25 +43,31 @@ extern NSString* const kBrowserActionButtonDragEndNotification;
   // YES upon |mouseDown:|.
   BOOL dragCouldStart_;
 
-  // The point where the mouse down event occurred. Used to prevent a drag from
-  // starting until it moves at least kMinimumDragDistance.
+  // If a drag is not currently in progress, this is the point where the mouse
+  // down event occurred, and is used to prevent a drag from starting until it
+  // moves at least kMinimumDragDistance. Once a drag begins, this is the point
+  // at which the drag actually started.
   NSPoint dragStartPoint_;
 }
 
-// Init the button with the frame. Takes ownership of |viewController|, but
-// does not own |controller|.
+// Init the button with the frame. Does not own either |view_controller| or
+// |controller|.
 - (id)initWithFrame:(NSRect)frame
-     viewController:(scoped_ptr<ToolbarActionViewController>)viewController
+     viewController:(ToolbarActionViewController*)viewController
          controller:(BrowserActionsController*)controller;
 
 - (void)setFrame:(NSRect)frameRect animate:(BOOL)animate;
 
+- (void)updateState;
+
 // Called when the button is removed from the toolbar and will soon be deleted.
 - (void)onRemoved;
 
-- (void)updateState;
-
 - (BOOL)isAnimating;
+
+// Returns the frame the button will occupy once animation is complete, or its
+// current frame if it is not animating.
+- (NSRect)frameAfterAnimation;
 
 - (ToolbarActionViewController*)viewController;
 

@@ -40,10 +40,14 @@ namespace content {
 
 class AppCacheService;
 class BrowserContext;
+class HostZoomLevelContext;
+class HostZoomMap;
 class DOMStorageContext;
 class GeofencingManager;
 class IndexedDBContext;
+class NavigatorConnectContext;
 class ServiceWorkerContext;
+class ZoomLevelDelegate;
 
 // Defines what persistent state a child process can access.
 //
@@ -64,6 +68,10 @@ class CONTENT_EXPORT StoragePartition {
   virtual IndexedDBContext* GetIndexedDBContext() = 0;
   virtual ServiceWorkerContext* GetServiceWorkerContext() = 0;
   virtual GeofencingManager* GetGeofencingManager() = 0;
+  virtual HostZoomMap* GetHostZoomMap() = 0;
+  virtual HostZoomLevelContext* GetHostZoomLevelContext() = 0;
+  virtual ZoomLevelDelegate* GetZoomLevelDelegate() = 0;
+  virtual NavigatorConnectContext* GetNavigatorConnectContext() = 0;
 
   static const uint32 REMOVE_DATA_MASK_APPCACHE        = 1 << 0;
   static const uint32 REMOVE_DATA_MASK_COOKIES         = 1 << 1;

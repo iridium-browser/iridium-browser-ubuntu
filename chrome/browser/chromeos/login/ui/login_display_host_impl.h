@@ -14,6 +14,7 @@
 #include "chrome/browser/chromeos/login/app_launch_controller.h"
 #include "chrome/browser/chromeos/login/auth/auth_prewarmer.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
+#include "chrome/browser/chromeos/login/signin_screen_controller.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
@@ -24,7 +25,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/gfx/display_observer.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/views/widget/widget_removals_observer.h"
 
@@ -84,15 +85,12 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   virtual void OpenProxySettings() override;
   virtual void SetStatusAreaVisible(bool visible) override;
   virtual AutoEnrollmentController* GetAutoEnrollmentController() override;
-  virtual void StartWizard(
-      const std::string& first_screen_name,
-      scoped_ptr<base::DictionaryValue> screen_parameters) override;
+  virtual void StartWizard(const std::string& first_screen_name) override;
   virtual WizardController* GetWizardController() override;
   virtual AppLaunchController* GetAppLaunchController() override;
   virtual void StartUserAdding(
       const base::Closure& completion_callback) override;
   virtual void StartSignInScreen(const LoginScreenContext& context) override;
-  virtual void ResumeSignInScreen() override;
   virtual void OnPreferencesChanged() override;
   virtual void PrewarmAuthentication() override;
   virtual void StartAppLaunch(const std::string& app_id,
@@ -176,9 +174,6 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   // Schedules fade out animation.
   void ScheduleFadeOutAnimation();
 
-  // Progress callback registered with |auto_enrollment_controller_|.
-  void OnAutoEnrollmentProgress(policy::AutoEnrollmentState state);
-
   // Loads given URL. Creates WebUILoginView if needed.
   void LoadURL(const GURL& url);
 
@@ -222,15 +217,13 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   // The controller driving the auto-enrollment check.
   scoped_ptr<AutoEnrollmentController> auto_enrollment_controller_;
 
-  // Subscription for progress callbacks from |auto_enrollement_controller_|.
-  scoped_ptr<AutoEnrollmentController::ProgressCallbackList::Subscription>
-      auto_enrollment_progress_subscription_;
-
   // Sign in screen controller.
-  scoped_ptr<ExistingUserController> sign_in_controller_;
+  scoped_ptr<ExistingUserController> existing_user_controller_;
 
   // OOBE and some screens (camera, recovery) controller.
   scoped_ptr<WizardController> wizard_controller_;
+
+  scoped_ptr<SignInScreenController> signin_screen_controller_;
 
   // App launch controller.
   scoped_ptr<AppLaunchController> app_launch_controller_;
@@ -291,7 +284,6 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
 
   // Stored parameters for StartWizard, required to restore in case of crash.
   std::string first_screen_name_;
-  scoped_ptr<base::DictionaryValue> screen_parameters_;
 
   // Called before host deletion.
   base::Closure completion_callback_;

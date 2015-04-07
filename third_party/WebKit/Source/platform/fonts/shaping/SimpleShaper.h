@@ -26,7 +26,6 @@
 #include "platform/PlatformExport.h"
 #include "platform/text/TextRun.h"
 #include "wtf/HashSet.h"
-#include "wtf/Vector.h"
 #include "wtf/unicode/Unicode.h"
 
 namespace blink {
@@ -82,7 +81,7 @@ private:
     GlyphData glyphDataForCharacter(CharacterData&, bool normalizeSpace = false);
     float characterWidth(UChar32, const GlyphData&) const;
     void cacheFallbackFont(const SimpleFontData*, const SimpleFontData* primaryFont);
-    float adjustSpacing(float, const CharacterData&, const SimpleFontData&, GlyphBuffer*);
+    float adjustSpacing(float, const CharacterData&);
     void updateGlyphBounds(const GlyphData&, float width, bool firstCharacter);
 
     template <typename TextIterator>

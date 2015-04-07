@@ -34,6 +34,7 @@
 #include "core/dom/ActiveDOMObject.h"
 #include "core/fileapi/FileReaderLoaderClient.h"
 #include "modules/EventTargetModules.h"
+#include "modules/mediasource/TrackDefaultList.h"
 #include "platform/AsyncMethodRunner.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/WebSourceBufferClient.h"
@@ -52,10 +53,14 @@ class Stream;
 class TimeRanges;
 class WebSourceBuffer;
 
-class SourceBuffer final : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<SourceBuffer>, public ActiveDOMObject, public EventTargetWithInlineData, public FileReaderLoaderClient, public WebSourceBufferClient {
+class SourceBuffer final
+    : public RefCountedGarbageCollectedEventTargetWithInlineData<SourceBuffer>
+    , public ActiveDOMObject
+    , public FileReaderLoaderClient
+    , public WebSourceBufferClient {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<SourceBuffer>);
-    DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SourceBuffer);
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static SourceBuffer* create(PassOwnPtr<WebSourceBuffer>, MediaSource*, GenericEventQueue*);
     static const AtomicString& segmentsKeyword();
@@ -80,6 +85,8 @@ public:
     void setAppendWindowStart(double, ExceptionState&);
     double appendWindowEnd() const;
     void setAppendWindowEnd(double, ExceptionState&);
+    TrackDefaultList* trackDefaults() const { return m_trackDefaults.get(); }
+    void setTrackDefaults(TrackDefaultList*, ExceptionState&);
 
     void abortIfUpdating();
     void removedFromMediaSource();
@@ -123,7 +130,8 @@ private:
 
     OwnPtr<WebSourceBuffer> m_webSourceBuffer;
     Member<MediaSource> m_source;
-    GenericEventQueue* m_asyncEventQueue;
+    Member<TrackDefaultList> m_trackDefaults;
+    RawPtrWillBeMember<GenericEventQueue> m_asyncEventQueue;
 
     AtomicString m_mode;
     bool m_updating;

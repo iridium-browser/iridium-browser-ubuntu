@@ -24,6 +24,10 @@
 #include "printing/printing_utils.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if defined(OS_ANDROID)
+#include "chrome/browser/android/tab_android.h"
+#endif
+
 using content::BrowserThread;
 
 namespace printing {
@@ -44,6 +48,9 @@ class PrintingContextDelegate : public PrintingContext::Delegate {
   gfx::NativeView GetParentView() override;
   std::string GetAppLocale() override;
 
+  // Not exposed to PrintingContext::Delegate because of dependency issues.
+  content::WebContents* GetWebContents();
+
  private:
   int render_process_id_;
   int render_view_id_;
@@ -59,13 +66,15 @@ PrintingContextDelegate::~PrintingContextDelegate() {
 }
 
 gfx::NativeView PrintingContextDelegate::GetParentView() {
+  content::WebContents* wc = GetWebContents();
+  return wc ? wc->GetNativeView() : nullptr;
+}
+
+content::WebContents* PrintingContextDelegate::GetWebContents() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   content::RenderViewHost* view =
       content::RenderViewHost::FromID(render_process_id_, render_view_id_);
-  if (!view)
-    return NULL;
-  content::WebContents* wc = content::WebContents::FromRenderViewHost(view);
-  return wc ? wc->GetNativeView() : NULL;
+  return view ? content::WebContents::FromRenderViewHost(view) : nullptr;
 }
 
 std::string PrintingContextDelegate::GetAppLocale() {
@@ -115,7 +124,8 @@ void PrintJobWorker::GetSettings(
     bool ask_user_for_settings,
     int document_page_count,
     bool has_selection,
-    MarginType margin_type) {
+    MarginType margin_type,
+    bool is_scripted) {
   DCHECK(task_runner_->RunsTasksOnCurrentThread());
   DCHECK_EQ(page_number_, PageNumber::npos());
 
@@ -136,7 +146,8 @@ void PrintJobWorker::GetSettings(
                    base::Bind(&PrintJobWorker::GetSettingsWithUI,
                               base::Unretained(this),
                               document_page_count,
-                              has_selection)));
+                              has_selection,
+                              is_scripted)));
   } else {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
@@ -188,11 +199,30 @@ void PrintJobWorker::GetSettingsDone(PrintingContext::Result result) {
 
 void PrintJobWorker::GetSettingsWithUI(
     int document_page_count,
-    bool has_selection) {
+    bool has_selection,
+    bool is_scripted) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+#if defined(OS_ANDROID)
+  if (is_scripted) {
+    PrintingContextDelegate* printing_context_delegate =
+        static_cast<PrintingContextDelegate*>(printing_context_delegate_.get());
+    content::WebContents* web_contents =
+        printing_context_delegate->GetWebContents();
+    TabAndroid* tab = TabAndroid::FromWebContents(web_contents);
+
+    // Regardless of whether the following call fails or not, the javascript
+    // call will return since startPendingPrint will make it return immediately
+    // in case of error.
+    if (tab)
+      tab->SetPendingPrint();
+  }
+#endif
+
   printing_context_->AskUserForSettings(
       document_page_count,
       has_selection,
+      is_scripted,
       base::Bind(&PrintJobWorker::GetSettingsWithUIDone,
                  base::Unretained(this)));
 }

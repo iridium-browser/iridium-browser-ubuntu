@@ -33,13 +33,13 @@ class Profile;
 @class NSMenuItem;
 @class BookmarkMenuCocoaController;
 
-class BookmarkMenuBridge : public BookmarkModelObserver,
+class BookmarkMenuBridge : public bookmarks::BookmarkModelObserver,
                            public MainMenuItem {
  public:
   BookmarkMenuBridge(Profile* profile, NSMenu* menu);
   ~BookmarkMenuBridge() override;
 
-  // BookmarkModelObserver:
+  // bookmarks::BookmarkModelObserver:
   void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override;
   void BookmarkModelBeingDeleted(BookmarkModel* model) override;
   void BookmarkNodeMoved(BookmarkModel* model,
@@ -77,6 +77,9 @@ class BookmarkMenuBridge : public BookmarkModelObserver,
   // I wish I had a "friend @class" construct.
   BookmarkModel* GetBookmarkModel();
   Profile* GetProfile();
+
+  // Return the Bookmark menu.
+  virtual NSMenu* BookmarkMenu();
 
  protected:
   // Rebuilds the bookmark content of supplied menu.
@@ -125,9 +128,6 @@ class BookmarkMenuBridge : public BookmarkModelObserver,
 
   // Returns the NSMenuItem for a given BookmarkNode.
   NSMenuItem* MenuItemForNode(const BookmarkNode* node);
-
-  // Return the Bookmark menu.
-  virtual NSMenu* BookmarkMenu();
 
   // Start watching the bookmarks for changes.
   void ObserveBookmarkModel();

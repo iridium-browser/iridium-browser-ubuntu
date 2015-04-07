@@ -21,6 +21,14 @@ class DictionaryValue;
 class ListValue;
 }
 
+namespace cryptauth {
+class ToggleEasyUnlockResponse;
+}
+
+namespace proximity_auth {
+class CryptAuthClient;
+}
+
 class EasyUnlockToggleFlow;
 class Profile;
 
@@ -41,7 +49,6 @@ class EasyUnlockServiceRegular : public EasyUnlockService {
   void ClearPermitAccess() override;
   const base::ListValue* GetRemoteDevices() const override;
   void SetRemoteDevices(const base::ListValue& devices) override;
-  void ClearRemoteDevices() override;
   void RunTurnOffFlow() override;
   void ResetTurnOffFlow() override;
   TurnOffFlowStatus GetTurnOffFlowStatus() const override;
@@ -63,12 +70,21 @@ class EasyUnlockServiceRegular : public EasyUnlockService {
   // Sets the new turn-off flow status.
   void SetTurnOffFlowStatus(TurnOffFlowStatus status);
 
-  // Callback invoked when turn off flow has finished.
-  void OnTurnOffFlowFinished(bool success);
+  // Callback for ToggleEasyUnlock CryptAuth API.
+  void OnToggleEasyUnlockApiComplete(
+      const cryptauth::ToggleEasyUnlockResponse& response);
+  void OnToggleEasyUnlockApiFailed(const std::string& error_message);
 
 #if defined(OS_CHROMEOS)
+  // Called with the user's credentials (e.g. username and password) after the
+  // user reauthenticates to begin setup.
   void OnUserContextFromReauth(const chromeos::UserContext& user_context);
-  void OnKeysRefreshedForSetDevices(bool success);
+
+  // Called after a cryptohome RemoveKey or RefreshKey operation to set the
+  // proper hardlock state if the operation is successful.
+  void SetHardlockAfterKeyOperation(
+      EasyUnlockScreenlockStateHandler::HardlockState state_on_success,
+      bool success);
 
   scoped_ptr<chromeos::ShortLivedUserContext> short_lived_user_context_;
 #endif
@@ -76,7 +92,7 @@ class EasyUnlockServiceRegular : public EasyUnlockService {
   PrefChangeRegistrar registrar_;
 
   TurnOffFlowStatus turn_off_flow_status_;
-  scoped_ptr<EasyUnlockToggleFlow> turn_off_flow_;
+  scoped_ptr<proximity_auth::CryptAuthClient> cryptauth_client_;
 
   base::WeakPtrFactory<EasyUnlockServiceRegular> weak_ptr_factory_;
 

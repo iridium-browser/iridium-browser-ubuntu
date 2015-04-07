@@ -37,6 +37,7 @@
 #include "chrome/browser/extensions/api/messaging/message_service.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_management_constants.h"
+#include "chrome/browser/extensions/extension_management_test_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/shared_module_service.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
@@ -61,6 +62,7 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/cld_data_harness.h"
+#include "chrome/browser/translate/cld_data_harness_factory.h"
 #include "chrome/browser/translate/translate_service.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/browser.h"
@@ -126,6 +128,7 @@
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_host.h"
+#include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/process_manager.h"
@@ -161,15 +164,17 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/ash/screenshot_taker.h"
+#include "chrome/browser/ui/ash/chrome_screenshot_grabber.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "ui/chromeos/accessibility_types.h"
 #include "ui/keyboard/keyboard_util.h"
+#include "ui/snapshot/screenshot_grabber.h"
 #endif
 
 #if !defined(OS_MACOSX)
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
@@ -213,6 +218,8 @@ const base::FilePath::CharType kGood2CrxManifestName[] =
     FILE_PATH_LITERAL("good2_update_manifest.xml");
 const base::FilePath::CharType kGoodV1CrxManifestName[] =
     FILE_PATH_LITERAL("good_v1_update_manifest.xml");
+const base::FilePath::CharType kGoodV1CrxName[] =
+    FILE_PATH_LITERAL("good_v1.crx");
 const base::FilePath::CharType kGoodUnpackedExt[] =
     FILE_PATH_LITERAL("good_unpacked");
 const base::FilePath::CharType kAppUnpackedExt[] =
@@ -345,9 +352,7 @@ void DownloadAndVerifyFile(
   GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
   base::FilePath downloaded = dir.Append(file);
   EXPECT_FALSE(base::PathExists(downloaded));
-  ui_test_utils::NavigateToURLWithDisposition(
-      browser, url, CURRENT_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  ui_test_utils::NavigateToURL(browser, url);
   observer.WaitForFinished();
   EXPECT_EQ(
       1u, observer.NumDownloadsSeenInState(content::DownloadItem::COMPLETE));
@@ -609,7 +614,7 @@ class PolicyTest : public InProcessBrowserTest {
   }
 
   void SetUpInProcessBrowserTestFixture() override {
-    CommandLine::ForCurrentProcess()->AppendSwitch("noerrdialogs");
+    base::CommandLine::ForCurrentProcess()->AppendSwitch("noerrdialogs");
     EXPECT_CALL(provider_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
     BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
@@ -651,10 +656,10 @@ class PolicyTest : public InProcessBrowserTest {
   }
 
 #if defined(OS_CHROMEOS)
-  class QuitMessageLoopAfterScreenshot : public ScreenshotTakerObserver {
+  class QuitMessageLoopAfterScreenshot : public ui::ScreenshotGrabberObserver {
    public:
     virtual void OnScreenshotCompleted(
-        ScreenshotTakerObserver::Result screenshot_result,
+        ScreenshotGrabberObserver::Result screenshot_result,
         const base::FilePath& screenshot_path) override {
       BrowserThread::PostTaskAndReply(BrowserThread::IO,
                                       FROM_HERE,
@@ -667,19 +672,25 @@ class PolicyTest : public InProcessBrowserTest {
 
   void TestScreenshotFile(bool enabled) {
     // AddObserver is an ash-specific method, so just replace the screenshot
-    // taker with one we've created here.
-    scoped_ptr<ScreenshotTaker> screenshot_taker(new ScreenshotTaker);
-    // ScreenshotTaker doesn't own this observer, so the observer's lifetime
+    // grabber with one we've created here.
+    scoped_ptr<ChromeScreenshotGrabber> chrome_screenshot_grabber(
+        new ChromeScreenshotGrabber);
+    // ScreenshotGrabber doesn't own this observer, so the observer's lifetime
     // is tied to the test instead.
-    screenshot_taker->AddObserver(&observer_);
+    chrome_screenshot_grabber->screenshot_grabber()->AddObserver(&observer_);
     ash::Shell::GetInstance()->accelerator_controller()->SetScreenshotDelegate(
-        screenshot_taker.Pass());
+        chrome_screenshot_grabber.Pass());
 
     SetScreenshotPolicy(enabled);
-    ash::Shell::GetInstance()->accelerator_controller()->PerformAction(
-        ash::TAKE_SCREENSHOT, ui::Accelerator());
+    ash::Shell::GetInstance()->accelerator_controller()->PerformActionIfEnabled(
+        ash::TAKE_SCREENSHOT);
 
     content::RunMessageLoop();
+    static_cast<ChromeScreenshotGrabber*>(ash::Shell::GetInstance()
+                                              ->accelerator_controller()
+                                              ->screenshot_delegate())
+        ->screenshot_grabber()
+        ->RemoveObserver(&observer_);
   }
 #endif
 
@@ -721,12 +732,12 @@ class PolicyTest : public InProcessBrowserTest {
     installer->Load(extension_path);
     observer.Wait();
 
-    const extensions::ExtensionSet* extensions =
-        extension_service()->extensions();
-    for (extensions::ExtensionSet::const_iterator it = extensions->begin();
-         it != extensions->end(); ++it) {
-      if ((*it)->path() == extension_path)
-        return it->get();
+    extensions::ExtensionRegistry* registry =
+        extensions::ExtensionRegistry::Get(browser()->profile());
+    for (const scoped_refptr<const extensions::Extension>& extension :
+         registry->enabled_extensions()) {
+      if (extension->path() == extension_path)
+        return extension.get();
     }
     return NULL;
   }
@@ -829,7 +840,8 @@ IN_PROC_BROWSER_TEST_F(LocalePolicyTest, ApplicationLocaleValue) {
 IN_PROC_BROWSER_TEST_F(PolicyTest, BookmarkBarEnabled) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -1458,7 +1470,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DeveloperToolsDisabled) {
   EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_DEV_TOOLS));
   content::WebContents* contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  DevToolsWindow *devtools_window =
+  DevToolsWindow* devtools_window =
       DevToolsWindow::GetInstanceForInspectedWebContents(contents);
   EXPECT_TRUE(devtools_window);
 
@@ -1487,7 +1499,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DeveloperToolsDisabled) {
 IN_PROC_BROWSER_TEST_F(PolicyTest, DISABLED_WebStoreIconHidden) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -1630,7 +1643,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallBlacklistSharedModules) {
                                        .AppendASCII("policy_shared_module")
                                        .AppendASCII("update.xml");
   GURL update_xml_url(URLRequestMockHTTPJob::GetMockUrl(update_xml_path));
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kAppsGalleryUpdateURL, update_xml_url.spec());
   ui_test_utils::NavigateToURL(browser(), update_xml_url);
 
@@ -1818,8 +1831,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallForcelist) {
   extensions::ExtensionHost* extension_host =
       extensions::ProcessManager::Get(browser()->profile())
           ->GetBackgroundHostForExtension(kGoodCrxId);
-  base::KillProcess(extension_host->render_process_host()->GetHandle(),
-                    content::RESULT_CODE_KILLED, false);
+  extension_host->render_process_host()->Shutdown(content::RESULT_CODE_KILLED,
+                                                  false);
   extension_crashed_observer.Wait();
   extension_loaded_observer.Wait();
 }
@@ -1954,10 +1967,197 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, MAYBE_ExtensionInstallSources) {
   EXPECT_TRUE(extension_service()->GetExtensionById(kAdBlockCrxId, false));
 }
 
+// Verifies that extensions with version older than the minimum version required
+// by policy will get disabled, and will be auto-updated and/or re-enabled upon
+// policy changes as well as regular auto-updater scheduled updates.
+IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionMinimumVersionRequired) {
+  ExtensionService* service = extension_service();
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(browser()->profile());
+  extensions::ExtensionPrefs* extension_prefs =
+      extensions::ExtensionPrefs::Get(browser()->profile());
+
+  // Explicitly stop the timer to avoid all scheduled extension auto-updates.
+  service->updater()->StopTimerForTesting();
+
+  // Setup interceptor for extension updates.
+  base::FilePath test_path;
+  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_path));
+  TestRequestInterceptor interceptor(
+      "update.extension",
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
+  interceptor.PushJobCallback(TestRequestInterceptor::BadRequestJob());
+  interceptor.PushJobCallback(TestRequestInterceptor::FileJob(
+      test_path.Append(kTestExtensionsDir).Append(kGood2CrxManifestName)));
+
+  // Install the extension.
+  EXPECT_TRUE(InstallExtension(kGoodV1CrxName));
+  EXPECT_TRUE(registry->enabled_extensions().Contains(kGoodCrxId));
+
+  // Update policy to set a minimum version of 1.0.0.0, the extension (with
+  // version 1.0.0.0) should still be enabled.
+  {
+    extensions::ExtensionManagementPolicyUpdater management_policy(&provider_);
+    management_policy.SetMinimumVersionRequired(kGoodCrxId, "1.0.0.0");
+  }
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_TRUE(registry->enabled_extensions().Contains(kGoodCrxId));
+
+  // Update policy to set a minimum version of 1.0.0.1, the extension (with
+  // version 1.0.0.0) should now be disabled.
+  EXPECT_EQ(2u, interceptor.GetPendingSize());
+  base::RunLoop service_request_run_loop;
+  interceptor.AddRequestServicedCallback(
+      service_request_run_loop.QuitClosure());
+  {
+    extensions::ExtensionManagementPolicyUpdater management_policy(&provider_);
+    management_policy.SetMinimumVersionRequired(kGoodCrxId, "1.0.0.1");
+  }
+  service_request_run_loop.Run();
+  EXPECT_EQ(1u, interceptor.GetPendingSize());
+
+  EXPECT_TRUE(registry->disabled_extensions().Contains(kGoodCrxId));
+  EXPECT_EQ(extensions::Extension::DISABLE_UPDATE_REQUIRED_BY_POLICY,
+            extension_prefs->GetDisableReasons(kGoodCrxId));
+
+  // Provide a new version (1.0.0.1) which is expected to be auto updated to
+  // via the update URL in the manifest of the older version.
+  EXPECT_EQ(1u, interceptor.GetPendingSize());
+  {
+    content::WindowedNotificationObserver update_observer(
+        extensions::NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
+        content::NotificationService::AllSources());
+    service->updater()->CheckSoon();
+    update_observer.Wait();
+  }
+  EXPECT_EQ(0u, interceptor.GetPendingSize());
+
+  // The extension should be auto-updated to newer version and re-enabled.
+  EXPECT_EQ("1.0.0.1",
+            service->GetInstalledExtension(kGoodCrxId)->version()->GetString());
+  EXPECT_TRUE(registry->enabled_extensions().Contains(kGoodCrxId));
+}
+
+// Similar to ExtensionMinimumVersionRequired test, but with different settings
+// and orders.
+IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionMinimumVersionRequiredAlt) {
+  ExtensionService* service = extension_service();
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(browser()->profile());
+  extensions::ExtensionPrefs* extension_prefs =
+      extensions::ExtensionPrefs::Get(browser()->profile());
+
+  // Explicitly stop the timer to avoid all scheduled extension auto-updates.
+  service->updater()->StopTimerForTesting();
+
+  // Setup interceptor for extension updates.
+  base::FilePath test_path;
+  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_path));
+  TestRequestInterceptor interceptor(
+      "update.extension",
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
+  interceptor.PushJobCallback(TestRequestInterceptor::FileJob(
+      test_path.Append(kTestExtensionsDir).Append(kGood2CrxManifestName)));
+
+  // Set the policy to require an even higher minimum version this time.
+  {
+    extensions::ExtensionManagementPolicyUpdater management_policy(&provider_);
+    management_policy.SetMinimumVersionRequired(kGoodCrxId, "1.0.0.2");
+  }
+  base::RunLoop().RunUntilIdle();
+
+  // Install the 1.0.0.0 version, it should be installed but disabled.
+  EXPECT_TRUE(InstallExtension(kGoodV1CrxName));
+  EXPECT_TRUE(registry->disabled_extensions().Contains(kGoodCrxId));
+  EXPECT_EQ(extensions::Extension::DISABLE_UPDATE_REQUIRED_BY_POLICY,
+            extension_prefs->GetDisableReasons(kGoodCrxId));
+  EXPECT_EQ("1.0.0.0",
+            service->GetInstalledExtension(kGoodCrxId)->version()->GetString());
+
+  // An extension management policy update should trigger an update as well.
+  EXPECT_EQ(1u, interceptor.GetPendingSize());
+  {
+    content::WindowedNotificationObserver update_observer(
+        extensions::NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
+        content::NotificationService::AllSources());
+    {
+      // Set a higher minimum version, just intend to trigger a policy update.
+      extensions::ExtensionManagementPolicyUpdater management_policy(
+          &provider_);
+      management_policy.SetMinimumVersionRequired(kGoodCrxId, "1.0.0.3");
+    }
+    base::RunLoop().RunUntilIdle();
+    update_observer.Wait();
+  }
+  EXPECT_EQ(0u, interceptor.GetPendingSize());
+
+  // It should be updated to 1.0.0.1 but remain disabled.
+  EXPECT_EQ("1.0.0.1",
+            service->GetInstalledExtension(kGoodCrxId)->version()->GetString());
+  EXPECT_TRUE(registry->disabled_extensions().Contains(kGoodCrxId));
+  EXPECT_EQ(extensions::Extension::DISABLE_UPDATE_REQUIRED_BY_POLICY,
+            extension_prefs->GetDisableReasons(kGoodCrxId));
+
+  // Remove the minimum version requirement. The extension should be re-enabled.
+  {
+    extensions::ExtensionManagementPolicyUpdater management_policy(&provider_);
+    management_policy.UnsetMinimumVersionRequired(kGoodCrxId);
+  }
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_TRUE(registry->enabled_extensions().Contains(kGoodCrxId));
+  EXPECT_FALSE(extension_prefs->HasDisableReason(
+      kGoodCrxId, extensions::Extension::DISABLE_UPDATE_REQUIRED_BY_POLICY));
+}
+
+// Verifies that a force-installed extension which does not meet a subsequently
+// set minimum version requirement is handled well.
+IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionMinimumVersionForceInstalled) {
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(browser()->profile());
+  extensions::ExtensionPrefs* extension_prefs =
+      extensions::ExtensionPrefs::Get(browser()->profile());
+
+  // Prepare the update URL for force installing.
+  const base::FilePath path =
+      base::FilePath(kTestExtensionsDir).Append(kGoodV1CrxManifestName);
+  const GURL url(URLRequestMockHTTPJob::GetMockUrl(path));
+
+  // Set policy to force-install the extension, it should be installed and
+  // enabled.
+  content::WindowedNotificationObserver install_observer(
+      extensions::NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
+      content::NotificationService::AllSources());
+  EXPECT_FALSE(registry->enabled_extensions().Contains(kGoodCrxId));
+  {
+    extensions::ExtensionManagementPolicyUpdater management_policy(&provider_);
+    management_policy.SetIndividualExtensionAutoInstalled(kGoodCrxId,
+                                                          url.spec(), true);
+  }
+  base::RunLoop().RunUntilIdle();
+  install_observer.Wait();
+
+  EXPECT_TRUE(registry->enabled_extensions().Contains(kGoodCrxId));
+
+  // Set policy a minimum version of "1.0.0.1", the extension now should be
+  // disabled.
+  {
+    extensions::ExtensionManagementPolicyUpdater management_policy(&provider_);
+    management_policy.SetMinimumVersionRequired(kGoodCrxId, "1.0.0.1");
+  }
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(registry->enabled_extensions().Contains(kGoodCrxId));
+  EXPECT_TRUE(registry->disabled_extensions().Contains(kGoodCrxId));
+  EXPECT_EQ(extensions::Extension::DISABLE_UPDATE_REQUIRED_BY_POLICY,
+            extension_prefs->GetDisableReasons(kGoodCrxId));
+}
+
 IN_PROC_BROWSER_TEST_F(PolicyTest, HomepageLocation) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -2139,7 +2339,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DISABLED_TranslateEnabled) {
     return;
 
   scoped_ptr<test::CldDataHarness> cld_data_scope =
-      test::CreateCldDataHarness();
+      test::CldDataHarnessFactory::Get()->CreateCldDataHarness();
   ASSERT_NO_FATAL_FAILURE(cld_data_scope->Init());
 
   // Verifies that translate can be forced enabled or disabled by policy.
@@ -2434,10 +2634,9 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, FullscreenAllowedApp) {
   // Launch an app that tries to open a fullscreen window.
   TestAddAppWindowObserver add_window_observer(
       extensions::AppWindowRegistry::Get(browser()->profile()));
-  OpenApplication(AppLaunchParams(browser()->profile(),
-                                  extension,
-                                  extensions::LAUNCH_CONTAINER_NONE,
-                                  NEW_WINDOW));
+  OpenApplication(AppLaunchParams(browser()->profile(), extension,
+                                  extensions::LAUNCH_CONTAINER_NONE, NEW_WINDOW,
+                                  extensions::SOURCE_TEST));
   extensions::AppWindow* window = add_window_observer.WaitForAppWindow();
   ASSERT_TRUE(window);
 
@@ -2851,7 +3050,7 @@ static const char* kRestoredURLs[] = {
   "http://bbb.com/empty.html",
 };
 
-bool IsNonSwitchArgument(const CommandLine::StringType& s) {
+bool IsNonSwitchArgument(const base::CommandLine::StringType& s) {
   return s.empty() || s[0] != '-';
 }
 
@@ -2869,7 +3068,7 @@ class RestoreOnStartupPolicyTest
   virtual ~RestoreOnStartupPolicyTest() {}
 
 #if defined(OS_CHROMEOS)
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     // TODO(nkostylev): Investigate if we can remove this switch.
     command_line->AppendSwitch(switches::kCreateBrowserOnStartupForTests);
     PolicyTest::SetUpCommandLine(command_line);
@@ -2883,8 +3082,8 @@ class RestoreOnStartupPolicyTest
 
     // Remove the non-switch arguments, so that session restore kicks in for
     // these tests.
-    CommandLine* command_line = CommandLine::ForCurrentProcess();
-    CommandLine::StringVector argv = command_line->argv();
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+    base::CommandLine::StringVector argv = command_line->argv();
     argv.erase(std::remove_if(++argv.begin(), argv.end(), IsNonSwitchArgument),
                argv.end());
     command_line->InitFromArgv(argv);
@@ -3012,7 +3211,8 @@ IN_PROC_BROWSER_TEST_P(RestoreOnStartupPolicyTest, PRE_RunTest) {
 IN_PROC_BROWSER_TEST_P(RestoreOnStartupPolicyTest, RunTest) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -3131,7 +3331,8 @@ class MediaStreamDevicesControllerBrowserTest
       // TODO(tommi): Remove the kiosk mode flag when the whitelist is visible
       // in the media exceptions UI.
       // See discussion here: https://codereview.chromium.org/15738004/
-      CommandLine::ForCurrentProcess()->AppendSwitch(switches::kKioskMode);
+      base::CommandLine::ForCurrentProcess()->AppendSwitch(
+          switches::kKioskMode);
 
       // Add an entry to the whitelist that allows the specified URL regardless
       // of the setting of kAudioCapturedAllowed.

@@ -42,7 +42,6 @@ class IDBDatabase;
 class IDBIndex;
 class IDBKeyPath;
 class IDBObjectStore;
-class IDBTransaction;
 class WebBlobInfo;
 
 class IDBAny : public GarbageCollectedFinalized<IDBAny> {
@@ -90,10 +89,8 @@ public:
         IDBDatabaseType,
         IDBIndexType,
         IDBObjectStoreType,
-        IDBTransactionType,
         BufferType,
         IntegerType,
-        StringType,
         KeyPathType,
         KeyType,
         BufferKeyAndKeyPathType,
@@ -107,11 +104,9 @@ public:
     IDBDatabase* idbDatabase() const;
     IDBIndex* idbIndex() const;
     IDBObjectStore* idbObjectStore() const;
-    IDBTransaction* idbTransaction() const;
     SharedBuffer* buffer() const;
     const Vector<WebBlobInfo>* blobInfo() const;
     int64_t integer() const;
-    const String& string() const;
     const IDBKey* key() const;
     const IDBKeyPath& keyPath() const;
 
@@ -122,10 +117,8 @@ private:
     explicit IDBAny(IDBDatabase*);
     explicit IDBAny(IDBIndex*);
     explicit IDBAny(IDBObjectStore*);
-    explicit IDBAny(IDBTransaction*);
     explicit IDBAny(IDBKey*);
     explicit IDBAny(const IDBKeyPath&);
-    explicit IDBAny(const String&);
     IDBAny(PassRefPtr<SharedBuffer>, const Vector<WebBlobInfo>*);
     IDBAny(PassRefPtr<SharedBuffer>, const Vector<WebBlobInfo>*, IDBKey*, const IDBKeyPath&);
     explicit IDBAny(int64_t);
@@ -138,12 +131,10 @@ private:
     const Member<IDBDatabase> m_idbDatabase;
     const Member<IDBIndex> m_idbIndex;
     const Member<IDBObjectStore> m_idbObjectStore;
-    const Member<IDBTransaction> m_idbTransaction;
     const Member<IDBKey> m_idbKey;
     const IDBKeyPath m_idbKeyPath;
     const RefPtr<SharedBuffer> m_buffer;
     const Vector<WebBlobInfo>* m_blobInfo;
-    const String m_string;
     const int64_t m_integer;
 };
 

@@ -7,6 +7,7 @@
 
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "base/files/file_path.h"
@@ -158,6 +159,31 @@ class CONTENT_EXPORT ServiceWorkerDatabase {
                             RegistrationData* deleted_version,
                             std::vector<int64>* newly_purgeable_resources);
 
+  // Reads user data for |registration_id| and |user_data_name| from the
+  // database.
+  Status ReadUserData(int64 registration_id,
+                      const std::string& user_data_name,
+                      std::string* user_data);
+
+  // Writes |user_data| into the database. Returns NOT_FOUND if the registration
+  // specified by |registration_id| does not exist in the database.
+  Status WriteUserData(int64 registration_id,
+                       const GURL& origin,
+                       const std::string& user_data_name,
+                       const std::string& user_data);
+
+  // Deletes user data for |registration_id| and |user_data_name| from the
+  // database. Returns OK if it's successfully deleted or not found in the
+  // database.
+  Status DeleteUserData(int64 registration_id,
+                        const std::string& user_data_name);
+
+  // Reads user data for all registrations that have data with |user_data_name|
+  // from the database. Returns OK if they are successfully read or not found.
+  Status ReadUserDataForAllRegistrations(
+      const std::string& user_data_name,
+      std::vector<std::pair<int64, std::string>>* user_data);
+
   // As new resources are put into the diskcache, they go into an uncommitted
   // list. When a registration is saved that refers to those ids, they're
   // removed from that list. When a resource no longer has any registrations or
@@ -273,6 +299,12 @@ class CONTENT_EXPORT ServiceWorkerDatabase {
       const std::set<int64>& ids,
       leveldb::WriteBatch* batch);
 
+  // Deletes all user data for |registration_id| from the database. Returns OK
+  // if they are successfully deleted or not found in the database.
+  Status DeleteUserDataForRegistration(
+      int64 registration_id,
+      leveldb::WriteBatch* batch);
+
   // Reads the current schema version from the database. If the database hasn't
   // been written anything yet, sets |db_version| to 0 and returns OK.
   Status ReadDatabaseVersion(int64* db_version);
@@ -330,6 +362,10 @@ class CONTENT_EXPORT ServiceWorkerDatabase {
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerDatabaseTest, OpenDatabase_InMemory);
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerDatabaseTest, DatabaseVersion);
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerDatabaseTest, GetNextAvailableIds);
+  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerDatabaseTest,
+                           Registration_UninitializedDatabase);
+  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerDatabaseTest,
+                           UserData_UninitializedDatabase);
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerDatabaseTest, DestroyDatabase);
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerDatabase);

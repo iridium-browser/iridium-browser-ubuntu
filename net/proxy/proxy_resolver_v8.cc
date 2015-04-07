@@ -196,7 +196,7 @@ bool V8ObjectToUTF16String(v8::Local<v8::Value> object,
     return false;
 
   v8::HandleScope scope(isolate);
-  v8::Local<v8::String> str_object = object->ToString();
+  v8::Local<v8::String> str_object = object->ToString(isolate);
   if (str_object.IsEmpty())
     return false;
   *utf16_result = V8StringToUTF16(str_object);
@@ -211,7 +211,8 @@ bool GetHostnameArgument(const v8::FunctionCallbackInfo<v8::Value>& args,
   if (args.Length() == 0 || args[0].IsEmpty() || !args[0]->IsString())
     return false;
 
-  const base::string16 hostname_utf16 = V8StringToUTF16(args[0]->ToString());
+  const base::string16 hostname_utf16 =
+      V8StringToUTF16(v8::Local<v8::String>::Cast(args[0]));
 
   // If the hostname is already in ASCII, simply return it as is.
   if (base::IsStringASCII(hostname_utf16)) {
@@ -333,6 +334,17 @@ bool IsInNetEx(const std::string& ip_address, const std::string& ip_prefix) {
   return IPNumberMatchesPrefix(address, prefix, prefix_length_in_bits);
 }
 
+// Consider only single component domains like 'foo' as plain host names.
+bool IsPlainHostName(const std::string& hostname_utf8) {
+  if (hostname_utf8.find('.') != std::string::npos)
+    return false;
+
+  // IPv6 literals might not contain any periods, however are not considered
+  // plain host names.
+  IPAddressNumber unused;
+  return !ParseIPLiteralToNumber(hostname_utf8, &unused);
+}
+
 }  // namespace
 
 // ProxyResolverV8::Context ---------------------------------------------------
@@ -393,7 +405,7 @@ class ProxyResolverV8::Context {
       return ERR_PAC_SCRIPT_FAILED;
     }
 
-    base::string16 ret_str = V8StringToUTF16(ret->ToString());
+    base::string16 ret_str = V8StringToUTF16(v8::Local<v8::String>::Cast(ret));
 
     if (!base::IsStringASCII(ret_str)) {
       // TODO(eroman): Rather than failing when a wide string is returned, we
@@ -437,6 +449,11 @@ class ProxyResolverV8::Context {
         v8::FunctionTemplate::New(isolate_, &DnsResolveCallback, v8_this);
     global_template->Set(ASCIILiteralToV8String(isolate_, "dnsResolve"),
                          dns_resolve_template);
+
+    v8::Local<v8::FunctionTemplate> is_plain_host_name_template =
+        v8::FunctionTemplate::New(isolate_, &IsPlainHostNameCallback, v8_this);
+    global_template->Set(ASCIILiteralToV8String(isolate_, "isPlainHostName"),
+                         is_plain_host_name_template);
 
     // Microsoft's PAC extensions:
 
@@ -656,7 +673,8 @@ class ProxyResolverV8::Context {
       return;
     }
 
-    std::string ip_address_list = V8StringToUTF8(args[0]->ToString());
+    std::string ip_address_list =
+        V8StringToUTF8(v8::Local<v8::String>::Cast(args[0]));
     if (!base::IsStringASCII(ip_address_list)) {
       args.GetReturnValue().SetNull();
       return;
@@ -681,17 +699,35 @@ class ProxyResolverV8::Context {
       return;
     }
 
-    std::string ip_address = V8StringToUTF8(args[0]->ToString());
+    std::string ip_address =
+        V8StringToUTF8(v8::Local<v8::String>::Cast(args[0]));
     if (!base::IsStringASCII(ip_address)) {
       args.GetReturnValue().Set(false);
       return;
     }
-    std::string ip_prefix = V8StringToUTF8(args[1]->ToString());
+    std::string ip_prefix =
+        V8StringToUTF8(v8::Local<v8::String>::Cast(args[1]));
     if (!base::IsStringASCII(ip_prefix)) {
       args.GetReturnValue().Set(false);
       return;
     }
     args.GetReturnValue().Set(IsInNetEx(ip_address, ip_prefix));
+  }
+
+  // V8 callback for when "isPlainHostName()" is invoked by the PAC script.
+  static void IsPlainHostNameCallback(
+      const v8::FunctionCallbackInfo<v8::Value>& args) {
+    // Need at least 1 string arguments.
+    if (args.Length() < 1 || args[0].IsEmpty() || !args[0]->IsString()) {
+      args.GetIsolate()->ThrowException(
+          v8::Exception::TypeError(ASCIIStringToV8String(
+              args.GetIsolate(), "Requires 1 string parameter")));
+      return;
+    }
+
+    std::string hostname_utf8 =
+        V8StringToUTF8(v8::Local<v8::String>::Cast(args[0]));
+    args.GetReturnValue().Set(IsPlainHostName(hostname_utf8));
   }
 
   mutable base::Lock lock_;

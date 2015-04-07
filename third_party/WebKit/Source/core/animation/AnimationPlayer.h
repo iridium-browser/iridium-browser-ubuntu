@@ -34,6 +34,7 @@
 #include "core/animation/AnimationNode.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/events/EventTarget.h"
+#include "platform/heap/Handle.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
@@ -41,9 +42,10 @@ namespace blink {
 class AnimationTimeline;
 class ExceptionState;
 
-class AnimationPlayer final : public RefCountedWillBeGarbageCollectedFinalized<AnimationPlayer>
-    , public ActiveDOMObject
-    , public EventTargetWithInlineData {
+class AnimationPlayer final
+    : public EventTargetWithInlineData
+    , public RefCountedWillBeNoBase<AnimationPlayer>
+    , public ActiveDOMObject {
     DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(AnimationPlayer);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(AnimationPlayer);
@@ -139,10 +141,11 @@ public:
     void notifyStartTime(double timelineTime);
 
 
-    void preCommit(bool startOnCompositor);
+    void preCommit(int compositorGroup, bool startOnCompositor);
     void postCommit(double timelineTime);
 
     unsigned sequenceNumber() const { return m_sequenceNumber; }
+    int compositorGroup() const { return m_compositorGroup; }
 
     static bool hasLowerPriority(AnimationPlayer* player1, AnimationPlayer* player2)
     {
@@ -169,10 +172,11 @@ private:
     double calculateCurrentTime() const;
 
     void unpauseInternal();
-    void uncancel();
     void setPlaybackRateInternal(double);
     void updateCurrentTimingState(TimingUpdateReason);
 
+    void beginUpdatingState();
+    void endUpdatingState();
 
     AnimationPlayState m_playState;
     double m_playbackRate;
@@ -233,7 +237,7 @@ private:
         PlayStateUpdateScope(AnimationPlayer&, TimingUpdateReason, CompositorPendingChange = SetCompositorPending);
         ~PlayStateUpdateScope();
     private:
-        AnimationPlayer& m_player;
+        RawPtrWillBeMember<AnimationPlayer> m_player;
         AnimationPlayState m_initial;
         CompositorPendingChange m_compositorPendingChange;
     };
@@ -243,9 +247,12 @@ private:
     // modifications are pushed to the compositor.
     OwnPtr<CompositorState> m_compositorState;
     bool m_compositorPending;
+    int m_compositorGroup;
+
     bool m_currentTimePending;
+    bool m_stateIsBeingUpdated;
 };
 
 } // namespace blink
 
-#endif
+#endif // AnimationPlayer_h

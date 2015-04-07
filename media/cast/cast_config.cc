@@ -23,7 +23,7 @@ namespace cast {
 
 VideoSenderConfig::VideoSenderConfig()
     : ssrc(0),
-      incoming_feedback_ssrc(0),
+      receiver_ssrc(0),
       rtcp_interval(kDefaultRtcpIntervalMs),
       max_playout_delay(
           base::TimeDelta::FromMilliseconds(kDefaultRtpMaxDelayMs)),
@@ -46,7 +46,7 @@ VideoSenderConfig::~VideoSenderConfig() {}
 
 AudioSenderConfig::AudioSenderConfig()
     : ssrc(0),
-      incoming_feedback_ssrc(0),
+      receiver_ssrc(0),
       rtcp_interval(kDefaultRtcpIntervalMs),
       max_playout_delay(
           base::TimeDelta::FromMilliseconds(kDefaultRtpMaxDelayMs)),
@@ -67,7 +67,7 @@ FrameReceiverConfig::FrameReceiverConfig()
       rtp_payload_type(0),
       frequency(0),
       channels(0),
-      max_frame_rate(0),
+      target_frame_rate(0),
       codec(CODEC_UNKNOWN) {}
 
 FrameReceiverConfig::~FrameReceiverConfig() {}

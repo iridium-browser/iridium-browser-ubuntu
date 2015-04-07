@@ -23,13 +23,27 @@ bool OpenAsset(const std::string& filename,
       env,
       base::android::GetApplicationContext(),
       base::android::ConvertUTF8ToJavaString(env, filename).Release());
-  std::vector<long> results;
+  std::vector<jlong> results;
   base::android::JavaLongArrayToLongVector(env, jarr.obj(), &results);
   DCHECK_EQ(3U, results.size());
   *fd = static_cast<int>(results[0]);
   *offset = results[1];
   *size = results[2];
   return *fd != -1;
+}
+
+bool RegisterAssetWithGlobalDescriptors(base::GlobalDescriptors::Key key,
+                                        const std::string& asset_filename) {
+  int asset_fd = 0;
+  int64 asset_off = 0;
+  int64 asset_len = 0;
+  bool result =
+      AwAssets::OpenAsset(asset_filename, &asset_fd, &asset_off, &asset_len);
+  if (result) {
+    base::GlobalDescriptors::GetInstance()->Set(
+        key, asset_fd, base::MemoryMappedFile::Region(asset_off, asset_len));
+  }
+  return result;
 }
 
 }  // namespace AwAssets

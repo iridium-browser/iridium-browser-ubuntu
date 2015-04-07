@@ -2,42 +2,226 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Namespace
+var importer = importer || {};
+
 /**
+ * A persistent data store for Cloud Import history information.
+ *
+ * @interface
+ */
+importer.ImportHistory = function() {};
+
+/**
+ * @param {!FileEntry} entry
+ * @param {!importer.Destination} destination
+ * @return {!Promise.<boolean>} Resolves with true if the FileEntry
+ *     was previously copied to the device.
+ */
+importer.ImportHistory.prototype.wasCopied;
+
+/**
+ * @param {!FileEntry} entry
+ * @param {!importer.Destination} destination
+ * @return {!Promise.<boolean>} Resolves with true if the FileEntry
+ *     was previously imported to the specified destination.
+ */
+importer.ImportHistory.prototype.wasImported;
+
+/**
+ * @param {!FileEntry} entry
+ * @param {!importer.Destination} destination
+ * @param {string} destinationUrl
+ */
+importer.ImportHistory.prototype.markCopied;
+
+/**
+ * @param {!FileEntry} entry
+ * @param {!importer.Destination} destination
+ * @return {!Promise.<?>} Resolves when the operation is completed.
+ */
+importer.ImportHistory.prototype.markImported;
+
+/**
+ * @param {string} destinationUrl
+ * @return {!Promise.<?>} Resolves when the operation is completed.
+ */
+importer.ImportHistory.prototype.markImportedByUrl;
+
+/**
+ * Adds an observer, which will be notified when cloud import history changes.
+ *
+ * @param {!importer.ImportHistory.Observer} observer
+ */
+importer.ImportHistory.prototype.addObserver;
+
+/**
+ * Remove a previously registered observer.
+ *
+ * @param {!importer.ImportHistory.Observer} observer
+ */
+importer.ImportHistory.prototype.removeObserver;
+
+/** @enum {string} */
+importer.ImportHistory.State = {
+  'COPIED': 'copied',
+  'IMPORTED': 'imported'
+};
+
+/**
+ * @typedef {{
+ *   state: !importer.ImportHistory.State,
+ *   entry: !FileEntry
+ * }}
+ */
+importer.ImportHistory.ChangedEvent;
+
+/** @typedef {function(!importer.ImportHistory.ChangedEvent)} */
+importer.ImportHistory.Observer;
+
+/**
+ * An dummy {@code ImportHistory} implementation. This class can conveniently
+ * be used when cloud import is disabled.
+ * @param {boolean} answer The value to answer all {@code wasImported}
+ *     queries with.
+ *
  * @constructor
+ * @implements {importer.HistoryLoader}
+ * @implements {importer.ImportHistory}
+ */
+importer.DummyImportHistory = function(answer) {
+  /** @private {boolean} */
+  this.answer_ = answer;
+};
+
+/** @override */
+importer.DummyImportHistory.prototype.getHistory = function() {
+  return Promise.resolve(this);
+};
+
+/** @override */
+importer.DummyImportHistory.prototype.wasCopied =
+    function(entry, destination) {
+  return Promise.resolve(this.answer_);
+};
+
+/** @override */
+importer.DummyImportHistory.prototype.wasImported =
+    function(entry, destination) {
+  return Promise.resolve(this.answer_);
+};
+
+/** @override */
+importer.DummyImportHistory.prototype.markCopied =
+    function(entry, destination, destinationUrl) {
+  return Promise.resolve();
+};
+
+/** @override */
+importer.DummyImportHistory.prototype.markImported =
+    function(entry, destination) {
+  return Promise.resolve();
+};
+
+/** @override */
+importer.DummyImportHistory.prototype.markImportedByUrl =
+    function(destinationUrl) {
+  return Promise.resolve();
+};
+
+/** @override */
+importer.DummyImportHistory.prototype.addObserver = function(observer) {};
+
+/** @override */
+importer.DummyImportHistory.prototype.removeObserver = function(observer) {};
+
+/**
+ * @private @enum {number}
+ */
+importer.RecordType_ = {
+  COPY: 0,
+  IMPORT: 1
+};
+
+/**
+ * @typedef {{
+ *   sourceUrl: string,
+ *   destinationUrl: string
+ * }}
+ */
+importer.Urls;
+
+/**
+ * An {@code ImportHistory} implementation that reads from and
+ * writes to a storage object.
+ *
+ * @constructor
+ * @implements {importer.ImportHistory}
  * @struct
  *
- * @param {!RecordStorage} storage
+ * @param {!importer.RecordStorage} storage
  */
-function ImportHistory(storage) {
+importer.PersistentImportHistory = function(storage) {
 
-  /** @private {!RecordStorage} */
+  /** @private {!importer.RecordStorage} */
   this.storage_ = storage;
 
-  /** @private {!Object.<string, !Array.<string>>} */
-  this.entries_ = {};
+  /**
+   * An in-memory representation of local copy history.
+   * The first value is the "key" (as generated internally
+   * from a file entry).
+   * @private {!Object.<string, !Object.<!importer.Destination, importer.Urls>>}
+   */
+  this.copiedEntries_ = {};
 
-  /** @private {!Promise.<!ImportHistory>} */
+  /**
+   * An in-memory index from destination URL to key.
+   *
+   * @private {!Object.<string, string>}
+   */
+  this.copyKeyIndex_ = {};
+
+  /**
+   * An in-memory representation of import history.
+   * The first value is the "key" (as generated internally
+   * from a file entry).
+   * @private {!Object.<string, !Array.<importer.Destination>>}
+   */
+  this.importedEntries_ = {};
+
+  /** @private {!Array.<!importer.ImportHistory.Observer>} */
+  this.observers_ = [];
+
+  /** @private {!Promise.<!importer.PersistentImportHistory>} */
   this.whenReady_ = this.refresh_();
-}
+};
 
 /**
- * Loads history from disk and merges in any previously existing entries
+ * Loads history from storage and merges in any previously existing entries
  * that are not present in the newly loaded data. Should be called
- * when the file is changed by an external source.
+ * when the storage is externally changed.
  *
- * @return {!Promise.<!ImportHistory>} Resolves when history has been refreshed.
+ * @return {!Promise.<!importer.PersistentImportHistory>} Resolves when history
+ *     has been refreshed.
  * @private
  */
-ImportHistory.prototype.refresh_ = function() {
-  var oldEntries = this.entries_;
-  this.entries_ = {};
+importer.PersistentImportHistory.prototype.refresh_ = function() {
+  var oldCopiedEntries = this.copiedEntries_;
+  // NOTE: importDetailsIndex is built in relation to the copiedEntries_
+  // data, so we don't need to preserve the information in that field.
+  var oldImportedEntries = this.importedEntries_;
+
+  this.copiedEntries_ = {};
+  this.importedEntries_ = {};
+
   return this.storage_.readAll()
       .then(this.updateHistoryRecords_.bind(this))
-      .then(this.mergeEntries_.bind(this, oldEntries))
+      .then(this.mergeCopiedEntries_.bind(this, oldCopiedEntries))
+      .then(this.mergeImportedEntries_.bind(this, oldImportedEntries))
       .then(
           /**
-           * @return {!ImportHistory}
-           * @this {ImportHistory}
+           * @return {!importer.PersistentImportHistory}
+           * @this {importer.PersistentImportHistory}
            */
           function() {
             return this;
@@ -45,32 +229,65 @@ ImportHistory.prototype.refresh_ = function() {
 };
 
 /**
- * Adds all entries not already present in history.
+ * Adds all copied entries into existing entries.
  *
- * @param {!Object.<string, !Array.<string>>} entries
+ * @param {!Object.<string, !Object.<!importer.Destination, importer.Urls>>}
+ *     entries
  * @return {!Promise.<?>} Resolves once all updates are completed.
  * @private
  */
-ImportHistory.prototype.mergeEntries_ = function(entries) {
+importer.PersistentImportHistory.prototype.mergeCopiedEntries_ =
+    function(entries) {
   var promises = [];
-  Object.keys(entries).forEach(
-      /**
-       * @param {string} key
-       * @this {ImportHistory}
-       */
-      function(key) {
-        entries[key].forEach(
-            /**
-             * @param {string} key
-             * @this {ImportHistory}
-             */
-            function(destination) {
-              if (this.getDestinations_(key).indexOf(destination) >= 0) {
-                this.updateHistoryRecord_(key, destination);
-                promises.push(this.storage_.write([key, destination]));
-              }
+  for (var key in entries) {
+    for (var destination in entries[key]) {
+      // This method is only called when data is reloaded from disk.
+      // In such a situation we defend against loss of in-memory data
+      // by copying it out of the way, reloading data from disk, then
+      // merging that data back into the freshly loaded data. For that
+      // reason we will write newly created entries back to disk.
+
+      var urls = entries[key][destination];
+      if (this.updateInMemoryCopyRecord_(
+          key,
+          destination,
+          urls.sourceUrl,
+          urls.destinationUrl)) {
+        promises.push(this.storage_.write([
+            importer.RecordType_.COPY,
+            key,
+            destination,
+            urls.sourceUrl,
+            urls.destinationUrl]));
+      }
+    }
+  }
+  return Promise.all(promises);
+};
+
+/**
+ * Adds all imported entries into existing entries.
+ *
+ * @param {!Object.<string, !Array.<!importer.Destination>>} entries
+ * @return {!Promise.<?>} Resolves once all updates are completed.
+ * @private
+ */
+importer.PersistentImportHistory.prototype.mergeImportedEntries_ =
+    function(entries) {
+  var promises = [];
+  for (var key in entries) {
+    entries[key].forEach(
+        /**
+         * @param {!importer.Destination} destination
+         * @this {importer.PersistentImportHistory}
+         */
+        function(destination) {
+          if (this.updateInMemoryImportRecord_(key, destination)) {
+            promises.push(this.storage_.write(
+                [importer.RecordType_.IMPORT, key, destination]));
+          }
         }.bind(this));
-      }.bind(this));
+  }
   return Promise.all(promises);
 };
 
@@ -78,18 +295,19 @@ ImportHistory.prototype.mergeEntries_ = function(entries) {
  * Reloads history from disk. Should be called when the file
  * is changed by an external source.
  *
- * @return {!Promise.<!ImportHistory>} Resolves when history has been refreshed.
+ * @return {!Promise.<!importer.PersistentImportHistory>} Resolves when
+ *     history has been refreshed.
  */
-ImportHistory.prototype.refresh = function() {
+importer.PersistentImportHistory.prototype.refresh = function() {
   this.whenReady_ = this.refresh_();
   return this.whenReady_;
 };
 
 /**
- * @return {!Promise.<!ImportHistory>}
+ * @return {!Promise.<!importer.ImportHistory>}
  */
-ImportHistory.prototype.whenReady = function() {
-  return this.whenReady_;
+importer.PersistentImportHistory.prototype.whenReady = function() {
+  return /** @type {!Promise.<!importer.ImportHistory>} */ (this.whenReady_);
 };
 
 /**
@@ -97,79 +315,262 @@ ImportHistory.prototype.whenReady = function() {
  * @param {!Array.<!Array.<*>>} records
  * @private
  */
-ImportHistory.prototype.updateHistoryRecords_ = function(records) {
-  records.forEach(
-      /**
-       * @param {!Array.<*>} entry
-       * @this {ImportHistory}
-       */
-      function(record) {
-        this.updateHistoryRecord_(record[0], record[1]);
-      }.bind(this));
+importer.PersistentImportHistory.prototype.updateHistoryRecords_ =
+    function(records) {
+  records.forEach(this.updateInMemoryRecord_.bind(this));
 };
 
 /**
- * Adds a history entry to the in-memory history model.
- * @param {string} key
- * @param {string} destination
- * @private
+ * @param {!Array.<*>} record
+ * @this {importer.PersistentImportHistory}
  */
-ImportHistory.prototype.updateHistoryRecord_ = function(key, destination) {
-  if (key in this.entries_) {
-    this.entries_[key].push(destination);
-  } else {
-    this.entries_[key] = [destination];
+importer.PersistentImportHistory.prototype.updateInMemoryRecord_ =
+    function(record) {
+  switch (record[0]) {
+    case importer.RecordType_.COPY:
+      this.updateInMemoryCopyRecord_(
+          /** @type {string} */ (
+              record[1]),  // key
+          /** @type {!importer.Destination} */ (
+              record[2]),
+          /** @type {string } */ (
+              record[3]),  // sourceUrl
+          /** @type {string } */ (
+              record[4])); // destinationUrl
+      return;
+    case importer.RecordType_.IMPORT:
+      this.updateInMemoryImportRecord_(
+          /** @type {string } */ (
+              record[1]),  // key
+          /** @type {!importer.Destination} */ (
+              record[2]));
+      return;
+    default:
+      assertNotReached('Ignoring record with unrecognized type: ' + record[0]);
   }
 };
 
 /**
- * @param {!FileEntry} entry
- * @param {string} destination
- * @return {!Promise.<boolean>} Resolves with true if the FileEntry
- *     was previously imported to the specified destination.
+ * Adds an import record to the in-memory history model.
+ *
+ * @param {string} key
+ * @param {!importer.Destination} destination
+ *
+ * @return {boolean} True if a record was created.
+ * @private
  */
-ImportHistory.prototype.wasImported = function(entry, destination) {
+importer.PersistentImportHistory.prototype.updateInMemoryImportRecord_ =
+    function(key, destination) {
+  if (!this.importedEntries_.hasOwnProperty(key)) {
+    this.importedEntries_[key] = [destination];
+    return true;
+  } else if (this.importedEntries_[key].indexOf(destination) === -1) {
+    this.importedEntries_[key].push(destination);
+    return true;
+  }
+  return false;
+};
+
+/**
+ * Adds a copy record to the in-memory history model.
+ *
+ * @param {string} key
+ * @param {!importer.Destination} destination
+ * @param {string} sourceUrl
+ * @param {string} destinationUrl
+ *
+ * @return {boolean} True if a record was created.
+ * @private
+ */
+importer.PersistentImportHistory.prototype.updateInMemoryCopyRecord_ =
+    function(key, destination, sourceUrl, destinationUrl) {
+  this.copyKeyIndex_[destinationUrl] = key;
+  if (!this.copiedEntries_.hasOwnProperty(key)) {
+    this.copiedEntries_[key] = {};
+  }
+  if (!this.copiedEntries_[key].hasOwnProperty(destination)) {
+    this.copiedEntries_[key][destination] = {
+      sourceUrl: sourceUrl,
+      destinationUrl: destinationUrl
+    };
+    return true;
+  }
+  return false;
+};
+
+/** @override */
+importer.PersistentImportHistory.prototype.wasCopied =
+    function(entry, destination) {
   return this.whenReady_
       .then(this.createKey_.bind(this, entry))
       .then(
           /**
            * @param {string} key
-           * @return {!Promise.<boolean>}
-           * @this {ImportHistory}
+           * @return {boolean}
+           * @this {importer.PersistentImportHistory}
+           */
+          function(key) {
+            return key in this.copiedEntries_ &&
+                destination in this.copiedEntries_[key];
+          }.bind(this));
+};
+
+/** @override */
+importer.PersistentImportHistory.prototype.wasImported =
+    function(entry, destination) {
+  return this.whenReady_
+      .then(this.createKey_.bind(this, entry))
+      .then(
+          /**
+           * @param {string} key
+           * @return {boolean}
+           * @this {importer.PersistentImportHistory}
            */
           function(key) {
             return this.getDestinations_(key).indexOf(destination) >= 0;
           }.bind(this));
 };
 
-/**
- * @param {!FileEntry} entry
- * @param {string} destination
- * @return {!Promise.<?>} Resolves when the operation is completed.
- */
-ImportHistory.prototype.markImported = function(entry, destination) {
+/** @override */
+importer.PersistentImportHistory.prototype.markCopied =
+    function(entry, destination, destinationUrl) {
   return this.whenReady_
       .then(this.createKey_.bind(this, entry))
       .then(
           /**
            * @param {string} key
            * @return {!Promise.<?>}
-           * @this {ImportHistory}
+           * @this {importer.ImportHistory}
            */
           function(key) {
-            return this.addDestination_(destination, key);
-          }.bind(this));
+            return this.storeRecord_([
+                importer.RecordType_.COPY,
+                key,
+                destination,
+                entry.toURL(),
+                destinationUrl]);
+          }.bind(this))
+      .then(this.notifyObservers_.bind(
+          this,
+          importer.ImportHistory.State.COPIED,
+          entry,
+          destination,
+          destinationUrl));
+};
+
+/** @override */
+importer.PersistentImportHistory.prototype.markImported =
+    function(entry, destination) {
+  return this.whenReady_
+      .then(this.createKey_.bind(this, entry))
+      .then(
+          /**
+           * @param {string} key
+           * @return {!Promise.<?>}
+           * @this {importer.ImportHistory}
+           */
+          function(key) {
+            return this.storeRecord_([
+                importer.RecordType_.IMPORT,
+                key,
+                destination]);
+          }.bind(this))
+      .then(this.notifyObservers_.bind(
+          this,
+          importer.ImportHistory.State.IMPORTED,
+          entry,
+          destination));
+};
+
+/** @override */
+importer.PersistentImportHistory.prototype.markImportedByUrl =
+    function(destinationUrl) {
+  var key = this.copyKeyIndex_[destinationUrl];
+  if (!!key) {
+    var copyData = this.copiedEntries_[key];
+
+    // we could build an index of this as well, but it seems
+    // unnecessary given the fact that there will almost always
+    // be just one destination for a file (assumption).
+    for (var destination in copyData) {
+      if (copyData[destination].destinationUrl === destinationUrl) {
+        return this.storeRecord_([
+            importer.RecordType_.IMPORT,
+            key,
+            destination]).then(
+              function() {
+                // Here we try to create an Entry for the source URL.
+                // This will allow observers to update the UI if the
+                // source entry is in view.
+                util.urlToEntry(copyData[destination].sourceUrl).then(
+                    function(entry) {
+                      if (entry.isFile) {
+                        this.notifyObservers_(
+                            importer.ImportHistory.State.IMPORTED,
+                            /** @type {!FileEntry} */ (entry),
+                            destination);
+                      }
+                    }.bind(this));
+              }.bind(this)
+            );
+      }
+    }
+  }
+
+  return Promise.reject(
+      'Unabled to match destination URL to import record > ' + destinationUrl);
+};
+
+/** @override */
+importer.PersistentImportHistory.prototype.addObserver =
+    function(observer) {
+  this.observers_.push(observer);
+};
+
+/** @override */
+importer.PersistentImportHistory.prototype.removeObserver =
+    function(observer) {
+  var index = this.observers_.indexOf(observer);
+  if (index > -1) {
+    this.observers_.splice(index, 1);
+  } else {
+    console.warn('Ignoring request to remove observer that is not registered.');
+  }
 };
 
 /**
- * @param {string} destination
- * @param {string} key
+ * @param {!importer.ImportHistory.State} state
+ * @param {!FileEntry} entry
+ * @param {!importer.Destination} destination
+ * @param {string=} opt_destinationUrl
+ * @private
+ */
+importer.PersistentImportHistory.prototype.notifyObservers_ =
+    function(state, entry, destination, opt_destinationUrl) {
+  this.observers_.forEach(
+      /**
+       * @param {!importer.ImportHistory.Observer} observer
+       * @this {importer.PersistentImportHistory}
+       */
+      function(observer) {
+        observer({
+          state: state,
+          entry: entry,
+          destination: destination,
+          destinationUrl: opt_destinationUrl
+        });
+      }.bind(this));
+};
+
+/**
+ * @param {!Array.<*>} record
+ *
  * @return {!Promise.<?>} Resolves once the write has been completed.
  * @private
  */
-ImportHistory.prototype.addDestination_ = function(destination, key) {
-  this.updateHistoryRecord_(key, destination);
-  return this.storage_.write([key, destination]);
+importer.PersistentImportHistory.prototype.storeRecord_ = function(record) {
+  this.updateInMemoryRecord_(record);
+  return this.storage_.write(record);
 };
 
 /**
@@ -178,8 +579,8 @@ ImportHistory.prototype.addDestination_ = function(destination, key) {
  *     destinations, or an empty array, if none.
  * @private
  */
-ImportHistory.prototype.getDestinations_ = function(key) {
-  return key in this.entries_ ? this.entries_[key] : [];
+importer.PersistentImportHistory.prototype.getDestinations_ = function(key) {
+  return key in this.importedEntries_ ? this.importedEntries_[key] : [];
 };
 
 /**
@@ -187,13 +588,13 @@ ImportHistory.prototype.getDestinations_ = function(key) {
  * @return {!Promise.<string>} Resolves with a the key is available.
  * @private
  */
-ImportHistory.prototype.createKey_ = function(fileEntry) {
-  var entry = new PromisaryFileEntry(fileEntry);
+importer.PersistentImportHistory.prototype.createKey_ = function(fileEntry) {
+  var entry = new importer.PromisingFileEntry(fileEntry);
   return new Promise(
       /**
        * @param {function()} resolve
        * @param {function()} reject
-       * @this {ImportHistory}
+       * @this {importer.PersistentImportHistory}
        */
       function(resolve, reject) {
         entry.getMetadata()
@@ -201,7 +602,7 @@ ImportHistory.prototype.createKey_ = function(fileEntry) {
                 /**
                  * @param {!Object} metadata
                  * @return {!Promise.<string>}
-                 * @this {ImportHistory}
+                 * @this {importer.PersistentImportHistory}
                  */
                 function(metadata) {
                   if (!('modificationTime' in metadata)) {
@@ -217,45 +618,46 @@ ImportHistory.prototype.createKey_ = function(fileEntry) {
 };
 
 /**
- * Provider of lazy loaded ImportHistory. This is the main
- * access point for a fully prepared {@code ImportHistory} object.
+ * Provider of lazy loaded importer.ImportHistory. This is the main
+ * access point for a fully prepared {@code importer.ImportHistory} object.
  *
  * @interface
  */
-function HistoryLoader() {}
+importer.HistoryLoader = function() {};
 
 /**
- * Instantiates an {@code ImportHistory} object and manages any
+ * Instantiates an {@code importer.ImportHistory} object and manages any
  * necessary ongoing maintenance of the object with respect to
  * its external dependencies.
  *
- * @see SynchronizedHistoryLoader for an example.
+ * @see importer.SynchronizedHistoryLoader for an example.
  *
- * @return {!Promise.<!ImportHistory>} Resolves when history instance is ready.
+ * @return {!Promise.<!importer.ImportHistory>} Resolves when history instance
+ *     is ready.
  */
-HistoryLoader.prototype.loadHistory;
+importer.HistoryLoader.prototype.getHistory;
 
 /**
- * Class responsible for lazy loading of {@code ImportHistory},
+ * Class responsible for lazy loading of {@code importer.ImportHistory},
  * and reloading when the underlying data is updated (via sync).
  *
  * @constructor
- * @implements {HistoryLoader}
+ * @implements {importer.HistoryLoader}
  * @struct
  *
- * @param {!SyncFileEntryProvider} fileProvider
+ * @param {!importer.SyncFileEntryProvider} fileProvider
  */
-function SynchronizedHistoryLoader(fileProvider) {
+importer.SynchronizedHistoryLoader = function(fileProvider) {
 
-  /** @private {!SyncFileEntryProvider} */
+  /** @private {!importer.SyncFileEntryProvider} */
   this.fileProvider_ = fileProvider;
 
-  /** @private {!ImportHistory|undefined} */
+  /** @private {!importer.PersistentImportHistory|undefined} */
   this.history_;
-}
+};
 
 /** @override */
-SynchronizedHistoryLoader.prototype.loadHistory = function() {
+importer.SynchronizedHistoryLoader.prototype.getHistory = function() {
   if (this.history_) {
     return this.history_.whenReady();
   }
@@ -267,16 +669,17 @@ SynchronizedHistoryLoader.prototype.loadHistory = function() {
       .then(
           /**
            * @param {!FileEntry} fileEntry
-           * @return {!Promise.<!ImportHistory>}
-           * @this {SynchronizedHistoryLoader}
+           * @return {!Promise.<!importer.ImportHistory>}
+           * @this {importer.SynchronizedHistoryLoader}
            */
           function(fileEntry) {
-            var storage = new FileEntryRecordStorage(fileEntry);
-            var history = new ImportHistory(storage);
+            var storage = new importer.FileEntryRecordStorage(fileEntry);
+            var history = new importer.PersistentImportHistory(storage);
+            new importer.DriveSyncWatcher(history);
             return history.refresh().then(
                 /**
-                 * @return {!ImportHistory}
-                 * @this {SynchronizedHistoryLoader}
+                 * @return {!importer.ImportHistory}
+                 * @this {importer.SynchronizedHistoryLoader}
                  */
                 function() {
                   this.history_ = history;
@@ -292,7 +695,8 @@ SynchronizedHistoryLoader.prototype.loadHistory = function() {
  *
  * @private
  */
-SynchronizedHistoryLoader.prototype.onSyncedDataChanged_ = function() {
+importer.SynchronizedHistoryLoader.prototype.onSyncedDataChanged_ =
+    function() {
   if (this.history_) {
     this.history_.refresh();  // Reload history entries.
   }
@@ -304,7 +708,7 @@ SynchronizedHistoryLoader.prototype.onSyncedDataChanged_ = function() {
  *
  * @interface
  */
-function SyncFileEntryProvider() {}
+importer.SyncFileEntryProvider = function() {};
 
 /**
  * Adds a listener to be notified when the the FileEntry owned/managed
@@ -312,53 +716,55 @@ function SyncFileEntryProvider() {}
  *
  * @param {function()} syncListener
  */
-SyncFileEntryProvider.prototype.addSyncListener;
+importer.SyncFileEntryProvider.prototype.addSyncListener;
 
 /**
  * Provides accsess to the sync FileEntry owned/managed by this class.
  *
  * @return {!Promise.<!FileEntry>}
  */
-SyncFileEntryProvider.prototype.getSyncFileEntry;
+importer.SyncFileEntryProvider.prototype.getSyncFileEntry;
 
 /**
  * Factory for synchronized files based on chrome.syncFileSystem.
  *
  * @constructor
- * @implements {SyncFileEntryProvider}
+ * @implements {importer.SyncFileEntryProvider}
  * @struct
  */
-function ChromeSyncFileEntryProvider() {
+importer.ChromeSyncFileEntryProvider = function() {
 
   /** @private {!Array.<function()>} */
   this.syncListeners_ = [];
 
   /** @private {!Promise.<!FileEntry>|undefined} */
   this.fileEntryPromise_;
-}
+};
 
-/** @private @const {string} */
-ChromeSyncFileEntryProvider.FILE_NAME_ = 'import-history.data';
+/** @type {string} */
+importer.ChromeSyncFileEntryProvider.FILE_NAME_ = 'import-history.r1.log';
 
 /**
  * Wraps chrome.syncFileSystem.onFileStatusChanged
  * so that we can report to our listeners when our file has changed.
  * @private
  */
-ChromeSyncFileEntryProvider.prototype.monitorSyncEvents_ = function() {
+importer.ChromeSyncFileEntryProvider.prototype.monitorSyncEvents_ =
+    function() {
   chrome.syncFileSystem.onFileStatusChanged.addListener(
       this.handleSyncEvent_.bind(this));
 };
 
 /** @override */
-ChromeSyncFileEntryProvider.prototype.addSyncListener = function(listener) {
+importer.ChromeSyncFileEntryProvider.prototype.addSyncListener =
+    function(listener) {
   if (this.syncListeners_.indexOf(listener) === -1) {
     this.syncListeners_.push(listener);
   }
 };
 
 /** @override */
-ChromeSyncFileEntryProvider.prototype.getSyncFileEntry = function() {
+importer.ChromeSyncFileEntryProvider.prototype.getSyncFileEntry = function() {
   if (this.fileEntryPromise_) {
     return this.fileEntryPromise_;
   };
@@ -368,7 +774,7 @@ ChromeSyncFileEntryProvider.prototype.getSyncFileEntry = function() {
           /**
            * @param {!FileSystem} fileSystem
            * @return {!Promise.<!FileEntry>}
-           * @this {ChromeSyncFileEntryProvider}
+           * @this {importer.ChromeSyncFileEntryProvider}
            */
           function(fileSystem) {
             return this.getFileEntry_(fileSystem);
@@ -383,18 +789,18 @@ ChromeSyncFileEntryProvider.prototype.getSyncFileEntry = function() {
  * @return {!Promise.<!FileSystem>}
  * @private
  */
-ChromeSyncFileEntryProvider.prototype.getFileSystem_ = function() {
+importer.ChromeSyncFileEntryProvider.prototype.getFileSystem_ = function() {
   return new Promise(
       /**
        * @param {function()} resolve
        * @param {function()} reject
-       * @this {ChromeSyncFileEntryProvider}
+       * @this {importer.ChromeSyncFileEntryProvider}
        */
       function(resolve, reject) {
         chrome.syncFileSystem.requestFileSystem(
             /**
               * @param {FileSystem} fileSystem
-              * @this {ChromeSyncFileEntryProvider}
+              * @this {importer.ChromeSyncFileEntryProvider}
               */
             function(fileSystem) {
               if (chrome.runtime.lastError) {
@@ -411,16 +817,17 @@ ChromeSyncFileEntryProvider.prototype.getFileSystem_ = function() {
  * @return {!Promise.<!FileEntry>}
  * @private
  */
-ChromeSyncFileEntryProvider.prototype.getFileEntry_ = function(fileSystem) {
+importer.ChromeSyncFileEntryProvider.prototype.getFileEntry_ =
+    function(fileSystem) {
   return new Promise(
       /**
        * @param {function()} resolve
        * @param {function()} reject
-       * @this {ChromeSyncFileEntryProvider}
+       * @this {importer.ChromeSyncFileEntryProvider}
        */
       function(resolve, reject) {
         fileSystem.root.getFile(
-            ChromeSyncFileEntryProvider.FILE_NAME_,
+            importer.ChromeSyncFileEntryProvider.FILE_NAME_,
             {
               create: true,
               exclusive: false
@@ -445,7 +852,8 @@ ChromeSyncFileEntryProvider.prototype.getFileEntry_ = function(fileSystem) {
  *
  * @private
  */
-ChromeSyncFileEntryProvider.prototype.handleSyncEvent_ = function(event) {
+importer.ChromeSyncFileEntryProvider.prototype.handleSyncEvent_ =
+    function(event) {
   if (!this.fileEntryPromise_) {
     return;
   }
@@ -453,7 +861,7 @@ ChromeSyncFileEntryProvider.prototype.handleSyncEvent_ = function(event) {
   this.fileEntryPromise_.then(
       /**
        * @param {!FileEntry} fileEntry
-       * @this {ChromeSyncFileEntryProvider}
+       * @this {importer.ChromeSyncFileEntryProvider}
        */
       function(fileEntry) {
         if (event['fileEntry'].fullPath !== fileEntry.fullPath) {
@@ -473,7 +881,7 @@ ChromeSyncFileEntryProvider.prototype.handleSyncEvent_ = function(event) {
         this.syncListeners_.forEach(
             /**
              * @param {function()} listener
-             * @this {ChromeSyncFileEntryProvider}
+             * @this {importer.ChromeSyncFileEntryProvider}
              */
             function(listener) {
               // Notify by way of a promise so that it is fully asynchronous
@@ -488,7 +896,7 @@ ChromeSyncFileEntryProvider.prototype.handleSyncEvent_ = function(event) {
  *
  * @interface
  */
-function RecordStorage() {}
+importer.RecordStorage = function() {};
 
 /**
  * Adds a new record.
@@ -496,14 +904,14 @@ function RecordStorage() {}
  * @param {!Array.<*>} record
  * @return {!Promise.<?>} Resolves when record is added.
  */
-RecordStorage.prototype.write;
+importer.RecordStorage.prototype.write;
 
 /**
  * Reads all records.
  *
  * @return {!Promise.<!Array.<!Array.<*>>>}
  */
-RecordStorage.prototype.readAll;
+importer.RecordStorage.prototype.readAll;
 
 /**
  * A {@code RecordStore} that persists data in a {@code FileEntry}.
@@ -511,16 +919,16 @@ RecordStorage.prototype.readAll;
  * @param {!FileEntry} fileEntry
  *
  * @constructor
- * @implements {RecordStorage}
+ * @implements {importer.RecordStorage}
  * @struct
  */
-function FileEntryRecordStorage(fileEntry) {
-  /** @private {!PromisaryFileEntry} */
-  this.fileEntry_ = new PromisaryFileEntry(fileEntry);
-}
+importer.FileEntryRecordStorage = function(fileEntry) {
+  /** @private {!importer.PromisingFileEntry} */
+  this.fileEntry_ = new importer.PromisingFileEntry(fileEntry);
+};
 
 /** @override */
-FileEntryRecordStorage.prototype.write = function(record) {
+importer.FileEntryRecordStorage.prototype.write = function(record) {
   // TODO(smckay): should we make an effort to reuse a file writer?
   return this.fileEntry_.createWriter()
       .then(this.writeRecord_.bind(this, record));
@@ -534,18 +942,18 @@ FileEntryRecordStorage.prototype.write = function(record) {
  * @return {!Promise.<?>} Resolves when write is complete.
  * @private
  */
-FileEntryRecordStorage.prototype.writeRecord_ = function(record, writer) {
+importer.FileEntryRecordStorage.prototype.writeRecord_ =
+    function(record, writer) {
+  var blob = new Blob(
+      [JSON.stringify(record) + ',\n'],
+      {type: 'text/plain; charset=UTF-8'});
   return new Promise(
       /**
        * @param {function()} resolve
        * @param {function()} reject
-       * @this {FileEntryRecordStorage}
+       * @this {importer.FileEntryRecordStorage}
        */
       function(resolve, reject) {
-        var blob = new Blob(
-            [JSON.stringify(record) + ',\n'],
-            {type: 'text/plain; charset=UTF-8'});
-
         writer.onwriteend = resolve;
         writer.onerror = reject;
 
@@ -555,13 +963,13 @@ FileEntryRecordStorage.prototype.writeRecord_ = function(record, writer) {
 };
 
 /** @override */
-FileEntryRecordStorage.prototype.readAll = function() {
+importer.FileEntryRecordStorage.prototype.readAll = function() {
   return this.fileEntry_.file()
       .then(
           this.readFileAsText_.bind(this),
           /**
            * @return {string}
-           * @this {FileEntryRecordStorage}
+           * @this {importer.FileEntryRecordStorage}
            */
           function() {
             console.error('Unable to read from history file.');
@@ -570,7 +978,7 @@ FileEntryRecordStorage.prototype.readAll = function() {
       .then(
           /**
            * @param {string} fileContents
-           * @this {FileEntryRecordStorage}
+           * @this {importer.FileEntryRecordStorage}
            */
           function(fileContents) {
             return this.parse_(fileContents);
@@ -584,12 +992,12 @@ FileEntryRecordStorage.prototype.readAll = function() {
  * @return {!Promise.<string>}
  * @private
  */
-FileEntryRecordStorage.prototype.readFileAsText_ = function(file) {
+importer.FileEntryRecordStorage.prototype.readFileAsText_ = function(file) {
   return new Promise(
       /**
        * @param {function()} resolve
        * @param {function()} reject
-       * @this {FileEntryRecordStorage}
+       * @this {importer.FileEntryRecordStorage}
        */
       function(resolve, reject) {
         var reader = new FileReader();
@@ -616,31 +1024,23 @@ FileEntryRecordStorage.prototype.readFileAsText_ = function(file) {
  * Parses the text.
  *
  * @param {string} text
- * @return {!Promise.<!Array.<!Array.<*>>>}
+ * @return {!Array.<!Array.<*>>}
  * @private
  */
-FileEntryRecordStorage.prototype.parse_ = function(text) {
-  return new Promise(
-      /**
-       * @param {function()} resolve
-       * @param {function()} reject
-       * @this {FileEntryRecordStorage}
-       */
-      function(resolve, reject) {
-        if (text.length === 0) {
-          resolve([]);
-        } else {
-          // Dress up the contents of the file like an array,
-          // so the JSON object can parse it using JSON.parse.
-          // That means we need to both:
-          //   1) Strip the trailing ',\n' from the last record
-          //   2) Surround the whole string in brackets.
-          // NOTE: JSON.parse is WAY faster than parsing this
-          // ourselves in javascript.
-          var json = '[' + text.substring(0, text.length - 2) + ']';
-          resolve(JSON.parse(json));
-        }
-      }.bind(this));
+importer.FileEntryRecordStorage.prototype.parse_ = function(text) {
+  if (text.length === 0) {
+    return [];
+  } else {
+    // Dress up the contents of the file like an array,
+    // so the JSON object can parse it using JSON.parse.
+    // That means we need to both:
+    //   1) Strip the trailing ',\n' from the last record
+    //   2) Surround the whole string in brackets.
+    // NOTE: JSON.parse is WAY faster than parsing this
+    // ourselves in javascript.
+    var json = '[' + text.substring(0, text.length - 2) + ']';
+    return /** @type {!Array.<!Array.<*>>} */ (JSON.parse(json));
+  }
 };
 
 /**
@@ -651,16 +1051,16 @@ FileEntryRecordStorage.prototype.parse_ = function(text) {
  * @constructor
  * @struct
  */
-function PromisaryFileEntry(fileEntry) {
+importer.PromisingFileEntry = function(fileEntry) {
   /** @private {!FileEntry} */
   this.fileEntry_ = fileEntry;
-}
+};
 
 /**
  * A "Promisary" wrapper around entry.getWriter.
  * @return {!Promise.<!FileWriter>}
  */
-PromisaryFileEntry.prototype.createWriter = function() {
+importer.PromisingFileEntry.prototype.createWriter = function() {
   return new Promise(this.fileEntry_.createWriter.bind(this.fileEntry_));
 };
 
@@ -668,13 +1068,89 @@ PromisaryFileEntry.prototype.createWriter = function() {
  * A "Promisary" wrapper around entry.file.
  * @return {!Promise.<!File>}
  */
-PromisaryFileEntry.prototype.file = function() {
+importer.PromisingFileEntry.prototype.file = function() {
   return new Promise(this.fileEntry_.file.bind(this.fileEntry_));
 };
 
 /**
  * @return {!Promise.<!Object>}
  */
-PromisaryFileEntry.prototype.getMetadata = function() {
+importer.PromisingFileEntry.prototype.getMetadata = function() {
   return new Promise(this.fileEntry_.getMetadata.bind(this.fileEntry_));
+};
+
+/**
+ * This class makes the "drive" badges appear by way of marking entries as
+ * imported in history when a previously imported file is fully synced to drive.
+ *
+ * @constructor
+ * @struct
+ *
+ * @param {!importer.ImportHistory} history
+ */
+importer.DriveSyncWatcher = function(history) {
+  /** @private {!importer.ImportHistory} */
+  this.history_ = history;
+
+  this.history_.addObserver(
+      this.onHistoryChanged_.bind(this));
+
+  // Listener is only registered once the history object is initialized.
+  // No need to register synchonously since we don't want to be
+  // woken up to respond to events.
+  chrome.fileManagerPrivate.onFileTransfersUpdated.addListener(
+      this.onFileTransfersUpdated_.bind(this));
+  // TODO(smckay): Listen also for errors on onDriveSyncError.
+};
+
+/**
+ * @param {!FileTransferStatus} status
+ * @private
+ */
+importer.DriveSyncWatcher.prototype.onFileTransfersUpdated_ =
+    function(status) {
+  if (status.transferState === 'completed') {
+    this.history_.markImportedByUrl(status.fileUrl);
+  }
+};
+
+/**
+ * @param {!importer.ImportHistory.ChangedEvent} event
+ * @private
+ */
+importer.DriveSyncWatcher.prototype.onHistoryChanged_ =
+    function(event) {
+  if (event.state === importer.ImportHistory.State.COPIED) {
+    // Check sync status incase the file synced *before* it was able
+    // to mark be marked as copied.
+    this.checkSyncStatus_(
+        event.entry,
+        event.destination,
+        event.destinationUrl);
+  }
+};
+
+/**
+ * @param {!FileEntry} entry
+ * @param {!importer.Destination} destination
+ * @param {string} url
+ * @private
+ */
+importer.DriveSyncWatcher.prototype.checkSyncStatus_ =
+    function(entry, destination, url) {
+  // TODO(smckay): User Metadata Cache...once it is available
+  // in the background.
+  chrome.fileManagerPrivate.getEntryProperties(
+      [url],
+      /**
+       * @param {!Array.<Object>} propertiesList
+       * @this {importer.DriveSyncWatcher}
+       */
+      function(propertiesList) {
+        console.assert(propertiesList.length === 1);
+        var data = propertiesList[0];
+        if (!data['isDirty']) {
+          this.history_.markImported(entry, destination);
+        }
+      }.bind(this));
 };

@@ -28,7 +28,6 @@
           'libavcodec/x86/fdctdsp_init.c',
           'libavcodec/x86/h263dsp_init.c',
           'libavcodec/x86/idctdsp_init.c',
-          'libavcodec/x86/idctdsp_mmx.c',
           'libavcodec/x86/me_cmp_init.c',
           'libavcodec/x86/mpegvideo.c',
           'libavcodec/x86/mpegvideodsp.c',
@@ -71,6 +70,14 @@
           'libavcodec/arm/simple_idct_armv6.S',
         ],
       }],  # (target_arch == "arm" or (target_arch == "arm" and arm_neon == 1)) and (ffmpeg_branding == "ChromeOS") and (1)
+      ['(target_arch == "mipsel") and (ffmpeg_branding == "Chrome" or ffmpeg_branding == "ChromeOS") and (1)', {
+        'c_sources': [
+          'libavcodec/mips/aacdec_mips.c',
+          'libavcodec/mips/aacpsdsp_mips.c',
+          'libavcodec/mips/aacsbr_mips.c',
+          'libavcodec/mips/sbrdsp_mips.c',
+        ],
+      }],  # (target_arch == "mipsel") and (ffmpeg_branding == "Chrome" or ffmpeg_branding == "ChromeOS") and (1)
       ['((target_arch == "arm" and arm_neon == 1)) and (ffmpeg_branding == "Chrome" or ffmpeg_branding == "ChromeOS") and (1)', {
         'asm_sources': [
           'libavcodec/arm/aacpsdsp_neon.S',
@@ -105,7 +112,6 @@
           'libavcodec/blockdsp.c',
           'libavcodec/celp_filters.c',
           'libavcodec/celp_math.c',
-          'libavcodec/dsputil_compat.c',
           'libavcodec/error_resilience.c',
           'libavcodec/exif.c',
           'libavcodec/faandct.c',
@@ -168,6 +174,11 @@
           'libavcodec/arm/flacdsp_arm.S',
         ],
       }],  # (target_arch == "arm" or (target_arch == "arm" and arm_neon == 1)) and (ffmpeg_branding == "ChromiumOS" or ffmpeg_branding == "ChromeOS") and (1)
+      ['(target_arch == "mipsel") and (1) and (1)', {
+        'c_sources': [
+          'libavutil/mips/float_dsp_mips.c',
+        ],
+      }],  # (target_arch == "mipsel") and (1) and (1)
       ['((target_arch == "arm" and arm_neon == 1)) and (1) and (1)', {
         'c_sources': [
           'libavcodec/arm/hpeldsp_init_neon.c',
@@ -217,7 +228,9 @@
       }],  # (target_arch == "ia32" or target_arch == "x64") and (ffmpeg_branding == "Chrome" or ffmpeg_branding == "ChromeOS") and (1)
       ['(1) and (ffmpeg_branding == "ChromiumOS" or ffmpeg_branding == "ChromeOS") and (1)', {
         'c_sources': [
+          'libavcodec/flac.c',
           'libavcodec/flac_parser.c',
+          'libavcodec/flacdata.c',
           'libavcodec/flacdec.c',
           'libavcodec/flacdsp.c',
           'libavformat/flacdec.c',
@@ -360,8 +373,6 @@
           'libavcodec/fft_fixed_32.c',
           'libavcodec/fft_float.c',
           'libavcodec/fft_init_table.c',
-          'libavcodec/flac.c',
-          'libavcodec/flacdata.c',
           'libavcodec/fmtconvert.c',
           'libavcodec/golomb.c',
           'libavcodec/h264pred.c',
@@ -455,7 +466,6 @@
           'libavutil/float_dsp.c',
           'libavutil/frame.c',
           'libavutil/imgutils.c',
-          'libavutil/intfloat_readwrite.c',
           'libavutil/intmath.c',
           'libavutil/lfg.c',
           'libavutil/log.c',

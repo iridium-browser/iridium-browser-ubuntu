@@ -91,6 +91,11 @@ void PlaceholderFrameOwner::dispatchLoad()
 {
 }
 
+void PlaceholderFrameOwner::trace(Visitor* visitor)
+{
+    FrameOwner::trace(visitor);
+}
+
 WebRemoteFrame* WebRemoteFrame::create(WebRemoteFrameClient* client)
 {
     WebRemoteFrameImpl* frame = new WebRemoteFrameImpl(client);
@@ -132,7 +137,7 @@ bool WebRemoteFrameImpl::isWebLocalFrame() const
 WebLocalFrame* WebRemoteFrameImpl::toWebLocalFrame()
 {
     ASSERT_NOT_REACHED();
-    return 0;
+    return nullptr;
 }
 
 bool WebRemoteFrameImpl::isWebRemoteFrame() const
@@ -256,7 +261,7 @@ bool WebRemoteFrameImpl::hasVerticalScrollbar() const
 WebView* WebRemoteFrameImpl::view() const
 {
     if (!frame())
-        return 0;
+        return nullptr;
     return WebViewImpl::fromPage(frame()->page());
 }
 
@@ -291,7 +296,7 @@ void WebRemoteFrameImpl::dispatchUnloadEvent()
 NPObject* WebRemoteFrameImpl::windowObject() const
 {
     ASSERT_NOT_REACHED();
-    return 0;
+    return nullptr;
 }
 
 void WebRemoteFrameImpl::bindToWindowObject(const WebString& name, NPObject*)
@@ -351,7 +356,7 @@ v8::Handle<v8::Value> WebRemoteFrameImpl::executeScriptAndReturnValue(
 
 void WebRemoteFrameImpl::executeScriptInIsolatedWorld(
     int worldID, const WebScriptSource* sourcesIn, unsigned numSources,
-    int extensionGroup, WebVector<v8::Local<v8::Value> >* results)
+    int extensionGroup, WebVector<v8::Local<v8::Value>>* results)
 {
     ASSERT_NOT_REACHED();
 }
@@ -414,13 +419,13 @@ void WebRemoteFrameImpl::stopLoading()
 WebDataSource* WebRemoteFrameImpl::provisionalDataSource() const
 {
     ASSERT_NOT_REACHED();
-    return 0;
+    return nullptr;
 }
 
 WebDataSource* WebRemoteFrameImpl::dataSource() const
 {
     ASSERT_NOT_REACHED();
-    return 0;
+    return nullptr;
 }
 
 void WebRemoteFrameImpl::enableViewSourceMode(bool enable)
@@ -447,7 +452,7 @@ void WebRemoteFrameImpl::dispatchWillSendRequest(WebURLRequest&)
 WebURLLoader* WebRemoteFrameImpl::createAssociatedURLLoader(const WebURLLoaderOptions&)
 {
     ASSERT_NOT_REACHED();
-    return 0;
+    return nullptr;
 }
 
 unsigned WebRemoteFrameImpl::unloadListenerCount() const
@@ -643,12 +648,6 @@ bool WebRemoteFrameImpl::isPrintScalingDisabledForPlugin(const WebNode&)
     return false;
 }
 
-int WebRemoteFrameImpl::getPrintCopiesForPlugin(const WebNode&)
-{
-    ASSERT_NOT_REACHED();
-    return 1;
-}
-
 bool WebRemoteFrameImpl::hasCustomPageSizeStyle(int pageIndex)
 {
     ASSERT_NOT_REACHED();
@@ -798,7 +797,7 @@ WebString WebRemoteFrameImpl::layerTreeAsText(bool showDebugInfo) const
 WebLocalFrame* WebRemoteFrameImpl::createLocalChild(const WebString& name, WebFrameClient* client)
 {
     WebLocalFrameImpl* child = toWebLocalFrameImpl(WebLocalFrame::create(client));
-    WillBeHeapHashMap<WebFrame*, OwnPtrWillBeMember<FrameOwner> >::AddResult result =
+    WillBeHeapHashMap<WebFrame*, OwnPtrWillBeMember<FrameOwner>>::AddResult result =
         m_ownersForChildren.add(child, RemoteBridgeFrameOwner::create(child));
     appendChild(child);
     // FIXME: currently this calls LocalFrame::init() on the created LocalFrame, which may
@@ -821,7 +820,7 @@ void WebRemoteFrameImpl::initializeCoreFrame(FrameHost* host, FrameOwner* owner,
 WebRemoteFrame* WebRemoteFrameImpl::createRemoteChild(const WebString& name, WebRemoteFrameClient* client)
 {
     WebRemoteFrameImpl* child = toWebRemoteFrameImpl(WebRemoteFrame::create(client));
-    WillBeHeapHashMap<WebFrame*, OwnPtrWillBeMember<FrameOwner> >::AddResult result =
+    WillBeHeapHashMap<WebFrame*, OwnPtrWillBeMember<FrameOwner>>::AddResult result =
         m_ownersForChildren.add(child, adoptPtrWillBeNoop(new PlaceholderFrameOwner));
     appendChild(child);
     child->initializeCoreFrame(frame()->host(), result.storedValue->value.get(), name);
@@ -836,7 +835,7 @@ void WebRemoteFrameImpl::setCoreFrame(PassRefPtrWillBeRawPtr<RemoteFrame> frame)
 WebRemoteFrameImpl* WebRemoteFrameImpl::fromFrame(RemoteFrame& frame)
 {
     if (!frame.client())
-        return 0;
+        return nullptr;
     return static_cast<RemoteFrameClientImpl*>(frame.client())->webFrame();
 }
 
@@ -847,6 +846,27 @@ void WebRemoteFrameImpl::initializeFromFrame(WebLocalFrame* source) const
     client()->initializeChildFrame(
         localFrameImpl->frame()->view()->frameRect(),
         localFrameImpl->frame()->view()->visibleContentScaleFactor());
+}
+
+void WebRemoteFrameImpl::setReplicatedOrigin(const WebSecurityOrigin& origin) const
+{
+    ASSERT(frame());
+    frame()->securityContext()->setReplicatedOrigin(origin);
+}
+
+void WebRemoteFrameImpl::didStartLoading()
+{
+    frame()->setIsLoading(true);
+}
+
+void WebRemoteFrameImpl::didStopLoading()
+{
+    frame()->setIsLoading(false);
+    if (parent() && parent()->isWebLocalFrame()) {
+        WebLocalFrameImpl* parentFrame =
+            toWebLocalFrameImpl(parent()->toWebLocalFrame());
+        parentFrame->frame()->loader().checkCompleted();
+    }
 }
 
 } // namespace blink

@@ -29,7 +29,6 @@
 #define ExecutionContext_h
 
 #include "core/dom/ActiveDOMObject.h"
-#include "core/dom/SandboxFlags.h"
 #include "core/dom/SecurityContext.h"
 #include "core/fetch/CrossOriginAccessControl.h"
 #include "core/frame/ConsoleTypes.h"
@@ -50,7 +49,6 @@ class LocalDOMWindow;
 class ErrorEvent;
 class EventQueue;
 class ExecutionContextTask;
-class ScriptState;
 class PublicURLManager;
 class SecurityOrigin;
 class ScriptCallStack;
@@ -69,7 +67,6 @@ public:
     virtual bool isJSExecutionForbidden() const { return false; }
     SecurityOrigin* securityOrigin();
     ContentSecurityPolicy* contentSecurityPolicy();
-    virtual void didUpdateSecurityOrigin() = 0;
     const KURL& url() const;
     KURL completeURL(const String& url) const;
     virtual void disableEval(const String& errorMessage) = 0;
@@ -122,14 +119,20 @@ public:
 
     void didChangeTimerAlignmentInterval();
 
-    SandboxFlags sandboxFlags() const { return m_sandboxFlags; }
-    bool isSandboxed(SandboxFlags mask) const { return m_sandboxFlags & mask; }
-    void enforceSandboxFlags(SandboxFlags mask);
+    int timerNestingLevel() { return m_timerNestingLevel; }
+    void setTimerNestingLevel(int level) { m_timerNestingLevel = level; }
 
     PassOwnPtr<LifecycleNotifier<ExecutionContext> > createLifecycleNotifier();
 
     virtual EventTarget* errorEventTarget() = 0;
     virtual EventQueue* eventQueue() const = 0;
+
+    void enforceStrictMixedContentChecking() { m_strictMixedContentCheckingEnforced = true; }
+    bool shouldEnforceStrictMixedContentChecking() const { return m_strictMixedContentCheckingEnforced; }
+
+    void allowWindowFocus();
+    void consumeWindowFocus();
+    bool isWindowFocusAllowed() const;
 
 protected:
     ExecutionContext();
@@ -155,11 +158,10 @@ private:
     int installNewTimeout(PassOwnPtr<ScheduledAction>, int timeout, bool singleShot);
     void removeTimeoutByID(int timeoutID); // This makes underlying DOMTimer instance destructed.
 
-    SandboxFlags m_sandboxFlags;
-
     int m_circularSequentialID;
-    typedef HashMap<int, OwnPtr<DOMTimer> > TimeoutMap;
+    typedef WillBeHeapHashMap<int, RefPtrWillBeMember<DOMTimer> > TimeoutMap;
     TimeoutMap m_timeouts;
+    int m_timerNestingLevel;
 
     bool m_inDispatchErrorEvent;
     class PendingException;
@@ -168,12 +170,20 @@ private:
     bool m_activeDOMObjectsAreSuspended;
     bool m_activeDOMObjectsAreStopped;
 
-    OwnPtr<PublicURLManager> m_publicURLManager;
+    OwnPtrWillBeMember<PublicURLManager> m_publicURLManager;
+
+    bool m_strictMixedContentCheckingEnforced;
 
     // The location of this member is important; to make sure contextDestroyed() notification on
     // ExecutionContext's members (notably m_timeouts) is called before they are destructed,
     // m_lifecycleNotifer should be placed *after* such members.
     OwnPtr<ContextLifecycleNotifier> m_lifecycleNotifier;
+
+    // Counter that keeps track of how many window focus calls are allowed for
+    // this ExecutionContext. Callers are expected to call |allowWindowFocus()|
+    // and |consumeWindowFocus()| in order to increment and decrement the
+    // counter.
+    int m_windowFocusTokens;
 };
 
 } // namespace blink

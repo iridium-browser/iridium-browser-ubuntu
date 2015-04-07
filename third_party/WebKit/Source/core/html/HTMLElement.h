@@ -96,8 +96,11 @@ public:
 
     static const AtomicString& eventParameterName();
 
+    HTMLMenuElement* assignedContextMenu() const;
     HTMLMenuElement* contextMenu() const;
     void setContextMenu(HTMLMenuElement*);
+
+    virtual String altText() const { return String(); }
 
 protected:
     HTMLElement(const QualifiedName& tagName, Document&, ConstructionType);
@@ -119,8 +122,8 @@ protected:
 private:
     virtual String nodeName() const override final;
 
-    bool isHTMLElement() const WTF_DELETED_FUNCTION; // This will catch anyone doing an unnecessary check.
-    bool isStyledElement() const WTF_DELETED_FUNCTION; // This will catch anyone doing an unnecessary check.
+    bool isHTMLElement() const = delete; // This will catch anyone doing an unnecessary check.
+    bool isStyledElement() const = delete; // This will catch anyone doing an unnecessary check.
 
     void mapLanguageAttributeToLocale(const AtomicString&, MutableStylePropertySet*);
 

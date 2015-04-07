@@ -20,6 +20,8 @@ namespace gcm {
 // Acts as a bridge between GCM API and GCMClient layer for testing purposes.
 class FakeGCMProfileService : public GCMProfileService {
  public:
+  typedef base::Callback<void(const std::string&)> UnregisterCallback;
+
   // Helper function to be used with
   // KeyedService::SetTestingFactory().
   static KeyedService* Build(content::BrowserContext* context);
@@ -35,6 +37,8 @@ class FakeGCMProfileService : public GCMProfileService {
                     const GCMClient::OutgoingMessage& message);
 
   void AddExpectedUnregisterResponse(GCMClient::Result result);
+
+  void SetUnregisterCallback(const UnregisterCallback& callback);
 
   const GCMClient::OutgoingMessage& last_sent_message() const {
     return last_sent_message_;
@@ -60,11 +64,15 @@ class FakeGCMProfileService : public GCMProfileService {
   // Indicates whether the service will collect paramters of the calls for
   // furter verification in tests.
   bool collect_;
+  // Used to give each registration a unique registration id. Does not decrease
+  // when unregister is called.
+  int registration_count_;
   std::string last_registered_app_id_;
   std::vector<std::string> last_registered_sender_ids_;
   std::list<GCMClient::Result> unregister_responses_;
   GCMClient::OutgoingMessage last_sent_message_;
   std::string last_receiver_id_;
+  UnregisterCallback unregister_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeGCMProfileService);
 };

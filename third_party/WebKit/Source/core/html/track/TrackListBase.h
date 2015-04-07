@@ -9,13 +9,13 @@
 
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/track/TrackEvent.h"
+#include "core/html/track/TrackEventInit.h"
 
 namespace blink {
 
 template<class T>
-class TrackListBase : public RefCountedWillBeGarbageCollectedFinalized<TrackListBase<T>>, public EventTargetWithInlineData {
+class TrackListBase : public EventTargetWithInlineData, public RefCountedWillBeNoBase<TrackListBase<T>> {
     REFCOUNTED_EVENT_TARGET(TrackListBase);
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(TrackListBase);
 public:
     explicit TrackListBase(HTMLMediaElement* mediaElement)
         : m_mediaElement(mediaElement)
@@ -118,11 +118,7 @@ public:
 private:
     void scheduleTrackEvent(const AtomicString& eventName, PassRefPtrWillBeRawPtr<T> track)
     {
-        TrackEventInit initializer;
-        initializer.track = track;
-        initializer.bubbles = false;
-        initializer.cancelable = false;
-        RefPtrWillBeRawPtr<Event> event = TrackEvent::create(eventName, initializer);
+        RefPtrWillBeRawPtr<Event> event = TrackEvent::create(eventName, track);
         event->setTarget(this);
         m_mediaElement->scheduleEvent(event);
     }

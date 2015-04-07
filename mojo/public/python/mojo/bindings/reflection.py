@@ -42,11 +42,11 @@ class MojoEnumType(type):
         raise ValueError('incorrect value: %r' % value)
     return type.__new__(mcs, name, bases, dictionary)
 
-  def __setattr__(mcs, key, value):
-    raise AttributeError, 'can\'t set attribute'
+  def __setattr__(cls, key, value):
+    raise AttributeError('can\'t set attribute')
 
-  def __delattr__(mcs, key):
-    raise AttributeError, 'can\'t delete attribute'
+  def __delattr__(cls, key):
+    raise AttributeError('can\'t delete attribute')
 
 
 class MojoStructType(type):
@@ -117,10 +117,10 @@ class MojoStructType(type):
       return self._fields
     dictionary['AsDict'] = AsDict
 
-    def Deserialize(cls, data, handles):
+    def Deserialize(cls, context):
       result = cls.__new__(cls)
       fields = {}
-      serialization_object.Deserialize(fields, data, handles)
+      serialization_object.Deserialize(fields, context)
       result._fields = fields
       return result
     dictionary['Deserialize'] = classmethod(Deserialize)
@@ -131,12 +131,12 @@ class MojoStructType(type):
     return type.__new__(mcs, name, bases, dictionary)
 
   # Prevent adding new attributes, or mutating constants.
-  def __setattr__(mcs, key, value):
-    raise AttributeError, 'can\'t set attribute'
+  def __setattr__(cls, key, value):
+    raise AttributeError('can\'t set attribute')
 
   # Prevent deleting constants.
-  def __delattr__(mcs, key):
-    raise AttributeError, 'can\'t delete attribute'
+  def __delattr__(cls, key):
+    raise AttributeError('can\'t delete attribute')
 
 
 class MojoInterfaceType(type):
@@ -195,16 +195,16 @@ class MojoInterfaceType(type):
     return interface_class
 
   @property
-  def manager(mcs):
-    return mcs._interface_manager
+  def manager(cls):
+    return cls._interface_manager
 
   # Prevent adding new attributes, or mutating constants.
-  def __setattr__(mcs, key, value):
-    raise AttributeError, 'can\'t set attribute'
+  def __setattr__(cls, key, value):
+    raise AttributeError('can\'t set attribute')
 
   # Prevent deleting constants.
-  def __delattr__(mcs, key):
-    raise AttributeError, 'can\'t delete attribute'
+  def __delattr__(cls, key):
+    raise AttributeError('can\'t delete attribute')
 
 
 class InterfaceProxy(object):
@@ -476,8 +476,9 @@ def _ProxyMethodCall(method):
           try:
             assert message.header.message_type == method.ordinal
             payload = message.payload
-            response = method.response_struct.Deserialize(payload.data,
-                                                          payload.handles)
+            response = method.response_struct.Deserialize(
+                serialization.RootDeserializationContext(payload.data,
+                                                         payload.handles))
             as_dict = response.AsDict()
             if len(as_dict) == 1:
               value = as_dict.values()[0]
@@ -533,7 +534,8 @@ def _StubAccept(methods):
       method = methods_by_ordinal[header.message_type]
       payload = message.payload
       parameters = method.parameters_struct.Deserialize(
-          payload.data, payload.handles).AsDict()
+          serialization.RootDeserializationContext(
+              payload.data, payload.handles)).AsDict()
       response = getattr(self.impl, method.name)(**parameters)
       if header.expects_response:
         def SendResponse(response):

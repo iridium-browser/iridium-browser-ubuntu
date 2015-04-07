@@ -29,8 +29,8 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/HTMLNames.h"
 #include "core/InputTypeNames.h"
-#include "core/accessibility/AXObjectCache.h"
 #include "core/css/StylePropertySet.h"
+#include "core/dom/AXObjectCache.h"
 #include "core/dom/CharacterData.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
@@ -298,8 +298,7 @@ void FrameSelection::setSelection(const VisibleSelection& newSelection, SetSelec
 
     notifyAccessibilityForSelectionChange();
     notifyCompositorForSelectionChange();
-    notifyEventHandlerForSelectionChange();
-    m_frame->domWindow()->enqueueDocumentEvent(Event::create(EventTypeNames::selectionchange));
+    m_frame->localDOMWindow()->enqueueDocumentEvent(Event::create(EventTypeNames::selectionchange));
 }
 
 static bool removingNodeRemovesPosition(Node& node, const Position& position)
@@ -393,7 +392,13 @@ static Position updatePositionAfterAdoptingTextReplacement(const Position& posit
     if (positionOffset > offset + oldLength)
         positionOffset = positionOffset - oldLength + newLength;
 
-    ASSERT_WITH_SECURITY_IMPLICATION(positionOffset <= node->length());
+    // Due to case folding (http://unicode.org/Public/UCD/latest/ucd/CaseFolding.txt),
+    // RenderText length may be different from Text length.  A correct implementation
+    // would translate the RenderText offset to a Text offset; this is just a safety
+    // precaution to avoid offset values that run off the end of the Text.
+    if (positionOffset > node->length())
+        positionOffset = node->length();
+
     // CharacterNode in VisibleSelection must be Text node, because Comment
     // and ProcessingInstruction node aren't visible.
     return Position(toText(node), positionOffset);
@@ -1265,9 +1270,9 @@ void FrameSelection::invalidateCaretRect()
         return;
 
     RenderView* view = m_frame->document()->renderView();
-    if (m_previousCaretNode && shouldRepaintCaret(view, m_previousCaretNode->isContentEditable()))
+    if (m_previousCaretNode && (shouldRepaintCaret(*m_previousCaretNode) || shouldRepaintCaret(view)))
         invalidateLocalCaretRect(m_previousCaretNode.get(), m_previousCaretRect);
-    if (newNode && shouldRepaintCaret(view, newNode->isContentEditable()))
+    if (newNode && (shouldRepaintCaret(*newNode) || shouldRepaintCaret(view)))
         invalidateLocalCaretRect(newNode, newRect);
 
     m_previousCaretNode = newNode;
@@ -1454,11 +1459,6 @@ void FrameSelection::notifyCompositorForSelectionChange()
     scheduleVisualUpdate();
 }
 
-void FrameSelection::notifyEventHandlerForSelectionChange()
-{
-    m_frame->eventHandler().notifySelectionChanged();
-}
-
 void FrameSelection::focusedOrActiveStateChanged()
 {
     bool activeAndFocused = isFocusedAndActive();
@@ -1563,49 +1563,8 @@ void FrameSelection::updateAppearance(ResetCaretBlinkOption option)
         setCaretRectNeedsUpdate();
 
     RenderView* view = m_frame->contentRenderer();
-    if (!view)
-        return;
-
-    // Construct a new VisibleSolution, since m_selection is not necessarily valid, and the following steps
-    // assume a valid selection. See <https://bugs.webkit.org/show_bug.cgi?id=69563> and <rdar://problem/10232866>.
-
-    VisibleSelection selection;
-    if (isTextFormControl(m_selection)) {
-        Position endPosition = paintBlockCursor ? m_selection.extent().next() : m_selection.end();
-        selection.setWithoutValidation(m_selection.start(), endPosition);
-    } else {
-        VisiblePosition endVisiblePosition = paintBlockCursor ? modifyExtendingForward(CharacterGranularity) : m_selection.visibleEnd();
-        selection = VisibleSelection(m_selection.visibleStart(), endVisiblePosition);
-    }
-
-    if (!selection.isRange()) {
-        view->clearSelection();
-        return;
-    }
-
-    m_frame->document()->updateLayoutIgnorePendingStylesheets();
-
-    // Use the rightmost candidate for the start of the selection, and the leftmost candidate for the end of the selection.
-    // Example: foo <a>bar</a>.  Imagine that a line wrap occurs after 'foo', and that 'bar' is selected.   If we pass [foo, 3]
-    // as the start of the selection, the selection painting code will think that content on the line containing 'foo' is selected
-    // and will fill the gap before 'bar'.
-    Position startPos = selection.start();
-    Position candidate = startPos.downstream();
-    if (candidate.isCandidate())
-        startPos = candidate;
-    Position endPos = selection.end();
-    candidate = endPos.upstream();
-    if (candidate.isCandidate())
-        endPos = candidate;
-
-    // We can get into a state where the selection endpoints map to the same VisiblePosition when a selection is deleted
-    // because we don't yet notify the FrameSelection of text removal.
-    if (startPos.isNotNull() && endPos.isNotNull() && selection.visibleStart() != selection.visibleEnd()) {
-        RenderObject* startRenderer = startPos.deprecatedNode()->renderer();
-        RenderObject* endRenderer = endPos.deprecatedNode()->renderer();
-        if (startRenderer && endRenderer && startRenderer->view() == view && endRenderer->view() == view)
-            view->setSelection(startRenderer, startPos.deprecatedEditingOffset(), endRenderer, endPos.deprecatedEditingOffset());
-    }
+    if (view)
+        view->setSelection(*this);
 }
 
 void FrameSelection::setCaretVisibility(CaretVisibility visibility)

@@ -28,24 +28,25 @@
 #ifndef HTMLCanvasElement_h
 #define HTMLCanvasElement_h
 
+#include "bindings/core/v8/ScriptValue.h"
+#include "bindings/core/v8/UnionTypesCore.h"
 #include "core/dom/Document.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/canvas/CanvasImageSource.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/IntSize.h"
-#include "platform/graphics/Canvas2DLayerBridge.h"
 #include "platform/graphics/GraphicsTypes.h"
+#include "platform/graphics/GraphicsTypes3D.h"
 #include "platform/graphics/ImageBufferClient.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebThread.h"
-#include "wtf/Forward.h"
 
 #define CanvasDefaultInterpolationQuality InterpolationLow
 
 namespace blink {
 
 class AffineTransform;
-class CanvasContextAttributes;
+class CanvasContextCreationAttributes;
 class CanvasRenderingContext;
 class GraphicsContext;
 class GraphicsContextStateSaver;
@@ -101,7 +102,11 @@ public:
         reset();
     }
 
-    CanvasRenderingContext* getContext(const String&, CanvasContextAttributes* attributes = 0);
+    // Called by HTMLCanvasElement's V8 bindings.
+    ScriptValue getContext(ScriptState*, const String&, const CanvasContextCreationAttributes&);
+    // Called by Document::getCSSCanvasContext as well as above getContext() variant.
+    void getContext(const String&, const CanvasContextCreationAttributes&, CanvasRenderingContext2DOrWebGLRenderingContext&);
+    bool isPaintable() const;
 
     static String toEncodingMimeType(const String& mimeType);
     String toDataURL(const String& mimeType, const double* quality, ExceptionState&) const;
@@ -120,9 +125,8 @@ public:
 
     void ensureUnacceleratedImageBuffer();
     ImageBuffer* buffer() const;
-    Image* copiedImage() const;
+    PassRefPtr<Image> copiedImage(SourceDrawingBuffer) const;
     void clearCopiedImage();
-    PassRefPtrWillBeRawPtr<ImageData> getImageData() const;
 
     SecurityOrigin* securityOrigin() const;
     bool originClean() const { return m_originClean; }
@@ -149,11 +153,13 @@ public:
     virtual PassRefPtr<Image> getSourceImageForCanvas(SourceImageMode, SourceImageStatus*) const override;
     virtual bool wouldTaintOrigin(SecurityOrigin*) const override;
     virtual FloatSize sourceSize() const override;
+    virtual bool isCanvasElement() const override { return true; }
 
     // ImageBufferClient implementation
     virtual void notifySurfaceInvalid() override;
     virtual bool isDirty() override { return !m_dirtyRect.isEmpty(); }
     virtual void didFinalizeFrame() override;
+    virtual void restoreCanvasMatrixClipStack() override;
 
     // Implementation of WebThread::TaskObserver methods
     virtual void willProcessTask() override;
@@ -169,6 +175,7 @@ private:
 
     virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual void didRecalcStyle(StyleRecalcChange) override;
     virtual bool areAuthorShadowsAllowed() const override { return false; }
 
     void reset();
@@ -177,7 +184,6 @@ private:
     PassOwnPtr<ImageBufferSurface> createImageBufferSurface(const IntSize& deviceSize, int* msaaSampleCount);
     void createImageBuffer();
     void createImageBufferInternal();
-    void clearImageBuffer();
     bool shouldUseDisplayList(const IntSize& deviceSize);
 
     void resetDirtyRect();
@@ -188,7 +194,7 @@ private:
 
     void updateExternallyAllocatedMemory() const;
 
-    String toDataURLInternal(const String& mimeType, const double* quality, bool isSaving = false) const;
+    String toDataURLInternal(const String& mimeType, const double* quality, SourceDrawingBuffer) const;
 
     WillBeHeapHashSet<RawPtrWillBeWeakMember<CanvasObserver>> m_observers;
 
@@ -207,7 +213,7 @@ private:
     // It prevents HTMLCanvasElement::buffer() from continuously re-attempting to allocate an imageBuffer
     // after the first attempt failed.
     mutable bool m_didFailToCreateImageBuffer;
-    mutable bool m_didClearImageBuffer;
+    bool m_imageBufferIsClear;
     OwnPtr<ImageBuffer> m_imageBuffer;
     mutable OwnPtr<GraphicsContextStateSaver> m_contextStateSaver;
 

@@ -18,6 +18,7 @@
 #include "webrtc/common_audio/resampler/include/push_resampler.h"
 #include "webrtc/common_audio/resampler/push_sinc_resampler.h"
 #include "webrtc/common_audio/signal_processing/include/signal_processing_library.h"
+#include "webrtc/modules/audio_processing/common.h"
 #include "webrtc/modules/audio_processing/include/audio_processing.h"
 #include "webrtc/modules/audio_processing/test/test_utils.h"
 #include "webrtc/modules/interface/module_common_types.h"
@@ -825,6 +826,7 @@ TEST_F(ApmTest, EchoCancellation) {
 }
 
 TEST_F(ApmTest, DISABLED_EchoCancellationReportsCorrectDelays) {
+  // TODO(bjornv): Fix this test to work with DA-AEC.
   // Enable AEC only.
   EXPECT_EQ(apm_->kNoError,
             apm_->echo_cancellation()->enable_drift_compensation(false));

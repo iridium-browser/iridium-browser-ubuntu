@@ -12,6 +12,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/observer_list.h"
 #include "chrome/browser/chromeos/policy/server_backed_state_keys_broker.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_manager.h"
@@ -32,10 +33,17 @@ class PrefService;
 namespace policy {
 
 class DeviceCloudPolicyStoreChromeOS;
+class EnterpriseInstallAttributes;
 
 // CloudPolicyManager specialization for device policy on Chrome OS.
 class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
  public:
+  class Observer {
+   public:
+    // Invoked when the device cloud policy manager connects.
+    virtual void OnDeviceCloudPolicyManagerConnected() = 0;
+  };
+
   // |task_runner| is the runner for policy refresh tasks.
   DeviceCloudPolicyManagerChromeOS(
       scoped_ptr<DeviceCloudPolicyStoreChromeOS> store,
@@ -45,6 +53,9 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
 
   // Initializes state keys and requisition information.
   void Initialize(PrefService* local_state);
+
+  void AddDeviceCloudPolicyManagerObserver(Observer* observer);
+  void RemoveDeviceCloudPolicyManagerObserver(Observer* observer);
 
   // TODO(davidyu): Move these two functions to a more appropriate place. See
   // http://crbug.com/383695.
@@ -73,8 +84,7 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
 
   // Starts the connection via |client_to_connect|.
   void StartConnection(scoped_ptr<CloudPolicyClient> client_to_connect,
-                       scoped_ptr<CloudPolicyClient::StatusProvider>
-                           device_status_provider);
+                       EnterpriseInstallAttributes* install_attributes);
 
   DeviceCloudPolicyStoreChromeOS* device_store() {
     return device_store_.get();
@@ -86,6 +96,8 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
 
   // Initializes requisition settings at OOBE with values from VPD.
   void InitializeRequisition();
+
+  void NotifyConnected();
 
   // Points to the same object as the base CloudPolicyManager::store(), but with
   // actual device policy specific type.
@@ -100,10 +112,7 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
   scoped_ptr<chromeos::attestation::AttestationPolicyObserver>
       attestation_policy_observer_;
 
-  // TODO(davidyu): Currently we need to keep this object alive while
-  // CloudPolicyClient is in use. We should have CPC take over the
-  // ownership of this object instead. See http://crbug.com/383696.
-  scoped_ptr<CloudPolicyClient::StatusProvider> device_status_provider_;
+  ObserverList<Observer, true> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(DeviceCloudPolicyManagerChromeOS);
 };

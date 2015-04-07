@@ -47,6 +47,7 @@
 #include "platform/geometry/LayoutRect.h"
 #include "platform/graphics/CompositingReasons.h"
 #include "platform/graphics/PaintInvalidationReason.h"
+#include "platform/graphics/paint/DisplayItem.h"
 #include "platform/transforms/TransformationMatrix.h"
 
 namespace blink {
@@ -57,7 +58,6 @@ class Document;
 class HitTestLocation;
 class HitTestResult;
 class InlineBox;
-class InlineFlowBox;
 class Position;
 class PositionWithAffinity;
 class PseudoStyleRequest;
@@ -67,6 +67,7 @@ class RenderFlowThread;
 class RenderGeometryMap;
 class RenderLayer;
 class RenderLayerModelObject;
+class RenderMultiColumnSpannerPlaceholder;
 class RenderView;
 class TransformState;
 
@@ -357,7 +358,7 @@ public:
     bool isRenderIFrame() const { return isOfType(RenderObjectRenderIFrame); }
     bool isRenderImage() const { return isOfType(RenderObjectRenderImage); }
     bool isRenderMultiColumnSet() const { return isOfType(RenderObjectRenderMultiColumnSet); }
-    bool isRenderMultiColumnSpannerSet() const { return isOfType(RenderObjectRenderMultiColumnSpannerSet); }
+    bool isRenderMultiColumnSpannerPlaceholder() const { return isOfType(RenderObjectRenderMultiColumnSpannerPlaceholder); }
     bool isRenderRegion() const { return isOfType(RenderObjectRenderRegion); }
     bool isRenderScrollbarPart() const { return isOfType(RenderObjectRenderScrollbarPart); }
     bool isRenderTableCol() const { return isOfType(RenderObjectRenderTableCol); }
@@ -468,6 +469,14 @@ public:
     virtual void setNeedsTransformUpdate() { }
     virtual void setNeedsBoundariesUpdate();
 
+    bool isBlendingAllowed() const { return !isSVG() || (isSVGContainer() && !isSVGHiddenContainer()) || isSVGShape() || isSVGImage() || isSVGText(); }
+    virtual bool hasNonIsolatedBlendingDescendants() const { return false; }
+    enum DescendantIsolationState {
+        DescendantIsolationRequired,
+        DescendantIsolationNeedsUpdate,
+    };
+    virtual void descendantIsolationRequirementsChanged(DescendantIsolationState) { }
+
     // Per SVG 1.1 objectBoundingBox ignores clipping, masking, filter effects, opacity and stroke-width.
     // This is used for all computation of objectBoundingBox relative units and by SVGLocatable::getBBox().
     // NOTE: Markers are not specifically ignored here by SVG 1.1 spec, but we ignore them
@@ -493,13 +502,6 @@ public:
     // coordinates instead of in paint invalidaiton container coordinates. Eventually the
     // rest of the rendering tree will move to a similar model.
     virtual bool nodeAtFloatPoint(const HitTestRequest&, HitTestResult&, const FloatPoint& pointInParent, HitTestAction);
-
-    virtual bool canHaveWhitespaceChildren() const
-    {
-        if (isTable() || isTableRow() || isTableSection() || isRenderTableCol() || isFrameSet() || isFlexibleBox() || isRenderGrid())
-            return false;
-        return true;
-    }
 
     bool isAnonymous() const { return m_bitfields.isAnonymous(); }
     bool isAnonymousBlock() const
@@ -532,8 +534,7 @@ public:
     bool isHorizontalWritingMode() const { return m_bitfields.horizontalWritingMode(); }
     bool hasFlippedBlocksWritingMode() const
     {
-        return document().containsAnyRareWritingMode()
-            && style()->slowIsFlippedBlocksWritingMode();
+        return style()->isFlippedBlocksWritingMode();
     }
 
     bool hasLayer() const { return m_bitfields.hasLayer(); }
@@ -596,8 +597,6 @@ public:
 
     bool hasFilter() const { return style() && style()->hasFilter(); }
 
-    bool hasBlendMode() const;
-
     bool hasShapeOutside() const { return style() && style()->shapeOutside(); }
 
     inline bool preservesNewline() const;
@@ -628,12 +627,15 @@ public:
     void clearNode() { m_node = nullptr; }
 
     // Returns the styled node that caused the generation of this renderer.
-    // This is the same as node() except for renderers of :before and :after
-    // pseudo elements for which their parent node is returned.
+    // This is the same as node() except for renderers of :before, :after and
+    // :first-letter pseudo elements for which their parent node is returned.
     Node* generatingNode() const { return isPseudoElement() ? node()->parentOrShadowHostNode() : node(); }
 
     Document& document() const { return m_node->document(); }
     LocalFrame* frame() const { return document().frame(); }
+
+    virtual RenderMultiColumnSpannerPlaceholder* spannerPlaceholder() const { return 0; }
+    bool isColumnSpanAll() const { return style()->columnSpan() == ColumnSpanAll && spannerPlaceholder(); }
 
     // Returns the object containing this one. Can be different from parent for positioned elements.
     // If paintInvalidationContainer and paintInvalidationContainerSkipped are not null, on return *paintInvalidationContainerSkipped
@@ -696,7 +698,7 @@ public:
     void updateShapeImage(const ShapeValue*, const ShapeValue*);
 
     // paintOffset is the offset from the origin of the GraphicsContext at which to paint the current object.
-    virtual void paint(PaintInfo&, const LayoutPoint& paintOffset);
+    virtual void paint(const PaintInfo&, const LayoutPoint& paintOffset);
 
     // Subclasses must reimplement this method to compute the size and position
     // of this object and all its descendants.
@@ -865,14 +867,12 @@ public:
     // Returns the rect that should have paint invalidated whenever this object changes. The rect is in the view's
     // coordinate space. This method deals with outlines and overflow.
     virtual LayoutRect absoluteClippedOverflowRect() const;
-    IntRect pixelSnappedAbsoluteClippedOverflowRect() const;
     virtual LayoutRect clippedOverflowRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, const PaintInvalidationState* = 0) const;
     virtual LayoutRect rectWithOutlineForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, LayoutUnit outlineWidth, const PaintInvalidationState* = 0) const;
 
     // Given a rect in the object's coordinate space, compute a rect suitable for invalidating paints of
     // that rect in the coordinate space of paintInvalidationContainer.
     virtual void mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect&, const PaintInvalidationState*) const;
-    virtual void computeFloatRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, FloatRect& paintInvalidationRect, const PaintInvalidationState*) const;
 
     // Return the offset to the column in which the specified point (in flow-thread coordinates)
     // lives. This is used to convert a flow-thread point to a visual point.
@@ -900,7 +900,7 @@ public:
     SelectionState selectionState() const { return m_bitfields.selectionState(); }
     virtual void setSelectionState(SelectionState state) { m_bitfields.setSelectionState(state); }
     inline void setSelectionStateIfNeeded(SelectionState);
-    bool canUpdateSelectionOnRootLineBoxes();
+    bool canUpdateSelectionOnRootLineBoxes() const;
 
     // A single rectangle that encompasses all of the selected objects within this object.  Used to determine the tightest
     // possible bounding box for the selection. The rect returned is in the coordinate space of the paint invalidation container's backing.
@@ -956,6 +956,7 @@ public:
     virtual void imageChanged(ImageResource*, const IntRect* = 0) override final;
     virtual void imageChanged(WrappedImagePtr, const IntRect* = 0) { }
     virtual bool willRenderImage(ImageResource*) override final;
+    virtual bool getImageAnimationPolicy(ImageResource*, ImageAnimationPolicy&) override final;
 
     void selectionStartEnd(int& spos, int& epos) const;
 
@@ -981,9 +982,9 @@ public:
     bool shouldUseTransformFromContainer(const RenderObject* container) const;
     void getTransformFromContainer(const RenderObject* container, const LayoutSize& offsetInContainer, TransformationMatrix&) const;
 
-    bool createsGroup() const { return isTransparent() || hasMask() || hasFilter() || hasBlendMode(); }
+    bool createsGroup() const { return isTransparent() || hasMask() || hasFilter() || style()->hasBlendMode(); }
 
-    virtual void addFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset, const RenderLayerModelObject* paintContainer) const { }
+    virtual void addFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset) const { }
 
     // Compute a list of hit-test rectangles per layer rooted at this renderer.
     virtual void computeLayerHitTestRects(LayerHitTestRects&) const;
@@ -1049,12 +1050,14 @@ public:
         return layoutDidGetCalledSinceLastFrame() || mayNeedPaintInvalidation() || shouldDoFullPaintInvalidation() || shouldInvalidateSelection();
     }
 
-    bool supportsPaintInvalidationStateCachedOffsets() const { return !hasColumns() && !hasTransformRelatedProperty() && !hasReflection() && !style()->slowIsFlippedBlocksWritingMode(); }
+    virtual bool supportsPaintInvalidationStateCachedOffsets() const { return !hasColumns() && !hasTransformRelatedProperty() && !hasReflection() && !style()->isFlippedBlocksWritingMode(); }
 
     void setNeedsOverflowRecalcAfterStyleChange();
     void markContainingBlocksForOverflowRecalc();
 
     virtual LayoutRect viewRect() const;
+
+    DisplayItemClient displayItemClient() const { return static_cast<DisplayItemClientInternalVoid*>((void*)this); }
 
 protected:
     enum RenderObjectType {
@@ -1084,7 +1087,7 @@ protected:
         RenderObjectRenderImage,
         RenderObjectRenderInline,
         RenderObjectRenderMultiColumnSet,
-        RenderObjectRenderMultiColumnSpannerSet,
+        RenderObjectRenderMultiColumnSpannerPlaceholder,
         RenderObjectRenderPart,
         RenderObjectRenderRegion,
         RenderObjectRenderScrollbarPart,
@@ -1139,11 +1142,7 @@ protected:
     void propagateStyleToAnonymousChildren(bool blockChildrenOnly = false);
     virtual void updateAnonymousChildStyle(const RenderObject* child, RenderStyle* style) const { }
 
-public:
-    void paintOutline(PaintInfo&, const LayoutRect&);
 protected:
-    void addChildFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset, const RenderLayerModelObject* paintContainer) const;
-
     void clearLayoutRootIfNeeded() const;
     virtual void willBeDestroyed();
     void postDestroy();
@@ -1403,6 +1402,8 @@ private:
 
     static unsigned s_instanceCount;
 };
+
+WILL_NOT_BE_EAGERLY_TRACED_CLASS(RenderObject);
 
 // FIXME: remove this once the render object lifecycle ASSERTS are no longer hit.
 class DeprecatedDisableModifyRenderTreeStructureAsserts {

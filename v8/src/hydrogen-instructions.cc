@@ -796,7 +796,6 @@ bool HInstruction::CanDeoptimize() {
     case HValue::kCallNew:
     case HValue::kCallNewArray:
     case HValue::kCallStub:
-    case HValue::kCallWithDescriptor:
     case HValue::kCapturedObject:
     case HValue::kClassOfTestAndBranch:
     case HValue::kCompareGeneric:
@@ -863,6 +862,7 @@ bool HInstruction::CanDeoptimize() {
     case HValue::kBranch:
     case HValue::kCallJSFunction:
     case HValue::kCallRuntime:
+    case HValue::kCallWithDescriptor:
     case HValue::kChange:
     case HValue::kCheckHeapObject:
     case HValue::kCheckInstanceType:
@@ -1155,12 +1155,10 @@ std::ostream& HReturn::PrintDataTo(std::ostream& os) const {  // NOLINT
 
 
 Representation HBranch::observed_input_representation(int index) {
-  static const ToBooleanStub::Types tagged_types(
-      ToBooleanStub::NULL_TYPE |
-      ToBooleanStub::SPEC_OBJECT |
-      ToBooleanStub::STRING |
-      ToBooleanStub::SYMBOL);
-  if (expected_input_types_.ContainsAnyOf(tagged_types)) {
+  if (expected_input_types_.Contains(ToBooleanStub::NULL_TYPE) ||
+      expected_input_types_.Contains(ToBooleanStub::SPEC_OBJECT) ||
+      expected_input_types_.Contains(ToBooleanStub::STRING) ||
+      expected_input_types_.Contains(ToBooleanStub::SYMBOL)) {
     return Representation::Tagged();
   }
   if (expected_input_types_.Contains(ToBooleanStub::UNDEFINED)) {
@@ -1718,6 +1716,13 @@ std::ostream& HCallStub::PrintDataTo(std::ostream& os) const {  // NOLINT
 }
 
 
+Code::Flags HTailCallThroughMegamorphicCache::flags() const {
+  Code::Flags code_flags = Code::RemoveTypeAndHolderFromFlags(
+      Code::ComputeHandlerFlags(Code::LOAD_IC));
+  return code_flags;
+}
+
+
 std::ostream& HTailCallThroughMegamorphicCache::PrintDataTo(
     std::ostream& os) const {  // NOLINT
   for (int i = 0; i < OperandCount(); i++) {
@@ -1789,7 +1794,7 @@ Range* HChange::InferRange(Zone* zone) {
 
 
 Range* HConstant::InferRange(Zone* zone) {
-  if (has_int32_value_) {
+  if (HasInteger32Value()) {
     Range* result = new(zone) Range(int32_value_, int32_value_);
     result->set_can_be_minus_zero(false);
     return result;
@@ -2606,7 +2611,7 @@ std::ostream& HSimulate::PrintDataTo(std::ostream& os) const {  // NOLINT
 
 
 void HSimulate::ReplayEnvironment(HEnvironment* env) {
-  if (done_with_replay_) return;
+  if (is_done_with_replay()) return;
   DCHECK(env != NULL);
   env->set_ast_id(ast_id());
   env->Drop(pop_count());
@@ -2618,7 +2623,7 @@ void HSimulate::ReplayEnvironment(HEnvironment* env) {
       env->Push(value);
     }
   }
-  done_with_replay_ = true;
+  set_done_with_replay();
 }
 
 
@@ -2662,48 +2667,56 @@ void HEnterInlined::RegisterReturnTarget(HBasicBlock* return_target,
 
 
 std::ostream& HEnterInlined::PrintDataTo(std::ostream& os) const {  // NOLINT
-  return os << function()->debug_name()->ToCString().get()
-            << ", id=" << function()->id().ToInt();
+  return os << function()->debug_name()->ToCString().get();
 }
 
 
 static bool IsInteger32(double value) {
-  double roundtrip_value = static_cast<double>(static_cast<int32_t>(value));
-  return bit_cast<int64_t>(roundtrip_value) == bit_cast<int64_t>(value);
+  if (value >= std::numeric_limits<int32_t>::min() &&
+      value <= std::numeric_limits<int32_t>::max()) {
+    double roundtrip_value = static_cast<double>(static_cast<int32_t>(value));
+    return bit_cast<int64_t>(roundtrip_value) == bit_cast<int64_t>(value);
+  }
+  return false;
 }
 
 
 HConstant::HConstant(Handle<Object> object, Representation r)
-  : HTemplateInstruction<0>(HType::FromValue(object)),
-    object_(Unique<Object>::CreateUninitialized(object)),
-    object_map_(Handle<Map>::null()),
-    has_stable_map_value_(false),
-    has_smi_value_(false),
-    has_int32_value_(false),
-    has_double_value_(false),
-    has_external_reference_value_(false),
-    is_not_in_new_space_(true),
-    boolean_value_(object->BooleanValue()),
-    is_undetectable_(false),
-    instance_type_(kUnknownInstanceType) {
+    : HTemplateInstruction<0>(HType::FromValue(object)),
+      object_(Unique<Object>::CreateUninitialized(object)),
+      object_map_(Handle<Map>::null()),
+      bit_field_(HasStableMapValueField::encode(false) |
+                 HasSmiValueField::encode(false) |
+                 HasInt32ValueField::encode(false) |
+                 HasDoubleValueField::encode(false) |
+                 HasExternalReferenceValueField::encode(false) |
+                 IsNotInNewSpaceField::encode(true) |
+                 BooleanValueField::encode(object->BooleanValue()) |
+                 IsUndetectableField::encode(false) |
+                 InstanceTypeField::encode(kUnknownInstanceType)) {
   if (object->IsHeapObject()) {
     Handle<HeapObject> heap_object = Handle<HeapObject>::cast(object);
     Isolate* isolate = heap_object->GetIsolate();
     Handle<Map> map(heap_object->map(), isolate);
-    is_not_in_new_space_ = !isolate->heap()->InNewSpace(*object);
-    instance_type_ = map->instance_type();
-    is_undetectable_ = map->is_undetectable();
+    bit_field_ = IsNotInNewSpaceField::update(
+        bit_field_, !isolate->heap()->InNewSpace(*object));
+    bit_field_ = InstanceTypeField::update(bit_field_, map->instance_type());
+    bit_field_ =
+        IsUndetectableField::update(bit_field_, map->is_undetectable());
     if (map->is_stable()) object_map_ = Unique<Map>::CreateImmovable(map);
-    has_stable_map_value_ = (instance_type_ == MAP_TYPE &&
-                             Handle<Map>::cast(heap_object)->is_stable());
+    bit_field_ = HasStableMapValueField::update(
+        bit_field_,
+        HasMapValue() && Handle<Map>::cast(heap_object)->is_stable());
   }
   if (object->IsNumber()) {
     double n = object->Number();
-    has_int32_value_ = IsInteger32(n);
+    bool has_int32_value = IsInteger32(n);
+    bit_field_ = HasInt32ValueField::update(bit_field_, has_int32_value);
     int32_value_ = DoubleToInt32(n);
-    has_smi_value_ = has_int32_value_ && Smi::IsValid(int32_value_);
+    bit_field_ = HasSmiValueField::update(
+        bit_field_, has_int32_value && Smi::IsValid(int32_value_));
     double_value_ = n;
-    has_double_value_ = true;
+    bit_field_ = HasDoubleValueField::update(bit_field_, true);
     // TODO(titzer): if this heap number is new space, tenure a new one.
   }
 
@@ -2711,112 +2724,104 @@ HConstant::HConstant(Handle<Object> object, Representation r)
 }
 
 
-HConstant::HConstant(Unique<Object> object,
-                     Unique<Map> object_map,
-                     bool has_stable_map_value,
-                     Representation r,
-                     HType type,
-                     bool is_not_in_new_space,
-                     bool boolean_value,
-                     bool is_undetectable,
-                     InstanceType instance_type)
-  : HTemplateInstruction<0>(type),
-    object_(object),
-    object_map_(object_map),
-    has_stable_map_value_(has_stable_map_value),
-    has_smi_value_(false),
-    has_int32_value_(false),
-    has_double_value_(false),
-    has_external_reference_value_(false),
-    is_not_in_new_space_(is_not_in_new_space),
-    boolean_value_(boolean_value),
-    is_undetectable_(is_undetectable),
-    instance_type_(instance_type) {
+HConstant::HConstant(Unique<Object> object, Unique<Map> object_map,
+                     bool has_stable_map_value, Representation r, HType type,
+                     bool is_not_in_new_space, bool boolean_value,
+                     bool is_undetectable, InstanceType instance_type)
+    : HTemplateInstruction<0>(type),
+      object_(object),
+      object_map_(object_map),
+      bit_field_(HasStableMapValueField::encode(has_stable_map_value) |
+                 HasSmiValueField::encode(false) |
+                 HasInt32ValueField::encode(false) |
+                 HasDoubleValueField::encode(false) |
+                 HasExternalReferenceValueField::encode(false) |
+                 IsNotInNewSpaceField::encode(is_not_in_new_space) |
+                 BooleanValueField::encode(boolean_value) |
+                 IsUndetectableField::encode(is_undetectable) |
+                 InstanceTypeField::encode(instance_type)) {
   DCHECK(!object.handle().is_null());
   DCHECK(!type.IsTaggedNumber() || type.IsNone());
   Initialize(r);
 }
 
 
-HConstant::HConstant(int32_t integer_value,
-                     Representation r,
-                     bool is_not_in_new_space,
-                     Unique<Object> object)
-  : object_(object),
-    object_map_(Handle<Map>::null()),
-    has_stable_map_value_(false),
-    has_smi_value_(Smi::IsValid(integer_value)),
-    has_int32_value_(true),
-    has_double_value_(true),
-    has_external_reference_value_(false),
-    is_not_in_new_space_(is_not_in_new_space),
-    boolean_value_(integer_value != 0),
-    is_undetectable_(false),
-    int32_value_(integer_value),
-    double_value_(FastI2D(integer_value)),
-    instance_type_(kUnknownInstanceType) {
+HConstant::HConstant(int32_t integer_value, Representation r,
+                     bool is_not_in_new_space, Unique<Object> object)
+    : object_(object),
+      object_map_(Handle<Map>::null()),
+      bit_field_(HasStableMapValueField::encode(false) |
+                 HasSmiValueField::encode(Smi::IsValid(integer_value)) |
+                 HasInt32ValueField::encode(true) |
+                 HasDoubleValueField::encode(true) |
+                 HasExternalReferenceValueField::encode(false) |
+                 IsNotInNewSpaceField::encode(is_not_in_new_space) |
+                 BooleanValueField::encode(integer_value != 0) |
+                 IsUndetectableField::encode(false) |
+                 InstanceTypeField::encode(kUnknownInstanceType)),
+      int32_value_(integer_value),
+      double_value_(FastI2D(integer_value)) {
   // It's possible to create a constant with a value in Smi-range but stored
   // in a (pre-existing) HeapNumber. See crbug.com/349878.
   bool could_be_heapobject = r.IsTagged() && !object.handle().is_null();
-  bool is_smi = has_smi_value_ && !could_be_heapobject;
+  bool is_smi = HasSmiValue() && !could_be_heapobject;
   set_type(is_smi ? HType::Smi() : HType::TaggedNumber());
   Initialize(r);
 }
 
 
-HConstant::HConstant(double double_value,
-                     Representation r,
-                     bool is_not_in_new_space,
-                     Unique<Object> object)
-  : object_(object),
-    object_map_(Handle<Map>::null()),
-    has_stable_map_value_(false),
-    has_int32_value_(IsInteger32(double_value)),
-    has_double_value_(true),
-    has_external_reference_value_(false),
-    is_not_in_new_space_(is_not_in_new_space),
-    boolean_value_(double_value != 0 && !std::isnan(double_value)),
-    is_undetectable_(false),
-    int32_value_(DoubleToInt32(double_value)),
-    double_value_(double_value),
-    instance_type_(kUnknownInstanceType) {
-  has_smi_value_ = has_int32_value_ && Smi::IsValid(int32_value_);
+HConstant::HConstant(double double_value, Representation r,
+                     bool is_not_in_new_space, Unique<Object> object)
+    : object_(object),
+      object_map_(Handle<Map>::null()),
+      bit_field_(HasStableMapValueField::encode(false) |
+                 HasInt32ValueField::encode(IsInteger32(double_value)) |
+                 HasDoubleValueField::encode(true) |
+                 HasExternalReferenceValueField::encode(false) |
+                 IsNotInNewSpaceField::encode(is_not_in_new_space) |
+                 BooleanValueField::encode(double_value != 0 &&
+                                           !std::isnan(double_value)) |
+                 IsUndetectableField::encode(false) |
+                 InstanceTypeField::encode(kUnknownInstanceType)),
+      int32_value_(HasInteger32Value() ? DoubleToInt32(double_value) : 0),
+      double_value_(double_value) {
+  bit_field_ = HasSmiValueField::update(
+      bit_field_, HasInteger32Value() && Smi::IsValid(int32_value_));
   // It's possible to create a constant with a value in Smi-range but stored
   // in a (pre-existing) HeapNumber. See crbug.com/349878.
   bool could_be_heapobject = r.IsTagged() && !object.handle().is_null();
-  bool is_smi = has_smi_value_ && !could_be_heapobject;
+  bool is_smi = HasSmiValue() && !could_be_heapobject;
   set_type(is_smi ? HType::Smi() : HType::TaggedNumber());
   Initialize(r);
 }
 
 
 HConstant::HConstant(ExternalReference reference)
-  : HTemplateInstruction<0>(HType::Any()),
-    object_(Unique<Object>(Handle<Object>::null())),
-    object_map_(Handle<Map>::null()),
-    has_stable_map_value_(false),
-    has_smi_value_(false),
-    has_int32_value_(false),
-    has_double_value_(false),
-    has_external_reference_value_(true),
-    is_not_in_new_space_(true),
-    boolean_value_(true),
-    is_undetectable_(false),
-    external_reference_value_(reference),
-    instance_type_(kUnknownInstanceType) {
+    : HTemplateInstruction<0>(HType::Any()),
+      object_(Unique<Object>(Handle<Object>::null())),
+      object_map_(Handle<Map>::null()),
+      bit_field_(
+          HasStableMapValueField::encode(false) |
+          HasSmiValueField::encode(false) | HasInt32ValueField::encode(false) |
+          HasDoubleValueField::encode(false) |
+          HasExternalReferenceValueField::encode(true) |
+          IsNotInNewSpaceField::encode(true) | BooleanValueField::encode(true) |
+          IsUndetectableField::encode(false) |
+          InstanceTypeField::encode(kUnknownInstanceType)),
+      external_reference_value_(reference) {
   Initialize(Representation::External());
 }
 
 
 void HConstant::Initialize(Representation r) {
   if (r.IsNone()) {
-    if (has_smi_value_ && SmiValuesAre31Bits()) {
+    if (HasSmiValue() && SmiValuesAre31Bits()) {
       r = Representation::Smi();
-    } else if (has_int32_value_) {
+    } else if (HasInteger32Value()) {
       r = Representation::Integer32();
-    } else if (has_double_value_) {
+    } else if (HasDoubleValue()) {
       r = Representation::Double();
-    } else if (has_external_reference_value_) {
+    } else if (HasExternalReferenceValue()) {
       r = Representation::External();
     } else {
       Handle<Object> object = object_.handle();
@@ -2837,22 +2842,26 @@ void HConstant::Initialize(Representation r) {
     // could cause heap object checks not to get emitted.
     object_ = Unique<Object>(Handle<Object>::null());
   }
+  if (r.IsSmiOrInteger32()) {
+    // If it's not a heap object, it can't be in new space.
+    bit_field_ = IsNotInNewSpaceField::update(bit_field_, true);
+  }
   set_representation(r);
   SetFlag(kUseGVN);
 }
 
 
 bool HConstant::ImmortalImmovable() const {
-  if (has_int32_value_) {
+  if (HasInteger32Value()) {
     return false;
   }
-  if (has_double_value_) {
+  if (HasDoubleValue()) {
     if (IsSpecialDouble()) {
       return true;
     }
     return false;
   }
-  if (has_external_reference_value_) {
+  if (HasExternalReferenceValue()) {
     return false;
   }
 
@@ -2893,44 +2902,35 @@ bool HConstant::EmitAtUses() {
 
 
 HConstant* HConstant::CopyToRepresentation(Representation r, Zone* zone) const {
-  if (r.IsSmi() && !has_smi_value_) return NULL;
-  if (r.IsInteger32() && !has_int32_value_) return NULL;
-  if (r.IsDouble() && !has_double_value_) return NULL;
-  if (r.IsExternal() && !has_external_reference_value_) return NULL;
-  if (has_int32_value_) {
-    return new(zone) HConstant(int32_value_, r, is_not_in_new_space_, object_);
+  if (r.IsSmi() && !HasSmiValue()) return NULL;
+  if (r.IsInteger32() && !HasInteger32Value()) return NULL;
+  if (r.IsDouble() && !HasDoubleValue()) return NULL;
+  if (r.IsExternal() && !HasExternalReferenceValue()) return NULL;
+  if (HasInteger32Value()) {
+    return new (zone) HConstant(int32_value_, r, NotInNewSpace(), object_);
   }
-  if (has_double_value_) {
-    return new(zone) HConstant(double_value_, r, is_not_in_new_space_, object_);
+  if (HasDoubleValue()) {
+    return new (zone) HConstant(double_value_, r, NotInNewSpace(), object_);
   }
-  if (has_external_reference_value_) {
+  if (HasExternalReferenceValue()) {
     return new(zone) HConstant(external_reference_value_);
   }
   DCHECK(!object_.handle().is_null());
-  return new(zone) HConstant(object_,
-                             object_map_,
-                             has_stable_map_value_,
-                             r,
-                             type_,
-                             is_not_in_new_space_,
-                             boolean_value_,
-                             is_undetectable_,
-                             instance_type_);
+  return new (zone) HConstant(object_, object_map_, HasStableMapValue(), r,
+                              type_, NotInNewSpace(), BooleanValue(),
+                              IsUndetectable(), GetInstanceType());
 }
 
 
 Maybe<HConstant*> HConstant::CopyToTruncatedInt32(Zone* zone) {
   HConstant* res = NULL;
-  if (has_int32_value_) {
-    res = new(zone) HConstant(int32_value_,
-                              Representation::Integer32(),
-                              is_not_in_new_space_,
-                              object_);
-  } else if (has_double_value_) {
-    res = new(zone) HConstant(DoubleToInt32(double_value_),
-                              Representation::Integer32(),
-                              is_not_in_new_space_,
-                              object_);
+  if (HasInteger32Value()) {
+    res = new (zone) HConstant(int32_value_, Representation::Integer32(),
+                               NotInNewSpace(), object_);
+  } else if (HasDoubleValue()) {
+    res = new (zone)
+        HConstant(DoubleToInt32(double_value_), Representation::Integer32(),
+                  NotInNewSpace(), object_);
   }
   return Maybe<HConstant*>(res != NULL, res);
 }
@@ -2952,11 +2952,11 @@ Maybe<HConstant*> HConstant::CopyToTruncatedNumber(Zone* zone) {
 
 
 std::ostream& HConstant::PrintDataTo(std::ostream& os) const {  // NOLINT
-  if (has_int32_value_) {
+  if (HasInteger32Value()) {
     os << int32_value_ << " ";
-  } else if (has_double_value_) {
+  } else if (HasDoubleValue()) {
     os << double_value_ << " ";
-  } else if (has_external_reference_value_) {
+  } else if (HasExternalReferenceValue()) {
     os << reinterpret_cast<void*>(external_reference_value_.address()) << " ";
   } else {
     // The handle() method is silently and lazily mutating the object.
@@ -2965,7 +2965,7 @@ std::ostream& HConstant::PrintDataTo(std::ostream& os) const {  // NOLINT
     if (HasStableMapValue()) os << "[stable-map] ";
     if (HasObjectMap()) os << "[map " << *ObjectMap().handle() << "] ";
   }
-  if (!is_not_in_new_space_) os << "[new space] ";
+  if (!NotInNewSpace()) os << "[new space] ";
   return os;
 }
 
@@ -4501,18 +4501,24 @@ void HPhi::SimplifyConstantInputs() {
 
 void HPhi::InferRepresentation(HInferRepresentationPhase* h_infer) {
   DCHECK(CheckFlag(kFlexibleRepresentation));
-  Representation new_rep = RepresentationFromInputs();
-  UpdateRepresentation(new_rep, h_infer, "inputs");
-  new_rep = RepresentationFromUses();
+  Representation new_rep = RepresentationFromUses();
   UpdateRepresentation(new_rep, h_infer, "uses");
+  new_rep = RepresentationFromInputs();
+  UpdateRepresentation(new_rep, h_infer, "inputs");
   new_rep = RepresentationFromUseRequirements();
   UpdateRepresentation(new_rep, h_infer, "use requirements");
 }
 
 
 Representation HPhi::RepresentationFromInputs() {
-  Representation r = Representation::None();
+  bool has_type_feedback =
+      smi_non_phi_uses() + int32_non_phi_uses() + double_non_phi_uses() > 0;
+  Representation r = representation();
   for (int i = 0; i < OperandCount(); ++i) {
+    // Ignore conservative Tagged assumption of parameters if we have
+    // reason to believe that it's too conservative.
+    if (has_type_feedback && OperandAt(i)->IsParameter()) continue;
+
     r = r.generalize(OperandAt(i)->KnownOptimalRepresentation());
   }
   return r;
@@ -4649,6 +4655,14 @@ HObjectAccess HObjectAccess::ForContextSlot(int index) {
   Portion portion = kInobject;
   int offset = Context::kHeaderSize + index * kPointerSize;
   DCHECK_EQ(offset, Context::SlotOffset(index) + kHeapObjectTag);
+  return HObjectAccess(portion, offset, Representation::Tagged());
+}
+
+
+HObjectAccess HObjectAccess::ForScriptContext(int index) {
+  DCHECK(index >= 0);
+  Portion portion = kInobject;
+  int offset = ScriptContextTable::GetContextOffset(index);
   return HObjectAccess(portion, offset, Representation::Tagged());
 }
 

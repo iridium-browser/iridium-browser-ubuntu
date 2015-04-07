@@ -165,10 +165,10 @@ void PpapiDispatcher::OnMsgInitializeNaClDispatcher(
   }
 
   command_line_and_logging_initialized = true;
-  CommandLine::Init(0, NULL);
+  base::CommandLine::Init(0, NULL);
   for (size_t i = 0; i < args.switch_names.size(); ++i) {
     DCHECK(i < args.switch_values.size());
-    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
         args.switch_names[i], args.switch_values[i]);
   }
   logging::LoggingSettings settings;
@@ -213,7 +213,7 @@ void PpapiDispatcher::OnPluginDispatcherMessageReceived(
   // The first parameter should be a plugin dispatcher ID.
   PickleIterator iter(msg);
   uint32 id = 0;
-  if (!msg.ReadUInt32(&iter, &id)) {
+  if (!iter.ReadUInt32(&id)) {
     NOTREACHED();
     return;
   }

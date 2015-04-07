@@ -52,7 +52,7 @@ static void outset_for_stroke(SkRect* rect, const SkStrokeRec& rec) {
     rect->outset(radius, radius);
 }
 
-// Attempt to trim the line to minimally cover the cull rect (currently 
+// Attempt to trim the line to minimally cover the cull rect (currently
 // only works for horizontal and vertical lines).
 // Return true if processing should continue; false otherwise.
 static bool cull_line(SkPoint* pts, const SkStrokeRec& rec,
@@ -94,7 +94,7 @@ static bool cull_line(SkPoint* pts, const SkStrokeRec& rec,
         }
 
         SkASSERT(minX < maxX);
-        if (maxX < bounds.fLeft || minX > bounds.fRight) {
+        if (maxX <= bounds.fLeft || minX >= bounds.fRight) {
             return false;
         }
 
@@ -125,7 +125,7 @@ static bool cull_line(SkPoint* pts, const SkStrokeRec& rec,
         }
 
         SkASSERT(minY < maxY);
-        if (maxY < bounds.fTop || minY > bounds.fBottom) {
+        if (maxY <= bounds.fTop || minY >= bounds.fBottom) {
             return false;
         }
 
@@ -369,47 +369,3 @@ SkFlattenable* SkDashPathEffect::CreateProc(SkReadBuffer& buffer) {
     }
     return NULL;
 }
-
-#ifdef SK_SUPPORT_LEGACY_DEEPFLATTENING
-SkDashPathEffect::SkDashPathEffect(SkReadBuffer& buffer)
-        : INHERITED(buffer)
-        , fPhase(0)
-        , fInitialDashLength(0)
-        , fInitialDashIndex(0)
-        , fIntervalLength(0) {
-    bool useOldPic = buffer.isVersionLT(SkReadBuffer::kDashWritesPhaseIntervals_Version);
-    if (useOldPic) {
-        fInitialDashIndex = buffer.readInt();
-        fInitialDashLength = buffer.readScalar();
-        fIntervalLength = buffer.readScalar();
-        buffer.readBool(); // Dummy for old ScalarToFit field
-    } else {
-        fPhase = buffer.readScalar();
-    }
-
-    fCount = buffer.getArrayCount();
-    size_t allocSize = sizeof(SkScalar) * fCount;
-    if (buffer.validateAvailable(allocSize)) {
-        fIntervals = (SkScalar*)sk_malloc_throw(allocSize);
-        buffer.readScalarArray(fIntervals, fCount);
-    } else {
-        fIntervals = NULL;
-    }
-
-    if (useOldPic) {
-        fPhase = 0;
-        if (fInitialDashLength != -1) { // Signal for bad dash interval
-            for (int i = 0; i < fInitialDashIndex; ++i) {
-                fPhase += fIntervals[i];
-            }
-            fPhase += fIntervals[fInitialDashIndex] - fInitialDashLength;
-        }
-    } else {
-        // set the internal data members, fPhase should have been between 0 and intervalLength
-        // when written to buffer so no need to adjust it
-        SkDashPath::CalcDashParameters(fPhase, fIntervals, fCount,
-                &fInitialDashLength, &fInitialDashIndex, &fIntervalLength);
-    }
-}
-#endif
-

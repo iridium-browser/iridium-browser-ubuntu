@@ -28,11 +28,11 @@ public:
     }
 
     bool isEnabled() const { return m_isEnabled; }
-    void setEnabled(bool);
+    void setEnabled(bool enabled, bool captureStacks);
 
     void clear();
 
-    void didReceiveV8PromiseEvent(ScriptState*, v8::Handle<v8::Object> promise, v8::Handle<v8::Value> parentPromise, int status);
+    void didReceiveV8PromiseEvent(ScriptState*, v8::Local<v8::Object> promise, v8::Local<v8::Value> parentPromise, int status);
 
     PassRefPtr<TypeBuilder::Array<TypeBuilder::Debugger::PromiseDetails> > promises();
     ScriptValue promiseById(int promiseId) const;
@@ -52,11 +52,12 @@ private:
     PromiseTracker();
 
     int circularSequentialId();
-    PassRefPtrWillBeRawPtr<PromiseData> createPromiseDataIfNeeded(ScriptState*, v8::Handle<v8::Object> promise);
+    PassRefPtrWillBeRawPtr<PromiseData> createPromiseDataIfNeeded(ScriptState*, v8::Local<v8::Object> promise);
 
     int m_circularSequentialId;
     PromiseDataMap m_promiseDataMap;
     bool m_isEnabled;
+    bool m_captureStacks;
     PromiseIdToDataMap m_promiseIdToDataMap;
 };
 

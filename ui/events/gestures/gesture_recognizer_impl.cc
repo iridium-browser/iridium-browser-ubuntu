@@ -83,10 +83,13 @@ GestureConsumer* GestureRecognizerImpl::GetTouchLockedTarget(
 
 GestureConsumer* GestureRecognizerImpl::GetTargetForGestureEvent(
     const GestureEvent& event) {
-  GestureConsumer* target = NULL;
   int touch_id = event.details().oldest_touch_id();
-  target = touch_id_target_for_gestures_[touch_id];
-  return target;
+  if (!touch_id_target_for_gestures_.count(touch_id)) {
+    NOTREACHED() << "Touch ID does not map to a valid GestureConsumer.";
+    return nullptr;
+  }
+
+  return touch_id_target_for_gestures_.at(touch_id);
 }
 
 GestureConsumer* GestureRecognizerImpl::GetTargetForLocation(
@@ -236,11 +239,11 @@ void GestureRecognizerImpl::DispatchGestureEvent(GestureEvent* event) {
 }
 
 bool GestureRecognizerImpl::ProcessTouchEventPreDispatch(
-    const TouchEvent& event,
+    TouchEvent* event,
     GestureConsumer* consumer) {
-  SetupTargets(event, consumer);
+  SetupTargets(*event, consumer);
 
-  if (event.result() & ER_CONSUMED)
+  if (event->result() & ER_CONSUMED)
     return false;
 
   GestureProviderAura* gesture_provider =
@@ -249,25 +252,24 @@ bool GestureRecognizerImpl::ProcessTouchEventPreDispatch(
 }
 
 GestureRecognizer::Gestures*
-GestureRecognizerImpl::ProcessTouchEventPostDispatch(
+GestureRecognizerImpl::AckAsyncTouchEvent(
     const TouchEvent& event,
     ui::EventResult result,
     GestureConsumer* consumer) {
   GestureProviderAura* gesture_provider =
       GetGestureProviderForConsumer(consumer);
-  gesture_provider->OnTouchEventAck(result != ER_UNHANDLED);
+  gesture_provider->OnAsyncTouchEventAck(result != ER_UNHANDLED);
   return gesture_provider->GetAndResetPendingGestures();
 }
 
-GestureRecognizer::Gestures* GestureRecognizerImpl::ProcessTouchEventOnAsyncAck(
-    const TouchEvent& event,
+GestureRecognizer::Gestures* GestureRecognizerImpl::AckSyncTouchEvent(
+    const uint64 unique_event_id,
     ui::EventResult result,
     GestureConsumer* consumer) {
-  if (result & ui::ER_CONSUMED)
-    return NULL;
   GestureProviderAura* gesture_provider =
       GetGestureProviderForConsumer(consumer);
-  gesture_provider->OnTouchEventAck(result != ER_UNHANDLED);
+  gesture_provider->OnSyncTouchEventAck(unique_event_id,
+                                        result != ER_UNHANDLED);
   return gesture_provider->GetAndResetPendingGestures();
 }
 

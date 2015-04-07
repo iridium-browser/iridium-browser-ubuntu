@@ -33,23 +33,10 @@ var allDescriptors = [];
 var applicationDescriptor;
 var _loadedScripts = {};
 
-/**
- * @param {string} url
- * @return {string}
- */
-function loadResource(url)
-{
-    var xhr = new XMLHttpRequest();
-    xhr.open("GET", url, false);
-    try {
-        xhr.send(null);
-    } catch (e) {
-        console.error(url + " -> " + new Error().stack);
-        throw e;
-    }
-    // xhr.status === 0 if loading from bundle.
-    return xhr.status < 400 ? xhr.responseText : "";
-}
+// FIXME: This is a workaround to force Closure compiler provide
+// the standard ES6 runtime for all modules. This should be removed
+// once Closure provides standard externs for Map et al.
+for (var k of []);
 
 /**
  * @param {string} url
@@ -210,7 +197,7 @@ function Runtime(descriptors, coreModuleNames)
     for (var i = 0; i < descriptors.length; ++i)
         this._registerModule(descriptors[i]);
     if (coreModuleNames)
-        this._loadAutoStartModules(coreModuleNames).catch(Runtime._reportError);
+        this._loadAutoStartModules(coreModuleNames);
 }
 
 /**
@@ -229,74 +216,6 @@ Runtime.cachedResources = { __proto__: null };
 Runtime.isReleaseMode = function()
 {
     return !!allDescriptors.length;
-}
-
-/**
- * @param {string} moduleName
- * @param {string} workerName
- * @return {!SharedWorker}
- */
-Runtime.startSharedWorker = function(moduleName, workerName)
-{
-    if (Runtime.isReleaseMode())
-        return new SharedWorker(moduleName + "_module.js", workerName);
-
-    var content = loadResource(moduleName + "/module.json");
-    if (!content)
-        throw new Error("Worker is not defined: " + moduleName + " " + new Error().stack);
-    var scripts = JSON.parse(content)["scripts"];
-    if (scripts.length !== 1)
-        throw Error("Runtime.startSharedWorker supports modules with only one script!");
-    return new SharedWorker(moduleName + "/" + scripts[0], workerName);
-}
-
-/**
- * @param {string} moduleName
- * @return {!Worker}
- */
-Runtime.startWorker = function(moduleName)
-{
-    if (Runtime.isReleaseMode())
-        return new Worker(moduleName + "_module.js");
-
-    var content = loadResource(moduleName + "/module.json");
-    if (!content)
-        throw new Error("Worker is not defined: " + moduleName + " " + new Error().stack);
-    var message = [];
-    var scripts = JSON.parse(content)["scripts"];
-    for (var i = 0; i < scripts.length; ++i) {
-        var url = self._importScriptPathPrefix + moduleName + "/" + scripts[i];
-        var parts = url.split("://");
-        url = parts.length === 1 ? url : parts[0] + "://" + normalizePath(parts[1]);
-        message.push({
-            source: loadResource(moduleName + "/" + scripts[i]),
-            url: url
-        });
-    }
-
-    /**
-     * @suppress {checkTypes}
-     */
-    var loader = function() {
-        self.onmessage = function(event) {
-            self.onmessage = null;
-            var scripts = event.data;
-            for (var i = 0; i < scripts.length; ++i) {
-                var source = scripts[i]["source"];
-                self.eval(source + "\n//# sourceURL=" + scripts[i]["url"]);
-            }
-        };
-    };
-
-    var blob = new Blob(["(" + loader.toString() + ")()\n//# sourceURL=" + moduleName], { type: "text/javascript" });
-    var workerURL = window.URL.createObjectURL(blob);
-    try {
-        var worker = new Worker(workerURL);
-        worker.postMessage(message);
-        return worker;
-    } finally {
-        window.URL.revokeObjectURL(workerURL);
-    }
 }
 
 /**
@@ -341,7 +260,7 @@ Runtime.startApplication = function(appName)
                 coreModuleNames.push(name);
         }
 
-        Promise.all(moduleJSONPromises).then(instantiateRuntime).catch(Runtime._reportError);
+        Promise.all(moduleJSONPromises).then(instantiateRuntime);
         /**
          * @param {!Array.<!Object>} moduleDescriptors
          */
@@ -361,6 +280,21 @@ Runtime.startApplication = function(appName)
 Runtime.queryParam = function(name)
 {
     return Runtime._queryParamsObject[name] || null;
+}
+
+/**
+ * @param {!Array.<string>} banned
+ * @return {string}
+ */
+Runtime.constructQueryParams = function(banned)
+{
+    var params = [];
+    for (var key in Runtime._queryParamsObject) {
+        if (!key || banned.indexOf(key) !== -1)
+            continue;
+        params.push(key + "=" + Runtime._queryParamsObject[key]);
+    }
+    return params.length ? "?" + params.join("&") : "";
 }
 
 /**
@@ -427,17 +361,6 @@ Runtime._assert = function(value, message)
     if (value)
         return;
     Runtime._originalAssert.call(Runtime._console, value, message);
-}
-
-/**
- * @param {*} e
- */
-Runtime._reportError = function(e)
-{
-    if (e instanceof Error)
-        console.error(e.stack);
-    else
-        console.error(e);
 }
 
 Runtime.prototype = {
@@ -725,6 +648,7 @@ Runtime.Module.prototype = {
             dependencyPromises.push(this._manager._modulesMap[dependencies[i]]._loadPromise());
 
         this._pendingLoadPromise = Promise.all(dependencyPromises)
+            .then(this._loadStylesheets.bind(this))
             .then(this._loadScripts.bind(this))
             .then(markAsLoaded.bind(this));
 
@@ -742,25 +666,58 @@ Runtime.Module.prototype = {
 
     /**
      * @return {!Promise.<undefined>}
+     * @this {Runtime.Module}
+     */
+    _loadStylesheets: function()
+    {
+        var stylesheets = this._descriptor["stylesheets"];
+        if (!stylesheets)
+            return Promise.resolve();
+        var promises = [];
+        for (var i = 0; i < stylesheets.length; ++i) {
+            var url = this._modularizeURL(stylesheets[i]);
+            promises.push(loadResourcePromise(url).then(cacheStylesheet.bind(this, url), cacheStylesheet.bind(this, url, undefined)));
+        }
+        return Promise.all(promises).then(undefined);
+
+        /**
+         * @param {string} path
+         * @param {string=} content
+         */
+        function cacheStylesheet(path, content)
+        {
+            if (!content) {
+                console.error("Failed to load stylesheet: " + path);
+                return;
+            }
+            var sourceURL = window.location.href;
+            if (window.location.search)
+                sourceURL.replace(window.location.search, "");
+            sourceURL = sourceURL.substring(0, sourceURL.lastIndexOf("/") + 1) + path;
+            Runtime.cachedResources[path] = content + "\n/*# sourceURL=" + sourceURL + " */";
+        }
+    },
+
+    /**
+     * @return {!Promise.<undefined>}
      */
     _loadScripts: function()
     {
         if (!this._descriptor.scripts)
-            return Promise.resolve(undefined);
+            return Promise.resolve();
 
         if (Runtime.isReleaseMode())
             return loadScriptsPromise([this._name + "_module.js"]);
 
-        return loadScriptsPromise(this._descriptor.scripts.map(modularizeURL, this)).catch(Runtime._reportError);
+        return loadScriptsPromise(this._descriptor.scripts.map(this._modularizeURL, this));
+    },
 
-        /**
-         * @param {string} scriptName
-         * @this {Runtime.Module}
-         */
-        function modularizeURL(scriptName)
-        {
-            return this._name + "/" + scriptName;
-        }
+    /**
+     * @param {string} resourceName
+     */
+    _modularizeURL: function(resourceName)
+    {
+        return normalizePath(this._name + "/" + resourceName);
     },
 
     /**

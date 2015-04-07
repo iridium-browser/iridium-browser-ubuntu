@@ -92,6 +92,21 @@ TEST_F(ProcessTest, DuplicateCurrent) {
   ASSERT_TRUE(process2.IsValid());
 }
 
+TEST_F(ProcessTest, DeprecatedGetProcessFromHandle) {
+  Process process1(SpawnChild("SimpleChildProcess"));
+  ASSERT_TRUE(process1.IsValid());
+
+  Process process2 = Process::DeprecatedGetProcessFromHandle(process1.Handle());
+  ASSERT_TRUE(process1.IsValid());
+  ASSERT_TRUE(process2.IsValid());
+  EXPECT_EQ(process1.pid(), process2.pid());
+  EXPECT_FALSE(process1.is_current());
+  EXPECT_FALSE(process2.is_current());
+
+  process1.Close();
+  ASSERT_TRUE(process2.IsValid());
+}
+
 MULTIPROCESS_TEST_MAIN(SleepyChildProcess) {
   PlatformThread::Sleep(TestTimeouts::action_max_timeout());
   return 0;
@@ -118,6 +133,34 @@ TEST_F(ProcessTest, Terminate) {
   // The POSIX implementation actually ignores the exit_code.
   EXPECT_EQ(kExpectedExitCode, exit_code);
 #endif
+}
+
+MULTIPROCESS_TEST_MAIN(FastSleepyChildProcess) {
+  PlatformThread::Sleep(TestTimeouts::tiny_timeout() * 10);
+  return 0;
+}
+
+TEST_F(ProcessTest, WaitForExit) {
+  Process process(SpawnChild("FastSleepyChildProcess"));
+  ASSERT_TRUE(process.IsValid());
+
+  const int kDummyExitCode = 42;
+  int exit_code = kDummyExitCode;
+  EXPECT_TRUE(process.WaitForExit(&exit_code));
+  EXPECT_EQ(0, exit_code);
+}
+
+TEST_F(ProcessTest, WaitForExitWithTimeout) {
+  Process process(SpawnChild("SleepyChildProcess"));
+  ASSERT_TRUE(process.IsValid());
+
+  const int kDummyExitCode = 42;
+  int exit_code = kDummyExitCode;
+  TimeDelta timeout = TestTimeouts::tiny_timeout();
+  EXPECT_FALSE(process.WaitForExitWithTimeout(timeout, &exit_code));
+  EXPECT_EQ(kDummyExitCode, exit_code);
+
+  process.Terminate(kDummyExitCode);
 }
 
 // Ensure that the priority of a process is restored correctly after

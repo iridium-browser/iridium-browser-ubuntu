@@ -19,17 +19,17 @@ grit("resources") {
 }
 
 source_set("app_shell_lib") {
-  # This library is testonly because it depends on testonly libarries,
-  # namely //base:prefs_test_support and //content/shell:content_shell_lib
-  # TODO(jamescook): investigate and get rid of test dependencies.
+  # TODO(jamescook): investigate and get rid of test dependencies. This library
+  # is testonly because it depends on testonly libraries, namely
+  # //content/shell:content_shell_lib. See http://crbug.com/438283
   testonly = true
   deps = [
     ":resources",
     ":version_header",
     "//base",
-    "//base:prefs_test_support",
-    "//components/omaha_query_params",
+    "//base:prefs",
     "//components/pref_registry",
+    "//components/update_client",
     "//components/user_prefs",
     "//components/web_cache/renderer",
     "//content",
@@ -58,10 +58,6 @@ source_set("app_shell_lib") {
     "app/shell_main_delegate.h",
     "browser/api/identity/identity_api.cc",
     "browser/api/identity/identity_api.h",
-    "browser/api/shell_gcd/shell_gcd_api.cc",
-    "browser/api/shell_gcd/shell_gcd_api.h",
-    "browser/api/shell_window/shell_window_api.cc",
-    "browser/api/shell_window/shell_window_api.h",
     "browser/default_shell_browser_main_delegate.cc",
     "browser/default_shell_browser_main_delegate.h",
     "browser/desktop_controller.cc",
@@ -70,8 +66,11 @@ source_set("app_shell_lib") {
     "browser/media_capture_util.h",
     "browser/shell_app_delegate.cc",
     "browser/shell_app_delegate.h",
+    "browser/shell_app_view_guest_delegate.cc",
+    "browser/shell_app_view_guest_delegate.h",
     "browser/shell_app_window_client.cc",
     "browser/shell_app_window_client.h",
+    "browser/shell_app_window_client_aura.cc",
     "browser/shell_audio_controller_chromeos.cc",
     "browser/shell_audio_controller_chromeos.h",
     "browser/shell_browser_context.cc",
@@ -83,8 +82,8 @@ source_set("app_shell_lib") {
     "browser/shell_browser_main_parts.h",
     "browser/shell_content_browser_client.cc",
     "browser/shell_content_browser_client.h",
-    "browser/shell_desktop_controller.cc",
-    "browser/shell_desktop_controller.h",
+    "browser/shell_desktop_controller_aura.cc",
+    "browser/shell_desktop_controller_aura.h",
     "browser/shell_device_client.cc",
     "browser/shell_device_client.h",
     "browser/shell_display_info_provider.cc",
@@ -97,22 +96,32 @@ source_set("app_shell_lib") {
     "browser/shell_extension_system_factory.h",
     "browser/shell_extension_web_contents_observer.cc",
     "browser/shell_extension_web_contents_observer.h",
+    "browser/shell_extensions_api_client.cc",
+    "browser/shell_extensions_api_client.h",
     "browser/shell_extensions_browser_client.cc",
     "browser/shell_extensions_browser_client.h",
     "browser/shell_native_app_window.cc",
     "browser/shell_native_app_window.h",
+    "browser/shell_native_app_window_aura.cc",
+    "browser/shell_native_app_window_aura.h",
     "browser/shell_network_controller_chromeos.cc",
     "browser/shell_network_controller_chromeos.h",
     "browser/shell_network_delegate.cc",
     "browser/shell_network_delegate.h",
     "browser/shell_oauth2_token_service.cc",
     "browser/shell_oauth2_token_service.h",
-    "browser/shell_omaha_query_params_delegate.cc",
-    "browser/shell_omaha_query_params_delegate.h",
+    "browser/shell_prefs.cc",
+    "browser/shell_prefs.h",
     "browser/shell_runtime_api_delegate.cc",
     "browser/shell_runtime_api_delegate.h",
+    "browser/shell_screen.cc",
+    "browser/shell_screen.h",
     "browser/shell_special_storage_policy.cc",
     "browser/shell_special_storage_policy.h",
+    "browser/shell_speech_recognition_manager_delegate.cc",
+    "browser/shell_speech_recognition_manager_delegate.h",
+    "browser/shell_update_query_params_delegate.cc",
+    "browser/shell_update_query_params_delegate.h",
     "browser/shell_url_request_context_getter.cc",
     "browser/shell_url_request_context_getter.h",
     "browser/shell_web_contents_modal_dialog_manager.cc",
@@ -134,6 +143,11 @@ source_set("app_shell_lib") {
       "//chromeos",
       "//ui/chromeos:ui_chromeos",
       "//ui/display",
+    ]
+    sources += [
+      "browser/api/shell_gcd/shell_gcd_api.cc",
+      "browser/api/shell_gcd/shell_gcd_api.h",
+      "browser/api/vpn_provider/vpn_service_factory.cc",
     ]
   }
 }

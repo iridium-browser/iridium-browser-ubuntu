@@ -27,9 +27,9 @@ interface Element : Node {
     DOMString? getAttribute(DOMString name);
     [RaisesException, CustomElementCallbacks] void setAttribute(DOMString name, DOMString value);
     [CustomElementCallbacks] void removeAttribute(DOMString name);
-    [MeasureAs=ElementGetAttributeNode] Attr getAttributeNode([Default=Undefined] optional DOMString name); // Removed from DOM4.
-    [RaisesException, CustomElementCallbacks, MeasureAs=ElementSetAttributeNode] Attr setAttributeNode([Default=Undefined] optional Attr newAttr); // Removed from DOM4.
-    [RaisesException, CustomElementCallbacks, MeasureAs=ElementRemoveAttributeNode] Attr removeAttributeNode([Default=Undefined] optional Attr oldAttr); // Removed from DOM4.
+    [MeasureAs=ElementGetAttributeNode] Attr getAttributeNode(DOMString name);
+    [RaisesException, CustomElementCallbacks, MeasureAs=ElementSetAttributeNode] Attr setAttributeNode(Attr newAttr);
+    [RaisesException, CustomElementCallbacks, MeasureAs=ElementRemoveAttributeNode] Attr removeAttributeNode(Attr oldAttr);
     HTMLCollection getElementsByTagName(DOMString name);
 
     [PerWorldBindings, ImplementedAs=attributesForBindings] readonly attribute NamedNodeMap     attributes;
@@ -41,9 +41,8 @@ interface Element : Node {
     [RaisesException, CustomElementCallbacks] void setAttributeNS(DOMString? namespaceURI, DOMString qualifiedName, DOMString value);
     [CustomElementCallbacks] void removeAttributeNS(DOMString? namespaceURI, DOMString localName);
     HTMLCollection getElementsByTagNameNS(DOMString? namespaceURI, DOMString localName);
-    [MeasureAs=ElementGetAttributeNodeNS] Attr getAttributeNodeNS([Default=Undefined] optional DOMString? namespaceURI,
-                                                                  [Default=Undefined] optional DOMString localName); // Removed from DOM4.
-    [RaisesException, CustomElementCallbacks, DeprecateAs=ElementSetAttributeNodeNS] Attr setAttributeNodeNS([Default=Undefined] optional Attr newAttr); // Removed from DOM4.
+    [MeasureAs=ElementGetAttributeNodeNS] Attr getAttributeNodeNS(DOMString? namespaceURI, DOMString localName);
+    [RaisesException, CustomElementCallbacks, MeasureAs=ElementSetAttributeNodeNS] Attr setAttributeNodeNS(Attr newAttr);
     boolean hasAttribute(DOMString name);
     boolean hasAttributeNS(DOMString? namespaceURI, DOMString localName);
 
@@ -52,10 +51,11 @@ interface Element : Node {
     // DOM4
     [Reflect] attribute DOMString id;
     readonly attribute DOMString? namespaceURI;
-    [RaisesException=Setter] attribute DOMString? prefix;
+    readonly attribute DOMString? prefix;
     readonly attribute DOMString? localName;
 
     [RaisesException] boolean matches(DOMString selectors);
+    [RaisesException] Element closest(DOMString selectors);
 
     // Common extensions
 
@@ -69,14 +69,17 @@ interface Element : Node {
     readonly attribute long clientWidth;
     readonly attribute long clientHeight;
 
-    // FIXME: should be:
-    // attribute (Dictionary or double) scrollLeft;
-    // attribute (Dictionary or double) scrollTop;
-    // http://crbug.com/240176
-    [Custom=Setter] attribute double scrollLeft;
-    [Custom=Setter] attribute double scrollTop;
+    attribute double scrollLeft;
+    attribute double scrollTop;
     readonly attribute long scrollWidth;
     readonly attribute long scrollHeight;
+
+    [RuntimeEnabled=CSSOMSmoothScroll] void scroll(double x, double y);
+    [RuntimeEnabled=CSSOMSmoothScroll] void scroll(optional ScrollToOptions scrollToOptions);
+    [RuntimeEnabled=CSSOMSmoothScroll] void scrollTo(double x, double y);
+    [RuntimeEnabled=CSSOMSmoothScroll] void scrollTo(optional ScrollToOptions scrollToOptions);
+    [RuntimeEnabled=CSSOMSmoothScroll] void scrollBy(double x, double y);
+    [RuntimeEnabled=CSSOMSmoothScroll] void scrollBy(optional ScrollToOptions scrollToOptions);
 
     void focus();
     void blur();
@@ -114,6 +117,10 @@ interface Element : Node {
 
     [MeasureAs=ElementRequestPointerLock] void requestPointerLock();
 
+    // Experimental accessibility API
+    [RuntimeEnabled=ComputedAccessibilityInfo] readonly attribute DOMString? computedRole;
+    [RuntimeEnabled=ComputedAccessibilityInfo] readonly attribute DOMString? computedName;
+
     // Event handler attributes
     attribute EventHandler onbeforecopy;
     attribute EventHandler onbeforecut;
@@ -132,3 +139,4 @@ interface Element : Node {
 
 Element implements ParentNode;
 Element implements ChildNode;
+Element implements NonDocumentTypeChildNode;

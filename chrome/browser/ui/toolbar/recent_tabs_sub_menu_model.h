@@ -18,7 +18,6 @@
 #include "ui/base/models/simple_menu_model.h"
 
 class Browser;
-struct SessionTab;
 
 namespace browser_sync {
 class OpenTabsUIDelegate;
@@ -30,6 +29,10 @@ struct FaviconImageResult;
 
 namespace gfx {
 class Image;
+}
+
+namespace sessions {
+struct SessionTab;
 }
 
 namespace ui {
@@ -102,7 +105,7 @@ class RecentTabsSubMenuModel : public ui::SimpleMenuModel,
 
   // Build the tab item for other devices with parameters needed to restore it.
   void BuildOtherDevicesTabItem(const std::string& session_tag,
-                                const SessionTab& tab);
+                                const sessions::SessionTab& tab);
 
   // Add the favicon for the device section header.
   void AddDeviceFavicon(int index_in_menu,
@@ -167,10 +170,10 @@ class RecentTabsSubMenuModel : public ui::SimpleMenuModel,
   base::CancelableTaskTracker local_tab_cancelable_task_tracker_;
   base::CancelableTaskTracker other_devices_tab_cancelable_task_tracker_;
 
-  base::WeakPtrFactory<RecentTabsSubMenuModel> weak_ptr_factory_;
-
   // Time the menu is open for until a recent tab is selected.
   base::ElapsedTimer menu_opened_timer_;
+
+  base::WeakPtrFactory<RecentTabsSubMenuModel> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RecentTabsSubMenuModel);
 };

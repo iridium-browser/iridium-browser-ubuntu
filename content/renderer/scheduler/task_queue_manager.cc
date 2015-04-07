@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
+#include "base/debug/trace_event_argument.h"
 #include "content/renderer/scheduler/task_queue_selector.h"
 
 namespace content {
@@ -19,10 +20,15 @@ class TaskQueue : public base::SingleThreadTaskRunner {
   bool RunsTasksOnCurrentThread() const override;
   bool PostDelayedTask(const tracked_objects::Location& from_here,
                        const base::Closure& task,
-                       base::TimeDelta delay) override;
+                       base::TimeDelta delay) override {
+    return PostDelayedTaskImpl(from_here, task, delay, true);
+  }
+
   bool PostNonNestableDelayedTask(const tracked_objects::Location& from_here,
                                   const base::Closure& task,
-                                  base::TimeDelta delay) override;
+                                  base::TimeDelta delay) override {
+    return PostDelayedTaskImpl(from_here, task, delay, false);
+  }
 
   // Adds a task at the end of the incoming task queue and schedules a call to
   // TaskQueueManager::DoWork() if the incoming queue was empty and automatic
@@ -41,17 +47,33 @@ class TaskQueue : public base::SingleThreadTaskRunner {
 
   base::TaskQueue& work_queue() { return work_queue_; }
 
+  void set_name(const char* name) { name_ = name; }
+
+  void AsValueInto(base::debug::TracedValue* state) const;
+
  private:
   ~TaskQueue() override;
 
+  bool PostDelayedTaskImpl(const tracked_objects::Location& from_here,
+                           const base::Closure& task,
+                           base::TimeDelta delay,
+                           bool nestable);
+
   void PumpQueueLocked();
   void EnqueueTaskLocked(const base::PendingTask& pending_task);
+
+  void TraceWorkQueueSize() const;
+  static void QueueAsValueInto(const base::TaskQueue& queue,
+                               base::debug::TracedValue* state);
+  static void TaskAsValueInto(const base::PendingTask& task,
+                              base::debug::TracedValue* state);
 
   // This lock protects all members except the work queue.
   mutable base::Lock lock_;
   TaskQueueManager* task_queue_manager_;
   base::TaskQueue incoming_queue_;
   bool auto_pump_;
+  const char* name_;
 
   base::TaskQueue work_queue_;
 
@@ -59,7 +81,9 @@ class TaskQueue : public base::SingleThreadTaskRunner {
 };
 
 TaskQueue::TaskQueue(TaskQueueManager* task_queue_manager)
-    : task_queue_manager_(task_queue_manager), auto_pump_(true) {
+    : task_queue_manager_(task_queue_manager),
+      auto_pump_(true),
+      name_(nullptr) {
 }
 
 TaskQueue::~TaskQueue() {
@@ -77,14 +101,15 @@ bool TaskQueue::RunsTasksOnCurrentThread() const {
   return task_queue_manager_->RunsTasksOnCurrentThread();
 }
 
-bool TaskQueue::PostDelayedTask(const tracked_objects::Location& from_here,
-                                const base::Closure& task,
-                                base::TimeDelta delay) {
+bool TaskQueue::PostDelayedTaskImpl(const tracked_objects::Location& from_here,
+                                    const base::Closure& task,
+                                    base::TimeDelta delay,
+                                    bool nestable) {
   base::AutoLock lock(lock_);
   if (!task_queue_manager_)
     return false;
 
-  base::PendingTask pending_task(from_here, task);
+  base::PendingTask pending_task(from_here, task, base::TimeTicks(), nestable);
   task_queue_manager_->DidQueueTask(&pending_task);
 
   if (delay > base::TimeDelta()) {
@@ -93,17 +118,6 @@ bool TaskQueue::PostDelayedTask(const tracked_objects::Location& from_here,
   }
   EnqueueTaskLocked(pending_task);
   return true;
-}
-
-bool TaskQueue::PostNonNestableDelayedTask(
-    const tracked_objects::Location& from_here,
-    const base::Closure& task,
-    base::TimeDelta delay) {
-  base::AutoLock lock(lock_);
-  if (!task_queue_manager_)
-    return false;
-  return task_queue_manager_->PostNonNestableDelayedTask(
-      from_here, task, delay);
 }
 
 bool TaskQueue::IsQueueEmpty() const {
@@ -125,6 +139,7 @@ bool TaskQueue::UpdateWorkQueue() {
     if (!auto_pump_ || incoming_queue_.empty())
       return false;
     work_queue_.Swap(&incoming_queue_);
+    TraceWorkQueueSize();
     return true;
   }
 }
@@ -132,7 +147,15 @@ bool TaskQueue::UpdateWorkQueue() {
 base::PendingTask TaskQueue::TakeTaskFromWorkQueue() {
   base::PendingTask pending_task = work_queue_.front();
   work_queue_.pop();
+  TraceWorkQueueSize();
   return pending_task;
+}
+
+void TaskQueue::TraceWorkQueueSize() const {
+  if (!name_)
+    return;
+  TRACE_COUNTER1(TRACE_DISABLED_BY_DEFAULT("renderer.scheduler"), name_,
+                 work_queue_.size());
 }
 
 void TaskQueue::EnqueueTask(const base::PendingTask& pending_task) {
@@ -145,7 +168,7 @@ void TaskQueue::EnqueueTaskLocked(const base::PendingTask& pending_task) {
   if (!task_queue_manager_)
     return;
   if (auto_pump_ && incoming_queue_.empty())
-    task_queue_manager_->PostDoWorkOnMainRunner();
+    task_queue_manager_->MaybePostDoWorkOnMainRunner();
   incoming_queue_.push(pending_task);
 }
 
@@ -166,7 +189,7 @@ void TaskQueue::PumpQueueLocked() {
     incoming_queue_.pop();
   }
   if (!work_queue_.empty())
-    task_queue_manager_->PostDoWorkOnMainRunner();
+    task_queue_manager_->MaybePostDoWorkOnMainRunner();
 }
 
 void TaskQueue::PumpQueue() {
@@ -174,7 +197,46 @@ void TaskQueue::PumpQueue() {
   PumpQueueLocked();
 }
 
-}  // namespace
+void TaskQueue::AsValueInto(base::debug::TracedValue* state) const {
+  base::AutoLock lock(lock_);
+  state->BeginDictionary();
+  if (name_)
+    state->SetString("name", name_);
+  state->SetBoolean("auto_pump", auto_pump_);
+  state->BeginArray("incoming_queue");
+  QueueAsValueInto(incoming_queue_, state);
+  state->EndArray();
+  state->BeginArray("work_queue");
+  QueueAsValueInto(work_queue_, state);
+  state->EndArray();
+  state->EndDictionary();
+}
+
+// static
+void TaskQueue::QueueAsValueInto(const base::TaskQueue& queue,
+                                 base::debug::TracedValue* state) {
+  base::TaskQueue queue_copy(queue);
+  while (!queue_copy.empty()) {
+    TaskAsValueInto(queue_copy.front(), state);
+    queue_copy.pop();
+  }
+}
+
+// static
+void TaskQueue::TaskAsValueInto(const base::PendingTask& task,
+                                base::debug::TracedValue* state) {
+  state->BeginDictionary();
+  state->SetString("posted_from", task.posted_from.ToString());
+  state->SetInteger("sequence_num", task.sequence_num);
+  state->SetBoolean("nestable", task.nestable);
+  state->SetBoolean("is_high_res", task.is_high_res);
+  state->SetDouble(
+      "delayed_run_time",
+      (task.delayed_run_time - base::TimeTicks()).InMicroseconds() / 1000.0L);
+  state->EndDictionary();
+}
+
+}  // namespace internal
 
 TaskQueueManager::TaskQueueManager(
     size_t task_queue_count,
@@ -182,8 +244,12 @@ TaskQueueManager::TaskQueueManager(
     TaskQueueSelector* selector)
     : main_task_runner_(main_task_runner),
       selector_(selector),
+      pending_dowork_count_(0),
       weak_factory_(this) {
   DCHECK(main_task_runner->RunsTasksOnCurrentThread());
+  TRACE_EVENT_OBJECT_CREATED_WITH_ID(
+      TRACE_DISABLED_BY_DEFAULT("renderer.scheduler"), "TaskQueueManager",
+      this);
 
   task_queue_manager_weak_ptr_ = weak_factory_.GetWeakPtr();
   for (size_t i = 0; i < task_queue_count; i++) {
@@ -199,6 +265,9 @@ TaskQueueManager::TaskQueueManager(
 }
 
 TaskQueueManager::~TaskQueueManager() {
+  TRACE_EVENT_OBJECT_DELETED_WITH_ID(
+      TRACE_DISABLED_BY_DEFAULT("renderer.scheduler"), "TaskQueueManager",
+      this);
   for (auto& queue : queues_)
     queue->WillDeleteTaskQueueManager();
 }
@@ -241,21 +310,44 @@ bool TaskQueueManager::UpdateWorkQueues() {
   return has_work;
 }
 
-void TaskQueueManager::PostDoWorkOnMainRunner() {
+void TaskQueueManager::MaybePostDoWorkOnMainRunner() {
+  bool on_main_thread = main_task_runner_->BelongsToCurrentThread();
+  if (on_main_thread) {
+    // We only want one pending DoWork posted from the main thread, or we risk
+    // an explosion of pending DoWorks which could starve out everything else.
+    if (pending_dowork_count_ > 0) {
+      return;
+    }
+    pending_dowork_count_++;
+  }
+
   main_task_runner_->PostTask(
-      FROM_HERE, Bind(&TaskQueueManager::DoWork, task_queue_manager_weak_ptr_));
+      FROM_HERE, Bind(&TaskQueueManager::DoWork, task_queue_manager_weak_ptr_,
+                      on_main_thread));
 }
 
-void TaskQueueManager::DoWork() {
+void TaskQueueManager::DoWork(bool posted_from_main_thread) {
+  if (posted_from_main_thread) {
+    pending_dowork_count_--;
+    DCHECK_GE(pending_dowork_count_, 0);
+  }
   main_thread_checker_.CalledOnValidThread();
   if (!UpdateWorkQueues())
     return;
 
   size_t queue_index;
-  if (!selector_->SelectWorkQueueToService(&queue_index))
+  if (!SelectWorkQueueToService(&queue_index))
     return;
-  PostDoWorkOnMainRunner();
-  RunTaskFromWorkQueue(queue_index);
+  MaybePostDoWorkOnMainRunner();
+  ProcessTaskFromWorkQueue(queue_index);
+}
+
+bool TaskQueueManager::SelectWorkQueueToService(size_t* out_queue_index) {
+  bool should_run = selector_->SelectWorkQueueToService(out_queue_index);
+  TRACE_EVENT_OBJECT_SNAPSHOT_WITH_ID(
+      TRACE_DISABLED_BY_DEFAULT("renderer.scheduler"), "TaskQueueManager", this,
+      AsValueWithSelectorResult(should_run, *out_queue_index));
+  return should_run;
 }
 
 void TaskQueueManager::DidQueueTask(base::PendingTask* pending_task) {
@@ -263,12 +355,19 @@ void TaskQueueManager::DidQueueTask(base::PendingTask* pending_task) {
   task_annotator_.DidQueueTask("TaskQueueManager::PostTask", *pending_task);
 }
 
-void TaskQueueManager::RunTaskFromWorkQueue(size_t queue_index) {
+void TaskQueueManager::ProcessTaskFromWorkQueue(size_t queue_index) {
   main_thread_checker_.CalledOnValidThread();
   internal::TaskQueue* queue = Queue(queue_index);
   base::PendingTask pending_task = queue->TakeTaskFromWorkQueue();
-  task_annotator_.RunTask(
-      "TaskQueueManager::PostTask", "TaskQueueManager::RunTask", pending_task);
+  if (!pending_task.nestable) {
+    // Defer non-nestable work to the main task runner.  NOTE these tasks can be
+    // arbitrarily delayed so the additional delay should not be a problem.
+    main_task_runner_->PostNonNestableTask(pending_task.posted_from,
+                                           pending_task.task);
+  } else {
+    task_annotator_.RunTask("TaskQueueManager::PostTask",
+                            "TaskQueueManager::RunTask", pending_task);
+  }
 }
 
 bool TaskQueueManager::RunsTasksOnCurrentThread() const {
@@ -283,12 +382,28 @@ bool TaskQueueManager::PostDelayedTask(
   return main_task_runner_->PostDelayedTask(from_here, task, delay);
 }
 
-bool TaskQueueManager::PostNonNestableDelayedTask(
-    const tracked_objects::Location& from_here,
-    const base::Closure& task,
-    base::TimeDelta delay) {
-  // Defer non-nestable work to the main task runner.
-  return main_task_runner_->PostNonNestableDelayedTask(from_here, task, delay);
+void TaskQueueManager::SetQueueName(size_t queue_index, const char* name) {
+  main_thread_checker_.CalledOnValidThread();
+  internal::TaskQueue* queue = Queue(queue_index);
+  queue->set_name(name);
+}
+
+scoped_refptr<base::debug::ConvertableToTraceFormat>
+TaskQueueManager::AsValueWithSelectorResult(bool should_run,
+                                            size_t selected_queue) const {
+  main_thread_checker_.CalledOnValidThread();
+  scoped_refptr<base::debug::TracedValue> state =
+      new base::debug::TracedValue();
+  state->BeginArray("queues");
+  for (auto& queue : queues_)
+    queue->AsValueInto(state.get());
+  state->EndArray();
+  state->BeginDictionary("selector");
+  selector_->AsValueInto(state.get());
+  state->EndDictionary();
+  if (should_run)
+    state->SetInteger("selected_queue", selected_queue);
+  return state;
 }
 
 }  // namespace content

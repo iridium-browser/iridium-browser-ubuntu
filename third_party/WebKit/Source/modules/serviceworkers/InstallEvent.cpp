@@ -32,7 +32,6 @@
 #include "InstallEvent.h"
 
 #include "modules/serviceworkers/WaitUntilObserver.h"
-#include "platform/NotImplemented.h"
 #include "wtf/RefPtr.h"
 #include <v8.h>
 
@@ -43,15 +42,14 @@ PassRefPtrWillBeRawPtr<InstallEvent> InstallEvent::create()
     return adoptRefWillBeNoop(new InstallEvent());
 }
 
-PassRefPtrWillBeRawPtr<InstallEvent> InstallEvent::create(const AtomicString& type, const EventInit& initializer, WaitUntilObserver* observer)
+PassRefPtrWillBeRawPtr<InstallEvent> InstallEvent::create(const AtomicString& type, const InstallEventInit& initializer)
 {
-    return adoptRefWillBeNoop(new InstallEvent(type, initializer, observer));
+    return adoptRefWillBeNoop(new InstallEvent(type, initializer));
 }
 
-void InstallEvent::replace()
+PassRefPtrWillBeRawPtr<InstallEvent> InstallEvent::create(const AtomicString& type, const InstallEventInit& initializer, WaitUntilObserver* observer)
 {
-    // FIXME: implement.
-    notImplemented();
+    return adoptRefWillBeNoop(new InstallEvent(type, initializer, observer));
 }
 
 const AtomicString& InstallEvent::interfaceName() const
@@ -63,7 +61,12 @@ InstallEvent::InstallEvent()
 {
 }
 
-InstallEvent::InstallEvent(const AtomicString& type, const EventInit& initializer, WaitUntilObserver* observer)
+InstallEvent::InstallEvent(const AtomicString& type, const InstallEventInit& initializer)
+    : ExtendableEvent(type, initializer)
+{
+}
+
+InstallEvent::InstallEvent(const AtomicString& type, const InstallEventInit& initializer, WaitUntilObserver* observer)
     : ExtendableEvent(type, initializer, observer)
 {
 }

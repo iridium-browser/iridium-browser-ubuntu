@@ -29,6 +29,8 @@ source_set("video_engine_core") {
     "encoder_state_feedback.h",
     "overuse_frame_detector.cc",
     "overuse_frame_detector.h",
+    "report_block_stats.cc",
+    "report_block_stats.h",
     "stream_synchronization.cc",
     "stream_synchronization.h",
     "vie_base_impl.cc",
@@ -99,6 +101,8 @@ source_set("video_engine_core") {
     cflags = [
       # TODO(jschuh): Bug 1348: fix size_t to int truncations.
       "/wd4267",  # size_t to int truncation.
+      # Bug 261.
+      "/wd4373",  # legacy warning for ignoring const / volatile in signatures.
     ]
   }
 

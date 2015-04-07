@@ -35,6 +35,10 @@
 #include "webrtc/common_types.h"
 #include "webrtc/modules/interface/module_common_types.h"
 
+namespace webrtc {
+class I420VideoFrame;
+};
+
 namespace cricket {
 
 struct CapturedFrame;
@@ -50,7 +54,7 @@ class WebRtcVideoFrame : public VideoFrame {
   // Returns "true" if successful.
   bool Init(uint32 format, int w, int h, int dw, int dh, uint8* sample,
             size_t sample_size, size_t pixel_width, size_t pixel_height,
-            int64 elapsed_time, int64 time_stamp, int rotation);
+            int64_t elapsed_time, int64_t time_stamp, int rotation);
 
   bool Init(const CapturedFrame* frame, int dw, int dh);
 
@@ -59,13 +63,13 @@ class WebRtcVideoFrame : public VideoFrame {
   bool Alias(const CapturedFrame* frame, int dw, int dh);
 
   bool InitToBlack(int w, int h, size_t pixel_width, size_t pixel_height,
-                   int64 elapsed_time, int64 time_stamp);
+                   int64_t elapsed_time, int64_t time_stamp);
 
   // Aliases this WebRtcVideoFrame to a memory buffer. |buffer| must outlive
   // this WebRtcVideoFrame.
   void Alias(uint8* buffer, size_t buffer_size, int w, int h,
-             size_t pixel_width, size_t pixel_height, int64 elapsed_time,
-             int64 time_stamp, int rotation);
+             size_t pixel_width, size_t pixel_height, int64_t elapsed_time,
+             int64_t time_stamp, int rotation);
 
   webrtc::VideoFrame* frame();
   const webrtc::VideoFrame* frame() const;
@@ -73,8 +77,8 @@ class WebRtcVideoFrame : public VideoFrame {
   // From base class VideoFrame.
   virtual bool Reset(uint32 format, int w, int h, int dw, int dh, uint8* sample,
                      size_t sample_size, size_t pixel_width,
-                     size_t pixel_height, int64 elapsed_time, int64 time_stamp,
-                     int rotation);
+                     size_t pixel_height, int64_t elapsed_time,
+                     int64_t time_stamp, int rotation);
 
   virtual size_t GetWidth() const;
   virtual size_t GetHeight() const;
@@ -91,12 +95,12 @@ class WebRtcVideoFrame : public VideoFrame {
 
   virtual size_t GetPixelWidth() const { return pixel_width_; }
   virtual size_t GetPixelHeight() const { return pixel_height_; }
-  virtual int64 GetElapsedTime() const { return elapsed_time_; }
-  virtual int64 GetTimeStamp() const { return time_stamp_; }
-  virtual void SetElapsedTime(int64 elapsed_time) {
+  virtual int64_t GetElapsedTime() const { return elapsed_time_; }
+  virtual int64_t GetTimeStamp() const { return time_stamp_; }
+  virtual void SetElapsedTime(int64_t elapsed_time) {
     elapsed_time_ = elapsed_time;
   }
-  virtual void SetTimeStamp(int64 time_stamp) { time_stamp_ = time_stamp; }
+  virtual void SetTimeStamp(int64_t time_stamp) { time_stamp_ = time_stamp; }
 
   virtual int GetRotation() const { return rotation_; }
 
@@ -111,22 +115,83 @@ class WebRtcVideoFrame : public VideoFrame {
   typedef rtc::RefCountedObject<FrameBuffer> RefCountedBuffer;
 
   void Attach(RefCountedBuffer* video_buffer, size_t buffer_size, int w, int h,
-              size_t pixel_width, size_t pixel_height, int64 elapsed_time,
-              int64 time_stamp, int rotation);
+              size_t pixel_width, size_t pixel_height, int64_t elapsed_time,
+              int64_t time_stamp, int rotation);
 
   virtual VideoFrame* CreateEmptyFrame(int w, int h, size_t pixel_width,
-                                       size_t pixel_height, int64 elapsed_time,
-                                       int64 time_stamp) const;
+                                       size_t pixel_height,
+                                       int64_t elapsed_time,
+                                       int64_t time_stamp) const;
   void InitToEmptyBuffer(int w, int h, size_t pixel_width, size_t pixel_height,
-                         int64 elapsed_time, int64 time_stamp);
+                         int64_t elapsed_time, int64_t time_stamp);
 
   rtc::scoped_refptr<RefCountedBuffer> video_buffer_;
-  bool is_black_;
   size_t pixel_width_;
   size_t pixel_height_;
-  int64 elapsed_time_;
-  int64 time_stamp_;
+  int64_t elapsed_time_;
+  int64_t time_stamp_;
   int rotation_;
+};
+
+// Thin map between VideoFrame and an existing webrtc::I420VideoFrame
+// to avoid having to copy the rendered VideoFrame prematurely.
+// This implementation is only safe to use in a const context and should never
+// be written to.
+class WebRtcVideoRenderFrame : public VideoFrame {
+ public:
+  explicit WebRtcVideoRenderFrame(const webrtc::I420VideoFrame* frame);
+
+  virtual bool InitToBlack(int w,
+                           int h,
+                           size_t pixel_width,
+                           size_t pixel_height,
+                           int64_t elapsed_time,
+                           int64_t time_stamp) OVERRIDE;
+  virtual bool Reset(uint32 fourcc,
+                     int w,
+                     int h,
+                     int dw,
+                     int dh,
+                     uint8* sample,
+                     size_t sample_size,
+                     size_t pixel_width,
+                     size_t pixel_height,
+                     int64_t elapsed_time,
+                     int64_t time_stamp,
+                     int rotation) OVERRIDE;
+  virtual size_t GetWidth() const OVERRIDE;
+  virtual size_t GetHeight() const OVERRIDE;
+  virtual const uint8* GetYPlane() const OVERRIDE;
+  virtual const uint8* GetUPlane() const OVERRIDE;
+  virtual const uint8* GetVPlane() const OVERRIDE;
+  virtual uint8* GetYPlane() OVERRIDE;
+  virtual uint8* GetUPlane() OVERRIDE;
+  virtual uint8* GetVPlane() OVERRIDE;
+  virtual int32 GetYPitch() const OVERRIDE;
+  virtual int32 GetUPitch() const OVERRIDE;
+  virtual int32 GetVPitch() const OVERRIDE;
+  virtual void* GetNativeHandle() const OVERRIDE;
+  virtual size_t GetPixelWidth() const OVERRIDE;
+  virtual size_t GetPixelHeight() const OVERRIDE;
+  virtual int64_t GetElapsedTime() const OVERRIDE;
+  virtual int64_t GetTimeStamp() const OVERRIDE;
+  virtual void SetElapsedTime(int64_t elapsed_time) OVERRIDE;
+  virtual void SetTimeStamp(int64_t time_stamp) OVERRIDE;
+  virtual int GetRotation() const OVERRIDE;
+  virtual VideoFrame* Copy() const OVERRIDE;
+  virtual bool MakeExclusive() OVERRIDE;
+  virtual size_t CopyToBuffer(uint8* buffer, size_t size) const OVERRIDE;
+
+ protected:
+  virtual VideoFrame* CreateEmptyFrame(int w,
+                                       int h,
+                                       size_t pixel_width,
+                                       size_t pixel_height,
+                                       int64_t elapsed_time,
+                                       int64_t time_stamp) const OVERRIDE;
+
+ private:
+  const webrtc::I420VideoFrame* const frame_;
 };
 
 }  // namespace cricket

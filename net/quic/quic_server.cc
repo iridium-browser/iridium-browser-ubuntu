@@ -47,6 +47,25 @@ QuicServer::QuicServer(const QuicConfig& config,
 }
 
 void QuicServer::Initialize() {
+#if MMSG_MORE
+  use_recvmmsg_ = true;
+#endif
+
+  // If an initial flow control window has not explicitly been set, then use a
+  // sensible value for a server: 1 MB for session, 64 KB for each stream.
+  const uint32 kInitialSessionFlowControlWindow = 1 * 1024 * 1024;  // 1 MB
+  const uint32 kInitialStreamFlowControlWindow = 64 * 1024;         // 64 KB
+  if (config_.GetInitialStreamFlowControlWindowToSend() ==
+      kMinimumFlowControlSendWindow) {
+    config_.SetInitialStreamFlowControlWindowToSend(
+        kInitialStreamFlowControlWindow);
+  }
+  if (config_.GetInitialSessionFlowControlWindowToSend() ==
+      kMinimumFlowControlSendWindow) {
+    config_.SetInitialSessionFlowControlWindowToSend(
+        kInitialSessionFlowControlWindow);
+  }
+
   // Initialize the in memory cache now.
   QuicInMemoryCache::GetInstance();
 
@@ -74,7 +93,8 @@ int QuicServer::Listen(const IPEndPoint& address) {
   // These send and receive buffer sizes are sized for a single connection,
   // because the default usage of QuicServer is as a test server with one or
   // two clients.  Adjust higher for use with many clients.
-  rc = socket->SetReceiveBufferSize(TcpReceiver::kReceiveWindowTCP);
+  rc = socket->SetReceiveBufferSize(
+      static_cast<int32>(TcpReceiver::kReceiveWindowTCP));
   if (rc < 0) {
     LOG(ERROR) << "SetReceiveBufferSize() failed: " << ErrorToString(rc);
     return rc;

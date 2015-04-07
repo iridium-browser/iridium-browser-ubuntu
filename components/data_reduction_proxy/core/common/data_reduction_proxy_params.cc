@@ -9,6 +9,7 @@
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
+#include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
@@ -41,6 +42,7 @@ const char kDefaultAltFallbackOrigin[] = "http://ssl.googlezip.net:80/";
 const char kDefaultProbeUrl[] = "http://check.googlezip.net/connect";
 const char kDefaultWarmupUrl[] = "http://www.gstatic.com/generate_204";
 
+const char kAndroidOneIdentifier[] = "sprout";
 }  // namespace
 
 namespace data_reduction_proxy {
@@ -49,7 +51,7 @@ namespace data_reduction_proxy {
 bool DataReductionProxyParams::IsIncludedInAlternativeFieldTrial() {
   const std::string group_name = base::FieldTrialList::FindFullName(
       "DataCompressionProxyAlternativeConfiguration");
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           data_reduction_proxy::switches::kEnableDataReductionProxyAlt)) {
     return true;
   }
@@ -60,12 +62,6 @@ bool DataReductionProxyParams::IsIncludedInAlternativeFieldTrial() {
 bool DataReductionProxyParams::IsIncludedInPromoFieldTrial() {
   return FieldTrialList::FindFullName(
       "DataCompressionProxyPromoVisibility") == kEnabled;
-}
-
-// static
-bool DataReductionProxyParams::IsIncludedInPreconnectHintingFieldTrial() {
-  return FieldTrialList::FindFullName(
-          "DataCompressionProxyPreconnectHints") == kEnabled;
 }
 
 // static
@@ -85,6 +81,20 @@ bool DataReductionProxyParams::
     IsIncludedInRemoveMissingViaHeaderOtherBypassFieldTrial() {
   return FieldTrialList::FindFullName(
       "DataReductionProxyRemoveMissingViaHeaderOtherBypass") == kEnabled;
+}
+
+// static
+bool DataReductionProxyParams::
+    IsIncludedInRelaxMissingViaHeaderOtherBypassFieldTrial() {
+  return FieldTrialList::FindFullName(
+      "DataReductionProxyRemoveMissingViaHeaderOtherBypass") == "Relaxed";
+}
+
+// static
+bool DataReductionProxyParams::IsIncludedInAndroidOnePromoFieldTrial(
+    const char* build_fingerprint) {
+  base::StringPiece fingerprint(build_fingerprint);
+  return (fingerprint.find(kAndroidOneIdentifier) != std::string::npos);
 }
 
 DataReductionProxyTypeInfo::DataReductionProxyTypeInfo()
@@ -241,7 +251,8 @@ bool DataReductionProxyParams::Init(bool allowed,
 }
 
 void DataReductionProxyParams::InitWithoutChecks() {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   std::string origin;
   if (!command_line.HasSwitch(switches::kDisableDataReductionProxyDev)) {
       origin = command_line.GetSwitchValueASCII(
@@ -384,7 +395,8 @@ bool DataReductionProxyParams::IsBypassedByDataReductionProxyLocalRules(
 }
 
 std::string DataReductionProxyParams::GetDefaultDevOrigin() const {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kDisableDataReductionProxyDev))
     return std::string();
   if (command_line.HasSwitch(switches::kEnableDataReductionProxyDev) ||
@@ -396,7 +408,8 @@ std::string DataReductionProxyParams::GetDefaultDevOrigin() const {
 }
 
 std::string DataReductionProxyParams::GetDefaultDevFallbackOrigin() const {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kDisableDataReductionProxyDev))
     return std::string();
   if (command_line.HasSwitch(switches::kEnableDataReductionProxyDev) ||
@@ -408,12 +421,14 @@ std::string DataReductionProxyParams::GetDefaultDevFallbackOrigin() const {
 }
 
 bool DataReductionProxyParams::AreDataReductionProxiesBypassed(
-    const net::URLRequest& request, base::TimeDelta* min_retry_delay) const {
+    const net::URLRequest& request,
+    const net::ProxyConfig& data_reduction_proxy_config,
+    base::TimeDelta* min_retry_delay) const {
   if (request.context() != NULL &&
       request.context()->proxy_service() != NULL) {
     return AreProxiesBypassed(
         request.context()->proxy_service()->proxy_retry_info(),
-        request.context()->proxy_service()->config().proxy_rules(),
+        data_reduction_proxy_config.proxy_rules(),
         request.url().SchemeIs(url::kHttpsScheme),
         min_retry_delay);
   }

@@ -136,7 +136,7 @@ void ClientSession::NotifyClientResolution(
 void ClientSession::ControlVideo(const protocol::VideoControl& video_control) {
   DCHECK(CalledOnValidThread());
 
-  // Note that |video_scheduler_| may be NULL, depending upon whether extensions
+  // Note that |video_scheduler_| may be null, depending upon whether extensions
   // choose to wrap or "steal" the video capturer or encoder.
   if (video_control.has_enable()) {
     VLOG(1) << "Received VideoControl (enable="
@@ -366,11 +366,11 @@ void ClientSession::OnConnectionClosed(
   // longer valid once ConnectionToClient calls OnConnectionClosed().
   if (audio_scheduler_.get()) {
     audio_scheduler_->Stop();
-    audio_scheduler_ = NULL;
+    audio_scheduler_ = nullptr;
   }
   if (video_scheduler_.get()) {
     video_scheduler_->Stop();
-    video_scheduler_ = NULL;
+    video_scheduler_ = nullptr;
   }
 
   client_clipboard_factory_.InvalidateWeakPtrs();
@@ -383,13 +383,13 @@ void ClientSession::OnConnectionClosed(
   event_handler_->OnSessionClosed(this);
 }
 
-void ClientSession::OnSequenceNumberUpdated(
-    protocol::ConnectionToClient* connection, int64 sequence_number) {
+void ClientSession::OnEventTimestamp(protocol::ConnectionToClient* connection,
+                                     int64 timestamp) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(connection_.get(), connection);
 
   if (video_scheduler_.get())
-    video_scheduler_->UpdateSequenceNumber(sequence_number);
+    video_scheduler_->SetLatestEventTimestamp(timestamp);
 }
 
 void ClientSession::OnRouteChange(
@@ -436,7 +436,7 @@ void ClientSession::ResetVideoPipeline() {
 
   if (video_scheduler_.get()) {
     video_scheduler_->Stop();
-    video_scheduler_ = NULL;
+    video_scheduler_ = nullptr;
   }
 
   // Create VideoEncoder and DesktopCapturer to match the session's video

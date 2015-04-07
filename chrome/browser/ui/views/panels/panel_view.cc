@@ -22,6 +22,7 @@
 #include "content/public/browser/web_contents.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/content_accelerators/accelerator_util.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/screen.h"
@@ -55,7 +56,7 @@ const int kStackedPanelHeightShrinkThresholdToBecomeMinimized =
 #endif
 
 // Supported accelerators.
-// Note: We can't use the acclerator table defined in chrome/browser/ui/views
+// Note: We can't use the accelerator table defined in chrome/browser/ui/views
 // due to checkdeps violation.
 struct AcceleratorMapping {
   ui::KeyboardCode keycode;
@@ -596,11 +597,8 @@ void PanelView::HandlePanelKeyboardEvent(
   if (focus_manager->shortcut_handling_suspended())
     return;
 
-  ui::Accelerator accelerator(
-      static_cast<ui::KeyboardCode>(event.windowsKeyCode),
-      content::GetModifiersFromNativeWebKeyboardEvent(event));
-  if (event.type == blink::WebInputEvent::KeyUp)
-    accelerator.set_type(ui::ET_KEY_RELEASED);
+  ui::Accelerator accelerator =
+      ui::GetAcceleratorFromNativeWebKeyboardEvent(event);
   focus_manager->ProcessAccelerator(accelerator);
 }
 

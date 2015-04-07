@@ -161,7 +161,7 @@ CFieldTree::_Node *CFieldTree::_Lookup(_Node *pParent, const CFX_WideString &sho
     for (int i = 0; i < ptr_array.GetSize(); i ++) {
         _Node *pNode = (_Node *)ptr_array[i];
         if (pNode->short_name.GetLength() == short_name.GetLength() &&
-                FXSYS_memcmp32((FX_LPCWSTR)pNode->short_name, (FX_LPCWSTR)short_name, short_name.GetLength()*sizeof(FX_WCHAR)) == 0) {
+                FXSYS_memcmp32(pNode->short_name.c_str(), short_name.c_str(), short_name.GetLength()*sizeof(FX_WCHAR)) == 0) {
             return pNode;
         }
     }
@@ -446,7 +446,7 @@ CPDF_Font* CPDF_InterForm::AddSystemFont(const CPDF_Document* pDocument, CFX_Byt
     if (iCharSet == 1) {
         iCharSet = GetNativeCharSet();
     }
-    HFONT hFont = ::CreateFontA(0, 0, 0, 0, 0, 0, 0, 0, iCharSet, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, (FX_LPCSTR)csFontName);
+    HFONT hFont = ::CreateFontA(0, 0, 0, 0, 0, 0, 0, 0, iCharSet, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, csFontName.c_str());
     if (hFont != NULL) {
         LOGFONTA lf;
         memset(&lf, 0, sizeof(LOGFONTA));

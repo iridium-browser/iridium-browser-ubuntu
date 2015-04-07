@@ -12,6 +12,7 @@
 #include "cc/quads/draw_quad.h"
 #include "cc/resources/prioritized_resource_manager.h"
 #include "cc/resources/resource_update_controller.h"
+#include "cc/scheduler/commit_earlyout_reason.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_host_single_thread_client.h"
 #include "cc/trees/layer_tree_impl.h"
@@ -23,15 +24,20 @@ namespace cc {
 scoped_ptr<Proxy> SingleThreadProxy::Create(
     LayerTreeHost* layer_tree_host,
     LayerTreeHostSingleThreadClient* client,
-    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner) {
-  return make_scoped_ptr(
-      new SingleThreadProxy(layer_tree_host, client, main_task_runner));
+    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
+    scoped_ptr<BeginFrameSource> external_begin_frame_source) {
+  return make_scoped_ptr(new SingleThreadProxy(
+                                 layer_tree_host,
+                                 client,
+                                 main_task_runner,
+                                 external_begin_frame_source.Pass()));
 }
 
 SingleThreadProxy::SingleThreadProxy(
     LayerTreeHost* layer_tree_host,
     LayerTreeHostSingleThreadClient* client,
-    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner)
+    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
+    scoped_ptr<BeginFrameSource> external_begin_frame_source)
     : Proxy(main_task_runner, NULL),
       layer_tree_host_(layer_tree_host),
       client_(client),
@@ -43,6 +49,7 @@ SingleThreadProxy::SingleThreadProxy(
       commit_requested_(false),
       inside_synchronous_composite_(false),
       output_surface_creation_requested_(false),
+      external_begin_frame_source_(external_begin_frame_source.Pass()),
       weak_factory_(this) {
   TRACE_EVENT0("cc", "SingleThreadProxy::SingleThreadProxy");
   DCHECK(Proxy::IsMainThread());
@@ -84,24 +91,34 @@ void SingleThreadProxy::SetLayerTreeHostClientReady() {
   if (layer_tree_host_->settings().single_thread_proxy_scheduler &&
       !scheduler_on_impl_thread_) {
     SchedulerSettings scheduler_settings(layer_tree_host_->settings());
-    scheduler_on_impl_thread_ = Scheduler::Create(this,
-                                                  scheduler_settings,
-                                                  layer_tree_host_->id(),
-                                                  MainThreadTaskRunner(),
-                                                  base::PowerMonitor::Get());
+    scheduler_settings.main_thread_should_always_be_low_latency = true;
+    scheduler_on_impl_thread_ =
+        Scheduler::Create(this,
+                          scheduler_settings,
+                          layer_tree_host_->id(),
+                          MainThreadTaskRunner(),
+                          base::PowerMonitor::Get(),
+                          external_begin_frame_source_.Pass());
     scheduler_on_impl_thread_->SetCanStart();
     scheduler_on_impl_thread_->SetVisible(layer_tree_host_impl_->visible());
   }
 }
 
 void SingleThreadProxy::SetVisible(bool visible) {
-  TRACE_EVENT0("cc", "SingleThreadProxy::SetVisible");
+  TRACE_EVENT1("cc", "SingleThreadProxy::SetVisible", "visible", visible);
   DebugScopedSetImplThread impl(this);
   layer_tree_host_impl_->SetVisible(visible);
   if (scheduler_on_impl_thread_)
     scheduler_on_impl_thread_->SetVisible(layer_tree_host_impl_->visible());
   // Changing visibility could change ShouldComposite().
-  UpdateBackgroundAnimateTicking();
+}
+
+void SingleThreadProxy::SetThrottleFrameProduction(bool throttle) {
+  TRACE_EVENT1("cc", "SingleThreadProxy::SetThrottleFrameProduction",
+               "throttle", throttle);
+  DebugScopedSetImplThread impl(this);
+  if (scheduler_on_impl_thread_)
+    scheduler_on_impl_thread_->SetThrottleFrameProduction(throttle);
 }
 
 void SingleThreadProxy::RequestNewOutputSurface() {
@@ -118,11 +135,11 @@ void SingleThreadProxy::SetOutputSurface(
     scoped_ptr<OutputSurface> output_surface) {
   DCHECK(Proxy::IsMainThread());
   DCHECK(layer_tree_host_->output_surface_lost());
-  output_surface_creation_requested_ = false;
+  DCHECK(output_surface_creation_requested_);
   renderer_capabilities_for_main_thread_ = RendererCapabilities();
 
-  bool success = !!output_surface;
-  if (success) {
+  bool success;
+  {
     DebugScopedSetMainThreadBlocked main_thread_blocked(this);
     DebugScopedSetImplThread impl(this);
     layer_tree_host_->DeleteContentsTexturesOnImplThread(
@@ -130,15 +147,17 @@ void SingleThreadProxy::SetOutputSurface(
     success = layer_tree_host_impl_->InitializeRenderer(output_surface.Pass());
   }
 
-  layer_tree_host_->OnCreateAndInitializeOutputSurfaceAttempted(success);
-
   if (success) {
+    layer_tree_host_->DidInitializeOutputSurface();
     if (scheduler_on_impl_thread_)
       scheduler_on_impl_thread_->DidCreateAndInitializeOutputSurface();
     else if (!inside_synchronous_composite_)
       SetNeedsCommit();
-  } else if (Proxy::MainThreadTaskRunner()) {
-    ScheduleRequestNewOutputSurface();
+    output_surface_creation_requested_ = false;
+  } else {
+    // DidFailToInitializeOutputSurface is treated as a RequestNewOutputSurface,
+    // and so output_surface_creation_requested remains true.
+    layer_tree_host_->DidFailToInitializeOutputSurface();
   }
 }
 
@@ -159,6 +178,24 @@ void SingleThreadProxy::SetNeedsUpdateLayers() {
   TRACE_EVENT0("cc", "SingleThreadProxy::SetNeedsUpdateLayers");
   DCHECK(Proxy::IsMainThread());
   SetNeedsCommit();
+}
+
+void SingleThreadProxy::DoAnimate() {
+  // Don't animate if there is no root layer.
+  // TODO(mithro): Both Animate and UpdateAnimationState already have a
+  // "!active_tree_->root_layer()" check?
+  if (!layer_tree_host_impl_->active_tree()->root_layer()) {
+    return;
+  }
+
+  layer_tree_host_impl_->Animate(
+      layer_tree_host_impl_->CurrentBeginFrameArgs().frame_time);
+
+  // If animations are not visible, update the animation state now as it
+  // won't happen in DoComposite.
+  if (!layer_tree_host_impl_->AnimationsAreVisible()) {
+    layer_tree_host_impl_->UpdateAnimationState(true);
+  }
 }
 
 void SingleThreadProxy::DoCommit() {
@@ -202,9 +239,7 @@ void SingleThreadProxy::DoCommit() {
 
     layer_tree_host_impl_->CommitComplete();
 
-    UpdateBackgroundAnimateTicking();
-
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
     // In the single-threaded case, the scale and scroll deltas should never be
     // touched on the impl layer tree.
     scoped_ptr<ScrollAndScaleSet> scroll_info =
@@ -212,12 +247,6 @@ void SingleThreadProxy::DoCommit() {
     DCHECK(!scroll_info->scrolls.size());
     DCHECK_EQ(1.f, scroll_info->page_scale_delta);
 #endif
-
-    RenderingStatsInstrumentation* stats_instrumentation =
-        layer_tree_host_->rendering_stats_instrumentation();
-    benchmark_instrumentation::IssueMainThreadRenderingStatsEvent(
-        stats_instrumentation->main_thread_rendering_stats());
-    stats_instrumentation->AccumulateAndClearMainThreadStats();
   }
 
   if (layer_tree_host_->settings().impl_side_painting) {
@@ -328,7 +357,6 @@ void SingleThreadProxy::OnCanDrawStateChanged(bool can_draw) {
   TRACE_EVENT1(
       "cc", "SingleThreadProxy::OnCanDrawStateChanged", "can_draw", can_draw);
   DCHECK(Proxy::IsImplThread());
-  UpdateBackgroundAnimateTicking();
   if (scheduler_on_impl_thread_)
     scheduler_on_impl_thread_->SetCanDraw(can_draw);
 }
@@ -340,6 +368,9 @@ void SingleThreadProxy::NotifyReadyToActivate() {
     scheduler_on_impl_thread_->NotifyReadyToActivate();
 }
 
+void SingleThreadProxy::NotifyReadyToDraw() {
+}
+
 void SingleThreadProxy::SetNeedsRedrawOnImplThread() {
   client_->ScheduleComposite();
   if (scheduler_on_impl_thread_)
@@ -347,25 +378,21 @@ void SingleThreadProxy::SetNeedsRedrawOnImplThread() {
 }
 
 void SingleThreadProxy::SetNeedsAnimateOnImplThread() {
-  SetNeedsRedrawOnImplThread();
+  client_->ScheduleComposite();
+  if (scheduler_on_impl_thread_)
+    scheduler_on_impl_thread_->SetNeedsAnimate();
 }
 
-void SingleThreadProxy::SetNeedsManageTilesOnImplThread() {
-  TRACE_EVENT0("cc", "SingleThreadProxy::SetNeedsManageTilesOnImplThread");
+void SingleThreadProxy::SetNeedsPrepareTilesOnImplThread() {
+  TRACE_EVENT0("cc", "SingleThreadProxy::SetNeedsPrepareTilesOnImplThread");
   if (scheduler_on_impl_thread_)
-    scheduler_on_impl_thread_->SetNeedsManageTiles();
+    scheduler_on_impl_thread_->SetNeedsPrepareTiles();
 }
 
 void SingleThreadProxy::SetNeedsRedrawRectOnImplThread(
     const gfx::Rect& damage_rect) {
   layer_tree_host_impl_->SetViewportDamage(damage_rect);
   SetNeedsRedrawOnImplThread();
-}
-
-void SingleThreadProxy::DidInitializeVisibleTileOnImplThread() {
-  TRACE_EVENT0("cc", "SingleThreadProxy::DidInitializeVisibleTileOnImplThread");
-  if (scheduler_on_impl_thread_)
-    scheduler_on_impl_thread_->SetNeedsRedraw();
 }
 
 void SingleThreadProxy::SetNeedsCommitOnImplThread() {
@@ -410,25 +437,17 @@ void SingleThreadProxy::DidActivateSyncTree() {
     // the pending tree is not actually ready in the SingleThreadProxy.
     layer_tree_host_impl_->SetRequiresHighResToDraw();
 
-    // Since activation could cause tasks to run, post CommitComplete
-    // separately so that it runs after these tasks.  This is the loose
-    // equivalent of blocking commit until activation and also running
-    // all tasks posted during commit/activation before CommitComplete.
-    MainThreadTaskRunner()->PostTask(
-        FROM_HERE,
-        base::Bind(&SingleThreadProxy::CommitComplete,
-                   weak_factory_.GetWeakPtr()));
+    CommitComplete();
   }
 
-  UpdateBackgroundAnimateTicking();
   timing_history_.DidActivateSyncTree();
 }
 
-void SingleThreadProxy::DidManageTiles() {
+void SingleThreadProxy::DidPrepareTiles() {
   DCHECK(layer_tree_host_impl_->settings().impl_side_painting);
   DCHECK(Proxy::IsImplThread());
   if (scheduler_on_impl_thread_)
-    scheduler_on_impl_thread_->DidManageTiles();
+    scheduler_on_impl_thread_->DidPrepareTiles();
 }
 
 void SingleThreadProxy::UpdateRendererCapabilitiesOnImplThread() {
@@ -448,6 +467,12 @@ void SingleThreadProxy::DidLoseOutputSurfaceOnImplThread() {
   client_->DidAbortSwapBuffers();
   if (scheduler_on_impl_thread_)
     scheduler_on_impl_thread_->DidLoseOutputSurface();
+}
+
+void SingleThreadProxy::CommitVSyncParameters(base::TimeTicks timebase,
+                                              base::TimeDelta interval) {
+  if (scheduler_on_impl_thread_)
+    scheduler_on_impl_thread_->CommitVSyncParameters(timebase, interval);
 }
 
 void SingleThreadProxy::DidSwapBuffersOnImplThread() {
@@ -478,10 +503,9 @@ void SingleThreadProxy::CompositeImmediately(base::TimeTicks frame_begin_time) {
   }
 
   {
-    BeginFrameArgs begin_frame_args(
-        BeginFrameArgs::Create(frame_begin_time,
-                               base::TimeTicks(),
-                               BeginFrameArgs::DefaultInterval()));
+    BeginFrameArgs begin_frame_args(BeginFrameArgs::Create(
+        BEGINFRAME_FROM_HERE, frame_begin_time, base::TimeTicks(),
+        BeginFrameArgs::DefaultInterval(), BeginFrameArgs::SYNCHRONOUS));
     DoBeginMainFrame(begin_frame_args);
     DoCommit();
 
@@ -494,9 +518,11 @@ void SingleThreadProxy::CompositeImmediately(base::TimeTicks frame_begin_time) {
     if (layer_tree_host_impl_->settings().impl_side_painting) {
       layer_tree_host_impl_->ActivateSyncTree();
       layer_tree_host_impl_->active_tree()->UpdateDrawProperties();
-      layer_tree_host_impl_->ManageTiles();
+      layer_tree_host_impl_->PrepareTiles();
       layer_tree_host_impl_->SynchronouslyInitializeAllTiles();
     }
+
+    DoAnimate();
 
     LayerTreeHostImpl::FrameData frame;
     DoComposite(frame_begin_time, &frame);
@@ -539,12 +565,6 @@ bool SingleThreadProxy::ShouldComposite() const {
          layer_tree_host_impl_->CanDraw();
 }
 
-void SingleThreadProxy::UpdateBackgroundAnimateTicking() {
-  DCHECK(Proxy::IsImplThread());
-  layer_tree_host_impl_->UpdateBackgroundAnimateTicking(
-      !ShouldComposite() && layer_tree_host_impl_->active_tree()->root_layer());
-}
-
 void SingleThreadProxy::ScheduleRequestNewOutputSurface() {
   if (output_surface_creation_callback_.IsCancelled() &&
       !output_surface_creation_requested_) {
@@ -572,15 +592,10 @@ DrawResult SingleThreadProxy::DoComposite(base::TimeTicks frame_begin_time,
     // DrawLayers() depends on the result of PrepareToDraw(), it is guarded on
     // CanDraw() as well.
     if (!ShouldComposite()) {
-      UpdateBackgroundAnimateTicking();
       return DRAW_ABORTED_CANT_DRAW;
     }
 
     timing_history_.DidStartDrawing();
-
-    layer_tree_host_impl_->Animate(
-        layer_tree_host_impl_->CurrentBeginFrameArgs().frame_time);
-    UpdateBackgroundAnimateTicking();
 
     draw_result = layer_tree_host_impl_->PrepareToDraw(frame);
     draw_frame = draw_result == DRAW_SUCCESS;
@@ -629,8 +644,10 @@ bool SingleThreadProxy::MainFrameWillHappenForTesting() {
   return false;
 }
 
-BeginFrameSource* SingleThreadProxy::ExternalBeginFrameSource() {
-  return layer_tree_host_impl_.get();
+void SingleThreadProxy::SetChildrenNeedBeginFrames(
+    bool children_need_begin_frames) {
+  scheduler_on_impl_thread_->SetChildrenNeedBeginFrames(
+      children_need_begin_frames);
 }
 
 void SingleThreadProxy::WillBeginImplFrame(const BeginFrameArgs& args) {
@@ -666,14 +683,16 @@ void SingleThreadProxy::BeginMainFrame() {
 
   if (!layer_tree_host_->visible()) {
     TRACE_EVENT_INSTANT0("cc", "EarlyOut_NotVisible", TRACE_EVENT_SCOPE_THREAD);
-    BeginMainFrameAbortedOnImplThread();
+    BeginMainFrameAbortedOnImplThread(
+        CommitEarlyOutReason::ABORTED_NOT_VISIBLE);
     return;
   }
 
   if (layer_tree_host_->output_surface_lost()) {
     TRACE_EVENT_INSTANT0(
         "cc", "EarlyOut_OutputSurfaceLost", TRACE_EVENT_SCOPE_THREAD);
-    BeginMainFrameAbortedOnImplThread();
+    BeginMainFrameAbortedOnImplThread(
+        CommitEarlyOutReason::ABORTED_OUTPUT_SURFACE_LOST);
     return;
   }
 
@@ -705,22 +724,23 @@ void SingleThreadProxy::DoBeginMainFrame(
 
   timing_history_.DidBeginMainFrame();
 
+  // TODO(enne): SingleThreadProxy does not support cancelling commits yet,
+  // search for CommitEarlyOutReason::FINISHED_NO_UPDATES inside
+  // thread_proxy.cc
   if (scheduler_on_impl_thread_) {
     scheduler_on_impl_thread_->NotifyBeginMainFrameStarted();
     scheduler_on_impl_thread_->NotifyReadyToCommit();
   }
 }
 
-void SingleThreadProxy::BeginMainFrameAbortedOnImplThread() {
+void SingleThreadProxy::BeginMainFrameAbortedOnImplThread(
+    CommitEarlyOutReason reason) {
   DebugScopedSetImplThread impl(this);
   DCHECK(scheduler_on_impl_thread_->CommitPending());
   DCHECK(!layer_tree_host_impl_->pending_tree());
 
-  // TODO(enne): SingleThreadProxy does not support cancelling commits yet so
-  // did_handle is always false.
-  bool did_handle = false;
-  layer_tree_host_impl_->BeginMainFrameAborted(did_handle);
-  scheduler_on_impl_thread_->BeginMainFrameAborted(did_handle);
+  layer_tree_host_impl_->BeginMainFrameAborted(reason);
+  scheduler_on_impl_thread_->BeginMainFrameAborted(reason);
 }
 
 DrawResult SingleThreadProxy::ScheduledActionDrawAndSwapIfPossible() {
@@ -742,13 +762,8 @@ void SingleThreadProxy::ScheduledActionCommit() {
 
 void SingleThreadProxy::ScheduledActionAnimate() {
   TRACE_EVENT0("cc", "ScheduledActionAnimate");
-  layer_tree_host_impl_->Animate(
-      layer_tree_host_impl_->CurrentBeginFrameArgs().frame_time);
-}
-
-void SingleThreadProxy::ScheduledActionUpdateVisibleTiles() {
   DebugScopedSetImplThread impl(this);
-  layer_tree_host_impl_->UpdateVisibleTiles();
+  DoAnimate();
 }
 
 void SingleThreadProxy::ScheduledActionActivateSyncTree() {
@@ -770,11 +785,11 @@ void SingleThreadProxy::ScheduledActionBeginOutputSurfaceCreation() {
   }
 }
 
-void SingleThreadProxy::ScheduledActionManageTiles() {
-  TRACE_EVENT0("cc", "SingleThreadProxy::ScheduledActionManageTiles");
+void SingleThreadProxy::ScheduledActionPrepareTiles() {
+  TRACE_EVENT0("cc", "SingleThreadProxy::ScheduledActionPrepareTiles");
   DCHECK(layer_tree_host_impl_->settings().impl_side_painting);
   DebugScopedSetImplThread impl(this);
-  layer_tree_host_impl_->ManageTiles();
+  layer_tree_host_impl_->PrepareTiles();
 }
 
 void SingleThreadProxy::DidAnticipatedDrawTimeChange(base::TimeTicks time) {
@@ -794,6 +809,10 @@ base::TimeDelta SingleThreadProxy::CommitToActivateDurationEstimate() {
 
 void SingleThreadProxy::DidBeginImplFrameDeadline() {
   layer_tree_host_impl_->ResetCurrentBeginFrameArgsForNextFrame();
+}
+
+void SingleThreadProxy::SendBeginFramesToChildren(const BeginFrameArgs& args) {
+  layer_tree_host_->SendBeginFramesToChildren(args);
 }
 
 }  // namespace cc

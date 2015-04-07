@@ -38,8 +38,8 @@
 #include "net/http/http_response_headers.h"
 #include "third_party/WebKit/public/web/WebDragOperation.h"
 #include "ui/base/page_transition_types.h"
-#include "ui/gfx/rect_f.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/size.h"
 
 struct BrowserPluginHostMsg_ResizeGuest_Params;
 struct ViewHostMsg_DateTimeDialogValue_Params;
@@ -51,12 +51,11 @@ class BrowserPluginGuest;
 class BrowserPluginGuestManager;
 class DateTimeChooserAndroid;
 class DownloadItem;
-class GeolocationDispatcherHost;
 class GeolocationServiceContext;
 class InterstitialPageImpl;
 class JavaScriptDialogManager;
 class ManifestManagerHost;
-class MidiDispatcherHost;
+class MediaWebContentsObserver;
 class PluginContentOriginWhitelist;
 class PowerSaveBlocker;
 class RenderViewHost;
@@ -101,6 +100,8 @@ class CONTENT_EXPORT WebContentsImpl
       public NON_EXPORTED_BASE(NavigationControllerDelegate),
       public NON_EXPORTED_BASE(NavigatorDelegate) {
  public:
+  class FriendZone;
+
   ~WebContentsImpl() override;
 
   static WebContentsImpl* CreateWithOpener(
@@ -170,7 +171,7 @@ class CONTENT_EXPORT WebContentsImpl
 
   // A redirect was received while requesting a resource.
   void DidGetRedirectForResourceRequest(
-      RenderViewHost* render_view_host,
+      RenderFrameHost* render_frame_host,
       const ResourceRedirectDetails& details);
 
   WebContentsView* GetView() const;
@@ -317,6 +318,7 @@ class CONTENT_EXPORT WebContentsImpl
   gfx::Size GetPreferredSize() const override;
   bool GotResponseToLockMouseRequest(bool allowed) override;
   bool HasOpener() const override;
+  WebContents* GetOpener() const override;
   void DidChooseColorInColorChooser(SkColor color) override;
   void DidEndColorChooser() override;
   int DownloadImage(const GURL& url,
@@ -354,6 +356,7 @@ class CONTENT_EXPORT WebContentsImpl
   void RenderFrameDeleted(RenderFrameHost* render_frame_host) override;
   void DidStartLoading(RenderFrameHost* render_frame_host,
                        bool to_different_document) override;
+  void DidStopLoading(RenderFrameHost* render_frame_host) override;
   void SwappedOut(RenderFrameHost* render_frame_host) override;
   void DidDeferAfterResponseStarted(
       const TransitionLayerData& transition_data) override;
@@ -409,7 +412,8 @@ class CONTENT_EXPORT WebContentsImpl
   void UpdateState(RenderViewHost* render_view_host,
                    int32 page_id,
                    const PageState& page_state) override;
-  void UpdateTargetURL(const GURL& url) override;
+  void UpdateTargetURL(RenderViewHost* render_view_host,
+                       const GURL& url) override;
   void Close(RenderViewHost* render_view_host) override;
   void RequestMove(const gfx::Rect& new_bounds) override;
   void DidCancelLoading() override;
@@ -474,6 +478,9 @@ class CONTENT_EXPORT WebContentsImpl
       SiteInstance* instance) override;
   SessionStorageNamespaceMap GetSessionStorageNamespaceMap() override;
   FrameTree* GetFrameTree() override;
+  void SetIsVirtualKeyboardRequested(bool requested) override;
+  bool IsVirtualKeyboardRequested() override;
+
 
   // NavigatorDelegate ---------------------------------------------------------
 
@@ -496,6 +503,7 @@ class CONTENT_EXPORT WebContentsImpl
                                 ui::PageTransition transition_type) override;
   void DidNavigateMainFramePreCommit(bool navigation_is_within_page) override;
   void DidNavigateMainFramePostCommit(
+      RenderFrameHostImpl* render_frame_host,
       const LoadCommittedDetails& details,
       const FrameHostMsg_DidCommitProvisionalLoad_Params& params) override;
   void DidNavigateAnyFramePostCommit(
@@ -553,7 +561,7 @@ class CONTENT_EXPORT WebContentsImpl
                                       bool is_main_frame) override;
   int CreateOpenerRenderViewsForRenderManager(SiteInstance* instance) override;
   NavigationControllerImpl& GetControllerForRenderManager() override;
-  WebUIImpl* CreateWebUIForRenderManager(const GURL& url) override;
+  scoped_ptr<WebUIImpl> CreateWebUIForRenderManager(const GURL& url) override;
   NavigationEntry* GetLastCommittedNavigationEntryForRenderManager() override;
   bool FocusLocationBarByDefault() override;
   void SetFocusToLocationBar(bool select_all) override;
@@ -609,13 +617,10 @@ class CONTENT_EXPORT WebContentsImpl
   bool NavigateToPendingEntry(
       NavigationController::ReloadType reload_type) override;
 
-  // Sets the history for this WebContentsImpl to |history_length| entries, and
-  // moves the current page_id to the last entry in the list if it's valid.
-  // This is mainly used when a prerendered page is swapped into the current
-  // tab. The method is virtual for testing.
-  void SetHistoryLengthAndPrune(const SiteInstance* site_instance,
-                                int merge_history_length,
-                                int32 minimum_page_id) override;
+  // Sets the history for this WebContentsImpl to |history_length| entries, with
+  // an offset of |history_offset|.
+  void SetHistoryOffsetAndLength(int history_offset,
+                                 int history_length) override;
 
   // Called by InterstitialPageImpl when it creates a RenderFrameHost.
   void RenderFrameForInterstitialPageCreated(
@@ -664,9 +669,13 @@ class CONTENT_EXPORT WebContentsImpl
     return video_power_save_blocker_;
   }
 
+#if defined(ENABLE_BROWSER_CDMS)
+  MediaWebContentsObserver* media_web_contents_observer() {
+    return media_web_contents_observer_.get();
+  }
+#endif
+
  private:
-  friend class TestNavigationObserver;
-  friend class WebContentsAddedObserver;
   friend class WebContentsObserver;
   friend class WebContents;  // To implement factory methods.
 
@@ -731,6 +740,10 @@ class CONTENT_EXPORT WebContentsImpl
   bool OnMessageReceived(RenderViewHost* render_view_host,
                          RenderFrameHost* render_frame_host,
                          const IPC::Message& message);
+
+  // Checks whether render_frame_message_source_ is set to non-null value,
+  // otherwise it terminates the main frame renderer process.
+  bool HasValidFrameSource();
 
   // IPC message handlers.
   void OnThemeColorChanged(SkColor theme_color);
@@ -882,10 +895,13 @@ class CONTENT_EXPORT WebContentsImpl
   // Calculates the progress of the current load and notifies the delegate.
   void SendLoadProgressChanged();
 
-  // Called once when the last frame on the page has stopped loading.
-  void DidStopLoading(RenderFrameHost* render_frame_host);
-
   // Misc non-view stuff -------------------------------------------------------
+
+  // Sets the history for a specified RenderViewHost to |history_length|
+  // entries, with an offset of |history_offset|.
+  void SetHistoryOffsetAndLengthForView(RenderViewHost* render_view_host,
+                                        int history_offset,
+                                        int history_length);
 
   // Helper functions for sending notifications.
   void NotifyViewSwapped(RenderViewHost* old_host, RenderViewHost* new_host);
@@ -940,11 +956,6 @@ class CONTENT_EXPORT WebContentsImpl
   // Removes all entries from |player_map| for |render_frame_host|.
   void RemoveAllMediaPlayerEntries(RenderFrameHost* render_frame_host,
                                    ActiveMediaPlayerMap* player_map);
-
-  // Adds/removes a callback called on creation of each new WebContents.
-  // Deprecated, about to remove.
-  static void AddCreatedCallback(const CreatedCallback& callback);
-  static void RemoveCreatedCallback(const CreatedCallback& callback);
 
   // Data for core operation ---------------------------------------------------
 
@@ -1211,10 +1222,6 @@ class CONTENT_EXPORT WebContentsImpl
 
   scoped_ptr<GeolocationServiceContext> geolocation_service_context_;
 
-  scoped_ptr<GeolocationDispatcherHost> geolocation_dispatcher_host_;
-
-  scoped_ptr<MidiDispatcherHost> midi_dispatcher_host_;
-
   scoped_ptr<ScreenOrientationDispatcherHost>
       screen_orientation_dispatcher_host_;
 
@@ -1230,9 +1237,33 @@ class CONTENT_EXPORT WebContentsImpl
   // Created on-demand to mute all audio output from this WebContents.
   scoped_ptr<WebContentsAudioMuter> audio_muter_;
 
+  bool virtual_keyboard_requested_;
+
+#if defined(ENABLE_BROWSER_CDMS)
+  // Manages all the media player and CDM managers and forwards IPCs to them.
+  scoped_ptr<MediaWebContentsObserver> media_web_contents_observer_;
+#endif
+
   base::WeakPtrFactory<WebContentsImpl> loading_weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsImpl);
+};
+
+// Dangerous methods which should never be made part of the public API, so we
+// grant their use only to an explicit friend list (c++ attorney/client idiom).
+class CONTENT_EXPORT WebContentsImpl::FriendZone {
+ private:
+  friend class TestNavigationObserver;
+  friend class WebContentsAddedObserver;
+  friend class ContentBrowserSanityChecker;
+
+  FriendZone();  // Not instantiable.
+
+  // Adds/removes a callback called on creation of each new WebContents.
+  static void AddCreatedCallbackForTesting(const CreatedCallback& callback);
+  static void RemoveCreatedCallbackForTesting(const CreatedCallback& callback);
+
+  DISALLOW_COPY_AND_ASSIGN(FriendZone);
 };
 
 }  // namespace content

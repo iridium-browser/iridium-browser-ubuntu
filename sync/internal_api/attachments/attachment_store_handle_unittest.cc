@@ -21,16 +21,26 @@ namespace {
 
 class MockAttachmentStore : public AttachmentStoreBase {
  public:
-  MockAttachmentStore(const base::Closure& read_called,
+  MockAttachmentStore(const base::Closure& init_called,
+                      const base::Closure& read_called,
                       const base::Closure& write_called,
                       const base::Closure& drop_called,
+                      const base::Closure& read_metadata_called,
+                      const base::Closure& read_all_metadata_called,
                       const base::Closure& dtor_called)
-      : read_called_(read_called),
+      : init_called_(init_called),
+        read_called_(read_called),
         write_called_(write_called),
         drop_called_(drop_called),
+        read_metadata_called_(read_metadata_called),
+        read_all_metadata_called_(read_all_metadata_called),
         dtor_called_(dtor_called) {}
 
   ~MockAttachmentStore() override { dtor_called_.Run(); }
+
+  void Init(const InitCallback& callback) override {
+    init_called_.Run();
+  }
 
   void Read(const AttachmentIdList& ids,
             const ReadCallback& callback) override {
@@ -47,9 +57,21 @@ class MockAttachmentStore : public AttachmentStoreBase {
     drop_called_.Run();
   }
 
+  void ReadMetadata(const AttachmentIdList& ids,
+                    const ReadMetadataCallback& callback) override {
+    read_metadata_called_.Run();
+  }
+
+  void ReadAllMetadata(const ReadMetadataCallback& callback) override {
+    read_all_metadata_called_.Run();
+  }
+
+  base::Closure init_called_;
   base::Closure read_called_;
   base::Closure write_called_;
   base::Closure drop_called_;
+  base::Closure read_metadata_called_;
+  base::Closure read_all_metadata_called_;
   base::Closure dtor_called_;
 };
 
@@ -58,18 +80,27 @@ class MockAttachmentStore : public AttachmentStoreBase {
 class AttachmentStoreHandleTest : public testing::Test {
  protected:
   AttachmentStoreHandleTest()
-      : read_call_count_(0),
+      : init_call_count_(0),
+        read_call_count_(0),
         write_call_count_(0),
         drop_call_count_(0),
+        read_metadata_call_count_(0),
+        read_all_metadata_call_count_(0),
         dtor_call_count_(0) {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     scoped_ptr<AttachmentStoreBase> backend(new MockAttachmentStore(
+        base::Bind(&AttachmentStoreHandleTest::InitCalled,
+                   base::Unretained(this)),
         base::Bind(&AttachmentStoreHandleTest::ReadCalled,
                    base::Unretained(this)),
         base::Bind(&AttachmentStoreHandleTest::WriteCalled,
                    base::Unretained(this)),
         base::Bind(&AttachmentStoreHandleTest::DropCalled,
+                   base::Unretained(this)),
+        base::Bind(&AttachmentStoreHandleTest::ReadMetadataCalled,
+                   base::Unretained(this)),
+        base::Bind(&AttachmentStoreHandleTest::ReadAllMetadataCalled,
                    base::Unretained(this)),
         base::Bind(&AttachmentStoreHandleTest::DtorCalled,
                    base::Unretained(this))));
@@ -87,11 +118,22 @@ class AttachmentStoreHandleTest : public testing::Test {
     NOTREACHED();
   }
 
+  static void ReadMetadataDone(const AttachmentStore::Result& result,
+                               scoped_ptr<AttachmentMetadataList> metadata) {
+    NOTREACHED();
+  }
+
+  void InitCalled() { ++init_call_count_; }
+
   void ReadCalled() { ++read_call_count_; }
 
   void WriteCalled() { ++write_call_count_; }
 
   void DropCalled() { ++drop_call_count_; }
+
+  void ReadMetadataCalled() { ++read_metadata_call_count_; }
+
+  void ReadAllMetadataCalled() { ++read_all_metadata_call_count_; }
 
   void DtorCalled() { ++dtor_call_count_; }
 
@@ -102,9 +144,12 @@ class AttachmentStoreHandleTest : public testing::Test {
 
   base::MessageLoop message_loop_;
   scoped_refptr<AttachmentStoreHandle> attachment_store_handle_;
+  int init_call_count_;
   int read_call_count_;
   int write_call_count_;
   int drop_call_count_;
+  int read_metadata_call_count_;
+  int read_all_metadata_call_count_;
   int dtor_call_count_;
 };
 
@@ -112,6 +157,12 @@ class AttachmentStoreHandleTest : public testing::Test {
 TEST_F(AttachmentStoreHandleTest, MethodsCalled) {
   AttachmentIdList ids;
   AttachmentList attachments;
+
+  attachment_store_handle_->Init(
+      base::Bind(&AttachmentStoreHandleTest::DoneWithResult));
+  EXPECT_EQ(init_call_count_, 0);
+  RunMessageLoop();
+  EXPECT_EQ(init_call_count_, 1);
 
   attachment_store_handle_->Read(
       ids, base::Bind(&AttachmentStoreHandleTest::ReadDone));
@@ -130,6 +181,18 @@ TEST_F(AttachmentStoreHandleTest, MethodsCalled) {
   EXPECT_EQ(drop_call_count_, 0);
   RunMessageLoop();
   EXPECT_EQ(drop_call_count_, 1);
+
+  attachment_store_handle_->ReadMetadata(
+      ids, base::Bind(&AttachmentStoreHandleTest::ReadMetadataDone));
+  EXPECT_EQ(read_metadata_call_count_, 0);
+  RunMessageLoop();
+  EXPECT_EQ(read_metadata_call_count_, 1);
+
+  attachment_store_handle_->ReadAllMetadata(
+      base::Bind(&AttachmentStoreHandleTest::ReadMetadataDone));
+  EXPECT_EQ(read_all_metadata_call_count_, 0);
+  RunMessageLoop();
+  EXPECT_EQ(read_all_metadata_call_count_, 1);
 
   // Releasing referehce to AttachmentStoreHandle should result in
   // MockAttachmentStore being deleted on backend loop.

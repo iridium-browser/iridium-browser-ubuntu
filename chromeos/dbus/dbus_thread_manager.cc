@@ -16,6 +16,8 @@
 #include "chromeos/dbus/bluetooth_gatt_manager_client.h"
 #include "chromeos/dbus/bluetooth_gatt_service_client.h"
 #include "chromeos/dbus/bluetooth_input_client.h"
+#include "chromeos/dbus/bluetooth_media_client.h"
+#include "chromeos/dbus/bluetooth_media_transport_client.h"
 #include "chromeos/dbus/bluetooth_profile_manager_client.h"
 #include "chromeos/dbus/cras_audio_client.h"
 #include "chromeos/dbus/cros_disks_client.h"
@@ -34,18 +36,21 @@
 #include "chromeos/dbus/nfc_manager_client.h"
 #include "chromeos/dbus/nfc_record_client.h"
 #include "chromeos/dbus/nfc_tag_client.h"
+#include "chromeos/dbus/peer_daemon_manager_client.h"
 #include "chromeos/dbus/permission_broker_client.h"
 #include "chromeos/dbus/power_manager_client.h"
-#include "chromeos/dbus/power_policy_controller.h"
+#include "chromeos/dbus/privet_daemon_client.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/dbus/shill_device_client.h"
 #include "chromeos/dbus/shill_ipconfig_client.h"
 #include "chromeos/dbus/shill_manager_client.h"
 #include "chromeos/dbus/shill_profile_client.h"
 #include "chromeos/dbus/shill_service_client.h"
+#include "chromeos/dbus/shill_third_party_vpn_driver_client.h"
 #include "chromeos/dbus/sms_client.h"
 #include "chromeos/dbus/system_clock_client.h"
 #include "chromeos/dbus/update_engine_client.h"
+#include "chromeos/device_event_log.h"
 #include "dbus/bus.h"
 #include "dbus/dbus_statistics.h"
 
@@ -56,6 +61,7 @@ static bool g_using_dbus_thread_manager_for_testing = false;
 
 DBusThreadManager::DBusThreadManager(scoped_ptr<DBusClientBundle> client_bundle)
     : client_bundle_(client_bundle.Pass()) {
+  device_event_log::Initialize(0 /* default max entries */);
   dbus::statistics::Initialize();
 
   if (client_bundle_->IsUsingAnyRealClient()) {
@@ -73,16 +79,9 @@ DBusThreadManager::DBusThreadManager(scoped_ptr<DBusClientBundle> client_bundle)
     system_bus_options.dbus_task_runner = dbus_thread_->message_loop_proxy();
     system_bus_ = new dbus::Bus(system_bus_options);
   }
-
-  // TODO(crbug.com/345586): Move PowerPolicyController out of
-  // DBusThreadManager.
-  power_policy_controller_.reset(new PowerPolicyController);
 }
 
 DBusThreadManager::~DBusThreadManager() {
-  // PowerPolicyController's destructor depends on PowerManagerClient.
-  power_policy_controller_.reset();
-
   // Delete all D-Bus clients before shutting down the system bus.
   client_bundle_.reset();
 
@@ -96,6 +95,7 @@ DBusThreadManager::~DBusThreadManager() {
     dbus_thread_->Stop();
 
   dbus::statistics::Shutdown();
+  device_event_log::Shutdown();
 
   if (!g_dbus_thread_manager)
     return;  // Called form Shutdown() or local test instance.
@@ -152,6 +152,15 @@ BluetoothInputClient* DBusThreadManager::GetBluetoothInputClient() {
   return client_bundle_->bluetooth_input_client();
 }
 
+BluetoothMediaClient* DBusThreadManager::GetBluetoothMediaClient() {
+  return client_bundle_->bluetooth_media_client();
+}
+
+BluetoothMediaTransportClient*
+DBusThreadManager::GetBluetoothMediaTransportClient() {
+  return client_bundle_->bluetooth_media_transport_client();
+}
+
 BluetoothProfileManagerClient*
 DBusThreadManager::GetBluetoothProfileManagerClient() {
   return client_bundle_->bluetooth_profile_manager_client();
@@ -206,6 +215,11 @@ DBusThreadManager::GetShillProfileClient() {
   return client_bundle_->shill_profile_client();
 }
 
+ShillThirdPartyVpnDriverClient*
+DBusThreadManager::GetShillThirdPartyVpnDriverClient() {
+  return client_bundle_->shill_third_party_vpn_driver_client();
+}
+
 GsmSMSClient* DBusThreadManager::GetGsmSMSClient() {
   return client_bundle_->gsm_sms_client();
 }
@@ -242,12 +256,20 @@ NfcTagClient* DBusThreadManager::GetNfcTagClient() {
   return client_bundle_->nfc_tag_client();
 }
 
+PeerDaemonManagerClient* DBusThreadManager::GetPeerDaemonManagerClient() {
+  return client_bundle_->peer_daemon_manager_client();
+}
+
 PermissionBrokerClient* DBusThreadManager::GetPermissionBrokerClient() {
   return client_bundle_->permission_broker_client();
 }
 
 PowerManagerClient* DBusThreadManager::GetPowerManagerClient() {
   return client_bundle_->power_manager_client();
+}
+
+PrivetDaemonClient* DBusThreadManager::GetPrivetDaemonClient() {
+  return client_bundle_->privet_daemon_client();
 }
 
 SessionManagerClient* DBusThreadManager::GetSessionManagerClient() {
@@ -266,10 +288,6 @@ UpdateEngineClient* DBusThreadManager::GetUpdateEngineClient() {
   return client_bundle_->update_engine_client();
 }
 
-PowerPolicyController* DBusThreadManager::GetPowerPolicyController() {
-  return power_policy_controller_.get();
-}
-
 void DBusThreadManager::InitializeClients() {
   GetBluetoothAdapterClient()->Init(GetSystemBus());
   GetBluetoothAgentManagerClient()->Init(GetSystemBus());
@@ -279,6 +297,8 @@ void DBusThreadManager::InitializeClients() {
   GetBluetoothGattManagerClient()->Init(GetSystemBus());
   GetBluetoothGattServiceClient()->Init(GetSystemBus());
   GetBluetoothInputClient()->Init(GetSystemBus());
+  GetBluetoothMediaClient()->Init(GetSystemBus());
+  GetBluetoothMediaTransportClient()->Init(GetSystemBus());
   GetBluetoothProfileManagerClient()->Init(GetSystemBus());
   GetCrasAudioClient()->Init(GetSystemBus());
   GetCrosDisksClient()->Init(GetSystemBus());
@@ -292,12 +312,14 @@ void DBusThreadManager::InitializeClients() {
   GetModemMessagingClient()->Init(GetSystemBus());
   GetPermissionBrokerClient()->Init(GetSystemBus());
   GetPowerManagerClient()->Init(GetSystemBus());
+  GetPrivetDaemonClient()->Init(GetSystemBus());
   GetSessionManagerClient()->Init(GetSystemBus());
   GetShillDeviceClient()->Init(GetSystemBus());
   GetShillIPConfigClient()->Init(GetSystemBus());
   GetShillManagerClient()->Init(GetSystemBus());
   GetShillServiceClient()->Init(GetSystemBus());
   GetShillProfileClient()->Init(GetSystemBus());
+  GetShillThirdPartyVpnDriverClient()->Init(GetSystemBus());
   GetSMSClient()->Init(GetSystemBus());
   GetSystemClockClient()->Init(GetSystemBus());
   GetUpdateEngineClient()->Init(GetSystemBus());
@@ -310,11 +332,6 @@ void DBusThreadManager::InitializeClients() {
   GetNfcDeviceClient()->Init(GetSystemBus());
   GetNfcTagClient()->Init(GetSystemBus());
   GetNfcRecordClient()->Init(GetSystemBus());
-
-  // PowerPolicyController is dependent on PowerManagerClient, so
-  // initialize it after the main list of clients.
-  if (GetPowerPolicyController())
-    GetPowerPolicyController()->Init(this);
 
   // This must be called after the list of clients so they've each had a
   // chance to register with their object g_dbus_thread_managers.
@@ -337,14 +354,14 @@ void DBusThreadManager::Initialize() {
 
   CHECK(!g_dbus_thread_manager);
   bool use_dbus_stub = !base::SysInfo::IsRunningOnChromeOS() ||
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          chromeos::switches::kDbusStub);
-  bool force_unstub_clients = CommandLine::ForCurrentProcess()->HasSwitch(
+                       base::CommandLine::ForCurrentProcess()->HasSwitch(
+                           chromeos::switches::kDbusStub);
+  bool force_unstub_clients = base::CommandLine::ForCurrentProcess()->HasSwitch(
       chromeos::switches::kDbusUnstubClients);
   // Determine whether we use stub or real client implementations.
   if (force_unstub_clients) {
     InitializeWithPartialStub(
-        CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             chromeos::switches::kDbusUnstubClients));
   } else if (use_dbus_stub) {
     InitializeWithStubs();
@@ -474,6 +491,18 @@ void DBusThreadManagerSetter::SetBluetoothInputClient(
       client.Pass();
 }
 
+void DBusThreadManagerSetter::SetBluetoothMediaClient(
+    scoped_ptr<BluetoothMediaClient> client) {
+  DBusThreadManager::Get()->client_bundle_->bluetooth_media_client_ =
+      client.Pass();
+}
+
+void DBusThreadManagerSetter::SetBluetoothMediaTransportClient(
+    scoped_ptr<BluetoothMediaTransportClient> client) {
+  DBusThreadManager::Get()->client_bundle_->bluetooth_media_transport_client_ =
+      client.Pass();
+}
+
 void DBusThreadManagerSetter::SetBluetoothProfileManagerClient(
     scoped_ptr<BluetoothProfileManagerClient> client) {
   DBusThreadManager::Get()->client_bundle_->bluetooth_profile_manager_client_ =
@@ -590,6 +619,12 @@ void DBusThreadManagerSetter::SetNfcTagClient(
   DBusThreadManager::Get()->client_bundle_->nfc_tag_client_ = client.Pass();
 }
 
+void DBusThreadManagerSetter::SetPeerDaemonManagerClient(
+    scoped_ptr<PeerDaemonManagerClient> client) {
+  DBusThreadManager::Get()->client_bundle_->peer_daemon_manager_client_ =
+      client.Pass();
+}
+
 void DBusThreadManagerSetter::SetPermissionBrokerClient(
     scoped_ptr<PermissionBrokerClient> client) {
   DBusThreadManager::Get()->client_bundle_->permission_broker_client_ =
@@ -598,13 +633,14 @@ void DBusThreadManagerSetter::SetPermissionBrokerClient(
 
 void DBusThreadManagerSetter::SetPowerManagerClient(
     scoped_ptr<PowerManagerClient> client) {
-  DBusThreadManager::Get()->power_policy_controller_.reset();
   DBusThreadManager::Get()->client_bundle_->power_manager_client_ =
       client.Pass();
-  DBusThreadManager::Get()->power_policy_controller_.reset(
-      new PowerPolicyController);
-  DBusThreadManager::Get()->power_policy_controller_->Init(
-      DBusThreadManager::Get());
+}
+
+void DBusThreadManagerSetter::SetPrivetDaemonClient(
+    scoped_ptr<PrivetDaemonClient> client) {
+  DBusThreadManager::Get()->client_bundle_->privet_daemon_client_ =
+      client.Pass();
 }
 
 void DBusThreadManagerSetter::SetSessionManagerClient(

@@ -442,9 +442,11 @@ def generate_param_name(param_type):
 
 
 def agent_class_name(agent):
-    custom_agent_names = ["PageDebugger", "PageRuntime", "WorkerRuntime"]
+    custom_agent_names = ["PageDebugger", "PageRuntime", "WorkerRuntime", "PageConsole"]
     if agent in custom_agent_names:
         return "%sAgent" % agent
+    if agent == "AsyncCallTracker":
+        return agent
     return "Inspector%sAgent" % agent
 
 

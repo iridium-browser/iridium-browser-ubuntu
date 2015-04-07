@@ -4,6 +4,7 @@
 
 #include "content/public/test/test_renderer_host.h"
 
+#include "base/command_line.h"
 #include "base/run_loop.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
@@ -11,8 +12,11 @@
 #include "content/browser/site_instance_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
+#include "content/public/test/content_browser_sanity_checker.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
+#include "content/test/browser_side_navigation_test_utils.h"
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_render_frame_host_factory.h"
 #include "content/test/test_render_view_host.h"
@@ -189,13 +193,25 @@ void RenderViewHostTestHarness::SetUp() {
   new wm::DefaultActivationClient(aura_test_helper_->root_window());
 #endif
 
+  sanity_checker_.reset(new ContentBrowserSanityChecker());
+
   DCHECK(!browser_context_);
   browser_context_.reset(CreateBrowserContext());
 
   SetContents(CreateTestWebContents());
+
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableBrowserSideNavigation)) {
+    BrowserSideNavigationSetUp();
+  }
 }
 
 void RenderViewHostTestHarness::TearDown() {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableBrowserSideNavigation)) {
+    BrowserSideNavigationTearDown();
+  }
+
   SetContents(NULL);
 #if defined(USE_AURA)
   aura_test_helper_->TearDown();
@@ -229,7 +245,7 @@ BrowserContext* RenderViewHostTestHarness::CreateBrowserContext() {
 
 void RenderViewHostTestHarness::SetRenderProcessHostFactory(
     RenderProcessHostFactory* factory) {
-    rvh_test_enabler_.rvh_factory_->set_render_process_host_factory(factory);
+  rvh_test_enabler_.rvh_factory_->set_render_process_host_factory(factory);
 }
 
 }  // namespace content

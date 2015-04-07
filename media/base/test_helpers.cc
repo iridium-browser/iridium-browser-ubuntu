@@ -14,7 +14,7 @@
 #include "media/base/audio_buffer.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/decoder_buffer.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 using ::testing::_;
 using ::testing::StrictMock;
@@ -222,6 +222,7 @@ scoped_refptr<DecoderBuffer> CreateFakeVideoBufferForTest(
       static_cast<int>(pickle.size()));
   buffer->set_timestamp(timestamp);
   buffer->set_duration(duration);
+  buffer->set_is_key_frame(true);
 
   return buffer;
 }

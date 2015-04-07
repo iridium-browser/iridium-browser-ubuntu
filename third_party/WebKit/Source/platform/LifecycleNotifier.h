@@ -45,9 +45,13 @@ public:
         return adoptPtr(new LifecycleNotifier(context));
     }
 
-
     virtual ~LifecycleNotifier();
 
+    // notifyContextDestroyed() should be explicitly dispatched from an
+    // observed context to notify observers contextDestroyed().
+    // At the point of contextDestroyed() is called, m_context is still
+    // valid and thus it is safe to use m_context during the notification.
+    virtual void notifyContextDestroyed();
 
     // FIXME: this won't need to be virtual anymore.
     virtual void addObserver(Observer*);
@@ -59,6 +63,7 @@ protected:
     explicit LifecycleNotifier(Context* context)
         : m_iterating(IteratingNone)
         , m_context(context)
+        , m_didCallContextDestroyed(false)
     {
     }
 
@@ -68,7 +73,6 @@ protected:
         IteratingNone,
         IteratingOverAll,
         IteratingOverActiveDOMObjects,
-        IteratingOverContextObservers,
         IteratingOverDocumentObservers,
         IteratingOverPageObservers,
         IteratingOverDOMWindowObservers
@@ -81,18 +85,44 @@ private:
 
     ObserverSet m_observers;
     Context* m_context;
+    bool m_didCallContextDestroyed;
 };
 
 template<typename T>
 inline LifecycleNotifier<T>::~LifecycleNotifier()
 {
+    // FIXME: Enable the following ASSERT. Also see a FIXME in Document::detach().
+    // ASSERT(!m_observers.size() || m_didCallContextDestroyed);
+
     TemporaryChange<IterationType> scope(this->m_iterating, IteratingOverAll);
-    for (typename ObserverSet::iterator it = m_observers.begin(); it != m_observers.end(); it = m_observers.begin()) {
-        Observer* observer = *it;
-        m_observers.remove(observer);
+    for (Observer* observer : m_observers) {
         ASSERT(observer->lifecycleContext() == m_context);
-        observer->contextDestroyed();
+        observer->clearLifecycleContext();
     }
+}
+
+template<typename T>
+inline void LifecycleNotifier<T>::notifyContextDestroyed()
+{
+    // Don't notify contextDestroyed() twice.
+    if (m_didCallContextDestroyed)
+        return;
+
+    TemporaryChange<IterationType> scope(this->m_iterating, IteratingOverAll);
+    Vector<Observer*> snapshotOfObservers;
+    copyToVector(m_observers, snapshotOfObservers);
+    for (Observer* observer : snapshotOfObservers) {
+        // FIXME: Oilpan: At the moment, it's possible that the Observer is
+        // destructed during the iteration. Once we enable Oilpan by default
+        // for Observers, we can remove the hack by making m_observers
+        // a HeapHashSet<WeakMember<Observers>>. (i.e., we can just iterate
+        // m_observers without taking a snapshot).
+        if (m_observers.contains(observer)) {
+            ASSERT(observer->lifecycleContext() == m_context);
+            observer->contextDestroyed();
+        }
+    }
+    m_didCallContextDestroyed = true;
 }
 
 template<typename T>
@@ -105,11 +135,8 @@ inline void LifecycleNotifier<T>::addObserver(typename LifecycleNotifier<T>::Obs
 template<typename T>
 inline void LifecycleNotifier<T>::removeObserver(typename LifecycleNotifier<T>::Observer* observer)
 {
-    RELEASE_ASSERT(m_iterating != IteratingOverAll);
     m_observers.remove(observer);
 }
-
-
 
 } // namespace blink
 

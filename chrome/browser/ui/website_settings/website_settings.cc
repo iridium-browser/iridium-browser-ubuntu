@@ -157,8 +157,9 @@ bool InRememberCertificateErrorDecisionsGroup() {
           kRememberCertificateErrorDecisionsFieldTrialDefaultGroup) != 0 &&
       group_name.compare(
           kRememberCertificateErrorDecisionsFieldTrialDisableGroup) != 0;
-  bool has_command_line_switch = CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kRememberCertErrorDecisions);
+  bool has_command_line_switch =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kRememberCertErrorDecisions);
   return in_experimental_group || has_command_line_switch;
 }
 
@@ -231,7 +232,23 @@ void WebsiteSettings::OnSitePermissionChanged(ContentSettingsType type,
                                               ContentSetting setting) {
   // Count how often a permission for a specific content type is changed using
   // the Website Settings UI.
-  UMA_HISTOGRAM_COUNTS("WebsiteSettings.PermissionChanged", type);
+  ContentSettingsTypeHistogram histogram_value =
+      ContentSettingTypeToHistogramValue(type);
+  DCHECK_NE(histogram_value, CONTENT_SETTINGS_TYPE_HISTOGRAM_INVALID)
+      << "Invalid content setting type specified.";
+  UMA_HISTOGRAM_ENUMERATION("WebsiteSettings.OriginInfo.PermissionChanged",
+                            histogram_value,
+                            CONTENT_SETTINGS_HISTOGRAM_NUM_TYPES);
+
+  if (setting == ContentSetting::CONTENT_SETTING_ALLOW) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "WebsiteSettings.OriginInfo.PermissionChanged.Allowed", histogram_value,
+        CONTENT_SETTINGS_HISTOGRAM_NUM_TYPES);
+  } else if (setting == ContentSetting::CONTENT_SETTING_BLOCK) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "WebsiteSettings.OriginInfo.PermissionChanged.Blocked", histogram_value,
+        CONTENT_SETTINGS_HISTOGRAM_NUM_TYPES);
+  }
 
   // This is technically redundant given the histogram above, but putting the
   // total count of permission changes in another histogram makes it easier to
@@ -551,17 +568,22 @@ void WebsiteSettings::Init(Profile* profile,
     site_connection_details_.assign(l10n_util::GetStringFUTF16(
         IDS_PAGE_INFO_SECURITY_TAB_NOT_ENCRYPTED_CONNECTION_TEXT,
         subject_name));
-  } else if (ssl.security_bits < 80) {
-    site_connection_status_ = SITE_CONNECTION_STATUS_ENCRYPTED_ERROR;
-    site_connection_details_.assign(l10n_util::GetStringFUTF16(
-        IDS_PAGE_INFO_SECURITY_TAB_WEAK_ENCRYPTION_CONNECTION_TEXT,
-        subject_name));
   } else {
     site_connection_status_ = SITE_CONNECTION_STATUS_ENCRYPTED;
-    site_connection_details_.assign(l10n_util::GetStringFUTF16(
-        IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_CONNECTION_TEXT,
-        subject_name,
-        base::IntToString16(ssl.security_bits)));
+
+    if (net::SSLConnectionStatusToVersion(ssl.connection_status) >=
+            net::SSL_CONNECTION_VERSION_TLS1_2 &&
+        net::IsSecureTLSCipherSuite(
+            net::SSLConnectionStatusToCipherSuite(ssl.connection_status))) {
+      site_connection_details_.assign(l10n_util::GetStringFUTF16(
+          IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_CONNECTION_TEXT,
+          subject_name));
+    } else {
+      site_connection_details_.assign(l10n_util::GetStringFUTF16(
+          IDS_PAGE_INFO_SECURITY_TAB_WEAK_ENCRYPTION_CONNECTION_TEXT,
+          subject_name));
+    }
+
     if (ssl.content_status) {
       bool ran_insecure_content =
           !!(ssl.content_status & content::SSLStatus::RAN_INSECURE_CONTENT);
@@ -667,7 +689,8 @@ void WebsiteSettings::PresentSitePermissions() {
   for (size_t i = 0; i < arraysize(kPermissionType); ++i) {
     permission_info.type = kPermissionType[i];
     if (permission_info.type == CONTENT_SETTINGS_TYPE_MIDI_SYSEX) {
-      const CommandLine* command_line = CommandLine::ForCurrentProcess();
+      const base::CommandLine* command_line =
+          base::CommandLine::ForCurrentProcess();
       if (!command_line->HasSwitch(switches::kEnableWebMIDI))
         continue;
     }

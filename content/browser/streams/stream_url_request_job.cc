@@ -4,6 +4,7 @@
 
 #include "content/browser/streams/stream_url_request_job.h"
 
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "content/browser/streams/stream.h"
 #include "net/base/io_buffer.h"
@@ -21,13 +22,13 @@ StreamURLRequestJob::StreamURLRequestJob(
     net::NetworkDelegate* network_delegate,
     scoped_refptr<Stream> stream)
     : net::URLRequestJob(request, network_delegate),
-      weak_factory_(this),
       stream_(stream),
       headers_set_(false),
       pending_buffer_size_(0),
       total_bytes_read_(0),
       max_range_(0),
-      request_failed_(false) {
+      request_failed_(false),
+      weak_factory_(this) {
   DCHECK(stream_.get());
   stream_->SetReadObserver(this);
 }
@@ -94,6 +95,11 @@ void StreamURLRequestJob::Kill() {
 bool StreamURLRequestJob::ReadRawData(net::IOBuffer* buf,
                                       int buf_size,
                                       int* bytes_read) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 StreamURLRequestJob::ReadRawData"));
+
   if (request_failed_)
     return true;
 

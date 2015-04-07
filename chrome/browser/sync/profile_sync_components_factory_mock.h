@@ -10,6 +10,7 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "components/sync_driver/data_type_controller.h"
 #include "components/sync_driver/data_type_error_handler.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace sync_driver {
@@ -53,6 +54,8 @@ class ProfileSyncComponentsFactoryMock : public ProfileSyncComponentsFactory {
   virtual scoped_ptr<syncer::AttachmentService> CreateAttachmentService(
       const scoped_refptr<syncer::AttachmentStore>& attachment_store,
       const syncer::UserShare& user_share,
+      const std::string& store_birthday,
+      syncer::ModelType model_type,
       syncer::AttachmentService::Delegate* delegate) override;
   MOCK_METHOD2(CreateBookmarkSyncComponents,
       SyncComponents(ProfileSyncService* profile_sync_service,

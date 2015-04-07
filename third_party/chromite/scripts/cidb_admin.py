@@ -13,10 +13,12 @@ from chromite.lib import cidb
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 
+
 MIGRATE = 'migrate'
 WIPE = 'wipe'
 
 COMMANDS = [MIGRATE, WIPE]
+
 
 def GetParser():
   """Creates the argparse parser."""
@@ -71,7 +73,7 @@ def main(argv):
   if options.command == MIGRATE:
     print('OK, applying migrations...')
     db = cidb.CIDBConnection(options.cred_dir)
-    db.ApplySchemaMigrations(maxVersion = options.migrate_version)
+    db.ApplySchemaMigrations(maxVersion=options.migrate_version)
   elif options.command == WIPE:
     print('OK, wiping database...')
     db = cidb.CIDBConnection(options.cred_dir)

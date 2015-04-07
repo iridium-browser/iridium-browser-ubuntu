@@ -5,7 +5,7 @@
 #include "content/renderer/media/crypto/render_cdm_factory.h"
 
 #include "base/logging.h"
-#include "content/renderer/media/crypto/key_systems.h"
+#include "media/base/key_systems.h"
 #include "media/cdm/aes_decryptor.h"
 #include "url/gurl.h"
 
@@ -38,7 +38,6 @@ scoped_ptr<media::MediaKeys> RenderCdmFactory::Create(
     const std::string& key_system,
     const GURL& security_origin,
     const media::SessionMessageCB& session_message_cb,
-    const media::SessionReadyCB& session_ready_cb,
     const media::SessionClosedCB& session_closed_cb,
     const media::SessionErrorCB& session_error_cb,
     const media::SessionKeysChangeCB& session_keys_change_cb,
@@ -48,7 +47,7 @@ scoped_ptr<media::MediaKeys> RenderCdmFactory::Create(
   // check the security origin before calling.
   // DCHECK(security_origin.is_valid());
 
-  if (CanUseAesDecryptor(key_system)) {
+  if (media::CanUseAesDecryptor(key_system)) {
     return scoped_ptr<media::MediaKeys>(new media::AesDecryptor(
         session_message_cb, session_closed_cb, session_keys_change_cb));
   }
@@ -59,7 +58,6 @@ scoped_ptr<media::MediaKeys> RenderCdmFactory::Create(
                              security_origin,
                              create_pepper_cdm_cb_,
                              session_message_cb,
-                             session_ready_cb,
                              session_closed_cb,
                              session_error_cb,
                              session_keys_change_cb,
@@ -70,7 +68,6 @@ scoped_ptr<media::MediaKeys> RenderCdmFactory::Create(
                              security_origin,
                              manager_,
                              session_message_cb,
-                             session_ready_cb,
                              session_closed_cb,
                              session_error_cb,
                              session_keys_change_cb,

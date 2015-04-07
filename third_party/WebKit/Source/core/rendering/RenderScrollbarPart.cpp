@@ -128,15 +128,15 @@ void RenderScrollbarPart::computeScrollbarWidth()
         return;
     // FIXME: We are querying layout information but nothing guarantees that it's up-to-date, especially since we are called at style change.
     // FIXME: Querying the style's border information doesn't work on table cells with collapsing borders.
-    int visibleSize = m_scrollbar->owningRenderer()->width() - m_scrollbar->owningRenderer()->style()->borderLeftWidth() - m_scrollbar->owningRenderer()->style()->borderRightWidth();
+    int visibleSize = m_scrollbar->owningRenderer()->size().width() - m_scrollbar->owningRenderer()->style()->borderLeftWidth() - m_scrollbar->owningRenderer()->style()->borderRightWidth();
     int w = calcScrollbarThicknessUsing(MainOrPreferredSize, style()->width(), visibleSize);
     int minWidth = calcScrollbarThicknessUsing(MinSize, style()->minWidth(), visibleSize);
     int maxWidth = style()->maxWidth().isMaxSizeNone() ? w : calcScrollbarThicknessUsing(MaxSize, style()->maxWidth(), visibleSize);
     setWidth(std::max(minWidth, std::min(maxWidth, w)));
 
     // Buttons and track pieces can all have margins along the axis of the scrollbar.
-    m_marginBox.setLeft(minimumValueForLength(style()->marginLeft(), visibleSize));
-    m_marginBox.setRight(minimumValueForLength(style()->marginRight(), visibleSize));
+    setMarginLeft(minimumValueForLength(style()->marginLeft(), visibleSize));
+    setMarginRight(minimumValueForLength(style()->marginRight(), visibleSize));
 }
 
 void RenderScrollbarPart::computeScrollbarHeight()
@@ -145,15 +145,15 @@ void RenderScrollbarPart::computeScrollbarHeight()
         return;
     // FIXME: We are querying layout information but nothing guarantees that it's up-to-date, especially since we are called at style change.
     // FIXME: Querying the style's border information doesn't work on table cells with collapsing borders.
-    int visibleSize = m_scrollbar->owningRenderer()->height() -  m_scrollbar->owningRenderer()->style()->borderTopWidth() - m_scrollbar->owningRenderer()->style()->borderBottomWidth();
+    int visibleSize = m_scrollbar->owningRenderer()->size().height() -  m_scrollbar->owningRenderer()->style()->borderTopWidth() - m_scrollbar->owningRenderer()->style()->borderBottomWidth();
     int h = calcScrollbarThicknessUsing(MainOrPreferredSize, style()->height(), visibleSize);
     int minHeight = calcScrollbarThicknessUsing(MinSize, style()->minHeight(), visibleSize);
     int maxHeight = style()->maxHeight().isMaxSizeNone() ? h : calcScrollbarThicknessUsing(MaxSize, style()->maxHeight(), visibleSize);
     setHeight(std::max(minHeight, std::min(maxHeight, h)));
 
     // Buttons and track pieces can all have margins along the axis of the scrollbar.
-    m_marginBox.setTop(minimumValueForLength(style()->marginTop(), visibleSize));
-    m_marginBox.setBottom(minimumValueForLength(style()->marginBottom(), visibleSize));
+    setMarginTop(minimumValueForLength(style()->marginTop(), visibleSize));
+    setMarginBottom(minimumValueForLength(style()->marginBottom(), visibleSize));
 }
 
 void RenderScrollbarPart::computePreferredLogicalWidths()

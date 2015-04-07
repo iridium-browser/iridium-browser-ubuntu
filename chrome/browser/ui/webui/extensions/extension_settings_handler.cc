@@ -20,6 +20,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
+#include "chrome/browser/background/background_contents.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/devtools_window.h"
@@ -44,11 +45,11 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/ui/apps/app_info_dialog.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/webui/extensions/extension_basic_info.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
@@ -257,6 +258,11 @@ base::DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
       (disable_reasons & Extension::DISABLE_CORRUPTED) != 0;
   extension_data->SetBoolean("corruptInstall", corrupt_install);
 
+  bool update_required_by_policy =
+      (disable_reasons & Extension::DISABLE_UPDATE_REQUIRED_BY_POLICY) != 0;
+  extension_data->SetBoolean("updateRequiredByPolicy",
+                             update_required_by_policy);
+
   bool managed_install =
       !management_policy_->UserMayModifySettings(extension, NULL);
   extension_data->SetBoolean("managedInstall", managed_install);
@@ -346,12 +352,7 @@ base::DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
           extension_service_->GetBrowserContext()));
 
   base::string16 location_text;
-  if (Manifest::IsPolicyLocation(extension->location()) ||
-      (extension->location() == Manifest::EXTERNAL_PREF_DOWNLOAD &&
-       recommended_install)) {
-    location_text = l10n_util::GetStringUTF16(
-        IDS_OPTIONS_INSTALL_LOCATION_ENTERPRISE);
-  } else if (extension->location() == Manifest::INTERNAL &&
+  if (extension->location() == Manifest::INTERNAL &&
       !ManifestURL::UpdatesFromGallery(extension)) {
     location_text = l10n_util::GetStringUTF16(
         IDS_OPTIONS_INSTALL_LOCATION_UNKNOWN);
@@ -363,6 +364,13 @@ base::DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
         IDS_OPTIONS_INSTALL_LOCATION_SHARED_MODULE);
   }
   extension_data->SetString("locationText", location_text);
+
+  base::string16 policy_text;
+  if (Manifest::IsPolicyLocation(extension->location())) {
+    policy_text = l10n_util::GetStringUTF16(
+        IDS_OPTIONS_INSTALL_LOCATION_ENTERPRISE);
+  }
+  extension_data->SetString("policyText", policy_text);
 
   base::string16 blacklist_text;
   switch (prefs->GetExtensionBlacklistState(extension->id())) {
@@ -625,6 +633,9 @@ void ExtensionSettingsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_SHOW_DETAILS));
   source->AddString("extensionSettingsHideDetails",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_HIDE_DETAILS));
+  source->AddString("extensionSettingsUpdateRequiredBePolicy",
+                    l10n_util::GetStringUTF16(
+                        IDS_EXTENSIONS_DISABLED_UPDATE_REQUIRED_BY_POLICY));
 
   // TODO(estade): comb through the above strings to find ones no longer used in
   // uber extensions.
@@ -864,12 +875,13 @@ void ExtensionSettingsHandler::AppInfoDialogClosed() {
 }
 
 void ExtensionSettingsHandler::ReloadUnpackedExtensions() {
-  const ExtensionSet* extensions = extension_service_->extensions();
+  ExtensionRegistry* registry =
+      ExtensionRegistry::Get(extension_service_->profile());
   std::vector<const Extension*> unpacked_extensions;
-  for (ExtensionSet::const_iterator extension = extensions->begin();
-       extension != extensions->end(); ++extension) {
-    if (Manifest::IsUnpackedLocation((*extension)->location()))
-      unpacked_extensions.push_back(extension->get());
+  for (const scoped_refptr<const extensions::Extension>& extension :
+       registry->enabled_extensions()) {
+    if (Manifest::IsUnpackedLocation(extension->location()))
+      unpacked_extensions.push_back(extension.get());
   }
 
   for (std::vector<const Extension*>::iterator iter =
@@ -998,10 +1010,11 @@ void ExtensionSettingsHandler::HandleInspectMessage(
 
   if (render_process_id == -1) {
     // This message is for a lazy background page. Start the page if necessary.
-    const Extension* extension =
-        extension_service_->extensions()->GetByID(extension_id);
-    DCHECK(extension);
     Profile* profile = Profile::FromWebUI(web_ui());
+    const Extension* extension =
+        ExtensionRegistry::Get(profile)->enabled_extensions().GetByID(
+            extension_id);
+    DCHECK(extension);
     if (incognito)
       profile = profile->GetOffTheRecordProfile();
     devtools_util::InspectBackgroundPage(extension, profile);
@@ -1027,7 +1040,8 @@ void ExtensionSettingsHandler::HandleLaunchMessage(
       extension_service_->GetExtensionById(extension_id, false);
   OpenApplication(AppLaunchParams(extension_service_->profile(), extension,
                                   extensions::LAUNCH_CONTAINER_WINDOW,
-                                  NEW_WINDOW));
+                                  NEW_WINDOW,
+                                  extensions::SOURCE_EXTENSIONS_PAGE));
 }
 
 void ExtensionSettingsHandler::HandleReloadMessage(

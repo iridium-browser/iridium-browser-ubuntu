@@ -2,17 +2,25 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import datetime
+import logging
+import random
+import shutil
+import os
+import sys
 import tempfile
 
 from telemetry import value as value_module
+from telemetry.timeline import trace_data as trace_data_module
+from telemetry.util import cloud_storage
 from telemetry.util import file_handle
 import telemetry.web_components # pylint: disable=W0611
 from trace_viewer.build import trace2html
 
 class TraceValue(value_module.Value):
-  def __init__(self, page, tracing_timeline_data, important=False,
+  def __init__(self, page, trace_data, important=False,
                description=None):
-    """A value that contains a TracingTimelineData object and knows how to
+    """A value that contains a TraceData object and knows how to
     output it.
 
     Adding TraceValues and outputting as JSON will produce a directory full of
@@ -22,20 +30,22 @@ class TraceValue(value_module.Value):
     super(TraceValue, self).__init__(
         page, name='trace', units='', important=important,
         description=description)
+    self._trace_data = trace_data
+    self._cloud_url = None
+    self._serialized_file_handle = None
 
+  def _GetTempFileHandle(self):
     tf = tempfile.NamedTemporaryFile(delete=False, suffix='.html')
-    if page:
-      title = page.display_name
+    if self.page:
+      title = self.page.display_name
     else:
       title = ''
     trace2html.WriteHTMLForTraceDataToFile(
-        [tracing_timeline_data.EventData()], title, tf)
+        [self._trace_data.GetEventsFor(trace_data_module.CHROME_TRACE_PART)],
+        title,
+        tf)
     tf.close()
-
-    self._file_handle = file_handle.FromTempFile(tf)
-
-  def GetAssociatedFileHandle(self):
-    return self._file_handle
+    return file_handle.FromTempFile(tf)
 
   def __repr__(self):
     if self.page:
@@ -75,5 +85,42 @@ class TraceValue(value_module.Value):
 
   def AsDict(self):
     d = super(TraceValue, self).AsDict()
-    d['file_id'] = self._file_handle.id
+    if self._serialized_file_handle:
+      d['file_id'] = self._serialized_file_handle.id
+    if self._cloud_url:
+      d['cloud_url'] = self._cloud_url
     return d
+
+  def Serialize(self, dir_path):
+    fh = self._GetTempFileHandle()
+    file_name = str(fh.id) + fh.extension
+    file_path = os.path.abspath(os.path.join(dir_path, file_name))
+    shutil.move(fh.GetAbsPath(), file_path)
+    self._serialized_file_handle = file_handle.FromFilePath(file_path)
+    return self._serialized_file_handle
+
+  def UploadToCloud(self, bucket):
+    temp_fh = None
+    try:
+      if self._serialized_file_handle:
+        fh = self._serialized_file_handle
+      else:
+        temp_fh = self._GetTempFileHandle()
+        fh = temp_fh
+      remote_path = ('trace-file-id_%s-%s-%d%s' % (
+          fh.id,
+          datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
+          random.randint(1, 100000),
+          fh.extension))
+      self._cloud_url = cloud_storage.Insert(
+          bucket, remote_path, fh.GetAbsPath())
+      sys.stderr.write(
+          'View generated trace files online at %s for page %s\n' %
+          (self._cloud_url, self.page.url if self.page else 'unknown'))
+      return self._cloud_url
+    except cloud_storage.PermissionError as e:
+      logging.error('Cannot upload trace files to cloud storage due to '
+                    ' permission error: %s' % e.message)
+    finally:
+      if temp_fh:
+        os.remove(temp_fh.GetAbsPath())

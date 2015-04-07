@@ -39,7 +39,6 @@
 <translation id="3883381313049582448">Brug kodeord, der er genereret af Chromium</translation>
 <translation id="3549345495227188780">Kom godt i gang med Chromium OS</translation>
 <translation id="1668054258064581266">Når du har fjernet din konto fra Chromium, skal du muligvis genindlæse dine åbne faner, før ændringen træder i kraft.</translation>
-<translation id="6953661834318318668">Værktøjslinje i Chromium</translation>
 <translation id="4285930937574705105">Installationen mislykkedes på grund af en ikke-specificeret fejl. Hvis Chromium kører, skal du lukke programmet og prøve igen.</translation>
 <translation id="1396446129537741364">Chromium forsøger at vise adgangskoder.</translation>
 <translation id="8987477933582888019">Webbrowser</translation>
@@ -86,7 +85,7 @@
 <translation id="3065280201209294872">Websitet bruger forældede sikkerhedsindstillinger, der kan forhindre fremtidige versioner af Chromium i at få sikker adgang til det.</translation>
 <translation id="8551886023433311834">Den er næsten opdateret. Genstart din enhed for at fuldføre opdateringen.</translation>
 <translation id="8353224596138547809">Skal Chromium gemme din adgangskode til dette website?</translation>
-<translation id="8738058698779197622">For at sikre en sikker forbindelse skal dit ur være indstillet korrekt. Det er vigtigt, da de certifikater, som websites bruger til at identificere sig selv, kun er gyldige i bestemte tidsperioder. Da uret på din enhed går forkert, kan Chromium ikke bekræfte disse certifikater.</translation>
+<translation id="8738058698779197622">For at kunne oprette en sikker forbindelse skal dit ur være indstillet korrekt. Det er vigtigt, da de certifikater, som websites bruger til at identificere sig selv, kun er gyldige i bestemte tidsperioder. Da uret på din enhed går forkert, kan Chromium ikke bekræfte disse certifikater.</translation>
 <translation id="7339898014177206373">Nyt vindue</translation>
 <translation id="7463979740390522693">Chromium – Underretninger (<ph name="QUANTITY"/> ulæste)</translation>
 <translation id="225614027745146050">Velkommen</translation>
@@ -94,6 +93,7 @@
 <translation id="7473891865547856676">Nej tak</translation>
 <translation id="9191268552238695869">En administrator har installeret Chromium på dette system, og det er tilgængeligt for alle brugere. Chromium-installationen på systemniveau vil øjeblikkeligt erstatte din installation på brugerniveau.</translation>
 <translation id="3509308970982693815">Luk alle Chromium-vinduer, og prøv igen.</translation>
+<translation id="8851136666856101339">hovd</translation>
 <translation id="4077262827416206768">Luk alle Chromium-vinduer, og genstart Chromium, før denne ændring kan træde i kraft.</translation>
 <translation id="6475912303565314141">Den styrer også, hvilken side der vises, når du åbner Chromium.</translation>
 <translation id="1725059042853530269"><ph name="FILE_NAME"/> kan skade din weboplevelse, så Chromium har blokeret det.</translation>
@@ -155,10 +155,11 @@
 <translation id="1745962126679160932">Chromium vil lagre dine oplysninger på sikker vis, så du ikke behøver at angive dem igen, men du skal stadig bekræfte dit korts sikkerhedskode ved fremtidige betalinger.</translation>
 <translation id="275588974610408078">Nedbrudsrapportering er ikke tilgængeligt i Chromium.</translation>
 <translation id="5909170354645388250">Ikke benyttet i Chromium. Pladsholder til at holde ressourcekort synkrone. Den kræver ét argument: $1.</translation>
-<translation id="1144202035120576837"><ph name="SITE"/> bruger normalt kryptering til at beskytte dine oplysninger. Da Chromium forsøgte at oprette forbindelse til <ph name="SITE"/> denne gang, returnerede websitet usædvanlige og forkerte loginoplysninger. Enten forsøger en hacker at give sig ud for <ph name="SITE"/>, eller også har en Wi-Fi-loginskærm forstyrret forbindelsen. Dine oplysninger er fortsat sikre, da Chromium afbrød forbindelsen, inden der blev udvekslet data.</translation>
+<translation id="1144202035120576837"><ph name="SITE"/> bruger normalt kryptering til at beskytte dine oplysninger. Da Chromium forsøgte at oprette forbindelse til <ph name="SITE"/> denne gang, returnerede websitet usædvanlige og forkerte loginoplysninger. Enten forsøger en hacker at give sig ud for at være <ph name="SITE"/>, eller også har en Wi-Fi-loginskærm forstyrret forbindelsen. Dine oplysninger er fortsat sikre, da Chromium afbrød forbindelsen, inden der blev udvekslet data.</translation>
+<translation id="2316129865977710310">Nej tak</translation>
 <translation id="7937630085815544518">Du loggede ind på Chromium som <ph name="USER_EMAIL_ADDRESS"/>. Brug den samme konto til at logge ind igen.</translation>
 <translation id="2685838254101182273">Chromium er holdt op med at opdatere og understøtter ikke længere denne version af dit operativsystem.</translation>
-<translation id="8684913864886094367">Chromium blev ikke korrekt afsluttet.</translation>
+<translation id="8684913864886094367">Chromium blev ikke afsluttet korrekt.</translation>
 <translation id="3582788516608077514">Opdaterer Chromium...</translation>
 <translation id="7223968959479464213">Jobliste – Chromium</translation>
 <translation id="1779356040007214683">For at gøre Chromium sikrere har vi slået nogle udvidelser fra, som ikke er anført i <ph name="IDS_EXTENSION_WEB_STORE_TITLE"/> og muligvis er blevet tilføjet, uden at du vidste det.</translation>
@@ -169,6 +170,7 @@
 <translation id="2648074677641340862">Der opstod en fejl i operativsystemet under installationen. Download Chromium igen.</translation>
 <translation id="5942520288919337908"><ph name="EXTENSION_NAME"/> er føjet til Chromium.</translation>
 <translation id="549669000822060376">Vent, mens Chromium installerer de nyeste systemopdateringer.</translation>
+<translation id="1240763998429950591">Chromium kan ikke opdatere til den nyeste version, så du går glip af nye funktioner og sikkerhedsrettelser. Du skal opdatere Chromium.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">sender et ord og ordets kontekst til Google Søgning, der returnerer definitioner, billeder, søgeresultater og andre detaljer.</translation>
 <translation id="4559775032954821361">Gå til
@@ -208,6 +210,7 @@ Visse funktioner kan være utilgængelige. Angiv en anden profilmappe, eller bru
 <translation id="2966088006374919794">Chromium skal starte en ekstern applikation for at håndtere <ph name="SCHEME"/>-links. Det link, der er anmodet om, er <ph name="PROTOLINK"/>.</translation>
 <translation id="2558235863893655150">Skal Chromium gemme din adgangskode?</translation>
 <translation id="6485906693002546646">Du bruger <ph name="PROFILE_EMAIL"/> til at synkronisere dine Chromium-ting med. Gå til <ph name="SETTINGS_LINK"/>, hvis du vil opdatere dine synkroniseringspræference eller bruge Chromium uden en Google-konto.</translation>
+<translation id="705851970750939768">Opdater Chromium</translation>
 <translation id="5772805321386874569">(kræver en <ph name="BEGIN_BUTTON"/>genstart<ph name="END_BUTTON"/> af Chromium)</translation>
 <translation id="1688750314291223739">Konfigurer Synkronisering for at gemme dine personlige browserfunktioner på nettet, og få adgang til dem fra Chromium på en computer.</translation>
 <translation id="8610831143142469229">Tillad, at Chromium får adgang til netværket i dine indstillinger for firewall eller

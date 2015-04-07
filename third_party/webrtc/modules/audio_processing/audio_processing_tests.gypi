@@ -36,6 +36,16 @@
           'sources': [ 'test/process_test.cc', ],
         },
         {
+          'target_name': 'audioproc_f',
+          'type': 'executable',
+          'dependencies': [
+            'audio_processing',
+            'audioproc_debug_proto',
+            '<(DEPTH)/third_party/gflags/gflags.gyp:gflags',
+          ],
+          'sources': [ 'test/audioproc_float.cc', ],
+        },
+        {
           'target_name': 'unpack_aecdump',
           'type': 'executable',
           'dependencies': [
@@ -46,6 +56,50 @@
           ],
           'sources': [ 'test/unpack.cc', ],
         },
+        {
+          'target_name': 'transient_suppression_test',
+          'type': 'executable',
+          'dependencies': [
+            '<(DEPTH)/testing/gtest.gyp:gtest',
+            '<(DEPTH)/third_party/gflags/gflags.gyp:gflags',
+            '<(webrtc_root)/test/test.gyp:test_support',
+            '<(webrtc_root)/modules/modules.gyp:audio_processing',
+          ],
+          'sources': [
+            'transient/transient_suppression_test.cc',
+            'transient/file_utils.cc',
+            'transient/file_utils.h',
+          ],
+        }, # transient_suppression_test
+        {
+          'target_name': 'click_annotate',
+          'type': 'executable',
+          'dependencies': [
+            '<(webrtc_root)/modules/modules.gyp:audio_processing',
+          ],
+          'sources': [
+            'transient/click_annotate.cc',
+            'transient/file_utils.cc',
+            'transient/file_utils.h',
+          ],
+        },  # click_annotate
+      ],
+    }],
+    ['rtc_use_openmax_dl==1', {
+      'targets': [
+        {
+          'target_name': 'beamformer_test',
+          'type': 'executable',
+          'dependencies': [
+            '<(DEPTH)/third_party/gflags/gflags.gyp:gflags',
+            '<(webrtc_root)/modules/modules.gyp:audio_processing',
+          ],
+          'sources': [
+            'beamformer/beamformer_test.cc',
+            'beamformer/pcm_utils.cc',
+            'beamformer/pcm_utils.h',
+          ],
+        }, # beamformer_test
       ],
     }],
   ],

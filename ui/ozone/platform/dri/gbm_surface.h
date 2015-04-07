@@ -6,6 +6,7 @@
 #define UI_OZONE_PLATFORM_DRI_GBM_SURFACE_H_
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/ozone/platform/dri/gbm_surfaceless.h"
 #include "ui/ozone/public/surface_ozone_egl.h"
@@ -37,8 +38,12 @@ class GbmSurface : public GbmSurfaceless {
   intptr_t GetNativeWindow() override;
   bool ResizeNativeWindow(const gfx::Size& viewport_size) override;
   bool OnSwapBuffers() override;
+  bool OnSwapBuffersAsync(const SwapCompletionCallback& callback) override;
 
  private:
+  void OnSwapBuffersCallback(const SwapCompletionCallback& callback,
+                             gbm_bo* pending_buffer);
+
   gbm_device* gbm_device_;
 
   DriWrapper* dri_;
@@ -50,6 +55,8 @@ class GbmSurface : public GbmSurfaceless {
   gbm_bo* current_buffer_;
 
   gfx::Size size_;
+
+  base::WeakPtrFactory<GbmSurface> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GbmSurface);
 };

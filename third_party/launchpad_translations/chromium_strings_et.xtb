@@ -39,7 +39,6 @@
 <translation id="3883381313049582448">Kasuta Chromiumi loodud parooli</translation>
 <translation id="3549345495227188780">Alustamine Chromium OS-iga</translation>
 <translation id="1668054258064581266">Pärast konto eemaldamist Chromiumist tuleb avatud vahekaardid võib-olla uuesti laadida, et need toimiksid.</translation>
-<translation id="6953661834318318668">Chromiumi tööriistariba</translation>
 <translation id="4285930937574705105">Installimine ebaõnnestus tundmatu vea tõttu. Kui Chromium praegu töötab, siis sulgege see ja proovige uuesti.</translation>
 <translation id="1396446129537741364">Chromium püüab paroole kuvada.</translation>
 <translation id="8987477933582888019">Veebibrauser</translation>
@@ -94,6 +93,7 @@
 <translation id="7473891865547856676">Tänan, ei</translation>
 <translation id="9191268552238695869">Administraator on installinud teie süsteemi Chromiumi ja see on kõikidele kasutajatele saadava. Süsteemi taseme Chromium asendab nüüd kasutaja taseme installi.</translation>
 <translation id="3509308970982693815">Sulgege kõik Chromiumi aknad ja proovige uuesti.</translation>
+<translation id="8851136666856101339">pea</translation>
 <translation id="4077262827416206768">Muudatuse rakendamiseks sulgege kõik Chromiumi aknad ja taaskäivitage Chromium.</translation>
 <translation id="6475912303565314141">Lisaks juhib see seda, mis leht kuvatakse Chromiumi käivitamisel.</translation>
 <translation id="1725059042853530269">Fail <ph name="FILE_NAME"/> võib teie kasutuskogemust sirvimisel kahjustada, seetõttu on Chromium selle blokeerinud.</translation>
@@ -157,6 +157,7 @@
 <translation id="5909170354645388250">Seda ei kasutata Chromiumis. See on kohatäide, mis sünkroonib ressursikaarte. See eeldab üht argumenti: $1.</translation>
 <translation id="1144202035120576837">Sait <ph name="SITE"/> kasutab teie teabe kaitsmiseks tavaliselt krüpteerimist. Kui Chromium püüdis seekord saidiga <ph name="SITE"/> ühendust luua, tagastas veebisait ebatavalised
 ja valed mandaadid. Kas proovib ründaja teeselda, et on <ph name="SITE"/>, või on WiFi-sisselogimisekraan ühenduse katkestanud. Teie teave on endiselt kaitstud, sest Chromium peatas ühenduse enne andmevahetust.</translation>
+<translation id="2316129865977710310">Ei, aitäh</translation>
 <translation id="7937630085815544518">Olite Chromiumisse sisse logitud kasutajana <ph name="USER_EMAIL_ADDRESS"/>. Kasutage uuesti sisselogimiseks sama kontot.</translation>
 <translation id="2685838254101182273">Chromiumi värskendamine peatati ja teie operatsioonisüsteemi seda versiooni ei toetata enam.</translation>
 <translation id="8684913864886094367">Chromium ei sulgunud õigesti.</translation>
@@ -170,6 +171,7 @@ ja valed mandaadid. Kas proovib ründaja teeselda, et on <ph name="SITE"/>, või
 <translation id="2648074677641340862">Installimisel ilmnes operatsioonisüsteemi viga. Laadige Chromium uuesti alla.</translation>
 <translation id="5942520288919337908"><ph name="EXTENSION_NAME"/> on Chromiumi lisatud.</translation>
 <translation id="549669000822060376">Oodake, kuni Chromium installib uusimad süsteemivärskendused.</translation>
+<translation id="1240763998429950591">Chromiumit ei õnnestunud uusimale versioonile värskendada, nii et te ei saa kasutada uusi funktsioone ja turvaparandusi. Peate Chromiumi värskendama.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">saadab sõna ja ümbritseva konteksti Google'i otsingule, tagastades mõisted, kujutised, otsingutulemused ja muud detailid.</translation>
 <translation id="4559775032954821361">Valige
@@ -209,6 +211,7 @@ On võimalik, et mõni funktsioon ei ole saadaval. Määrake muu profiilikataloo
 <translation id="2966088006374919794">Chromium peab rakenduse <ph name="SCHEME"/> linkide käsitlemiseks käivitama välisrakenduse. Taotletud link on <ph name="PROTOLINK"/>.</translation>
 <translation id="2558235863893655150">Kas soovite, et Chromium salvestaks teie parooli?</translation>
 <translation id="6485906693002546646">Kasutate Chromiumi kraami sünkroonimiseks kontot <ph name="PROFILE_EMAIL"/>. Sünkroonimiseelistuste värskendamiseks või Chromiumi kasutamiseks ilma Google'i kontota avage <ph name="SETTINGS_LINK"/>.</translation>
+<translation id="705851970750939768">Värskenda Chromiumi</translation>
 <translation id="5772805321386874569">(nõuab Chromiumi <ph name="BEGIN_BUTTON"/>taaskäivitamist<ph name="END_BUTTON"/>)</translation>
 <translation id="1688750314291223739">Seadistage sünkroonimine, et salvestada isikupärastatud brauserifunktsioonid veebi, misjuhul pääsete igast arvutist Chromiumi kaudu nende juurde.</translation>
 <translation id="8610831143142469229">Juurdepääsuks võrgule tulemüüri või viirusetõrje seadetes lubage

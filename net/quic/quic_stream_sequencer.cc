@@ -14,6 +14,7 @@
 using std::make_pair;
 using std::min;
 using std::numeric_limits;
+using std::string;
 
 namespace net {
 
@@ -160,7 +161,7 @@ int QuicStreamSequencer::Readv(const struct iovec* iov, size_t iov_len) {
   size_t iov_index = 0;
   size_t iov_offset = 0;
   size_t frame_offset = 0;
-  size_t initial_bytes_consumed = num_bytes_consumed_;
+  QuicStreamOffset initial_bytes_consumed = num_bytes_consumed_;
 
   while (iov_index < iov_len &&
          it != buffered_frames_.end() &&
@@ -194,7 +195,7 @@ int QuicStreamSequencer::Readv(const struct iovec* iov, size_t iov_len) {
     buffered_frames_.erase(buffered_frames_.begin());
     RecordBytesConsumed(frame_offset);
   }
-  return num_bytes_consumed_ - initial_bytes_consumed;
+  return static_cast<int>(num_bytes_consumed_ - initial_bytes_consumed);
 }
 
 bool QuicStreamSequencer::HasBytesToRead() const {

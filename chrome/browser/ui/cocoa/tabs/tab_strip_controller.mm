@@ -34,7 +34,7 @@
 #import "chrome/browser/ui/cocoa/new_tab_button.h"
 #import "chrome/browser/ui/cocoa/tab_contents/favicon_util_mac.h"
 #import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
-#import "chrome/browser/ui/cocoa/tabs/media_indicator_button.h"
+#import "chrome/browser/ui/cocoa/tabs/media_indicator_button_cocoa.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_drag_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_model_observer_bridge.h"
@@ -594,7 +594,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 }
 
 + (CGFloat)defaultTabHeight {
-  return 26.0;
+  return [TabController defaultTabHeight];
 }
 
 + (CGFloat)defaultLeftIndentForControls {
@@ -1867,6 +1867,12 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
 }
 
 - (void)mouseMoved:(NSEvent*)event {
+  // We don't want the draggged tab to repeatedly redraw its glow unnecessarily.
+  // We also want the dragged tab to keep the glow even when it slides behind
+  // another tab.
+  if ([dragController_ draggedTab])
+    return;
+
   // Use hit test to figure out what view we are hovering over.
   NSView* targetView = [tabStripView_ hitTest:[event locationInWindow]];
 

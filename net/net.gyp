@@ -376,12 +376,7 @@
         }],
         [ 'enable_websockets != 1', {
             'sources/': [
-              ['exclude', '^socket_stream/'],
               ['exclude', '^websockets/'],
-            ],
-            'sources!': [
-              'spdy/spdy_websocket_stream.cc',
-              'spdy/spdy_websocket_stream.h',
             ],
         }],
         [ 'enable_mdns != 1', {
@@ -447,6 +442,12 @@
             },
           },
         ],
+        [ 'OS == "ios" or OS == "mac"', {
+            'sources': [
+              '<@(net_base_mac_ios_sources)',
+            ],
+          },
+        ],
         ['OS=="android" and _toolset=="target" and android_webview_build == 0', {
           'dependencies': [
              'net_java',
@@ -492,10 +493,14 @@
             ['include', '^base/platform_mime_util_linux\\.cc$'],
             ['include', '^base/address_tracker_linux\\.cc$'],
             ['include', '^base/address_tracker_linux\\.h$'],
+            ['include', '^base/net_util_linux\\.cc$'],
+            ['include', '^base/net_util_linux\\.h$'],
           ],
         }],
         ['OS == "ios"', {
           'sources/': [
+            ['include', '^base/net_util_mac\\.cc$'],
+            ['include', '^base/net_util_mac\\.h$'],
             ['include', '^base/network_change_notifier_mac\\.cc$'],
             ['include', '^base/network_config_watcher_mac\\.cc$'],
             ['include', '^base/platform_mime_util_mac\\.mm$'],
@@ -549,6 +554,11 @@
           ],
           'sources': [
             '<@(net_linux_test_sources)',
+          ],
+        }],
+        ['OS == "mac" or OS == "ios"', {
+          'sources': [
+            '<@(net_base_test_mac_ios_sources)',
           ],
         }],
         ['chromeos==1', {
@@ -654,9 +664,11 @@
         }],
         [ 'enable_websockets != 1', {
             'sources/': [
-              ['exclude', '^socket_stream/'],
               ['exclude', '^websockets/'],
-              ['exclude', '^spdy/spdy_websocket_stream_unittest\\.cc$'],
+              ['exclude', '^server/'],
+            ],
+            'dependencies!': [
+              'http_server',
             ],
         }],
         ['disable_file_support==1', {
@@ -879,8 +891,12 @@
         '../testing/gmock.gyp:gmock',
       ],
       'sources': [
+        'base/captured_net_log_entry.cc',
+        'base/captured_net_log_entry.h',
         'base/capturing_net_log.cc',
         'base/capturing_net_log.h',
+        'base/capturing_net_log_observer.cc',
+        'base/capturing_net_log_observer.h',
         'base/load_timing_info_test_util.cc',
         'base/load_timing_info_test_util.h',
         'base/mock_file_stream.cc',
@@ -947,6 +963,8 @@
         'test/spawned_test_server/spawner_communicator.h',
         'test/url_request/url_request_failed_job.cc',
         'test/url_request/url_request_failed_job.h',
+        'test/url_request/url_request_mock_data_job.cc',
+        'test/url_request/url_request_mock_data_job.h',
         'test/url_request/url_request_mock_http_job.cc',
         'test/url_request/url_request_mock_http_job.h',
         'url_request/test_url_fetcher_factory.cc',
@@ -1063,6 +1081,8 @@
         'server/http_server_response_info.h',
         'server/web_socket.cc',
         'server/web_socket.h',
+        'server/web_socket_encoder.cc',
+        'server/web_socket_encoder.h',
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [4267, ],
@@ -1569,6 +1589,7 @@
             '../base/base.gyp:base',
             'cert_verify_status_android_java',
             'certificate_mime_types_java',
+            'network_change_notifier_types_java',
             'net_errors_java',
             'private_key_types_java',
             'remote_android_keystore_aidl',
@@ -1639,6 +1660,14 @@
           'includes': [ '../build/android/java_cpp_enum.gypi' ],
         },
         {
+          'target_name': 'network_change_notifier_types_java',
+          'type': 'none',
+          'variables': {
+            'source_file': 'base/network_change_notifier.h',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
+        },
+        {
           'target_name': 'private_key_types_java',
           'type': 'none',
           'variables': {
@@ -1654,22 +1683,34 @@
             'net_javatests',
             'net_unittests',
           ],
+          'conditions': [
+            ['v8_use_external_startup_data==1', {
+              'dependencies': [
+                '../v8/tools/gyp/v8.gyp:v8_external_snapshot',
+              ],
+              'copies': [
+                {
+                'destination': '<(asset_location)',
+                  'files': [
+                    '<(PRODUCT_DIR)/natives_blob.bin',
+                    '<(PRODUCT_DIR)/snapshot_blob.bin',
+                  ],
+                },
+              ],
+            }],
+          ],
           'variables': {
             'test_suite_name': 'net_unittests',
             'conditions': [
               ['v8_use_external_startup_data==1', {
+                'asset_location': '<(PRODUCT_DIR)/net_unittests_apk/assets',
                 'additional_input_paths': [
+                  '<(PRODUCT_DIR)/net_unittests_apk/assets/natives_blob.bin',
+                  '<(PRODUCT_DIR)/net_unittests_apk/assets/snapshot_blob.bin',
+                ],
+                'inputs': [
                   '<(PRODUCT_DIR)/natives_blob.bin',
                   '<(PRODUCT_DIR)/snapshot_blob.bin',
-                ],
-                'copies': [
-                  {
-                  'destination': '<(PRODUCT_DIR)/net_unittests_apk/assets',
-                    'files': [
-                      '<(PRODUCT_DIR)/natives_blob.bin',
-                      '<(PRODUCT_DIR)/snapshot_blob.bin',
-                    ],
-                  },
                 ],
               }],
             ],

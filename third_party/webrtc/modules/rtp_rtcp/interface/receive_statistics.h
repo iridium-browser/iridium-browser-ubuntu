@@ -26,8 +26,13 @@ class StreamStatistician {
   virtual ~StreamStatistician();
 
   virtual bool GetStatistics(RtcpStatistics* statistics, bool reset) = 0;
-  virtual void GetDataCounters(uint32_t* bytes_received,
+  virtual void GetDataCounters(size_t* bytes_received,
                                uint32_t* packets_received) const = 0;
+
+  // Gets received stream data counters (includes reset counter values).
+  virtual void GetReceiveStreamDataCounters(
+      StreamDataCounters* data_counters) const = 0;
+
   virtual uint32_t BitrateReceived() const = 0;
 
   // Resets all statistics.
@@ -52,7 +57,7 @@ class ReceiveStatistics : public Module {
 
   // Updates the receive statistics with this packet.
   virtual void IncomingPacket(const RTPHeader& rtp_header,
-                              size_t bytes,
+                              size_t packet_length,
                               bool retransmitted) = 0;
 
   // Increment counter for number of FEC packets received.
@@ -80,12 +85,12 @@ class ReceiveStatistics : public Module {
 class NullReceiveStatistics : public ReceiveStatistics {
  public:
   virtual void IncomingPacket(const RTPHeader& rtp_header,
-                              size_t bytes,
+                              size_t packet_length,
                               bool retransmitted) OVERRIDE;
   virtual void FecPacketReceived(uint32_t ssrc) OVERRIDE;
   virtual StatisticianMap GetActiveStatisticians() const OVERRIDE;
   virtual StreamStatistician* GetStatistician(uint32_t ssrc) const OVERRIDE;
-  virtual int32_t TimeUntilNextProcess() OVERRIDE;
+  virtual int64_t TimeUntilNextProcess() OVERRIDE;
   virtual int32_t Process() OVERRIDE;
   virtual void SetMaxReorderingThreshold(int max_reordering_threshold) OVERRIDE;
   virtual void RegisterRtcpStatisticsCallback(RtcpStatisticsCallback* callback)

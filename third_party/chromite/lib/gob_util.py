@@ -10,6 +10,8 @@ https://gerrit-review.googlesource.com/Documentation/rest-api.html
 from __future__ import print_function
 
 import base64
+import cookielib
+import datetime
 import httplib
 import json
 import logging
@@ -20,6 +22,7 @@ import urllib
 import urlparse
 from cStringIO import StringIO
 
+from chromite.cbuildbot import constants
 from chromite.lib import retry_util
 
 
@@ -58,21 +61,33 @@ def _QueryString(param_dict, first_param=None):
   return '+'.join(q)
 
 
-def GetCookies(_host, _path):
+def GetCookies(host, _path):
   """Returns cookies that should be set on a request.
 
   Used by CreateHttpConn for any requests that do not already specify a Cookie
   header. All requests made by this library are HTTPS.
 
   Args:
-    _host: The hostname of the Gerrit service.
+    host: The hostname of the Gerrit service.
     _path: The path on the Gerrit service, already including /a/ if applicable.
 
   Returns:
     A dict of cookie name to value, with no URL encoding applied.
   """
-  # Default implementation does not use cookies but may be stubbed out in tests.
-  return {}
+  def _IsDomain(x, domain):
+    return x.partition('.')[2] == domain.strip('.')
+
+  # Set cookie file for http authentication
+  cookie_path = constants.GOB_COOKIE_PATH
+  if os.path.isfile(constants.GOB_COOKIE_PATH):
+    jar = cookielib.MozillaCookieJar(cookie_path)
+    jar.load()
+    # Skip checking whether |_path| is a subpath of the path specified
+    # in the cookie because we don't support the granularity.
+    return dict((x.name, urllib.unquote(x.value)) for x in jar
+                if _IsDomain(host, x.domain) and x.path == '/')
+  else:
+    return {}
 
 
 def CreateHttpConn(host, path, reqtype='GET', headers=None, body=None):
@@ -95,11 +110,11 @@ def CreateHttpConn(host, path, reqtype='GET', headers=None, body=None):
     body = json.JSONEncoder().encode(body)
     headers.setdefault('Content-Type', 'application/json')
   if LOGGER.isEnabledFor(logging.DEBUG):
-    LOGGER.debug('%s https://%s/a/%s' % (reqtype, host, path))
+    LOGGER.debug('%s https://%s/a/%s', reqtype, host, path)
     for key, val in headers.iteritems():
       if key.lower() in ('authorization', 'cookie'):
         val = 'HIDDEN'
-      LOGGER.debug('%s: %s' % (key, val))
+      LOGGER.debug('%s: %s', key, val)
     if body:
       LOGGER.debug(body)
   conn = httplib.HTTPSConnection(host)
@@ -143,18 +158,19 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
       raise
 
     # Normal/good responses.
+    response_body = response.read()
     if response.status == 404 and ignore_404:
       return StringIO()
     elif response.status == 200:
-      return StringIO(response.read())
+      return StringIO(response_body)
 
     # Bad responses.
     LOGGER.debug('response msg:\n%s', response.msg)
     http_version = 'HTTP/%s' % ('1.1' if response.version == 11 else '1.0')
-    msg = ('%s %s %s\n%s %d %s\nResponse body: %s' %
+    msg = ('%s %s %s\n%s %d %s\nResponse body: %r' %
            (reqtype, conn.req_params['url'], http_version,
             http_version, response.status, response.reason,
-            response.read()))
+            response_body))
 
     # Ones we can retry.
     if response.status >= 500:
@@ -478,3 +494,41 @@ def GetTipOfTrunkRevision(git_url):
     msg = ('The json returned by https://%s%s has an unfamiliar structure:\n'
            '%s\n' % (parsed_url[1], path, j))
     raise GOBError(msg)
+
+
+def GetCommitDate(git_url, commit):
+  """Returns the date of a particular git commit.
+
+  The returned object is naive in the sense that it doesn't carry any timezone
+  information - you should assume UTC.
+
+  Args:
+     git_url: URL for the repository to get the commit date from.
+     commit: A git commit identifier (e.g. a sha1).
+
+  Returns:
+     A datetime object.
+  """
+  parsed_url = urlparse.urlparse(git_url)
+  path = '%s/+log/%s?n=1&format=JSON' % (parsed_url.path.rstrip('/'), commit)
+  j = FetchUrlJson(parsed_url.netloc, path, ignore_404=False)
+  if not j:
+    raise GOBError(
+        'Could not find revision information from %s' % git_url)
+  try:
+    commit_timestr = j['log'][0]['committer']['time']
+  except (IndexError, KeyError, TypeError):
+    msg = ('The json returned by https://%s%s has an unfamiliar structure:\n'
+           '%s\n' % (parsed_url.netloc, path, j))
+    raise GOBError(msg)
+  try:
+    # We're parsing a string of the form 'Tue Dec 02 17:48:06 2014'.
+    return datetime.datetime.strptime(commit_timestr,
+                                      constants.GOB_COMMIT_TIME_FORMAT)
+  except ValueError:
+    raise GOBError('Failed parsing commit time "%s"' % commit_timestr)
+
+
+def GetAccount(host):
+  """Get information about the user account."""
+  return FetchUrlJson(host, 'accounts/self')

@@ -5,7 +5,6 @@
 #include "config.h"
 #include "core/paint/LineBoxListPainter.h"
 
-#include "core/paint/DrawingRecorder.h"
 #include "core/paint/InlinePainter.h"
 #include "core/rendering/InlineFlowBox.h"
 #include "core/rendering/PaintInfo.h"
@@ -15,7 +14,7 @@
 
 namespace blink {
 
-void LineBoxListPainter::paint(RenderBoxModelObject* renderer, PaintInfo& paintInfo, const LayoutPoint& paintOffset) const
+void LineBoxListPainter::paint(RenderBoxModelObject* renderer, const PaintInfo& paintInfo, const LayoutPoint& paintOffset) const
 {
     // Only paint during the foreground/selection phases.
     if (paintInfo.phase != PaintPhaseForeground && paintInfo.phase != PaintPhaseSelection && paintInfo.phase != PaintPhaseOutline
@@ -47,11 +46,8 @@ void LineBoxListPainter::paint(RenderBoxModelObject* renderer, PaintInfo& paintI
     }
 
     if (info.phase == PaintPhaseOutline || info.phase == PaintPhaseSelfOutline || info.phase == PaintPhaseChildOutlines) {
-        ListHashSet<RenderInline*>::iterator end = info.outlineObjects()->end();
-        for (ListHashSet<RenderInline*>::iterator it = info.outlineObjects()->begin(); it != end; ++it) {
-            RenderInline* flow = *it;
+        for (RenderInline* flow : *info.outlineObjects())
             InlinePainter(*flow).paintOutline(info, paintOffset);
-        }
         info.outlineObjects()->clear();
     }
 }

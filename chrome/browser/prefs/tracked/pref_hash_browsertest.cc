@@ -147,7 +147,7 @@ class PrefHashBrowserTestBase
       : protection_level_(GetProtectionLevelFromTrialGroup(GetParam())) {
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
     EXPECT_FALSE(command_line->HasSwitch(switches::kForceFieldTrials));
     command_line->AppendSwitchASCII(
@@ -226,6 +226,14 @@ class PrefHashBrowserTestBase
     }
 
     return true;
+  }
+
+  void SetUpInProcessBrowserTestFixture() override {
+    ExtensionBrowserTest::SetUpInProcessBrowserTestFixture();
+
+    // Bots are on a domain, turn off the domain check for settings hardening in
+    // order to be able to test all SettingsEnforcement groups.
+    chrome_prefs::DisableDomainCheckForTesting();
   }
 
   // In the PRE_ test, find the number of tracked preferences that were

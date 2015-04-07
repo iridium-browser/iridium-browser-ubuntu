@@ -175,12 +175,12 @@ static uint32_t get_error_values(int inc, int top, const char **file, int *line,
   uint32_t ret;
 
   state = err_get_state();
-
-  if (state->bottom == state->top) {
+  if (state == NULL || state->bottom == state->top) {
     return 0;
   }
 
   if (top) {
+    assert(!inc);
     /* last error */
     i = state->top;
   } else {
@@ -211,14 +211,21 @@ static uint32_t get_error_values(int inc, int top, const char **file, int *line,
       if (flags != NULL) {
         *flags = error->flags & ERR_FLAG_PUBLIC_MASK;
       }
-      if (error->flags & ERR_FLAG_MALLOCED) {
-        if (state->to_free) {
-          OPENSSL_free(state->to_free);
+      /* If this error is being removed, take ownership of data from
+       * the error. The semantics are such that the caller doesn't
+       * take ownership either. Instead the error system takes
+       * ownership and retains it until the next call that affects the
+       * error queue. */
+      if (inc) {
+        if (error->flags & ERR_FLAG_MALLOCED) {
+          if (state->to_free) {
+            OPENSSL_free(state->to_free);
+          }
+          state->to_free = error->data;
         }
-        state->to_free = error->data;
+        error->data = NULL;
+        error->flags = 0;
       }
-      error->data = NULL;
-      error->flags = 0;
     }
   }
 
@@ -273,6 +280,10 @@ uint32_t ERR_peek_last_error_line_data(const char **file, int *line,
 void ERR_clear_error(void) {
   ERR_STATE *const state = err_get_state();
   unsigned i;
+
+  if (state == NULL) {
+    return;
+  }
 
   for (i = 0; i < ERR_NUM_ERRORS; i++) {
     err_clear(&state->errors[i]);
@@ -473,7 +484,10 @@ static void err_set_error_data(char *data, int flags) {
   ERR_STATE *const state = err_get_state();
   struct err_error_st *error;
 
-  if (state->top == state->bottom) {
+  if (state == NULL || state->top == state->bottom) {
+    if (flags & ERR_FLAG_MALLOCED) {
+      OPENSSL_free(data);
+    }
     return;
   }
 
@@ -488,6 +502,10 @@ void ERR_put_error(int library, int func, int reason, const char *file,
                    unsigned line) {
   ERR_STATE *const state = err_get_state();
   struct err_error_st *error;
+
+  if (state == NULL) {
+    return;
+  }
 
   if (library == ERR_LIB_SYS && reason == 0) {
 #if defined(WIN32)
@@ -589,7 +607,7 @@ void ERR_add_error_dataf(const char *format, ...) {
 int ERR_set_mark(void) {
   ERR_STATE *const state = err_get_state();
 
-  if (state->bottom == state->top) {
+  if (state == NULL || state->bottom == state->top) {
     return 0;
   }
   state->errors[state->top].flags |= ERR_FLAG_MARK;
@@ -599,6 +617,10 @@ int ERR_set_mark(void) {
 int ERR_pop_to_mark(void) {
   ERR_STATE *const state = err_get_state();
   struct err_error_st *error;
+
+  if (state == NULL) {
+    return 0;
+  }
 
   while (state->bottom != state->top) {
     error = &state->errors[state->top];
@@ -656,6 +678,7 @@ static const char *const kLibraryNames[ERR_NUM_LIBS] = {
     "Digest functions",                           /* ERR_LIB_DIGEST */
     "Cipher functions",                           /* ERR_LIB_CIPHER */
     "User defined functions",                     /* ERR_LIB_USER */
+    "HKDF functions",                             /* ERR_LIB_HKDF */
 };
 
 #define NUM_SYS_ERRNOS 127
@@ -700,6 +723,7 @@ extern const ERR_STRING_DATA ECDSA_error_string_data[];
 extern const ERR_STRING_DATA EC_error_string_data[];
 extern const ERR_STRING_DATA ENGINE_error_string_data[];
 extern const ERR_STRING_DATA EVP_error_string_data[];
+extern const ERR_STRING_DATA HKDF_error_string_data[];
 extern const ERR_STRING_DATA OBJ_error_string_data[];
 extern const ERR_STRING_DATA PEM_error_string_data[];
 extern const ERR_STRING_DATA PKCS8_error_string_data[];
@@ -754,6 +778,7 @@ static void err_load_strings(void) {
   ERR_load_strings(EC_error_string_data);
   ERR_load_strings(ENGINE_error_string_data);
   ERR_load_strings(EVP_error_string_data);
+  ERR_load_strings(HKDF_error_string_data);
   ERR_load_strings(OBJ_error_string_data);
   ERR_load_strings(PEM_error_string_data);
   ERR_load_strings(PKCS8_error_string_data);

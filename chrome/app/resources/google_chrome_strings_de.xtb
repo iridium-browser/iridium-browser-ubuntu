@@ -45,6 +45,7 @@
 <translation id="568643307450491754">Ihre Lesezeichen finden Sie im Chrome-Menü oder in der Lesezeichenleiste.</translation>
 <translation id="8556340503434111824">Es gibt eine neue Version von Google Chrome, die schneller ist, als anderen zuvor.</translation>
 <translation id="8987477933582888019">Webbrowser</translation>
+<translation id="3749644715096758981">Chrome konnte nicht auf die neueste Version aktualisiert werden. In Ihrer Version fehlen einige neue Funktionen und Sicherheitsmerkmale. Aktualisieren Sie Chrome manuell.</translation>
 <translation id="4728575227883772061">Installation aufgrund von unbekanntem Fehler fehlgeschlagen. Falls Google Chrome bereits ausgeführt wird, schließen Sie es und versuchen Sie es erneut.</translation>
 <translation id="3080151273017101988">Apps im Hintergrund ausführen, wenn Google Chrome geschlossen ist</translation>
 <translation id="4149882025268051530">Das Installationsprogramm konnte das Archiv nicht dekomprimieren. Laden Sie Google Chrome erneut herunter.</translation>
@@ -83,6 +84,7 @@
 <translation id="225614027745146050">Willkommen</translation>
 <translation id="7473891865547856676">Nein danke</translation>
 <translation id="3149510190863420837">Chrome-Apps</translation>
+<translation id="8851136666856101339">main</translation>
 <translation id="7473136999113284234">Chrome wird automatisch aktualisiert, sodass Sie immer über die neueste Version verfügen.</translation>
 <translation id="7084448929020576097"><ph name="FILE_NAME"/> ist schädlich und wurde von Chrome blockiert.</translation>
 <translation id="6368958679917195344">Chrome OS wird durch zusätzliche <ph name="BEGIN_LINK_CROS_OSS"/>Open-Source-Software<ph name="END_LINK_CROS_OSS"/> möglich gemacht.</translation>
@@ -135,7 +137,6 @@ Sollten Sie sich trotzdem anmelden, werden die Chrome-Daten wie Lesezeichen, Ver
 <translation id="5855036575689098185">Auf Ihrem Computer befindet sich Software, die nicht mit Google Chrome kompatibel ist.</translation>
 <translation id="7164397146364144019">Helfen Sie mit, Chrome sicherer und nutzerfreundlicher zu machen, indem Sie Details zu möglichen sicherheitsrelevanten Zwischenfällen automatisch an Google senden.</translation>
 <translation id="8008534537613507642">Chrome erneut installieren</translation>
-<translation id="2044287590254833138">Google Chrome-Toolbar</translation>
 <translation id="8862326446509486874">Sie verfügen nicht über die erforderlichen Rechte für eine systemweite Installation. Starten Sie das Installationsprogramm als Administrator.</translation>
 <translation id="2874156562296220396">Google Chrome wird durch das Open-Source-Projekt <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> und andere <ph name="BEGIN_LINK_OSS"/>Open-Source-Software<ph name="END_LINK_OSS"/> ermöglicht.</translation>
 <translation id="7191567847629796517">Google Chrome OS unterstützt keine externe Anwendung zur Verarbeitung von <ph name="SCHEME"/>-Links. Der angeforderte Link ist <ph name="PROTOLINK"/>.</translation>
@@ -147,6 +148,7 @@ Sollten Sie sich trotzdem anmelden, werden die Chrome-Daten wie Lesezeichen, Ver
 <translation id="2290095356545025170">Möchten Sie Google Chrome wirklich deinstallieren?</translation>
 <translation id="7062966102157262887">Momentan wird ein Download durchgeführt. Möchten Sie Google Chrome beenden und den Download abbrechen?</translation>
 <translation id="4273752058983339720">Google Chrome ist so konfiguriert, dass es beim Hochfahren Ihres Computers automatisch gestartet wird.</translation>
+<translation id="2316129865977710310">Kein Interesse</translation>
 <translation id="415994390253732730">Verhält Chrome sich ungewöhnlich?</translation>
 <translation id="1104959162601287462">Über &amp;Chrome OS</translation>
 <translation id="5328989068199000832">Google Chrome Binaries</translation>
@@ -237,6 +239,7 @@ Sollten Sie sich trotzdem anmelden, werden die Chrome-Daten wie Lesezeichen, Ver
 <translation id="6626317981028933585">Leider sind Ihre Mozilla Firefox-Einstellungen nicht verfügbar, wenn dieser Browser ausgeführt wird. Um diese Einstellungen in Google Chrome zu importieren, speichern Sie Ihre Arbeit und schließen Sie alle Firefox-Fenster. Klicken Sie anschließend auf &quot;Weiter&quot;.</translation>
 <translation id="7242029209006116544">Sie melden sich mit einem verwalteten Konto an und ermöglichen dessen Administrator Zugriff auf Ihr Google Chrome-Profil. Ihre Chrome-Daten, wie Apps, Lesezeichen, Verlauf, Passwörter und andere Einstellungen, werden dauerhaft mit <ph name="USER_NAME"/> verknüpft. Sie können diese Daten über das Google Konten-Dashboard löschen, aber nicht mit einem anderen Konto verknüpfen. Wenn Sie Ihre bestehenden Chrome-Daten getrennt verwenden möchten, können Sie ein neues Profil erstellen. <ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">Die Erweiterung legt auch fest, welche Seite beim Start von Chrome oder bei der Suche über die Omnibox angezeigt wird.</translation>
+<translation id="1553358976309200471">Chrome aktualisieren</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Copyright <ph name="YEAR"/> Google Inc. Alle Rechte vorbehalten.</translation>
 <translation id="1698376642261615901">Google Chrome ist ein Webbrowser, der Webseiten und Apps in Sekundenschnelle lädt und dabei äußerst stabil und nutzerfreundlich ist. Dank des integrierten Malware- und Phishing-Schutzes können Sie bedenkenlos im Internet surfen.</translation>

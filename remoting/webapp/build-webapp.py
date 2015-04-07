@@ -278,7 +278,7 @@ def buildWebApp(buildtype, version, destination, zip_path,
   oauth2RedirectPath = '/talkgadget/oauth/chrome-remote-desktop'
   oauth2RedirectBaseUrlJs = oauth2RedirectHostJs + oauth2RedirectPath
   oauth2RedirectBaseUrlJson = oauth2RedirectHostJson + oauth2RedirectPath
-  if buildtype != 'Dev':
+  if buildtype == 'Official':
     oauth2RedirectUrlJs = ("'" + oauth2RedirectBaseUrlJs +
                            "/rel/' + chrome.i18n.getMessage('@@extension_id')")
     oauth2RedirectUrlJson = oauth2RedirectBaseUrlJson + '/rel/*'
@@ -292,16 +292,18 @@ def buildWebApp(buildtype, version, destination, zip_path,
                  "'OAUTH2_REDIRECT_URL'", oauth2RedirectUrlJs)
 
   # Configure xmpp server and directory bot settings in the plugin.
-  xmppServerAddress = os.environ.get(
-      'XMPP_SERVER_ADDRESS', 'talk.google.com:5222')
-  xmppServerUseTls = os.environ.get('XMPP_SERVER_USE_TLS', 'true')
-  directoryBotJid = os.environ.get(
-      'DIRECTORY_BOT_JID', 'remoting@bot.talk.google.com')
-
   findAndReplace(os.path.join(destination, 'plugin_settings.js'),
-                 "Boolean('XMPP_SERVER_USE_TLS')", xmppServerUseTls)
-  replaceString(destination, 'XMPP_SERVER_ADDRESS', xmppServerAddress)
-  replaceString(destination, 'DIRECTORY_BOT_JID', directoryBotJid)
+                 "Boolean('XMPP_SERVER_USE_TLS')",
+                  os.environ.get('XMPP_SERVER_USE_TLS', 'true'))
+  replaceString(destination, 'XMPP_SERVER_FOR_IT2ME_HOST',
+                os.environ.get('XMPP_SERVER_FOR_IT2ME_HOST',
+                               'talk.google.com:5222'))
+  replaceString(destination, 'XMPP_SERVER_FOR_CLIENT',
+                os.environ.get('XMPP_SERVER_FOR_CLIENT',
+                               'talk.google.com:443'))
+  replaceString(destination, 'DIRECTORY_BOT_JID',
+                os.environ.get('DIRECTORY_BOT_JID',
+                               'remoting@bot.talk.google.com'))
   replaceString(destination, 'THIRD_PARTY_AUTH_REDIRECT_URL',
                 thirdPartyAuthUrlJs)
 
@@ -315,7 +317,9 @@ def buildWebApp(buildtype, version, destination, zip_path,
   replaceString(destination, 'API_CLIENT_SECRET', apiClientSecret)
 
   # Use a consistent extension id for dev builds.
-  if buildtype == 'Dev':
+  # AppRemoting builds always use the dev app id - the correct app id gets
+  # written into the manifest later.
+  if buildtype != 'Official' or webapp_type == 'app_remoting':
     manifestKey = '"key": "remotingdevbuild",'
   else:
     manifestKey = ''

@@ -5,6 +5,8 @@
 #include "ui/ozone/common/native_display_delegate_ozone.h"
 
 #include "base/logging.h"
+#include "ui/ozone/common/display_snapshot_proxy.h"
+#include "ui/ozone/common/display_util.h"
 
 namespace ui {
 
@@ -15,7 +17,9 @@ NativeDisplayDelegateOzone::~NativeDisplayDelegateOzone() {
 }
 
 void NativeDisplayDelegateOzone::Initialize() {
-  NOTIMPLEMENTED();
+  DisplaySnapshot_Params params = CreateSnapshotFromCommandLine();
+  if (params.type != DISPLAY_CONNECTION_TYPE_NONE)
+    displays_.push_back(new DisplaySnapshotProxy(params));
 }
 
 void NativeDisplayDelegateOzone::GrabServer() {
@@ -48,9 +52,9 @@ void NativeDisplayDelegateOzone::ForceDPMSOn() {
   NOTIMPLEMENTED();
 }
 
-std::vector<ui::DisplaySnapshot*> NativeDisplayDelegateOzone::GetDisplays() {
-  NOTIMPLEMENTED();
-  return std::vector<ui::DisplaySnapshot*>();
+void NativeDisplayDelegateOzone::GetDisplays(
+    const GetDisplaysCallback& callback) {
+  callback.Run(displays_.get());
 }
 
 void NativeDisplayDelegateOzone::AddMode(const ui::DisplaySnapshot& output,
@@ -58,11 +62,12 @@ void NativeDisplayDelegateOzone::AddMode(const ui::DisplaySnapshot& output,
   NOTIMPLEMENTED();
 }
 
-bool NativeDisplayDelegateOzone::Configure(const ui::DisplaySnapshot& output,
+void NativeDisplayDelegateOzone::Configure(const ui::DisplaySnapshot& output,
                                            const ui::DisplayMode* mode,
-                                           const gfx::Point& origin) {
+                                           const gfx::Point& origin,
+                                           const ConfigureCallback& callback) {
   NOTIMPLEMENTED();
-  return false;
+  callback.Run(true);
 }
 
 void NativeDisplayDelegateOzone::CreateFrameBuffer(const gfx::Size& size) {

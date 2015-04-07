@@ -5,12 +5,14 @@
 #include "ui/gfx/win/hwnd_util.h"
 
 #include "base/i18n/rtl.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_util.h"
+#include "base/tracked_objects.h"
 #include "base/win/metro.h"
 #include "base/win/win_util.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace gfx {
 
@@ -111,6 +113,10 @@ void* SetWindowUserData(HWND hwnd, void* user_data) {
 }
 
 void* GetWindowUserData(HWND hwnd) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/440919 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("440919 GetWindowUserData"));
+
   DWORD process_id = 0;
   GetWindowThreadProcessId(hwnd, &process_id);
   // A window outside the current process needs to be ignored.
@@ -222,8 +228,15 @@ void ShowSystemMenuAtPoint(HWND window, const Point& point) {
   if (base::i18n::IsRTL())
     flags |= TPM_RIGHTALIGN;
   HMENU menu = GetSystemMenu(window, FALSE);
+
+  // Use task stopwatch to exclude the time while the context menu is open from
+  // the current task, if any.
+  tracked_objects::TaskStopwatch stopwatch;
+  stopwatch.Start();
   const int command =
       TrackPopupMenu(menu, flags, point.x(), point.y(), 0, window, NULL);
+  stopwatch.Stop();
+
   if (command)
     SendMessage(window, WM_SYSCOMMAND, command, 0);
 }

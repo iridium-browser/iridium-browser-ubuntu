@@ -1440,7 +1440,7 @@ class DetachToBrowserInSeparateDisplayTabDragControllerTest
   DetachToBrowserInSeparateDisplayTabDragControllerTest() {}
   virtual ~DetachToBrowserInSeparateDisplayTabDragControllerTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     DetachToBrowserTabDragControllerTest::SetUpCommandLine(command_line);
     // Make screens sufficiently wide to host 2 browsers side by side.
     command_line->AppendSwitchASCII("ash-host-window-bounds",
@@ -1818,7 +1818,7 @@ class DifferentDeviceScaleFactorDisplayTabDragControllerTest
   DifferentDeviceScaleFactorDisplayTabDragControllerTest() {}
   virtual ~DifferentDeviceScaleFactorDisplayTabDragControllerTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     DetachToBrowserTabDragControllerTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII("ash-host-window-bounds",
                                     "400x400,0+400-800x800*2");
@@ -1859,9 +1859,10 @@ const float kDeviceScaleFactorExpectations[] = {
   1.0f,
 };
 
-COMPILE_ASSERT(
+static_assert(
     arraysize(kDragPoints) == arraysize(kDeviceScaleFactorExpectations),
-    kDragPoints_and_kDeviceScaleFactorExpectations_must_have_same_size);
+    "kDragPoints and kDeviceScaleFactorExpectations must have the same "
+    "number of elements");
 
 // Drags tab to |kDragPoints[index]|, then calls the next step function.
 void CursorDeviceScaleFactorStep(
@@ -1917,7 +1918,7 @@ class DetachToBrowserInSeparateDisplayAndCancelTabDragControllerTest
  public:
   DetachToBrowserInSeparateDisplayAndCancelTabDragControllerTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     TabDragControllerTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII("ash-host-window-bounds",
                                     "0+0-250x250,251+0-250x250");

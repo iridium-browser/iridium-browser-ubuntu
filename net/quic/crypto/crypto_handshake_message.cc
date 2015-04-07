@@ -240,11 +240,9 @@ string CryptoHandshakeMessage::DebugStringInternal(size_t indent) const {
     bool done = false;
     switch (it->first) {
       case kICSL:
-      case kIFCW:
       case kCFCW:
       case kSFCW:
       case kIRTT:
-      case kKATO:
       case kMSPC:
       case kSWND:
         // uint32 value
@@ -302,8 +300,9 @@ string CryptoHandshakeMessage::DebugStringInternal(size_t indent) const {
                             static_cast<int>(it->second.size()));
         done = true;
         break;
+      case kSNI:
       case kUAID:
-        ret += it->second;
+        ret += "\"" + it->second + "\"";
         done = true;
         break;
     }

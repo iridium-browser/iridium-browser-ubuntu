@@ -13,11 +13,14 @@
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "ui/events/devices/device_data_manager.h"
+#include "ui/events/devices/device_util_linux.h"
+#include "ui/events/devices/input_device.h"
 #include "ui/events/ozone/device/device_event.h"
 #include "ui/events/ozone/device/device_manager.h"
 #include "ui/events/ozone/evdev/cursor_delegate_evdev.h"
 #include "ui/events/ozone/evdev/event_converter_evdev_impl.h"
-#include "ui/events/ozone/evdev/event_device_info.h"
+#include "ui/events/ozone/evdev/input_injector_evdev.h"
+#include "ui/events/ozone/evdev/tablet_event_converter_evdev.h"
 #include "ui/events/ozone/evdev/touch_event_converter_evdev.h"
 
 #if defined(USE_EVDEV_GESTURES)
@@ -49,6 +52,7 @@ struct OpenInputDeviceParams {
 
   // State shared between devices. Must not be dereferenced on worker thread.
   EventModifiersEvdev* modifiers;
+  MouseButtonMapEvdev* button_map;
   KeyboardEvdev* keyboard;
   CursorDelegateEvdev* cursor;
 #if defined(USE_EVDEV_GESTURES)
@@ -58,7 +62,8 @@ struct OpenInputDeviceParams {
 
 #if defined(USE_EVDEV_GESTURES)
 bool UseGesturesLibraryForDevice(const EventDeviceInfo& devinfo) {
-  if (devinfo.HasAbsXY() && !devinfo.IsMappedToScreen())
+  if ((devinfo.HasAbsXY() || devinfo.HasMTAbsXY()) &&
+      !devinfo.IsMappedToScreen())
     return true;  // touchpad
 
   if (devinfo.HasRelXY())
@@ -71,38 +76,42 @@ bool UseGesturesLibraryForDevice(const EventDeviceInfo& devinfo) {
 scoped_ptr<EventConverterEvdev> CreateConverter(
     const OpenInputDeviceParams& params,
     int fd,
+    InputDeviceType type,
     const EventDeviceInfo& devinfo) {
 #if defined(USE_EVDEV_GESTURES)
   // Touchpad or mouse: use gestures library.
   // EventReaderLibevdevCros -> GestureInterpreterLibevdevCros -> DispatchEvent
   if (UseGesturesLibraryForDevice(devinfo)) {
-    scoped_ptr<GestureInterpreterLibevdevCros> gesture_interp = make_scoped_ptr(
-        new GestureInterpreterLibevdevCros(params.id,
-                                           params.modifiers,
-                                           params.cursor,
-                                           params.keyboard,
-                                           params.gesture_property_provider,
-                                           params.dispatch_callback));
+    scoped_ptr<GestureInterpreterLibevdevCros> gesture_interp =
+        make_scoped_ptr(new GestureInterpreterLibevdevCros(
+            params.id, params.modifiers, params.button_map, params.cursor,
+            params.keyboard, params.gesture_property_provider,
+            params.dispatch_callback));
     return make_scoped_ptr(new EventReaderLibevdevCros(
-          fd, params.path, params.id, gesture_interp.Pass()));
+        fd, params.path, params.id, type, devinfo, gesture_interp.Pass()));
   }
 #endif
 
   // Touchscreen: use TouchEventConverterEvdev.
-  scoped_ptr<EventConverterEvdev> converter;
+  if (devinfo.HasMTAbsXY()) {
+    scoped_ptr<TouchEventConverterEvdev> converter(new TouchEventConverterEvdev(
+        fd, params.path, params.id, type, params.modifiers,
+        params.dispatch_callback));
+    converter->Initialize(devinfo);
+    return converter.Pass();
+  }
+
+  // Graphics tablet
   if (devinfo.HasAbsXY())
-    return make_scoped_ptr<EventConverterEvdev>(new TouchEventConverterEvdev(
-        fd, params.path, params.id, devinfo, params.dispatch_callback));
+    return make_scoped_ptr<EventConverterEvdev>(new TabletEventConverterEvdev(
+        fd, params.path, params.id, type, params.modifiers, params.cursor,
+        devinfo, params.dispatch_callback));
 
   // Everything else: use EventConverterEvdevImpl.
-  return make_scoped_ptr<EventConverterEvdevImpl>(
-      new EventConverterEvdevImpl(fd,
-                                  params.path,
-                                  params.id,
-                                  params.modifiers,
-                                  params.cursor,
-                                  params.keyboard,
-                                  params.dispatch_callback));
+  return make_scoped_ptr<EventConverterEvdevImpl>(new EventConverterEvdevImpl(
+      fd, params.path, params.id, type, devinfo, params.modifiers,
+      params.button_map, params.cursor, params.keyboard,
+      params.dispatch_callback));
 }
 
 // Open an input device. Opening may put the calling thread to sleep, and
@@ -138,8 +147,10 @@ void OpenInputDevice(scoped_ptr<OpenInputDeviceParams> params,
     return;
   }
 
+  InputDeviceType type = GetInputDeviceTypeFromPath(path);
+
   scoped_ptr<EventConverterEvdev> converter =
-      CreateConverter(*params, fd, devinfo);
+      CreateConverter(*params, fd, type, devinfo);
 
   // Reply with the constructed converter.
   reply_runner->PostTask(FROM_HERE,
@@ -158,21 +169,35 @@ void CloseInputDevice(const base::FilePath& path,
 }  // namespace
 
 EventFactoryEvdev::EventFactoryEvdev(CursorDelegateEvdev* cursor,
-                                     DeviceManager* device_manager)
+                                     DeviceManager* device_manager,
+                                     KeyboardLayoutEngine* keyboard_layout)
     : last_device_id_(0),
       device_manager_(device_manager),
       dispatch_callback_(
           base::Bind(&EventFactoryEvdev::PostUiEvent, base::Unretained(this))),
-      keyboard_(&modifiers_, dispatch_callback_),
+      keyboard_(&modifiers_, keyboard_layout, dispatch_callback_),
       cursor_(cursor),
 #if defined(USE_EVDEV_GESTURES)
       gesture_property_provider_(new GesturePropertyProvider),
 #endif
+      input_controller_(this,
+                        &keyboard_,
+                        &button_map_
+#if defined(USE_EVDEV_GESTURES)
+                        ,
+                        gesture_property_provider_.get()
+#endif
+                            ),
       weak_ptr_factory_(this) {
   DCHECK(device_manager_);
 }
 
 EventFactoryEvdev::~EventFactoryEvdev() { STLDeleteValues(&converters_); }
+
+scoped_ptr<SystemInputInjector> EventFactoryEvdev::CreateSystemInputInjector() {
+  return make_scoped_ptr(new InputInjectorEvdev(
+      &modifiers_, cursor_, &keyboard_, dispatch_callback_));
+}
 
 void EventFactoryEvdev::PostUiEvent(scoped_ptr<Event> event) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -202,7 +227,10 @@ void EventFactoryEvdev::AttachInputDevice(
   converters_[path] = converter.release();
   converters_[path]->Start();
 
-  NotifyHotplugEventObserver(*converters_[path]);
+  NotifyDeviceChange(*converters_[path]);
+
+  // Sync settings to new device.
+  input_controller_.UpdateDeviceSettings();
 }
 
 void EventFactoryEvdev::OnDeviceEvent(const DeviceEvent& event) {
@@ -219,6 +247,7 @@ void EventFactoryEvdev::OnDeviceEvent(const DeviceEvent& event) {
       params->path = event.path();
       params->dispatch_callback = dispatch_callback_;
       params->modifiers = &modifiers_;
+      params->button_map = &button_map_;
       params->keyboard = &keyboard_;
       params->cursor = cursor_;
 #if defined(USE_EVDEV_GESTURES)
@@ -268,7 +297,7 @@ void EventFactoryEvdev::DetachInputDevice(const base::FilePath& path) {
     // on UI since the polling happens on UI.
     converter->Stop();
 
-    NotifyHotplugEventObserver(*converter);
+    NotifyDeviceChange(*converter);
 
     // Dispatch task to close from the worker pool, since close may block.
     base::WorkerPool::PostTask(
@@ -283,41 +312,100 @@ void EventFactoryEvdev::WarpCursorTo(gfx::AcceleratedWidget widget,
   if (cursor_) {
     cursor_->MoveCursorTo(widget, location);
     PostUiEvent(make_scoped_ptr(new MouseEvent(ET_MOUSE_MOVED,
-                                               cursor_->location(),
-                                               cursor_->location(),
+                                               cursor_->GetLocation(),
+                                               cursor_->GetLocation(),
                                                modifiers_.GetModifierFlags(),
                                                /* changed_button_flags */ 0)));
   }
 }
 
-void EventFactoryEvdev::NotifyHotplugEventObserver(
+void EventFactoryEvdev::NotifyDeviceChange(
     const EventConverterEvdev& converter) {
-  // For now the only information propagated is related to touchscreens. Ignore
-  // events for everything but touchscreens.
-  if (!converter.HasTouchscreen())
-    return;
+  if (converter.HasTouchscreen())
+    NotifyTouchscreensUpdated();
 
+  if (converter.HasKeyboard())
+    NotifyKeyboardsUpdated();
+
+  if (converter.HasTouchpad())
+    NotifyTouchpadsUpdated();
+
+  if (converter.HasMouse())
+    NotifyMiceUpdated();
+}
+
+void EventFactoryEvdev::NotifyTouchscreensUpdated() {
   DeviceHotplugEventObserver* observer = DeviceDataManager::GetInstance();
   std::vector<TouchscreenDevice> touchscreens;
   for (auto it = converters_.begin(); it != converters_.end(); ++it) {
     if (it->second->HasTouchscreen()) {
-      InputDeviceType device_type = InputDeviceType::INPUT_DEVICE_EXTERNAL;
-      if (converter.IsInternal())
-        device_type = InputDeviceType::INPUT_DEVICE_INTERNAL;
-
-      touchscreens.push_back(
-          TouchscreenDevice(it->second->id(),
-                            device_type,
-                            std::string(), /* Device name */
-                            it->second->GetTouchscreenSize()));
+      touchscreens.push_back(TouchscreenDevice(
+          it->second->id(), it->second->type(), std::string() /* Device name */,
+          it->second->GetTouchscreenSize()));
     }
   }
 
   observer->OnTouchscreenDevicesUpdated(touchscreens);
 }
 
+void EventFactoryEvdev::NotifyKeyboardsUpdated() {
+  DeviceHotplugEventObserver* observer = DeviceDataManager::GetInstance();
+  std::vector<KeyboardDevice> keyboards;
+  for (auto it = converters_.begin(); it != converters_.end(); ++it) {
+    if (it->second->HasKeyboard()) {
+      keyboards.push_back(KeyboardDevice(it->second->id(), it->second->type(),
+                                         std::string() /* Device name */));
+    }
+  }
+
+  observer->OnKeyboardDevicesUpdated(keyboards);
+}
+
+void EventFactoryEvdev::NotifyTouchpadsUpdated() {
+  std::vector<InputDevice> touchpads;
+  for (auto it = converters_.begin(); it != converters_.end(); ++it) {
+    if (it->second->HasTouchpad()) {
+      touchpads.push_back(InputDevice(it->second->id(), it->second->type(),
+                                      std::string() /* Device name */));
+    }
+  }
+
+  DeviceHotplugEventObserver* observer = DeviceDataManager::GetInstance();
+  observer->OnTouchpadDevicesUpdated(touchpads);
+}
+
+void EventFactoryEvdev::NotifyMiceUpdated() {
+  std::vector<InputDevice> mice;
+  for (auto it = converters_.begin(); it != converters_.end(); ++it) {
+    if (it->second->HasMouse()) {
+      mice.push_back(InputDevice(it->second->id(), it->second->type(),
+                                 std::string() /* Device name */));
+    }
+  }
+
+  DeviceHotplugEventObserver* observer = DeviceDataManager::GetInstance();
+  observer->OnMouseDevicesUpdated(mice);
+}
+
 int EventFactoryEvdev::NextDeviceId() {
   return ++last_device_id_;
+}
+
+bool EventFactoryEvdev::GetDeviceIdsByType(const EventDeviceType type,
+                                           std::vector<int>* device_ids) {
+  if (device_ids)
+    device_ids->clear();
+  std::vector<int> ids;
+
+#if defined(USE_EVDEV_GESTURES)
+  // Ask GesturePropertyProvider for matching devices.
+  gesture_property_provider_->GetDeviceIdsByType(type, &ids);
+#endif
+  // In the future we can add other device matching logics here.
+
+  if (device_ids)
+    device_ids->assign(ids.begin(), ids.end());
+  return !ids.empty();
 }
 
 }  // namespace ui

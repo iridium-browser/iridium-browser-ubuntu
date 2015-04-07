@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 
+#include "base/basictypes.h"
 #include "base/logging.h"
 #include "net/base/iovec.h"
 #include "net/base/ip_endpoint.h"
@@ -251,11 +252,17 @@ class NET_EXPORT_PRIVATE QuicConnection
                  const PacketWriterFactory& writer_factory,
                  bool owns_writer,
                  bool is_server,
+                 bool is_secure,
                  const QuicVersionVector& supported_versions);
   ~QuicConnection() override;
 
   // Sets connection parameters from the supplied |config|.
   void SetFromConfig(const QuicConfig& config);
+
+  // Called by the Session when the client has provided CachedNetworkParameters.
+  // Returns true if this changes the initial connection state.
+  virtual bool ResumeConnectionState(
+      const CachedNetworkParameters& cached_network_params);
 
   // Sets the number of active streams on the connection for congestion control.
   void SetNumOpenStreams(size_t num_streams);
@@ -376,6 +383,7 @@ class NET_EXPORT_PRIVATE QuicConnection
 
   // QuicSentPacketManager::NetworkChangeVisitor
   void OnCongestionWindowChange() override;
+  void OnRttChange() override;
 
   // Called by the crypto stream when the handshake completes. In the server's
   // case this is when the SHLO has been ACKed. Clients call this on receipt of
@@ -397,8 +405,8 @@ class NET_EXPORT_PRIVATE QuicConnection
   QuicConnectionId connection_id() const { return connection_id_; }
   const QuicClock* clock() const { return clock_; }
   QuicRandom* random_generator() const { return random_generator_; }
-  size_t max_packet_length() const;
-  void set_max_packet_length(size_t length);
+  QuicByteCount max_packet_length() const;
+  void set_max_packet_length(QuicByteCount length);
 
   bool connected() const { return connected_; }
 
@@ -424,16 +432,6 @@ class NET_EXPORT_PRIVATE QuicConnection
 
   // Returns true if the connection has queued packets or frames.
   bool HasQueuedData() const;
-
-  // TODO(ianswett): Remove when quic_unified_timeouts is removed.
-  // Sets (or resets) the idle state connection timeout. Also, checks and times
-  // out the connection if network timer has expired for |timeout|.
-  void SetIdleNetworkTimeout(QuicTime::Delta timeout);
-
-  // Sets (or resets) the total time delta the connection can be alive for.
-  // Used to limit the time a connection can be alive before crypto handshake
-  // finishes.
-  void SetOverallConnectionTimeout(QuicTime::Delta timeout);
 
   // Sets the overall and idle state connection timeouts.
   void SetNetworkTimeouts(QuicTime::Delta overall_timeout,
@@ -530,6 +528,9 @@ class NET_EXPORT_PRIVATE QuicConnection
   QuicPacketSequenceNumber sequence_number_of_last_sent_packet() const {
     return sequence_number_of_last_sent_packet_;
   }
+  const QuicPacketWriter* writer() const { return writer_; }
+
+  bool is_secure() const { return is_secure_; }
 
  protected:
   // Packets which have not been written to the wire.
@@ -567,7 +568,6 @@ class NET_EXPORT_PRIVATE QuicConnection
   bool SelectMutualVersion(const QuicVersionVector& available_versions);
 
   QuicPacketWriter* writer() { return writer_; }
-  const QuicPacketWriter* writer() const { return writer_; }
 
   bool peer_port_changed() const { return peer_port_changed_; }
 
@@ -696,13 +696,13 @@ class NET_EXPORT_PRIVATE QuicConnection
   IPEndPoint self_address_;
   IPEndPoint peer_address_;
   // Used to store latest peer port to possibly migrate to later.
-  int migrating_peer_port_;
+  uint16 migrating_peer_port_;
 
   // True if the last packet has gotten far enough in the framer to be
   // decrypted.
   bool last_packet_decrypted_;
   bool last_packet_revived_;  // True if the last packet was revived from FEC.
-  size_t last_size_;  // Size of the last received packet.
+  QuicByteCount last_size_;  // Size of the last received packet.
   EncryptionLevel last_decrypted_packet_level_;
   QuicPacketHeader last_header_;
   std::vector<QuicStreamFrame> last_stream_frames_;
@@ -746,6 +746,9 @@ class NET_EXPORT_PRIVATE QuicConnection
   // Contains the connection close packet if the connection has been closed.
   scoped_ptr<QuicEncryptedPacket> connection_close_packet_;
 
+  // When true, the connection does not send a close packet on timeout.
+  bool silent_close_enabled_;
+
   FecGroupMap group_map_;
 
   QuicReceivedPacketManager received_packet_manager_;
@@ -754,7 +757,7 @@ class NET_EXPORT_PRIVATE QuicConnection
   // Indicates whether an ack should be sent the next time we try to write.
   bool ack_queued_;
   // Indicates how many consecutive packets have arrived without sending an ack.
-  uint32 num_packets_received_since_last_ack_sent_;
+  QuicPacketCount num_packets_received_since_last_ack_sent_;
   // Indicates how many consecutive times an ack has arrived which indicates
   // the peer needs to stop waiting for some packets.
   int stop_waiting_count_;
@@ -790,8 +793,8 @@ class NET_EXPORT_PRIVATE QuicConnection
   // This is used for timeouts, and does not indicate the packet was processed.
   QuicTime time_of_last_received_packet_;
 
-  // The last time a new (non-retransmitted) packet was sent for this
-  // connection.
+  // The last time this connection began sending a new (non-retransmitted)
+  // packet.
   QuicTime time_of_last_sent_new_packet_;
 
   // Sequence number of the last sent packet.  Packets are guaranteed to be sent
@@ -836,6 +839,9 @@ class NET_EXPORT_PRIVATE QuicConnection
   // If non-empty this contains the set of versions received in a
   // version negotiation packet.
   QuicVersionVector server_supported_versions_;
+
+  // True if this is a secure QUIC connection.
+  bool is_secure_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicConnection);
 };

@@ -45,6 +45,7 @@
 <translation id="568643307450491754">Yer işaretlerinizi Chrome menüsünde veya yer işaretleri çubuğunda bulabilirsiniz.</translation>
 <translation id="8556340503434111824">Kullanabileceğiniz yeni bir Google Chrome sürümü var ve bu sürüm, her zamankinden daha hızlı.</translation>
 <translation id="8987477933582888019">Web Tarayıcı</translation>
+<translation id="3749644715096758981">Chrome en son sürüme güncellenemediği için yeni özellikler ve güvenlik düzeltmeleri cihazınızda bulunmuyor. Chrome'u güncellemeniz gerekiyor.</translation>
 <translation id="4728575227883772061">Belirlenemeyen bir hata nedeniyle yükleme başarısız oldu. Google Chrome şu anda çalışır durumdaysa, kapatıp yeniden deneyin.</translation>
 <translation id="3080151273017101988">Google Chrome kapandığında arka plan uygulamaları çalıştırmaya devam et</translation>
 <translation id="4149882025268051530">Yükleyici arşivi açamadı. Lütfen Google Chrome'u yeniden indirin.</translation>
@@ -65,7 +66,7 @@
 <translation id="4513711165509885787">Fatura ayrıntılarınız Chrome'a kaydedildi.</translation>
 <translation id="5253588388888612165">Bu bilgisayarı <ph name="PROFILE_NAME"/> ile paylaşıyorsanız web'e ayrı olarak göz atmak için kendinizi Chrome'a ekleyin. Bunu yapmazsanız diğer kullanıcıların Google Hesaplarının bağlantısını kesebilirsiniz.</translation>
 <translation id="7098166902387133879">Google Chrome mikrofonunuzu kullanıyor.</translation>
-<translation id="2596415276201385844">Güvenli bir bağlantı kurmak için saatinizin doğru ayarlanmış olması gerekir. Bunun sebebi, web sitelerinin kendilerini tanımlamak için kullandıkları sertifikaların sadece belli süreler için geçerli olmasıdır. Cihazınızın saati yanlış olduğundan, Chrome'un bu sertifikaları doğrulayamıyor.</translation>
+<translation id="2596415276201385844">Güvenli bir bağlantı kurmak için saatinizin doğru ayarlanmış olması gerekir. Bunun sebebi, web sitelerinin kendilerini tanımlamak için kullandıkları sertifikaların sadece belli süreler için geçerli olmasıdır. Cihazınızın saati yanlış olduğundan, Chrome bu sertifikaları doğrulayamıyor.</translation>
 <translation id="4053720452172726777">Google Chrome'u özelleştirin ve kontrol edin</translation>
 <translation id="5298539825145851748">Chrome'dan Kaldır</translation>
 <translation id="3197823471738295152">Cihazınız güncel.</translation>
@@ -83,6 +84,7 @@
 <translation id="225614027745146050">Hoş Geldiniz</translation>
 <translation id="7473891865547856676">Hayır, Teşekkürler</translation>
 <translation id="3149510190863420837">Chrome Uygulamaları</translation>
+<translation id="8851136666856101339">main</translation>
 <translation id="7473136999113284234">Chrome otomatik olarak güncellenir, böylece her zaman en yeni sürüme sahip olursunuz.</translation>
 <translation id="7084448929020576097"><ph name="FILE_NAME"/> kötü amaçlı bir dosya ve Chrome tarafından engellendi.</translation>
 <translation id="6368958679917195344">Chrome OS, ek <ph name="BEGIN_LINK_CROS_OSS"/>açık kaynak yazılımlardan<ph name="END_LINK_CROS_OSS"/> yararlanılarak geliştirilmiştir.</translation>
@@ -141,7 +143,6 @@ Yine de oturum açarsanız, yer işaretleriniz, geçmişiniz ve diğer ayarları
 <translation id="5855036575689098185">Bilgisayarınızda çalışan yazılım Google Chrome ile uyumsuz.</translation>
 <translation id="7164397146364144019">Olası güvenlik olaylarının ayrıntılarını Google'a otomatik olarak bildirerek Chrome'un daha güvenli ve kullanımı kolay bir hale gelmesine yardımcı olabilirsiniz.</translation>
 <translation id="8008534537613507642">Chrome'u yeniden yükle</translation>
-<translation id="2044287590254833138">Google Chrome Araç Çubuğu</translation>
 <translation id="8862326446509486874">Sistem düzeyinde yükleme için gerekli haklara sahip değilsiniz. Yükleyiciyi Yönetici olarak tekrar çalıştırmayı deneyin.</translation>
 <translation id="2874156562296220396">Google Chrome, <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> açık kaynak projesi ve diğer <ph name="BEGIN_LINK_OSS"/>açık kaynak yazılımlar<ph name="END_LINK_OSS"/> ile oluşturulmuştur.</translation>
 <translation id="7191567847629796517">Google Chrome OS, <ph name="SCHEME"/> bağlantılarını işlemek için harici bir uygulamanın başlatılmasını desteklemiyor. İstenen bağlantı: <ph name="PROTOLINK"/>.</translation>
@@ -153,6 +154,7 @@ Yine de oturum açarsanız, yer işaretleriniz, geçmişiniz ve diğer ayarları
 <translation id="2290095356545025170">Google Chrome'u kaldırmak istediğinizden emin misiniz?</translation>
 <translation id="7062966102157262887">Şu anda devam eden bir indirme işlemi var. Google Chrome'dan çıkmak ve indirme işlemini iptal etmek istiyor musunuz?</translation>
 <translation id="4273752058983339720">Google Chrome bilgisayarınızı başlattığınızda otomatik olarak başlayacak şekilde yapılandırıldı.</translation>
+<translation id="2316129865977710310">Hayır, teşekkürler</translation>
 <translation id="415994390253732730">Chrome Tuhaf Biçimde mi Çalışıyor?</translation>
 <translation id="1104959162601287462">&amp;Chrome OS hakkında</translation>
 <translation id="5328989068199000832">Google Chrome Binaries</translation>
@@ -252,6 +254,7 @@ Yine de oturum açarsanız, yer işaretleriniz, geçmişiniz ve diğer ayarları
 <translation id="6626317981028933585">Maalesef, Mozilla Firefox çalışırken ona ait ayarlarınız kullanılamaz. Bu ayarları Google Chrome'a aktarmak için çalışmanızı kaydedin ve tüm Firefox pencerelerini kapatın. Ardından Devam Et'i tıklayın.</translation>
 <translation id="7242029209006116544">Yönetilen bir hesapla oturum açıyor ve hesabın yöneticisine Google Chrome profilinizi denetleme izni veriyorsunuz. Uygulamalarınız, yer işaretleriniz, geçmişiniz, şifreleriniz ve diğer ayarlarınız gibi Chrome verileriniz kalıcı olarak <ph name="USER_NAME"/> ile bağlantılandırılacaktır. Google Hesapları Hesap Özeti'ni kullanarak bu verileri silebilecek, ancak bu verileri başka bir hesapla ilişkilendiremeyeceksiniz. İsterseniz mevcut Chrome verilerinizi ayrı tutmak için yeni bir profil oluşturabilirsiniz.<ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">Ayrıca, Chrome'u başlattığınızda veya Çok Amaçlı Adres Çubuğu'ndan arama yaptığınızda gösterilecek sayfayı da denetler.</translation>
+<translation id="1553358976309200471">Chrome'u güncelle</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Telif Hakkı <ph name="YEAR"/> Google Inc. Tüm hakları saklıdır.</translation>
 <translation id="1698376642261615901">Google Chrome, web sayfalarını ve uygulamaları yıldırım hızıyla çalıştıran bir web tarayıcısıdır. Hızlı, dengeli ve kullanımı kolaydır. Kötü amaçlı yazılımlara ve e-dolandırıcılığa karşı Google Chrome'un içinde yerleşik olarak bulunan koruma özellikleriyle web'de daha güvenli bir şekilde gezinin.</translation>

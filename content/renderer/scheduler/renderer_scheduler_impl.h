@@ -8,9 +8,16 @@
 #include "base/atomicops.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
+#include "content/renderer/scheduler/cancelable_closure_holder.h"
 #include "content/renderer/scheduler/renderer_scheduler.h"
 #include "content/renderer/scheduler/single_thread_idle_task_runner.h"
 #include "content/renderer/scheduler/task_queue_manager.h"
+
+namespace base {
+namespace debug {
+class ConvertableToTraceFormat;
+}
+}
 
 namespace content {
 
@@ -28,7 +35,9 @@ class CONTENT_EXPORT RendererSchedulerImpl : public RendererScheduler {
   scoped_refptr<SingleThreadIdleTaskRunner> IdleTaskRunner() override;
   void WillBeginFrame(const cc::BeginFrameArgs& args) override;
   void DidCommitFrameToCompositor() override;
-  void DidReceiveInputEventOnCompositorThread() override;
+  void DidReceiveInputEventOnCompositorThread(
+      blink::WebInputEvent::Type type) override;
+  void DidAnimateForInputOnCompositorThread() override;
   bool ShouldYieldForHighPriorityWork() override;
   void Shutdown() override;
 
@@ -72,6 +81,12 @@ class CONTENT_EXPORT RendererSchedulerImpl : public RendererScheduler {
     DISALLOW_COPY_AND_ASSIGN(PollableNeedsUpdateFlag);
   };
 
+  // Returns the serialized scheduler state for tracing.
+  scoped_refptr<base::debug::ConvertableToTraceFormat> AsValueLocked(
+      base::TimeTicks optional_now) const;
+  static const char* TaskQueueIdToString(QueueId queue_id);
+  static const char* PolicyToString(Policy policy);
+
   // The time we should stay in CompositorPriority mode for after a touch event.
   static const int kCompositorPriorityAfterTouchMillis = 100;
 
@@ -91,6 +106,9 @@ class CONTENT_EXPORT RendererSchedulerImpl : public RendererScheduler {
   // Updates the scheduler policy. Must be called from the main thread.
   void UpdatePolicy();
 
+  // An input event of some sort happened, the policy may need updating.
+  void UpdateForInputEvent();
+
   // Start and end an idle period.
   void StartIdlePeriod();
   void EndIdlePeriod();
@@ -104,7 +122,7 @@ class CONTENT_EXPORT RendererSchedulerImpl : public RendererScheduler {
   scoped_refptr<SingleThreadIdleTaskRunner> idle_task_runner_;
 
   base::Closure update_policy_closure_;
-  base::Closure end_idle_period_closure_;
+  CancelableClosureHolder end_idle_period_closure_;
 
   // Don't access current_policy_ directly, instead use SchedulerPolicy().
   Policy current_policy_;

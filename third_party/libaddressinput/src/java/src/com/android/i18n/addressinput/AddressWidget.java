@@ -96,7 +96,8 @@ public class AddressWidget implements AdapterView.OnItemSelectedListener {
   // The appropriate label that should be applied to the zip code field of the current country.
   private enum ZipLabel {
     ZIP,
-    POSTAL
+    POSTAL,
+    PIN
   }
 
   private ZipLabel zipLabel;
@@ -214,7 +215,7 @@ public class AddressWidget implements AdapterView.OnItemSelectedListener {
 
   /** TODO: Add region-dependent width types for address fields. */
   private WidthType getFieldWidthType(AddressUiComponent field) {
-    return field.getId().getDefaulWidthType();
+    return field.getId().getDefaultWidthType();
   }
 
   private void createView(ViewGroup rootView, AddressUiComponent field, String defaultKey,
@@ -318,14 +319,17 @@ public class AddressWidget implements AdapterView.OnItemSelectedListener {
     localityUi.initializeCandidatesList(localityList);
   }
 
-  // ZIP code is called postal code in some countries. This method returns the appropriate name
-  // for the given countryNode.
+  // ZIP code is called postal code in some countries, and PIN code in India. This method returns
+  // the appropriate name for the given countryNode.
   private String getZipFieldName(AddressVerificationNodeData countryNode) {
     String zipName;
     String zipType = countryNode.get(AddressDataKey.ZIP_NAME_TYPE);
     if (zipType == null) {
       zipLabel = ZipLabel.POSTAL;
       zipName = context.getString(R.string.i18n_postal_code_label);
+    } else if (zipType.equals("pin")) {
+      zipLabel = ZipLabel.PIN;
+      zipName = context.getString(R.string.i18n_pin_code_label);
     } else {
       zipLabel = ZipLabel.ZIP;
       zipName = context.getString(R.string.i18n_zip_code_label);
@@ -554,7 +558,7 @@ public class AddressWidget implements AdapterView.OnItemSelectedListener {
       ClientCacheManager cacheManager, AddressWidgetUiComponentProvider provider) {
     componentProvider = provider;
     currentRegion =
-        ((TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE))
+        ((TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE))
         .getSimCountryIso().toUpperCase(Locale.US);
     if (currentRegion.length() == 0) {
       currentRegion = "US";
@@ -728,7 +732,7 @@ public class AddressWidget implements AdapterView.OnItemSelectedListener {
       case UNKNOWN_VALUE:
         String currentValue = address.getFieldValue(field);
         return String.format(context.getString(R.string.unknown_entry), currentValue);
-      case UNRECOGNIZED_FORMAT:
+      case INVALID_FORMAT:
         // We only support this error type for the Postal Code field.
         return (zipLabel == ZipLabel.POSTAL
             ? context.getString(R.string.unrecognized_format_postal_code)

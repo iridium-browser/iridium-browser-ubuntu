@@ -18,6 +18,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
+#include "base/time/time.h"
 #include "net/base/address_list.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -293,7 +294,7 @@ class DynamicSocketDataProvider : public SocketDataProvider {
 
   // SocketDataProvider implementation.
   MockRead GetNextRead() override;
-  virtual MockWriteResult OnWrite(const std::string& data) = 0;
+  MockWriteResult OnWrite(const std::string& data) override = 0;
   void Reset() override;
 
  protected:
@@ -328,6 +329,7 @@ struct SSLSocketDataProvider {
   std::string next_proto;
   bool was_npn_negotiated;
   NextProto protocol_negotiated;
+  NextProtoVector next_protos_expected_in_ssl_config;
   bool client_cert_sent;
   SSLCertRequestInfo* cert_request_info;
   scoped_refptr<X509Certificate> cert;
@@ -682,17 +684,17 @@ class MockClientSocket : public SSLClientSocket {
   explicit MockClientSocket(const BoundNetLog& net_log);
 
   // Socket implementation.
-  virtual int Read(IOBuffer* buf,
-                   int buf_len,
-                   const CompletionCallback& callback) = 0;
-  virtual int Write(IOBuffer* buf,
-                    int buf_len,
-                    const CompletionCallback& callback) = 0;
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override = 0;
+  int Write(IOBuffer* buf,
+            int buf_len,
+            const CompletionCallback& callback) override = 0;
   int SetReceiveBufferSize(int32 size) override;
   int SetSendBufferSize(int32 size) override;
 
   // StreamSocket implementation.
-  virtual int Connect(const CompletionCallback& callback) = 0;
+  int Connect(const CompletionCallback& callback) override = 0;
   void Disconnect() override;
   bool IsConnected() const override;
   bool IsConnectedAndIdle() const override;
@@ -881,13 +883,13 @@ class DeterministicMockUDPClientSocket
   void OnReadComplete(const MockRead& data) override;
   void OnConnectComplete(const MockConnect& data) override;
 
-  void set_source_port(int port) { source_port_ = port; }
+  void set_source_port(uint16 port) { source_port_ = port; }
 
  private:
   bool connected_;
   IPEndPoint peer_address_;
   DeterministicSocketHelper helper_;
-  int source_port_;  // Ephemeral source port.
+  uint16 source_port_;  // Ephemeral source port.
 
   DISALLOW_COPY_AND_ASSIGN(DeterministicMockUDPClientSocket);
 };
@@ -1051,7 +1053,7 @@ class MockUDPClientSocket : public DatagramClientSocket, public AsyncSocket {
   void OnReadComplete(const MockRead& data) override;
   void OnConnectComplete(const MockConnect& data) override;
 
-  void set_source_port(int port) { source_port_ = port;}
+  void set_source_port(uint16 port) { source_port_ = port;}
 
  private:
   int CompleteRead();
@@ -1064,7 +1066,7 @@ class MockUDPClientSocket : public DatagramClientSocket, public AsyncSocket {
   int read_offset_;
   MockRead read_data_;
   bool need_read_data_;
-  int source_port_;  // Ephemeral source port.
+  uint16 source_port_;  // Ephemeral source port.
 
   // Address of the "remote" peer we're connected to.
   IPEndPoint peer_addr_;
@@ -1316,6 +1318,18 @@ class MockSOCKSClientSocketPool : public SOCKSClientSocketPool {
   TransportClientSocketPool* const transport_pool_;
 
   DISALLOW_COPY_AND_ASSIGN(MockSOCKSClientSocketPool);
+};
+
+// Convenience class to temporarily set the WebSocketEndpointLockManager unlock
+// delay to zero for testing purposes. Automatically restores the original value
+// when destroyed.
+class ScopedWebSocketEndpointZeroUnlockDelay {
+ public:
+  ScopedWebSocketEndpointZeroUnlockDelay();
+  ~ScopedWebSocketEndpointZeroUnlockDelay();
+
+ private:
+  base::TimeDelta old_delay_;
 };
 
 // Constants for a successful SOCKS v5 handshake.

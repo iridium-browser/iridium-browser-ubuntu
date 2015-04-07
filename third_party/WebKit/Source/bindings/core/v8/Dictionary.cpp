@@ -46,32 +46,57 @@
 
 namespace blink {
 
+static ExceptionState& emptyExceptionState()
+{
+    DEFINE_STATIC_LOCAL(NonThrowableExceptionState, exceptionState, ());
+    return exceptionState;
+}
+
 Dictionary::Dictionary()
     : m_isolate(0)
+    , m_exceptionState(&emptyExceptionState())
 {
 }
 
-Dictionary::Dictionary(const v8::Handle<v8::Value>& options, v8::Isolate* isolate)
+Dictionary::Dictionary(const v8::Handle<v8::Value>& options, v8::Isolate* isolate, ExceptionState& exceptionState)
     : m_options(options)
     , m_isolate(isolate)
+    , m_exceptionState(&exceptionState)
 {
     ASSERT(m_isolate);
+    ASSERT(m_exceptionState);
+#if ENABLE(ASSERT)
+    m_exceptionState->onStackObjectChecker().add(this);
+#endif
 }
 
 Dictionary::~Dictionary()
 {
+#if ENABLE(ASSERT)
+    if (m_exceptionState)
+        m_exceptionState->onStackObjectChecker().remove(this);
+#endif
 }
 
 Dictionary& Dictionary::operator=(const Dictionary& optionsObject)
 {
     m_options = optionsObject.m_options;
     m_isolate = optionsObject.m_isolate;
+#if ENABLE(ASSERT)
+    if (m_exceptionState)
+        m_exceptionState->onStackObjectChecker().remove(this);
+#endif
+    m_exceptionState = optionsObject.m_exceptionState;
+#if ENABLE(ASSERT)
+    if (m_exceptionState)
+        m_exceptionState->onStackObjectChecker().add(this);
+#endif
     return *this;
 }
 
 Dictionary Dictionary::createEmpty(v8::Isolate* isolate)
 {
-    return Dictionary(v8::Object::New(isolate), isolate);
+    return Dictionary(v8::Object::New(isolate), isolate, emptyExceptionState());
 }
 
 bool Dictionary::isObject() const
@@ -90,11 +115,12 @@ bool Dictionary::hasProperty(const String& key) const
 {
     if (isUndefinedOrNull())
         return false;
-    v8::Local<v8::Object> options = m_options->ToObject();
+    v8::Local<v8::Object> options = m_options->ToObject(m_isolate);
     ASSERT(!options.IsEmpty());
 
     ASSERT(m_isolate);
     ASSERT(m_isolate == v8::Isolate::GetCurrent());
+    ASSERT(m_exceptionState);
     v8::Handle<v8::String> v8Key = v8String(m_isolate, key);
     if (!options->Has(v8Key))
         return false;
@@ -106,11 +132,12 @@ bool Dictionary::getKey(const String& key, v8::Local<v8::Value>& value) const
 {
     if (isUndefinedOrNull())
         return false;
-    v8::Local<v8::Object> options = m_options->ToObject();
+    v8::Local<v8::Object> options = m_options->ToObject(m_isolate);
     ASSERT(!options.IsEmpty());
 
     ASSERT(m_isolate);
     ASSERT(m_isolate == v8::Isolate::GetCurrent());
+    ASSERT(m_exceptionState);
     v8::Handle<v8::String> v8Key = v8String(m_isolate, key);
     if (!options->Has(v8Key))
         return false;
@@ -125,37 +152,6 @@ bool Dictionary::get(const String& key, v8::Local<v8::Value>& value) const
     return getKey(key, value);
 }
 
-bool Dictionary::getWithUndefinedOrNullCheck(const String& key, String& value) const
-{
-    v8::Local<v8::Value> v8Value;
-    if (!getKey(key, v8Value) || blink::isUndefinedOrNull(v8Value))
-        return false;
-
-    TOSTRING_DEFAULT(V8StringResource<>, stringValue, v8Value, false);
-    value = stringValue;
-    return true;
-}
-
-bool Dictionary::getWithUndefinedOrNullCheck(const String& key, RefPtrWillBeMember<Element>& value) const
-{
-    v8::Local<v8::Value> v8Value;
-    if (!getKey(key, v8Value) || blink::isUndefinedOrNull(v8Value))
-        return false;
-
-    value = V8Element::toImplWithTypeCheck(m_isolate, v8Value);
-    return true;
-}
-
-bool Dictionary::getWithUndefinedOrNullCheck(const String& key, RefPtrWillBeMember<Path2D>& value) const
-{
-    v8::Local<v8::Value> v8Value;
-    if (!getKey(key, v8Value) || blink::isUndefinedOrNull(v8Value))
-        return false;
-
-    value = V8Path2D::toImplWithTypeCheck(m_isolate, v8Value);
-    return true;
-}
-
 bool Dictionary::get(const String& key, Dictionary& value) const
 {
     v8::Local<v8::Value> v8Value;
@@ -165,7 +161,7 @@ bool Dictionary::get(const String& key, Dictionary& value) const
     if (v8Value->IsObject()) {
         ASSERT(m_isolate);
         ASSERT(m_isolate == v8::Isolate::GetCurrent());
-        value = Dictionary(v8Value, m_isolate);
+        value = Dictionary(v8Value, m_isolate, *m_exceptionState);
     }
 
     return true;
@@ -175,8 +171,9 @@ bool Dictionary::set(const String& key, const v8::Handle<v8::Value>& value)
 {
     if (isUndefinedOrNull())
         return false;
-    v8::Local<v8::Object> options = m_options->ToObject();
+    v8::Local<v8::Object> options = m_options->ToObject(m_isolate);
     ASSERT(!options.IsEmpty());
+    ASSERT(m_exceptionState);
 
     return options->Set(v8String(m_isolate, key), value);
 }
@@ -219,7 +216,7 @@ bool Dictionary::getOwnPropertiesAsStringHashMap(HashMap<String, String>& hashMa
     if (!isObject())
         return false;
 
-    v8::Handle<v8::Object> options = m_options->ToObject();
+    v8::Handle<v8::Object> options = m_options->ToObject(m_isolate);
     if (options.IsEmpty())
         return false;
 
@@ -227,7 +224,7 @@ bool Dictionary::getOwnPropertiesAsStringHashMap(HashMap<String, String>& hashMa
     if (properties.IsEmpty())
         return true;
     for (uint32_t i = 0; i < properties->Length(); ++i) {
-        v8::Local<v8::String> key = properties->Get(i)->ToString();
+        v8::Local<v8::String> key = properties->Get(i)->ToString(m_isolate);
         if (!options->Has(key))
             continue;
 
@@ -241,35 +238,12 @@ bool Dictionary::getOwnPropertiesAsStringHashMap(HashMap<String, String>& hashMa
     return true;
 }
 
-bool Dictionary::getOwnPropertyNames(Vector<String>& names) const
-{
-    if (!isObject())
-        return false;
-
-    v8::Handle<v8::Object> options = m_options->ToObject();
-    if (options.IsEmpty())
-        return false;
-
-    v8::Local<v8::Array> properties = options->GetOwnPropertyNames();
-    if (properties.IsEmpty())
-        return true;
-    for (uint32_t i = 0; i < properties->Length(); ++i) {
-        v8::Local<v8::String> key = properties->Get(i)->ToString();
-        if (!options->Has(key))
-            continue;
-        TOSTRING_DEFAULT(V8StringResource<>, stringKey, key, false);
-        names.append(stringKey);
-    }
-
-    return true;
-}
-
 bool Dictionary::getPropertyNames(Vector<String>& names) const
 {
     if (!isObject())
         return false;
 
-    v8::Handle<v8::Object> options = m_options->ToObject();
+    v8::Handle<v8::Object> options = m_options->ToObject(m_isolate);
     if (options.IsEmpty())
         return false;
 
@@ -277,7 +251,7 @@ bool Dictionary::getPropertyNames(Vector<String>& names) const
     if (properties.IsEmpty())
         return true;
     for (uint32_t i = 0; i < properties->Length(); ++i) {
-        v8::Local<v8::String> key = properties->Get(i)->ToString();
+        v8::Local<v8::String> key = properties->Get(i)->ToString(m_isolate);
         if (!options->Has(key))
             continue;
         TOSTRING_DEFAULT(V8StringResource<>, stringKey, key, false);

@@ -135,6 +135,7 @@ OutputHLSL::OutputHLSL(TParseContext &context, TranslatorHLSL *parentTranslator)
     mUniqueIndex = 0;
 
     mContainsLoopDiscontinuity = false;
+    mContainsAnyLoop = false;
     mOutputLod0Function = false;
     mInsideDiscontinuousLoop = false;
     mNestedLoopDepth = 0;
@@ -172,6 +173,7 @@ OutputHLSL::~OutputHLSL()
 void OutputHLSL::output()
 {
     mContainsLoopDiscontinuity = mContext.shaderType == GL_FRAGMENT_SHADER && containsLoopDiscontinuity(mContext.treeRoot);
+    mContainsAnyLoop = containsAnyLoop(mContext.treeRoot);
     const std::vector<TIntermTyped*> &flaggedStructs = FlagStd140ValueStructs(mContext.treeRoot);
     makeFlaggedStructMaps(flaggedStructs);
 
@@ -509,14 +511,21 @@ void OutputHLSL::header()
 
         if (mOutputType == SH_HLSL11_OUTPUT)
         {
+            out << "cbuffer DriverConstants : register(b1)\n"
+                    "{\n";
+
             if (mUsesDepthRange)
             {
-                out << "cbuffer DriverConstants : register(b1)\n"
-                       "{\n"
-                       "    float3 dx_DepthRange : packoffset(c0);\n"
-                       "};\n"
-                       "\n";
+                out << "    float3 dx_DepthRange : packoffset(c0);\n";
             }
+
+            // dx_ViewAdjust will only be used in Feature Level 9 shaders.
+            // However, we declare it for all shaders (including Feature Level 10+).
+            // The bytecode is the same whether we declare it or not, since D3DCompiler removes it if it's unused.
+            out << "    float4 dx_ViewAdjust : packoffset(c1);\n";
+
+            out << "};\n"
+                   "\n";
         }
         else
         {
@@ -1562,6 +1571,7 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
         }
         break;
       case EOpDivAssign:               outputTriplet(visit, "(", " /= ", ")");          break;
+      case EOpModAssign:               outputTriplet(visit, "(", " %= ", ")");          break;
       case EOpIndexDirect:
         {
             const TType& leftType = node->getLeft()->getType();
@@ -1649,6 +1659,7 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
       case EOpSub:               outputTriplet(visit, "(", " - ", ")"); break;
       case EOpMul:               outputTriplet(visit, "(", " * ", ")"); break;
       case EOpDiv:               outputTriplet(visit, "(", " / ", ")"); break;
+      case EOpMod:               outputTriplet(visit, "(", " % ", ")"); break;
       case EOpEqual:
       case EOpNotEqual:
         if (node->getLeft()->isScalar())
@@ -1781,6 +1792,10 @@ bool OutputHLSL::visitUnary(Visit visit, TIntermUnary *node)
       case EOpFloor:            outputTriplet(visit, "floor(", "", ")");     break;
       case EOpCeil:             outputTriplet(visit, "ceil(", "", ")");      break;
       case EOpFract:            outputTriplet(visit, "frac(", "", ")");      break;
+      case EOpFloatBitsToInt:   outputTriplet(visit, "asint(", "", ")");     break;
+      case EOpFloatBitsToUint:  outputTriplet(visit, "asuint(", "", ")");    break;
+      case EOpIntBitsToFloat:   outputTriplet(visit, "asfloat(", "", ")");   break;
+      case EOpUintBitsToFloat:  outputTriplet(visit, "asfloat(", "", ")");   break;
       case EOpLength:           outputTriplet(visit, "length(", "", ")");    break;
       case EOpNormalize:        outputTriplet(visit, "normalize(", "", ")"); break;
       case EOpDFdx:
@@ -1939,7 +1954,7 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
       case EOpPrototype:
         if (visit == PreVisit)
         {
-            out << TypeString(node->getType()) << " " << Decorate(node->getName()) << (mOutputLod0Function ? "Lod0(" : "(");
+            out << TypeString(node->getType()) << " " << Decorate(TFunction::unmangleName(node->getName())) << (mOutputLod0Function ? "Lod0(" : "(");
 
             TIntermSequence *arguments = node->getSequence();
 
@@ -2301,7 +2316,16 @@ bool OutputHLSL::visitSelection(Visit visit, TIntermSelection *node)
     {
         mUnfoldShortCircuit->traverse(node->getCondition());
 
-        out << "FLATTEN if (";
+        // D3D errors when there is a gradient operation in a loop in an unflattened if
+        // however flattening all the ifs in branch heavy shaders made D3D error too.
+        // As a temporary workaround we flatten the ifs only if there is at least a loop
+        // present somewhere in the shader.
+        if (mContext.shaderType == GL_FRAGMENT_SHADER && mContainsAnyLoop)
+        {
+            out << "FLATTEN ";
+        }
+
+        out << "if (";
 
         node->getCondition()->traverse(this);
 

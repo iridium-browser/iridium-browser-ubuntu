@@ -33,7 +33,7 @@ EmbeddedWorkerTestHelper::EmbeddedWorkerTestHelper(int mock_render_process_id)
                          NULL,
                          NULL);
   wrapper_->process_manager()->SetProcessIdForTest(mock_render_process_id);
-  registry()->AddChildProcessSender(mock_render_process_id, this);
+  registry()->AddChildProcessSender(mock_render_process_id, this, nullptr);
 }
 
 EmbeddedWorkerTestHelper::~EmbeddedWorkerTestHelper() {
@@ -44,7 +44,7 @@ EmbeddedWorkerTestHelper::~EmbeddedWorkerTestHelper() {
 void EmbeddedWorkerTestHelper::SimulateAddProcessToPattern(
     const GURL& pattern,
     int process_id) {
-  registry()->AddChildProcessSender(process_id, this);
+  registry()->AddChildProcessSender(process_id, this, nullptr);
   wrapper_->process_manager()->AddProcessReferenceToPattern(
       pattern, process_id);
 }
@@ -139,6 +139,9 @@ void EmbeddedWorkerTestHelper::OnActivateEvent(int embedded_worker_id,
 void EmbeddedWorkerTestHelper::OnInstallEvent(int embedded_worker_id,
                                               int request_id,
                                               int active_version_id) {
+  // The installing worker may have been doomed and terminated.
+  if (!registry()->GetWorker(embedded_worker_id))
+    return;
   SimulateSend(
       new ServiceWorkerHostMsg_InstallEventFinished(
           embedded_worker_id, request_id,
@@ -153,13 +156,14 @@ void EmbeddedWorkerTestHelper::OnFetchEvent(
       embedded_worker_id,
       request_id,
       SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
-      ServiceWorkerResponse(GURL(""),
+      ServiceWorkerResponse(GURL(),
                             200,
                             "OK",
                             blink::WebServiceWorkerResponseTypeDefault,
                             ServiceWorkerHeaderMap(),
                             std::string(),
-                            0)));
+                            0,
+                            GURL())));
 }
 
 void EmbeddedWorkerTestHelper::SimulatePausedAfterDownload(

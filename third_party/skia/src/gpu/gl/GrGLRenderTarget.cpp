@@ -7,23 +7,23 @@
 
 #include "GrGLRenderTarget.h"
 
-#include "GrGpuGL.h"
+#include "GrGLGpu.h"
 
-#define GPUGL static_cast<GrGpuGL*>(this->getGpu())
+#define GPUGL static_cast<GrGLGpu*>(this->getGpu())
 #define GL_CALL(X) GR_GL_CALL(GPUGL->glInterface(), X)
 
 // Because this class is virtually derived from GrSurface we must explicitly call its constructor.
-GrGLRenderTarget::GrGLRenderTarget(GrGpuGL* gpu, const GrSurfaceDesc& desc, const IDDesc& idDesc)
-    : GrSurface(gpu, idDesc.fIsWrapped, desc)
-    , INHERITED(gpu, idDesc.fIsWrapped, desc) {
+GrGLRenderTarget::GrGLRenderTarget(GrGLGpu* gpu, const GrSurfaceDesc& desc, const IDDesc& idDesc)
+    : GrSurface(gpu, idDesc.fLifeCycle, desc)
+    , INHERITED(gpu, idDesc.fLifeCycle, desc) {
     this->init(desc, idDesc);
     this->registerWithCache();
 }
 
-GrGLRenderTarget::GrGLRenderTarget(GrGpuGL* gpu, const GrSurfaceDesc& desc, const IDDesc& idDesc,
+GrGLRenderTarget::GrGLRenderTarget(GrGLGpu* gpu, const GrSurfaceDesc& desc, const IDDesc& idDesc,
                                    Derived)
-    : GrSurface(gpu, idDesc.fIsWrapped, desc)
-    , INHERITED(gpu, idDesc.fIsWrapped, desc) {
+    : GrSurface(gpu, idDesc.fLifeCycle, desc)
+    , INHERITED(gpu, idDesc.fLifeCycle, desc) {
     this->init(desc, idDesc);
 }
 
@@ -31,7 +31,7 @@ void GrGLRenderTarget::init(const GrSurfaceDesc& desc, const IDDesc& idDesc) {
     fRTFBOID                = idDesc.fRTFBOID;
     fTexFBOID               = idDesc.fTexFBOID;
     fMSColorRenderbufferID  = idDesc.fMSColorRenderbufferID;
-    fIsWrapped              = idDesc.fIsWrapped;
+    fIsWrapped              = kWrapped_LifeCycle == idDesc.fLifeCycle;
 
     fViewport.fLeft   = 0;
     fViewport.fBottom = 0;
@@ -46,7 +46,7 @@ void GrGLRenderTarget::init(const GrSurfaceDesc& desc, const IDDesc& idDesc) {
     } 
 }
 
-size_t GrGLRenderTarget::gpuMemorySize() const {
+size_t GrGLRenderTarget::onGpuMemorySize() const {
     SkASSERT(kUnknown_GrPixelConfig != fDesc.fConfig);
     SkASSERT(!GrPixelConfigIsCompressed(fDesc.fConfig));
     size_t colorBytes = GrBytesPerPixel(fDesc.fConfig);

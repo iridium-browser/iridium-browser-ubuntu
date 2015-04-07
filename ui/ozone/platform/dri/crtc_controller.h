@@ -9,19 +9,23 @@
 #include <stdint.h>
 #include <xf86drmMode.h>
 
+#include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
+#include "ui/ozone/platform/dri/hardware_display_plane_manager.h"
 #include "ui/ozone/platform/dri/overlay_plane.h"
 #include "ui/ozone/platform/dri/scoped_drm_types.h"
 
 namespace ui {
 
 class DriWrapper;
+class PageFlipObserver;
 
 // Wrapper around a CRTC.
 //
 // One CRTC can be paired up with one or more connectors. The simplest
 // configuration represents one CRTC driving one monitor, while pairing up a
 // CRTC with multiple connectors results in hardware mirroring.
-class CrtcController {
+class CrtcController : public base::SupportsWeakPtr<CrtcController> {
  public:
   CrtcController(DriWrapper* drm, uint32_t crtc, uint32_t connector);
   ~CrtcController();
@@ -33,6 +37,8 @@ class CrtcController {
   bool page_flip_pending() const { return page_flip_pending_; }
   uint64_t time_of_last_flip() const { return time_of_last_flip_; }
 
+  drmModeCrtc* saved_crtc() const { return saved_crtc_.get(); }
+
   // Perform the initial modesetting operation using |plane| as the buffer for
   // the primary plane. The CRTC configuration is specified by |mode|.
   bool Modeset(const OverlayPlane& plane, drmModeModeInfo mode);
@@ -41,7 +47,11 @@ class CrtcController {
   bool Disable();
 
   // Schedule a page flip event and present the overlays in |planes|.
-  bool SchedulePageFlip(const OverlayPlaneList& planes);
+  bool SchedulePageFlip(HardwareDisplayPlaneList* plane_list,
+                        const OverlayPlaneList& planes);
+
+  // Called if the page flip for this CRTC fails after being scheduled.
+  void PageFlipFailed();
 
   // Called when the page flip event occurred. The event is provided by the
   // kernel when a VBlank event finished. This allows the controller to
@@ -57,8 +67,13 @@ class CrtcController {
   bool UnsetCursor();
   bool MoveCursor(const gfx::Point& location);
 
+  void AddObserver(PageFlipObserver* observer);
+  void RemoveObserver(PageFlipObserver* observer);
+
  private:
   DriWrapper* drm_;  // Not owned.
+
+  HardwareDisplayPlaneManager* overlay_plane_manager_;  // Not owned.
 
   // Buffers need to be declared first so that they are destroyed last. Needed
   // since the controllers may reference the buffers.
@@ -87,6 +102,8 @@ class CrtcController {
 
   // The time of the last page flip event as reported by the kernel callback.
   uint64_t time_of_last_flip_;
+
+  ObserverList<PageFlipObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(CrtcController);
 };

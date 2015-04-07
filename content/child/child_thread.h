@@ -36,6 +36,7 @@ class WebFrame;
 }  // namespace blink
 
 namespace content {
+class BluetoothMessageFilter;
 class ChildDiscardableSharedMemoryManager;
 class ChildGpuMemoryBufferManager;
 class ChildHistogramMessageFilter;
@@ -43,7 +44,9 @@ class ChildResourceMessageFilter;
 class ChildSharedBitmapManager;
 class FileSystemDispatcher;
 class GeofencingMessageFilter;
+class NavigatorConnectDispatcher;
 class NotificationDispatcher;
+class PushDispatcher;
 class ServiceWorkerMessageFilter;
 class QuotaDispatcher;
 class QuotaMessageFilter;
@@ -84,16 +87,17 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
 
   MessageRouter* GetRouter();
 
-  // Allocates a block of shared memory of the given size and
-  // maps in into the address space. Returns NULL of failure.
+  // Allocates a block of shared memory of the given size. Returns NULL on
+  // failure.
   // Note: On posix, this requires a sync IPC to the browser process,
   // but on windows the child process directly allocates the block.
-  base::SharedMemory* AllocateSharedMemory(size_t buf_size);
+  scoped_ptr<base::SharedMemory> AllocateSharedMemory(size_t buf_size);
 
   // A static variant that can be called on background threads provided
   // the |sender| passed in is safe to use on background threads.
-  static base::SharedMemory* AllocateSharedMemory(size_t buf_size,
-                                                  IPC::Sender* sender);
+  static scoped_ptr<base::SharedMemory> AllocateSharedMemory(
+      size_t buf_size,
+      IPC::Sender* sender);
 
   ChildSharedBitmapManager* shared_bitmap_manager() const {
     return shared_bitmap_manager_.get();
@@ -128,6 +132,10 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
     return notification_dispatcher_.get();
   }
 
+  PushDispatcher* push_dispatcher() const {
+    return push_dispatcher_.get();
+  }
+
   IPC::SyncMessageFilter* sync_message_filter() const {
     return sync_message_filter_.get();
   }
@@ -149,6 +157,10 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
 
   QuotaMessageFilter* quota_message_filter() const {
     return quota_message_filter_.get();
+  }
+
+  ChildResourceMessageFilter* child_resource_message_filter() const {
+    return resource_message_filter_.get();
   }
 
   base::MessageLoop* message_loop() const { return message_loop_; }
@@ -250,6 +262,8 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
 
   scoped_refptr<NotificationDispatcher> notification_dispatcher_;
 
+  scoped_refptr<PushDispatcher> push_dispatcher_;
+
   scoped_ptr<ChildSharedBitmapManager> shared_bitmap_manager_;
 
   scoped_ptr<ChildGpuMemoryBufferManager> gpu_memory_buffer_manager_;
@@ -264,6 +278,10 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
   scoped_ptr<base::PowerMonitor> power_monitor_;
 
   scoped_refptr<GeofencingMessageFilter> geofencing_message_filter_;
+
+  scoped_refptr<BluetoothMessageFilter> bluetooth_message_filter_;
+
+  scoped_refptr<NavigatorConnectDispatcher> navigator_connect_dispatcher_;
 
   bool in_browser_process_;
 

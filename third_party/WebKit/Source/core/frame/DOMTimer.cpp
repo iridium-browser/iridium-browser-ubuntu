@@ -46,8 +46,6 @@ static const double oneMillisecond = 0.001;
 // the smallest possible interval timer.
 static const double minimumInterval = 0.004;
 
-static int timerNestingLevel = 0;
-
 static inline bool shouldForwardUserGesture(int interval, int nestingLevel)
 {
     return UserGestureIndicator::processingUserGesture()
@@ -72,7 +70,6 @@ int DOMTimer::install(ExecutionContext* context, PassOwnPtr<ScheduledAction> act
 {
     int timeoutID = context->installNewTimeout(action, timeout, singleShot);
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "TimerInstall", "data", InspectorTimerInstallEvent::data(context, timeoutID, timeout, singleShot));
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.stack"), "CallStack", "stack", InspectorCallStackEvent::currentCallStack());
     // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
     InspectorInstrumentation::didInstallTimer(context, timeoutID, timeout, singleShot);
     WTF_LOG(Timers, "DOMTimer::install: timeoutID = %d, timeout = %d, singleShot = %d", timeoutID, timeout, singleShot ? 1 : 0);
@@ -84,7 +81,6 @@ void DOMTimer::removeByID(ExecutionContext* context, int timeoutID)
     WTF_LOG(Timers, "DOMTimer::removeByID: timeoutID = %d", timeoutID);
     context->removeTimeoutByID(timeoutID);
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "TimerRemove", "data", InspectorTimerRemoveEvent::data(context, timeoutID));
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.stack"), "CallStack", "stack", InspectorCallStackEvent::currentCallStack());
     // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
     InspectorInstrumentation::didRemoveTimer(context, timeoutID);
 }
@@ -92,7 +88,7 @@ void DOMTimer::removeByID(ExecutionContext* context, int timeoutID)
 DOMTimer::DOMTimer(ExecutionContext* context, PassOwnPtr<ScheduledAction> action, int interval, bool singleShot, int timeoutID)
     : SuspendableTimer(context)
     , m_timeoutID(timeoutID)
-    , m_nestingLevel(timerNestingLevel + 1)
+    , m_nestingLevel(context->timerNestingLevel() + 1)
     , m_action(action)
 {
     ASSERT(timeoutID > 0);
@@ -112,6 +108,13 @@ DOMTimer::~DOMTimer()
 {
 }
 
+void DOMTimer::dispose()
+{
+    m_action = nullptr;
+    m_userGestureToken = nullptr;
+    stop();
+}
+
 int DOMTimer::timeoutID() const
 {
     return m_timeoutID;
@@ -120,7 +123,8 @@ int DOMTimer::timeoutID() const
 void DOMTimer::fired()
 {
     ExecutionContext* context = executionContext();
-    timerNestingLevel = m_nestingLevel;
+    ASSERT(context);
+    context->setTimerNestingLevel(m_nestingLevel);
     ASSERT(!context->activeDOMObjectsAreSuspended());
     // Only the first execution of a multi-shot timer should get an affirmative user gesture indicator.
     UserGestureIndicator gestureIndicator(m_userGestureToken.release());
@@ -149,10 +153,11 @@ void DOMTimer::fired()
 
     WTF_LOG(Timers, "DOMTimer::fired: m_timeoutID = %d, one-shot, m_action = %p", m_timeoutID, m_action.get());
 
-    // Delete timer before executing the action for one-shot timers.
-    OwnPtr<ScheduledAction> action = m_action.release();
+    RefPtrWillBeRawPtr<DOMTimer> protect(this);
 
-    // This timer is being deleted; no access to member variables allowed after this point.
+    // Unregister the timer from ExecutionContext before executing the action
+    // for one-shot timers.
+    OwnPtr<ScheduledAction> action = m_action.release();
     context->removeTimeoutByID(m_timeoutID);
 
     action->execute(context);
@@ -160,12 +165,9 @@ void DOMTimer::fired()
     InspectorInstrumentation::didFireTimer(cookie);
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", "data", InspectorUpdateCountersEvent::data());
 
-    timerNestingLevel = 0;
-}
-
-void DOMTimer::contextDestroyed()
-{
-    SuspendableTimer::contextDestroyed();
+    // ExecutionContext might be already gone when we executed action->execute().
+    if (executionContext())
+        executionContext()->setTimerNestingLevel(0);
 }
 
 void DOMTimer::stop()
@@ -211,6 +213,11 @@ double DOMTimer::alignedFireTime(double fireTime) const
     }
 
     return fireTime;
+}
+
+void DOMTimer::trace(Visitor* visitor)
+{
+    SuspendableTimer::trace(visitor);
 }
 
 } // namespace blink

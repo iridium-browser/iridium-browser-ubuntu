@@ -11,7 +11,6 @@ import sys
 import traceback
 
 from chromite.lib import cros_build_lib
-from chromite.lib import portage_util
 
 
 class StepFailure(Exception):
@@ -231,6 +230,14 @@ class TestLabFailure(InfrastructureFailure):
   """Raised if a stage fails due to hardware lab infrastructure issues."""
 
 
+class SuiteTimedOut(TestLabFailure):
+  """Raised if a test suite timed out with no test failures."""
+
+
+class BoardNotAvailable(TestLabFailure):
+  """Raised if the board is not available in the lab."""
+
+
 # Gerrit-on-Borg failures.
 class GoBFailure(InfrastructureFailure):
   """Raised if a stage fails due to Gerrit-on-Borg (GoB) issues."""
@@ -271,6 +278,14 @@ class CrashCollectionFailure(InfrastructureFailure):
   """Raised if a stage fails due to crash collection services."""
 
 
+class TestFailure(StepFailure):
+  """Raised if a test stage (e.g. VMTest) fails."""
+
+
+class TestWarning(StepFailure):
+  """Raised if a test stage (e.g. VMTest) returns a warning code."""
+
+
 class BuildFailureMessage(object):
   """Message indicating that changes failed to be validated."""
 
@@ -294,6 +309,17 @@ class BuildFailureMessage(object):
 
   def __str__(self):
     return self.message
+
+  def GetFailingStages(self):
+    """Get a list of the failing stage prefixes from tracebacks.
+
+    Returns:
+      A list of failing stage prefixes if there are tracebacks; None otherwise.
+    """
+    failing_stages = None
+    if self.tracebacks:
+      failing_stages = set(x.failed_prefix for x in self.tracebacks)
+    return failing_stages
 
   def MatchesFailureType(self, cls):
     """Check if all of the tracebacks match the specified failure type."""
@@ -355,6 +381,8 @@ class BuildFailureMessage(object):
     Returns:
       Set of changes that likely caused the failure.
     """
+    # Import portage_util here to avoid circular imports.
+    from chromite.lib import portage_util
     blame_everything = False
     suspects = set()
     for tb in self.tracebacks:

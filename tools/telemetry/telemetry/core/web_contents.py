@@ -12,9 +12,8 @@ DEFAULT_WEB_CONTENTS_TIMEOUT = 90
 # independent of Tab.
 class WebContents(object):
   """Represents web contents in the browser"""
-  def __init__(self, inspector_backend, backend_list):
+  def __init__(self, inspector_backend):
     self._inspector_backend = inspector_backend
-    self._backend_list = backend_list
 
     with open(os.path.join(os.path.dirname(__file__),
         'network_quiescence.js')) as f:
@@ -136,6 +135,25 @@ class WebContents(object):
     """Enable all contexts in a page. Returns the number of available contexts.
     """
     return self._inspector_backend.EnableAllContexts()
+
+  def WaitForNavigate(self, timeout=DEFAULT_WEB_CONTENTS_TIMEOUT):
+    """Waits for the navigation to complete.
+
+    The current page is expect to be in a navigation.
+    This function returns when the navigation is complete or when
+    the timeout has been exceeded.
+    """
+    self._inspector_backend.WaitForNavigate(timeout)
+
+  def Navigate(self, url, script_to_evaluate_on_commit=None,
+               timeout=DEFAULT_WEB_CONTENTS_TIMEOUT):
+    """Navigates to url.
+
+    If |script_to_evaluate_on_commit| is given, the script source string will be
+    evaluated when the navigation is committed. This is after the context of
+    the page exists, but before any script on the page itself has executed.
+    """
+    self._inspector_backend.Navigate(url, script_to_evaluate_on_commit, timeout)
 
   @property
   def message_output_stream(self):

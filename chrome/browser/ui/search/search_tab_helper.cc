@@ -46,6 +46,7 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/referrer.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 #include "net/base/net_errors.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
@@ -136,14 +137,15 @@ void RecordNewTabLoadTime(content::WebContents* contents) {
   core_tab_helper->set_new_tab_start_time(base::TimeTicks());
 }
 
-// Returns true if the user is signed in and full history sync is enabled,
-// and false otherwise.
+// Returns true if the user wants to sync history. This function returning true
+// is not a guarantee that history is being synced, but it can be used to
+// disable a feature that should not be shown to users who prefer not to sync
+// their history.
 bool IsHistorySyncEnabled(Profile* profile) {
   ProfileSyncService* sync =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
   return sync &&
-      sync->SyncActive() &&
-      sync->GetActiveDataTypes().Has(syncer::HISTORY_DELETE_DIRECTIVES);
+      sync->GetPreferredDataTypes().Has(syncer::HISTORY_DELETE_DIRECTIVES);
 }
 
 bool OmniboxHasFocus(OmniboxView* omnibox) {
@@ -215,7 +217,7 @@ void SearchTabHelper::OmniboxFocusChanged(OmniboxFocusState state,
 
     if (!IsSearchResultsPage()) {
       prerenderer->Init(
-          web_contents_->GetController().GetSessionStorageNamespaceMap(),
+          web_contents_->GetController().GetDefaultSessionStorageNamespace(),
           web_contents_->GetContainerBounds().size());
     }
   }
@@ -270,7 +272,7 @@ void SearchTabHelper::OnTabActivated() {
         InstantSearchPrerenderer::GetForProfile(profile());
     if (prerenderer && !IsSearchResultsPage()) {
       prerenderer->Init(
-          web_contents_->GetController().GetSessionStorageNamespaceMap(),
+          web_contents_->GetController().GetDefaultSessionStorageNamespace(),
           web_contents_->GetContainerBounds().size());
     }
   }
@@ -563,14 +565,16 @@ void SearchTabHelper::PasteIntoOmnibox(const base::string16& text) {
 void SearchTabHelper::OnChromeIdentityCheck(const base::string16& identity) {
   SigninManagerBase* manager = SigninManagerFactory::GetForProfile(profile());
   if (manager) {
-    const base::string16 username =
-        base::UTF8ToUTF16(manager->GetAuthenticatedUsername());
-    // The identity check only passes if the user is syncing their history.
-    // TODO(beaudoin): Change this function name and related APIs now that it's
-    // checking both the identity and the user's sync state.
-    bool matches = IsHistorySyncEnabled(profile()) && identity == username;
-    ipc_router_.SendChromeIdentityCheckResult(identity, matches);
+    ipc_router_.SendChromeIdentityCheckResult(
+        identity, gaia::AreEmailsSame(base::UTF16ToUTF8(identity),
+                                      manager->GetAuthenticatedUsername()));
+  } else {
+    ipc_router_.SendChromeIdentityCheckResult(identity, false);
   }
+}
+
+void SearchTabHelper::OnHistorySyncCheck() {
+  ipc_router_.SendHistorySyncCheckResult(IsHistorySyncEnabled(profile()));
 }
 
 void SearchTabHelper::UpdateMode(bool update_origin, bool is_preloaded_ntp) {

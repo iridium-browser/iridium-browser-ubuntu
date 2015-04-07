@@ -4,7 +4,21 @@
 
 #include "content/common/gpu/client/gpu_memory_buffer_impl.h"
 
+#include "base/logging.h"
+#include "content/common/gpu/client/gpu_memory_buffer_impl_shared_memory.h"
 #include "ui/gl/gl_bindings.h"
+
+#if defined(OS_MACOSX)
+#include "content/common/gpu/client/gpu_memory_buffer_impl_io_surface.h"
+#endif
+
+#if defined(OS_ANDROID)
+#include "content/common/gpu/client/gpu_memory_buffer_impl_surface_texture.h"
+#endif
+
+#if defined(USE_OZONE)
+#include "content/common/gpu/client/gpu_memory_buffer_impl_ozone_native_buffer.h"
+#endif
 
 namespace content {
 
@@ -22,6 +36,37 @@ GpuMemoryBufferImpl::GpuMemoryBufferImpl(gfx::GpuMemoryBufferId id,
 
 GpuMemoryBufferImpl::~GpuMemoryBufferImpl() {
   callback_.Run(destruction_sync_point_);
+}
+
+// static
+scoped_ptr<GpuMemoryBufferImpl> GpuMemoryBufferImpl::CreateFromHandle(
+    const gfx::GpuMemoryBufferHandle& handle,
+    const gfx::Size& size,
+    Format format,
+    const DestructionCallback& callback) {
+  switch (handle.type) {
+    case gfx::SHARED_MEMORY_BUFFER:
+      return GpuMemoryBufferImplSharedMemory::CreateFromHandle(
+          handle, size, format, callback);
+#if defined(OS_MACOSX)
+    case gfx::IO_SURFACE_BUFFER:
+      return GpuMemoryBufferImplIOSurface::CreateFromHandle(
+          handle, size, format, callback);
+#endif
+#if defined(OS_ANDROID)
+    case gfx::SURFACE_TEXTURE_BUFFER:
+      return GpuMemoryBufferImplSurfaceTexture::CreateFromHandle(
+          handle, size, format, callback);
+#endif
+#if defined(USE_OZONE)
+    case gfx::OZONE_NATIVE_BUFFER:
+      return GpuMemoryBufferImplOzoneNativeBuffer::CreateFromHandle(
+          handle, size, format, callback);
+#endif
+    default:
+      NOTREACHED();
+      return scoped_ptr<GpuMemoryBufferImpl>();
+  }
 }
 
 // static

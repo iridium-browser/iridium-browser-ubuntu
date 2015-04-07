@@ -15,23 +15,27 @@
 <translation id="3622586652998721735">既定の配色として設定</translation>
 <translation id="2179565792157161713">詳しい説明を新しいタブで開く</translation>
 <translation id="2471847333270902538"><ph name="SITE"/> の配色:</translation>
+<translation id="381767806621926835">「longdesc」または「aria-describedat」属性が指定された要素を右クリックすると、詳しい説明が表示されます。</translation>
+<translation id="786423340267544509">aria-describedat または longdesc 属性が指定された要素を枠線付きで表示する</translation>
 <translation id="690628312087070417">カーソルが離れた場所に移動した場合:</translation>
 <translation id="5331422999063554397">反転色</translation>
 <translation id="2648340354586434750">単語単位で移動するには &lt;span class='key'&gt;Option&lt;/span&gt; キーを押したままにします。</translation>
+<translation id="4769065380738716500">画像の代わりに代替（alt）テキストを表示しています。</translation>
 <translation id="5287723860611749454">&lt;p&gt;矢印キーを使ってドキュメント全体を移動できます。&lt;/p&gt;&lt;p&gt;クリックした場所にカーソルを移動することもできます。&lt;/p&gt; &lt;p&gt;テキストを選択するには &lt;span class='key'&gt;Shift&lt;/span&gt; キーを押しながら矢印キーを使用します。&lt;/p&gt;</translation>
 <translation id="5558600050691192317">キーボード コマンド</translation>
 <translation id="633394792577263429">単語単位で移動するには &lt;span class='key'&gt;Control&lt;/span&gt; キーを押したままにします。</translation>
+<translation id="2079545284768500474">取り消す</translation>
 <translation id="8254860724243898966">&lt;span class='key'&gt;Alt&lt;/span&gt; キーを押しながら &lt;img src='increase_brightness.png'&gt;（明るさを上げるキー、または F7）を押すとカーソル ブラウジングがオンになり、もう一度押すとオフになります。</translation>
 <translation id="3812541808639806898">Image Alt Text Viewer</translation>
 <translation id="1287053896835709737">黒の背景に黄色の文字</translation>
 <translation id="4896660567607030658">効果なしでカーソルのみを表示する。</translation>
 <translation id="5631241868147802353">既定の配色:</translation>
-<translation id="625377550964694810">「longdesc」または「aria-describedat」のいずれかの属性が指定された HTML 要素は、くっきりした枠線付きで表示されます。この要素を右クリックすると、詳しい説明を表示するオプションがコンテキスト メニューに追加されます。</translation>
 <translation id="5173942593318174089">カーソルの位置をアニメーションで強調表示する。</translation>
 <translation id="894241283505723656">Long Descriptions in Context Menu</translation>
 <translation id="5555153510860501336">ハイ コントラストは無効です</translation>
 <translation id="1703735871906654364">カーソル ブラウジング</translation>
 <translation id="7384431257964758081">ハイ コントラストが有効です</translation>
+<translation id="6550675742724504774">オプション</translation>
 <translation id="5650358096585648000">視覚効果</translation>
 <translation id="4388820049312272371">カーソルの位置を短い点滅で強調表示する。</translation>
 <translation id="4023902424053835668">矢印キーを使ってウェブページのテキストを閲覧します。</translation>

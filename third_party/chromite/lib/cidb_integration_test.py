@@ -12,20 +12,25 @@ database test instance.
 to the above test instance.
 """
 
-# pylint: disable-msg= W0212
+# pylint: disable= W0212
+
+# pylint: disable=bad-continuation
 
 from __future__ import print_function
 
+import datetime
 import glob
 import logging
 import os
 import sys
+import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
 
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import metadata_lib
 from chromite.lib import cidb
+from chromite.lib import clactions
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_test_lib
 from chromite.lib import osutils
@@ -103,13 +108,13 @@ class CIDBMigrationsTest(CIDBIntegrationTest):
     build_id = db.InsertBuild('my builder', 'chromiumos', 12, 'my config',
                               'my bot hostname')
 
-    a1 = metadata_lib.GetCLActionTuple(
+    a1 = clactions.CLAction.FromGerritPatchAndAction(
         metadata_lib.GerritPatchTuple(1, 1, True),
         constants.CL_ACTION_PICKED_UP)
-    a2 = metadata_lib.GetCLActionTuple(
+    a2 = clactions.CLAction.FromGerritPatchAndAction(
         metadata_lib.GerritPatchTuple(1, 1, True),
         constants.CL_ACTION_PICKED_UP)
-    a3 = metadata_lib.GetCLActionTuple(
+    a3 = clactions.CLAction.FromGerritPatchAndAction(
         metadata_lib.GerritPatchTuple(1, 1, True),
         constants.CL_ACTION_PICKED_UP)
 
@@ -123,8 +128,9 @@ class CIDBMigrationsTest(CIDBIntegrationTest):
 
     # Test that all known CL action types can be inserted
     fakepatch = metadata_lib.GerritPatchTuple(1, 1, True)
-    all_actions_list = [metadata_lib.GetCLActionTuple(fakepatch, action)
-                        for action in constants.CL_ACTIONS]
+    all_actions_list = [
+        clactions.CLAction.FromGerritPatchAndAction(fakepatch, action)
+        for action in constants.CL_ACTIONS]
     db.InsertCLActions(build_id, all_actions_list)
 
 class CIDBAPITest(CIDBIntegrationTest):
@@ -132,14 +138,19 @@ class CIDBAPITest(CIDBIntegrationTest):
 
   def testSchemaVersionTooLow(self):
     """Tests that the minimum_schema decorator works as expected."""
-    db = self._PrepareFreshDatabase(3)
-    self.assertRaises2(cidb.UnsupportedMethodException,
-                       db.InsertBuildStages, [])
+    db = self._PrepareFreshDatabase(2)
+    with self.assertRaises(cidb.UnsupportedMethodException):
+      db.InsertCLActions(0, [])
 
   def testSchemaVersionOK(self):
     """Tests that the minimum_schema decorator works as expected."""
     db = self._PrepareFreshDatabase(4)
-    db.InsertBuildStages([])
+    db.InsertCLActions(0, [])
+
+  def testGetTime(self):
+    db = self._PrepareFreshDatabase(1)
+    current_db_time = db.GetTime()
+    self.assertEqual(type(current_db_time), datetime.datetime)
 
 
 def GetTestDataSeries(test_data_path):
@@ -166,10 +177,9 @@ def GetTestDataSeries(test_data_path):
 class DataSeries0Test(CIDBIntegrationTest):
   """Simulate a set of 630 master/slave CQ builds."""
 
-  def testCQWithSchema16(self):
-    """Run the CQ test with schema version 16."""
-    # Run the CQ test at schema version 16
-    self._PrepareFreshDatabase(16)
+  def testCQWithSchema32(self):
+    """Run the CQ test with schema version 32."""
+    self._PrepareFreshDatabase(32)
     self._runCQTest()
 
   def _runCQTest(self):
@@ -217,19 +227,51 @@ class DataSeries0Test(CIDBIntegrationTest):
     # Make sure we can get build status by build id.
     self.assertEqual(readonly_db.GetBuildStatus(2).get('id'), 2)
 
+    # Make sure we can get build statuses by build ids.
+    build_dicts = readonly_db.GetBuildStatuses([1, 2])
+    self.assertEqual([x.get('id') for x in build_dicts], [1, 2])
+
     self._start_and_finish_time_checks(readonly_db)
     self._cl_action_checks(readonly_db)
     self._last_updated_time_checks(readonly_db)
+
+    #| Test get build_status from -- here's the relevant data from
+    # master-paladin
+    #|          id | status |
+    #|         601 | pass   |
+    #|         571 | pass   |
+    #|         541 | fail   |
+    #|         511 | pass   |
+    #|         481 | pass   |
+    # From 1929 because we always go back one build first.
+    last_status = readonly_db.GetLastBuildStatuses('master-paladin', 1)
+    self.assertEqual(len(last_status), 1)
+    last_status = readonly_db.GetLastBuildStatuses('master-paladin', 5)
+    self.assertEqual(len(last_status), 5)
+    # Make sure keys are sorted correctly.
+    build_ids = []
+    for index, status in enumerate(last_status):
+      # Add these to list to confirm they are sorted afterwards correctly.
+      # Should be descending.
+      build_ids.append(status['id'])
+      if index == 2:
+        self.assertEqual(status['status'], 'fail')
+      else:
+        self.assertEqual(status['status'], 'pass')
+
+    # Check the sort order.
+    self.assertEqual(sorted(build_ids, reverse=True), build_ids)
 
   def _last_updated_time_checks(self, db):
     """Sanity checks on the last_updated column."""
     # We should have a diversity of last_updated times. Since the timestamp
     # resolution is only 1 second, and we have lots of parallelism in the test,
-    # we won't have a distring last_updated time per row. But we will have at
-    # least 100 distinct last_updated times.
+    # we won't have a distinct last_updated time per row.
+    # As the test db gets beefier, we're more likely to get collisions. So we
+    # check for a small number of distinct timestamps.
     distinct_last_updated = db._GetEngine().execute(
         'select count(distinct last_updated) from buildTable').fetchall()[0][0]
-    self.assertTrue(distinct_last_updated > 80)
+    self.assertTrue(distinct_last_updated > 20)
 
     ids_by_last_updated = db._GetEngine().execute(
         'select id from buildTable order by last_updated').fetchall()
@@ -259,19 +301,20 @@ class DataSeries0Test(CIDBIntegrationTest):
     self.assertEqual(rejected_cl_count, 8)
     self.assertEqual(total_actions, 1877)
 
-    actions_for_change = db.GetActionsForChange(
-        metadata_lib.GerritChangeTuple(205535, False))
+    actions_for_change = db.GetActionsForChanges(
+        [metadata_lib.GerritChangeTuple(205535, False)])
 
     self.assertEqual(len(actions_for_change), 60)
-    last_action = actions_for_change[-1]
-    last_action.pop('timestamp')
-    last_action.pop('id')
-    self.assertEqual(last_action, {'action': 'submitted',
-                                   'build_config': 'master-paladin',
-                                   'build_id': 511L,
-                                   'change_number': 205535L,
-                                   'change_source': 'external',
-                                   'patch_number': 1L})
+    last_action_dict = dict(actions_for_change[-1]._asdict())
+    last_action_dict.pop('timestamp')
+    last_action_dict.pop('id')
+    self.assertEqual(last_action_dict, {'action': 'submitted',
+                                        'build_config': 'master-paladin',
+                                        'build_id': 511L,
+                                        'change_number': 205535L,
+                                        'change_source': 'external',
+                                        'patch_number': 1L,
+                                        'reason': ''})
 
   def _start_and_finish_time_checks(self, db):
     """Sanity checks that correct data was recorded, and can be retrieved."""
@@ -294,7 +337,7 @@ class DataSeries0Test(CIDBIntegrationTest):
 
 
   def simulate_builds(self, db, metadatas):
-    """Simulate a serires of Commit Queue master and slave builds.
+    """Simulate a series of Commit Queue master and slave builds.
 
     This method use the metadata objects in |metadatas| to simulate those
     builds insertions and updates to the cidb. All metadatas encountered
@@ -344,11 +387,122 @@ class DataSeries0Test(CIDBIntegrationTest):
       logging.debug('Simulated master build %s', master_build_id)
 
 
+class BuildStagesAndFailureTest(CIDBIntegrationTest):
+  """Test buildStageTable functionality."""
+
+  def runTest(self):
+    """Test basic buildStageTable and failureTable functionality."""
+    self._PrepareFreshDatabase(32)
+
+    bot_db = cidb.CIDBConnection(TEST_DB_CRED_BOT)
+
+    build_id = bot_db.InsertBuild('builder name',
+                                  constants.WATERFALL_INTERNAL,
+                                  1,
+                                  'build_config',
+                                  'bot_hostname')
+
+    build_stage_id = bot_db.InsertBuildStage(build_id,
+                                             'My Stage',
+                                             board='bunny')
+
+    values = bot_db._Select('buildStageTable', build_stage_id, ['start_time'])
+    self.assertEqual(None, values['start_time'])
+
+    bot_db.StartBuildStage(build_stage_id)
+    values = bot_db._Select('buildStageTable', build_stage_id,
+                            ['start_time', 'status'])
+    self.assertNotEqual(None, values['start_time'])
+    self.assertEqual(constants.BUILDER_STATUS_INFLIGHT, values['status'])
+
+    bot_db.FinishBuildStage(build_stage_id, constants.BUILDER_STATUS_PASSED)
+    values = bot_db._Select('buildStageTable', build_stage_id,
+                            ['finish_time', 'status', 'final'])
+    self.assertNotEqual(None, values['finish_time'])
+    self.assertEqual(True, values['final'])
+    self.assertEqual(constants.BUILDER_STATUS_PASSED, values['status'])
+
+    for category in constants.EXCEPTION_CATEGORY_ALL_CATEGORIES:
+      e = ValueError('The value was erroneous.')
+      bot_db.InsertFailure(build_stage_id, e, category)
+
+
+class BuildTableTest(CIDBIntegrationTest):
+  """Test buildTable functionality not tested by the DataSeries tests."""
+
+  def testInsertWithDeadline(self):
+    """Test deadline setting/querying API."""
+    self._PrepareFreshDatabase(32)
+    bot_db = cidb.CIDBConnection(TEST_DB_CRED_BOT)
+
+    build_id = bot_db.InsertBuild('build_name',
+                                  constants.WATERFALL_INTERNAL,
+                                  1,
+                                  'build_config',
+                                  'bot_hostname',
+                                  timeout_seconds=30 * 60)
+    # This will flake if the few cidb calls above take hours. Unlikely.
+    self.assertLess(10, bot_db.GetTimeToDeadline(build_id))
+
+    build_id = bot_db.InsertBuild('build_name',
+                                  constants.WATERFALL_INTERNAL,
+                                  2,
+                                  'build_config',
+                                  'bot_hostname',
+                                  timeout_seconds=1)
+    # Sleep till the deadline expires.
+    time.sleep(3)
+    self.assertEqual(0, bot_db.GetTimeToDeadline(build_id))
+
+    build_id = bot_db.InsertBuild('build_name',
+                                  constants.WATERFALL_INTERNAL,
+                                  3,
+                                  'build_config',
+                                  'bot_hostname')
+    self.assertEqual(None, bot_db.GetTimeToDeadline(build_id))
+
+    self.assertEqual(None, bot_db.GetTimeToDeadline(build_id))
+
+  def testExtendDeadline(self):
+    """Test that a deadline in the future can be extended."""
+
+    #self._PrepareFreshDatabase(32)
+    bot_db = cidb.CIDBConnection(TEST_DB_CRED_BOT)
+
+    build_id = bot_db.InsertBuild('build_name',
+                                  constants.WATERFALL_INTERNAL,
+                                  1,
+                                  'build_config',
+                                  'bot_hostname')
+    self.assertEqual(None, bot_db.GetTimeToDeadline(build_id))
+
+    self.assertEqual(1, bot_db.ExtendDeadline(build_id, 1))
+    time.sleep(2)
+    self.assertEqual(0, bot_db.GetTimeToDeadline(build_id))
+    self.assertEqual(0, bot_db.ExtendDeadline(build_id, 10 * 60))
+    self.assertEqual(0, bot_db.GetTimeToDeadline(build_id))
+
+
+    build_id = bot_db.InsertBuild('build_name',
+                                  constants.WATERFALL_INTERNAL,
+                                  2,
+                                  'build_config',
+                                  'bot_hostname',
+                                  timeout_seconds=30 * 60)
+    self.assertLess(10, bot_db.GetTimeToDeadline(build_id))
+
+    self.assertEqual(0, bot_db.ExtendDeadline(build_id, 10 * 60))
+    self.assertLess(20 * 60, bot_db.GetTimeToDeadline(build_id))
+
+    self.assertEqual(1, bot_db.ExtendDeadline(build_id, 60 * 60))
+    self.assertLess(40 * 60, bot_db.GetTimeToDeadline(build_id))
+
+
 class DataSeries1Test(CIDBIntegrationTest):
   """Simulate a single set of canary builds."""
 
   def runTest(self):
-    """Simulate a single set of canary builds with database schema v7."""
+    """Simulate a single set of canary builds with database schema v28."""
     metadatas = GetTestDataSeries(SERIES_1_TEST_DATA_PATH)
     self.assertEqual(len(metadatas), 18, 'Did not load expected amount of '
                                          'test data')
@@ -356,7 +510,7 @@ class DataSeries1Test(CIDBIntegrationTest):
     # Migrate db to specified version. As new schema versions are added,
     # migrations to later version can be applied after the test builds are
     # simulated, to test that db contents are correctly migrated.
-    self._PrepareFreshDatabase(16)
+    self._PrepareFreshDatabase(32)
 
     bot_db = cidb.CIDBConnection(TEST_DB_CRED_BOT)
 
@@ -417,6 +571,15 @@ class DataSeries1Test(CIDBIntegrationTest):
 
     status = metadata_dict['status']['status']
     status = _TranslateStatus(status)
+
+    for child_config_dict in metadata_dict['child-configs']:
+      # Note, we are not using test data here, because the test data
+      # we have predates the existence of child-config status being
+      # stored in metadata.json. Instead, we just pretend all child
+      # configs had the same status as the main config.
+      db.FinishChildConfig(build_id, child_config_dict['name'],
+                           status)
+
     db.FinishBuild(build_id, status)
 
     return build_id
@@ -435,7 +598,7 @@ def _TranslateStatus(status):
 
 
 def _SimulateBuildStart(db, metadata, master_build_id=None):
-  """Returns (build_id, metadata_id) tuple."""
+  """Returns build_id for the inserted buildTable entry."""
   metadata_dict = metadata.GetDict()
   # TODO(akeshet): We are pretending that all these builds were on the internal
   # waterfall at the moment, for testing purposes. This is because we don't
@@ -457,37 +620,21 @@ def _SimulateCQBuildFinish(db, metadata, build_id):
 
   metadata_dict = metadata.GetDict()
 
-  # Insert the first build stage using InsertBuildStage, then batch-insert
-  # the rest with InsertBuildStages. This allows us to test InsertBuildStage
-  # without taking too much performance loss in the test.
-  stage_results = metadata_dict['results']
-  if len(stage_results) > 0:
-    r = stage_results[0]
-    db.InsertBuildStage(build_id, r['name'], r['board'],
-                        _TranslateStatus(r['status']), r['log'],
-                        cros_build_lib.ParseDurationToSeconds(r['duration']),
-                        r['summary'])
-  if len(stage_results) > 1:
-    stages = [{'build_id': build_id,
-               'name': r['name'],
-               'board': r['board'],
-               'status': _TranslateStatus(r['status']),
-               'log_url': r['log'],
-               'duration_seconds':
-                 cros_build_lib.ParseDurationToSeconds(r['duration']),
-               'summary': r['summary']}
-              for r in stage_results[1:]]
-    db.InsertBuildStages(stages)
-
-  db.InsertCLActions(build_id, metadata_dict['cl_actions'])
+  db.InsertCLActions(
+      build_id,
+      [clactions.CLAction.FromMetadataEntry(e)
+       for e in metadata_dict['cl_actions']])
 
   db.UpdateMetadata(build_id, metadata)
 
   status = metadata_dict['status']['status']
-
   status = _TranslateStatus(status)
+  # The build summary reported by a real CQ run is more complicated -- it is
+  # computed from slave summaries by a master. For sanity checking, we just
+  # insert the current builer's summary.
+  summary = metadata_dict['status'].get('reason', None)
 
-  db.FinishBuild(build_id, status)
+  db.FinishBuild(build_id, status, summary)
 
 
 # TODO(akeshet): Allow command line args to specify alternate CIDB instance

@@ -7,7 +7,6 @@
 #include "base/stl_util.h"
 #include "net/quic/crypto/proof_verifier.h"
 #include "net/quic/quic_connection.h"
-#include "net/quic/quic_flags.h"
 #include "net/quic/quic_flow_controller.h"
 #include "net/quic/quic_headers_stream.h"
 #include "net/ssl/ssl_info.h"
@@ -16,7 +15,9 @@ using base::StringPiece;
 using base::hash_map;
 using base::hash_set;
 using std::make_pair;
+using std::map;
 using std::max;
+using std::string;
 using std::vector;
 
 namespace net {
@@ -48,8 +49,8 @@ class VisitorShim : public QuicConnectionVisitorInterface {
     session_->PostProcessAfterData();
   }
 
-  void OnWindowUpdateFrames(const vector<QuicWindowUpdateFrame>& frames)
-      override {
+  void OnWindowUpdateFrames(
+      const vector<QuicWindowUpdateFrame>& frames) override {
     session_->OnWindowUpdateFrames(frames);
     session_->PostProcessAfterData();
   }
@@ -95,8 +96,7 @@ class VisitorShim : public QuicConnectionVisitorInterface {
   QuicSession* session_;
 };
 
-QuicSession::QuicSession(QuicConnection* connection, const QuicConfig& config,
-                         bool is_secure)
+QuicSession::QuicSession(QuicConnection* connection, const QuicConfig& config)
     : connection_(connection),
       visitor_shim_(new VisitorShim(this)),
       config_(config),
@@ -104,30 +104,21 @@ QuicSession::QuicSession(QuicConnection* connection, const QuicConfig& config,
       next_stream_id_(is_server() ? 2 : 5),
       largest_peer_created_stream_id_(0),
       error_(QUIC_NO_ERROR),
+      flow_controller_(new QuicFlowController(
+          connection_.get(),
+          0,
+          is_server(),
+          kMinimumFlowControlSendWindow,
+          config_.GetInitialSessionFlowControlWindowToSend(),
+          config_.GetInitialSessionFlowControlWindowToSend())),
       goaway_received_(false),
       goaway_sent_(false),
-      has_pending_handshake_(false),
-      is_secure_(is_secure) {
-  if (connection_->version() == QUIC_VERSION_19) {
-    flow_controller_.reset(new QuicFlowController(
-        connection_.get(), 0, is_server(), kDefaultFlowControlSendWindow,
-        config_.GetInitialFlowControlWindowToSend(),
-        config_.GetInitialFlowControlWindowToSend()));
-  } else {
-    flow_controller_.reset(new QuicFlowController(
-        connection_.get(), 0, is_server(), kDefaultFlowControlSendWindow,
-        config_.GetInitialSessionFlowControlWindowToSend(),
-        config_.GetInitialSessionFlowControlWindowToSend()));
-  }
+      has_pending_handshake_(false) {
 }
 
 void QuicSession::InitializeSession() {
   connection_->set_visitor(visitor_shim_.get());
   connection_->SetFromConfig(config_);
-  if (!FLAGS_quic_unified_timeouts && connection_->connected()) {
-    connection_->SetOverallConnectionTimeout(
-        config_.max_time_before_crypto_handshake());
-  }
   headers_stream_.reset(new QuicHeadersStream(this));
 }
 
@@ -444,7 +435,7 @@ void QuicSession::UpdateFlowControlOnFinalReceivedByteOffset(
 
   DVLOG(1) << ENDPOINT << "Received final byte offset " << final_byte_offset
            << " for stream " << stream_id;
-  uint64 offset_diff = final_byte_offset - it->second;
+  QuicByteCount offset_diff = final_byte_offset - it->second;
   if (flow_controller_->UpdateHighestReceivedOffset(
       flow_controller_->highest_received_byte_offset() + offset_diff)) {
     // If the final offset violates flow control, close the connection now.
@@ -469,39 +460,20 @@ bool QuicSession::IsCryptoHandshakeConfirmed() {
 
 void QuicSession::OnConfigNegotiated() {
   connection_->SetFromConfig(config_);
-  QuicVersion version = connection()->version();
 
-  if (FLAGS_quic_allow_more_open_streams) {
-    uint32 max_streams = config_.MaxStreamsPerConnection();
-    if (is_server()) {
-      // A server should accept a small number of additional streams beyond the
-      // limit sent to the client. This helps avoid early connection termination
-      // when FIN/RSTs for old streams are lost or arrive out of order.
-      // Use a minimum number of additional streams, or a percentage increase,
-      // whichever is larger.
-      max_streams =
-          max(max_streams + kMaxStreamsMinimumIncrement,
-              static_cast<uint32>(max_streams * kMaxStreamsMultiplier));
-    }
-    set_max_open_streams(max_streams);
+  uint32 max_streams = config_.MaxStreamsPerConnection();
+  if (is_server()) {
+    // A server should accept a small number of additional streams beyond the
+    // limit sent to the client. This helps avoid early connection termination
+    // when FIN/RSTs for old streams are lost or arrive out of order.
+    // Use a minimum number of additional streams, or a percentage increase,
+    // whichever is larger.
+    max_streams =
+        max(max_streams + kMaxStreamsMinimumIncrement,
+            static_cast<uint32>(max_streams * kMaxStreamsMultiplier));
   }
+  set_max_open_streams(max_streams);
 
-  if (version == QUIC_VERSION_19) {
-    // QUIC_VERSION_19 doesn't support independent stream/session flow
-    // control windows.
-    if (config_.HasReceivedInitialFlowControlWindowBytes()) {
-      // Streams which were created before the SHLO was received (0-RTT
-      // requests) are now informed of the peer's initial flow control window.
-      uint32 new_window = config_.ReceivedInitialFlowControlWindowBytes();
-      OnNewStreamFlowControlWindow(new_window);
-      OnNewSessionFlowControlWindow(new_window);
-    }
-
-    return;
-  }
-
-  // QUIC_VERSION_21 and higher can have independent stream and session flow
-  // control windows.
   if (config_.HasReceivedInitialStreamFlowControlWindowBytes()) {
     // Streams which were created before the SHLO was received (0-RTT
     // requests) are now informed of the peer's initial flow control window.
@@ -514,11 +486,11 @@ void QuicSession::OnConfigNegotiated() {
   }
 }
 
-void QuicSession::OnNewStreamFlowControlWindow(uint32 new_window) {
-  if (new_window < kDefaultFlowControlSendWindow) {
-    LOG(ERROR)
-        << "Peer sent us an invalid stream flow control send window: "
-        << new_window << ", below default: " << kDefaultFlowControlSendWindow;
+void QuicSession::OnNewStreamFlowControlWindow(QuicStreamOffset new_window) {
+  if (new_window < kMinimumFlowControlSendWindow) {
+    LOG(ERROR) << "Peer sent us an invalid stream flow control send window: "
+               << new_window
+               << ", below default: " << kMinimumFlowControlSendWindow;
     if (connection_->connected()) {
       connection_->SendConnectionClose(QUIC_FLOW_CONTROL_INVALID_WINDOW);
     }
@@ -536,11 +508,11 @@ void QuicSession::OnNewStreamFlowControlWindow(uint32 new_window) {
   }
 }
 
-void QuicSession::OnNewSessionFlowControlWindow(uint32 new_window) {
-  if (new_window < kDefaultFlowControlSendWindow) {
-    LOG(ERROR)
-        << "Peer sent us an invalid session flow control send window: "
-        << new_window << ", below default: " << kDefaultFlowControlSendWindow;
+void QuicSession::OnNewSessionFlowControlWindow(QuicStreamOffset new_window) {
+  if (new_window < kMinimumFlowControlSendWindow) {
+    LOG(ERROR) << "Peer sent us an invalid session flow control send window: "
+               << new_window
+               << ", below default: " << kMinimumFlowControlSendWindow;
     if (connection_->connected()) {
       connection_->SendConnectionClose(QUIC_FLOW_CONTROL_INVALID_WINDOW);
     }
@@ -569,12 +541,6 @@ void QuicSession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
       // Discard originally encrypted packets, since they can't be decrypted by
       // the peer.
       connection_->NeuterUnencryptedPackets();
-      if (!FLAGS_quic_unified_timeouts) {
-        connection_->SetOverallConnectionTimeout(QuicTime::Delta::Infinite());
-      }
-      if (!FLAGS_quic_allow_more_open_streams) {
-        max_open_streams_ = config_.MaxStreamsPerConnection();
-      }
       break;
 
     default:
@@ -671,9 +637,9 @@ QuicDataStream* QuicSession::GetIncomingDataStream(QuicStreamId stream_id) {
     }
     if (largest_peer_created_stream_id_ == 0) {
       if (is_server()) {
-        largest_peer_created_stream_id_= 3;
+        largest_peer_created_stream_id_ = 3;
       } else {
-        largest_peer_created_stream_id_= 1;
+        largest_peer_created_stream_id_ = 1;
       }
     }
     for (QuicStreamId id = largest_peer_created_stream_id_ + 2;
@@ -760,21 +726,11 @@ bool QuicSession::GetSSLInfo(SSLInfo* ssl_info) const {
 
 void QuicSession::PostProcessAfterData() {
   STLDeleteElements(&closed_streams_);
-  closed_streams_.clear();
 
   if (connection()->connected() &&
       locally_closed_streams_highest_offset_.size() > max_open_streams_) {
     // A buggy client may fail to send FIN/RSTs. Don't tolerate this.
     connection_->SendConnectionClose(QUIC_TOO_MANY_UNFINISHED_STREAMS);
-  }
-}
-
-void QuicSession::OnSuccessfulVersionNegotiation(const QuicVersion& version) {
-  // Disable stream level flow control based on negotiated version. Streams may
-  // have been created with a different version.
-  if (version < QUIC_VERSION_21) {
-    GetCryptoStream()->flow_controller()->Disable();
-    headers_stream_->flow_controller()->Disable();
   }
 }
 

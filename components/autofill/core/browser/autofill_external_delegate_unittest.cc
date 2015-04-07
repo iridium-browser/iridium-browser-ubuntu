@@ -9,8 +9,11 @@
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "components/autofill/core/browser/autofill_manager.h"
+#include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/popup_item_ids.h"
+#include "components/autofill/core/browser/suggestion_test_helpers.h"
 #include "components/autofill/core/browser/test_autofill_client.h"
 #include "components/autofill/core/browser/test_autofill_driver.h"
 #include "components/autofill/core/browser/test_autofill_external_delegate.h"
@@ -20,7 +23,7 @@
 #include "components/autofill/core/common/password_form_fill_data.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 using base::ASCIIToUTF16;
 using testing::_;
@@ -55,13 +58,13 @@ class MockAutofillClient : public autofill::TestAutofillClient {
  public:
   MockAutofillClient() {}
 
-  MOCK_METHOD7(ShowAutofillPopup,
+  MOCK_METHOD1(ScanCreditCard,
+               void(const CreditCardScanCallback& callbacK));
+
+  MOCK_METHOD4(ShowAutofillPopup,
                void(const gfx::RectF& element_bounds,
                     base::i18n::TextDirection text_direction,
-                    const std::vector<base::string16>& values,
-                    const std::vector<base::string16>& labels,
-                    const std::vector<base::string16>& icons,
-                    const std::vector<int>& identifiers,
+                    const std::vector<Suggestion>& suggestions,
                     base::WeakPtr<AutofillPopupDelegate> delegate));
 
   MOCK_METHOD2(UpdateAutofillPopupDataListValues,
@@ -82,12 +85,21 @@ class MockAutofillManager : public AutofillManager {
       : AutofillManager(driver, client, NULL) {}
   virtual ~MockAutofillManager() {}
 
+  MOCK_METHOD2(ShouldShowScanCreditCard,
+               bool(const FormData& form, const FormFieldData& field));
+
   MOCK_METHOD5(FillOrPreviewForm,
                void(AutofillDriver::RendererFormDataAction action,
                     int query_id,
                     const FormData& form,
                     const FormFieldData& field,
                     int unique_id));
+
+  MOCK_METHOD4(FillCreditCardForm,
+               void(int query_id,
+                    const FormData& form,
+                    const FormFieldData& field,
+                    const CreditCard& credit_card));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAutofillManager);
@@ -98,7 +110,7 @@ class MockAutofillManager : public AutofillManager {
 class AutofillExternalDelegateUnitTest : public testing::Test {
  protected:
   void SetUp() override {
-    autofill_driver_.reset(new MockAutofillDriver());
+    autofill_driver_.reset(new testing::NiceMock<MockAutofillDriver>());
     autofill_manager_.reset(
         new MockAutofillManager(autofill_driver_.get(), &autofill_client_));
     external_delegate_.reset(
@@ -125,8 +137,15 @@ class AutofillExternalDelegateUnitTest : public testing::Test {
     external_delegate_->OnQuery(query_id, form, field, element_bounds, true);
   }
 
-  MockAutofillClient autofill_client_;
-  scoped_ptr<MockAutofillDriver> autofill_driver_;
+  void IssueOnSuggestionsReturned() {
+    std::vector<Suggestion> suggestions;
+    suggestions.push_back(Suggestion());
+    suggestions[0].frontend_id = kAutofillProfileId;
+    external_delegate_->OnSuggestionsReturned(kQueryId, suggestions);
+  }
+
+  testing::NiceMock<MockAutofillClient> autofill_client_;
+  scoped_ptr<testing::NiceMock<MockAutofillDriver>> autofill_driver_;
   scoped_ptr<MockAutofillManager> autofill_manager_;
   scoped_ptr<AutofillExternalDelegate> external_delegate_;
 
@@ -142,25 +161,17 @@ TEST_F(AutofillExternalDelegateUnitTest, TestExternalDelegateVirtualCalls) {
       autofill_client_,
       ShowAutofillPopup(_,
                         _,
-                        _,
-                        _,
-                        _,
-                        testing::ElementsAre(
+                        SuggestionVectorIdsAre(testing::ElementsAre(
                             kAutofillProfileId,
                             static_cast<int>(POPUP_ITEM_ID_SEPARATOR),
-                            static_cast<int>(POPUP_ITEM_ID_AUTOFILL_OPTIONS)),
+                            static_cast<int>(POPUP_ITEM_ID_AUTOFILL_OPTIONS))),
                         _));
 
   // This should call ShowAutofillPopup.
-  std::vector<base::string16> autofill_item;
-  autofill_item.push_back(base::string16());
-  std::vector<int> autofill_ids;
-  autofill_ids.push_back(kAutofillProfileId);
-  external_delegate_->OnSuggestionsReturned(kQueryId,
-                                            autofill_item,
-                                            autofill_item,
-                                            autofill_item,
-                                            autofill_ids);
+  std::vector<Suggestion> autofill_item;
+  autofill_item.push_back(Suggestion());
+  autofill_item[0].frontend_id = kAutofillProfileId;
+  external_delegate_->OnSuggestionsReturned(kQueryId, autofill_item);
 
   EXPECT_CALL(*autofill_manager_,
               FillOrPreviewForm(
@@ -169,7 +180,8 @@ TEST_F(AutofillExternalDelegateUnitTest, TestExternalDelegateVirtualCalls) {
 
   // This should trigger a call to hide the popup since we've selected an
   // option.
-  external_delegate_->DidAcceptSuggestion(autofill_item[0], autofill_ids[0]);
+  external_delegate_->DidAcceptSuggestion(autofill_item[0].value,
+                                          autofill_item[0].frontend_id);
 }
 
 // Test that data list elements for a node will appear in the Autofill popup.
@@ -191,27 +203,19 @@ TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateDataList) {
       autofill_client_,
       ShowAutofillPopup(_,
                         _,
-                        _,
-                        _,
-                        _,
-                        testing::ElementsAre(
+                        SuggestionVectorIdsAre(testing::ElementsAre(
                             static_cast<int>(POPUP_ITEM_ID_DATALIST_ENTRY),
                             static_cast<int>(POPUP_ITEM_ID_SEPARATOR),
                             kAutofillProfileId,
                             static_cast<int>(POPUP_ITEM_ID_SEPARATOR),
-                            static_cast<int>(POPUP_ITEM_ID_AUTOFILL_OPTIONS)),
+                            static_cast<int>(POPUP_ITEM_ID_AUTOFILL_OPTIONS))),
                         _));
 
   // This should call ShowAutofillPopup.
-  std::vector<base::string16> autofill_item;
-  autofill_item.push_back(base::string16());
-  std::vector<int> autofill_ids;
-  autofill_ids.push_back(kAutofillProfileId);
-  external_delegate_->OnSuggestionsReturned(kQueryId,
-                                            autofill_item,
-                                            autofill_item,
-                                            autofill_item,
-                                            autofill_ids);
+  std::vector<Suggestion> autofill_item;
+  autofill_item.push_back(Suggestion());
+  autofill_item[0].frontend_id = kAutofillProfileId;
+  external_delegate_->OnSuggestionsReturned(kQueryId, autofill_item);
 
   // Try calling OnSuggestionsReturned with no Autofill values and ensure
   // the datalist items are still shown.
@@ -221,26 +225,19 @@ TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateDataList) {
       ShowAutofillPopup(
           _,
           _,
-          _,
-          _,
-          _,
-          testing::ElementsAre(static_cast<int>(POPUP_ITEM_ID_DATALIST_ENTRY)),
+          SuggestionVectorIdsAre(testing::ElementsAre(
+              static_cast<int>(POPUP_ITEM_ID_DATALIST_ENTRY))),
           _));
 
-  autofill_item = std::vector<base::string16>();
-  autofill_ids = std::vector<int>();
-  external_delegate_->OnSuggestionsReturned(kQueryId,
-                                            autofill_item,
-                                            autofill_item,
-                                            autofill_item,
-                                            autofill_ids);
+  autofill_item.clear();
+  external_delegate_->OnSuggestionsReturned(kQueryId, autofill_item);
 }
 
 // Test that datalist values can get updated while a popup is showing.
 TEST_F(AutofillExternalDelegateUnitTest, UpdateDataListWhileShowingPopup) {
   IssueOnQuery(kQueryId);
 
-  EXPECT_CALL(autofill_client_, ShowAutofillPopup(_, _, _, _, _, _, _))
+  EXPECT_CALL(autofill_client_, ShowAutofillPopup(_, _, _, _))
       .Times(0);
 
   // Make sure just setting the data list values doesn't cause the popup to
@@ -260,27 +257,19 @@ TEST_F(AutofillExternalDelegateUnitTest, UpdateDataListWhileShowingPopup) {
       autofill_client_,
       ShowAutofillPopup(_,
                         _,
-                        _,
-                        _,
-                        _,
-                        testing::ElementsAre(
+                        SuggestionVectorIdsAre(testing::ElementsAre(
                             static_cast<int>(POPUP_ITEM_ID_DATALIST_ENTRY),
                             static_cast<int>(POPUP_ITEM_ID_SEPARATOR),
                             kAutofillProfileId,
                             static_cast<int>(POPUP_ITEM_ID_SEPARATOR),
-                            static_cast<int>(POPUP_ITEM_ID_AUTOFILL_OPTIONS)),
+                            static_cast<int>(POPUP_ITEM_ID_AUTOFILL_OPTIONS))),
                         _));
 
   // Ensure the popup is displayed.
-  std::vector<base::string16> autofill_item;
-  autofill_item.push_back(base::string16());
-  std::vector<int> autofill_ids;
-  autofill_ids.push_back(kAutofillProfileId);
-  external_delegate_->OnSuggestionsReturned(kQueryId,
-                                            autofill_item,
-                                            autofill_item,
-                                            autofill_item,
-                                            autofill_ids);
+  std::vector<Suggestion> autofill_item;
+  autofill_item.push_back(Suggestion());
+  autofill_item[0].frontend_id = kAutofillProfileId;
+  external_delegate_->OnSuggestionsReturned(kQueryId, autofill_item);
 
   // This would normally get called from ShowAutofillPopup, but it is mocked so
   // we need to call OnPopupShown ourselves.
@@ -310,28 +299,26 @@ TEST_F(AutofillExternalDelegateUnitTest, AutofillWarnings) {
       ShowAutofillPopup(
           _,
           _,
-          _,
-          _,
-          _,
-          testing::ElementsAre(static_cast<int>(POPUP_ITEM_ID_WARNING_MESSAGE)),
+          SuggestionVectorIdsAre(testing::ElementsAre(
+              static_cast<int>(POPUP_ITEM_ID_WARNING_MESSAGE))),
           _));
 
   // This should call ShowAutofillPopup.
-  std::vector<base::string16> autofill_item;
-  autofill_item.push_back(base::string16());
-  std::vector<int> autofill_ids;
-  autofill_ids.push_back(POPUP_ITEM_ID_WARNING_MESSAGE);
-  external_delegate_->OnSuggestionsReturned(kQueryId,
-                                            autofill_item,
-                                            autofill_item,
-                                            autofill_item,
-                                            autofill_ids);
+  std::vector<Suggestion> autofill_item;
+  autofill_item.push_back(Suggestion());
+  autofill_item[0].frontend_id = POPUP_ITEM_ID_WARNING_MESSAGE;
+  external_delegate_->OnSuggestionsReturned(kQueryId, autofill_item);
 }
 
 // Test that the Autofill popup doesn't display a warning explaining why
 // Autofill is disabled for a website when there are no Autofill suggestions.
 // Regression test for http://crbug.com/105636
 TEST_F(AutofillExternalDelegateUnitTest, NoAutofillWarningsWithoutSuggestions) {
+  // This test only makes sense if we're respecting autocomplete="off".
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kRespectAutocompleteOffForAutofill))
+    return;
+
   const FormData form;
   FormFieldData field;
   field.is_focusable = true;
@@ -340,20 +327,15 @@ TEST_F(AutofillExternalDelegateUnitTest, NoAutofillWarningsWithoutSuggestions) {
 
   external_delegate_->OnQuery(kQueryId, form, field, element_bounds, true);
 
-  EXPECT_CALL(autofill_client_, ShowAutofillPopup(_, _, _, _, _, _, _))
+  EXPECT_CALL(autofill_client_, ShowAutofillPopup(_, _, _, _))
       .Times(0);
   EXPECT_CALL(autofill_client_, HideAutofillPopup()).Times(1);
 
   // This should not call ShowAutofillPopup.
-  std::vector<base::string16> autofill_item;
-  autofill_item.push_back(base::string16());
-  std::vector<int> autofill_ids;
-  autofill_ids.push_back(POPUP_ITEM_ID_AUTOCOMPLETE_ENTRY);
-  external_delegate_->OnSuggestionsReturned(kQueryId,
-                                            autofill_item,
-                                            autofill_item,
-                                            autofill_item,
-                                            autofill_ids);
+  std::vector<Suggestion> autofill_item;
+  autofill_item.push_back(Suggestion());
+  autofill_item[0].frontend_id = POPUP_ITEM_ID_AUTOCOMPLETE_ENTRY;
+  external_delegate_->OnSuggestionsReturned(kQueryId, autofill_item);
 }
 
 // Test that the Autofill delegate doesn't try and fill a form with a
@@ -396,7 +378,7 @@ TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateClearPreviewedForm) {
 // Test that the popup is hidden once we are done editing the autofill field.
 TEST_F(AutofillExternalDelegateUnitTest,
        ExternalDelegateHidePopupAfterEditing) {
-  EXPECT_CALL(autofill_client_, ShowAutofillPopup(_, _, _, _, _, _, _));
+  EXPECT_CALL(autofill_client_, ShowAutofillPopup(_, _, _, _));
   autofill::GenerateTestAutofillPopup(external_delegate_.get());
 
   EXPECT_CALL(autofill_client_, HideAutofillPopup());
@@ -424,7 +406,92 @@ TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateClearForm) {
                                           POPUP_ITEM_ID_CLEAR_FORM);
 }
 
+// Test that autofill client will scan a credit card after use accepted the
+// suggestion to scan a credit card.
+TEST_F(AutofillExternalDelegateUnitTest, ScanCreditCardMenuItem) {
+  EXPECT_CALL(autofill_client_, ScanCreditCard(_));
+  EXPECT_CALL(autofill_client_, HideAutofillPopup());
+  external_delegate_->DidAcceptSuggestion(base::string16(),
+                                          POPUP_ITEM_ID_SCAN_CREDIT_CARD);
+}
+
+TEST_F(AutofillExternalDelegateUnitTest, ScanCreditCardPromptMetricsTest) {
+  // Log that the scan card item was shown, although nothing was selected.
+  {
+    EXPECT_CALL(*autofill_manager_, ShouldShowScanCreditCard(_, _))
+        .WillOnce(testing::Return(true));
+    base::HistogramTester histogram;
+    IssueOnQuery(kQueryId);
+    IssueOnSuggestionsReturned();
+    external_delegate_->OnPopupHidden();
+    histogram.ExpectUniqueSample("Autofill.ScanCreditCardPrompt",
+                                 AutofillMetrics::SCAN_CARD_ITEM_SHOWN, 1);
+  }
+  // Log that the scan card item was selected.
+  {
+    EXPECT_CALL(*autofill_manager_, ShouldShowScanCreditCard(_, _))
+        .WillOnce(testing::Return(true));
+    base::HistogramTester histogram;
+    IssueOnQuery(kQueryId);
+    IssueOnSuggestionsReturned();
+    external_delegate_->DidAcceptSuggestion(base::string16(),
+                                            POPUP_ITEM_ID_SCAN_CREDIT_CARD);
+    histogram.ExpectBucketCount("Autofill.ScanCreditCardPrompt",
+                                AutofillMetrics::SCAN_CARD_ITEM_SHOWN, 1);
+    histogram.ExpectBucketCount("Autofill.ScanCreditCardPrompt",
+                                AutofillMetrics::SCAN_CARD_ITEM_SELECTED, 1);
+    histogram.ExpectBucketCount("Autofill.ScanCreditCardPrompt",
+                                AutofillMetrics::SCAN_CARD_OTHER_ITEM_SELECTED,
+                                0);
+  }
+  // Log that something else was selected.
+  {
+    EXPECT_CALL(*autofill_manager_, ShouldShowScanCreditCard(_, _))
+        .WillOnce(testing::Return(true));
+    base::HistogramTester histogram;
+    IssueOnQuery(kQueryId);
+    IssueOnSuggestionsReturned();
+    external_delegate_->DidAcceptSuggestion(base::string16(),
+                                            POPUP_ITEM_ID_CLEAR_FORM);
+    histogram.ExpectBucketCount("Autofill.ScanCreditCardPrompt",
+                                AutofillMetrics::SCAN_CARD_ITEM_SHOWN, 1);
+    histogram.ExpectBucketCount("Autofill.ScanCreditCardPrompt",
+                                AutofillMetrics::SCAN_CARD_ITEM_SELECTED, 0);
+    histogram.ExpectBucketCount("Autofill.ScanCreditCardPrompt",
+                                AutofillMetrics::SCAN_CARD_OTHER_ITEM_SELECTED,
+                                1);
+  }
+  // Nothing is logged when the item isn't shown.
+  {
+    EXPECT_CALL(*autofill_manager_, ShouldShowScanCreditCard(_, _))
+        .WillOnce(testing::Return(false));
+    base::HistogramTester histogram;
+    IssueOnQuery(kQueryId);
+    IssueOnSuggestionsReturned();
+    external_delegate_->DidAcceptSuggestion(base::string16(),
+                                            POPUP_ITEM_ID_CLEAR_FORM);
+    histogram.ExpectTotalCount("Autofill.ScanCreditCardPrompt", 0);
+  }
+}
+
+// Test that autofill manager will fill the credit card form after user scans a
+// credit card.
+TEST_F(AutofillExternalDelegateUnitTest, FillCreditCardForm) {
+  base::string16 card_number = base::ASCIIToUTF16("test");
+  int expiration_month = 1;
+  int expiration_year = 3000;
+  EXPECT_CALL(
+      *autofill_manager_,
+      FillCreditCardForm(
+          _, _, _, CreditCard(card_number, expiration_month, expiration_year)));
+  external_delegate_->OnCreditCardScanned(card_number, expiration_month,
+                                          expiration_year);
+}
+
 TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateHideWarning) {
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kRespectAutocompleteOffForAutofill);
+
   // Set up a field that shouldn't get autocompleted or display warnings.
   const FormData form;
   FormFieldData field;
@@ -434,26 +501,18 @@ TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateHideWarning) {
 
   external_delegate_->OnQuery(kQueryId, form, field, element_bounds, false);
 
-  std::vector<base::string16> autofill_items;
-  autofill_items.push_back(base::string16());
-  std::vector<int> autofill_ids;
-  autofill_ids.push_back(POPUP_ITEM_ID_AUTOCOMPLETE_ENTRY);
+  std::vector<Suggestion> autofill_items;
+  autofill_items.push_back(Suggestion());
+  autofill_items[0].frontend_id = POPUP_ITEM_ID_AUTOCOMPLETE_ENTRY;
 
   // Ensure the popup tries to hide itself, since it is not allowed to show
   // anything.
   EXPECT_CALL(autofill_client_, HideAutofillPopup());
 
-  external_delegate_->OnSuggestionsReturned(kQueryId,
-                                            autofill_items,
-                                            autofill_items,
-                                            autofill_items,
-                                            autofill_ids);
+  external_delegate_->OnSuggestionsReturned(kQueryId, autofill_items);
 }
 
 TEST_F(AutofillExternalDelegateUnitTest, IgnoreAutocompleteOffForAutofill) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kIgnoreAutocompleteOffForAutofill);
-
   const FormData form;
   FormFieldData field;
   field.is_focusable = true;
@@ -462,20 +521,15 @@ TEST_F(AutofillExternalDelegateUnitTest, IgnoreAutocompleteOffForAutofill) {
 
   external_delegate_->OnQuery(kQueryId, form, field, element_bounds, false);
 
-  std::vector<base::string16> autofill_items;
-  autofill_items.push_back(base::string16());
-  std::vector<int> autofill_ids;
-  autofill_ids.push_back(POPUP_ITEM_ID_AUTOCOMPLETE_ENTRY);
+  std::vector<Suggestion> autofill_items;
+  autofill_items.push_back(Suggestion());
+  autofill_items[0].frontend_id = POPUP_ITEM_ID_AUTOCOMPLETE_ENTRY;
 
   // Ensure the popup tries to show itself, despite autocomplete="off".
-  EXPECT_CALL(autofill_client_, ShowAutofillPopup(_, _, _, _, _, _, _));
+  EXPECT_CALL(autofill_client_, ShowAutofillPopup(_, _, _, _));
   EXPECT_CALL(autofill_client_, HideAutofillPopup()).Times(0);
 
-  external_delegate_->OnSuggestionsReturned(kQueryId,
-                                            autofill_items,
-                                            autofill_items,
-                                            autofill_items,
-                                            autofill_ids);
+  external_delegate_->OnSuggestionsReturned(kQueryId, autofill_items);
 }
 
 TEST_F(AutofillExternalDelegateUnitTest, ExternalDelegateFillFieldWithValue) {

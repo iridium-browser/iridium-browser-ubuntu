@@ -24,9 +24,9 @@
 #include "ui/events/event_target.h"
 #include "ui/events/event_targeter.h"
 #include "ui/events/gestures/gesture_types.h"
-#include "ui/gfx/insets.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/rect.h"
 #include "ui/wm/public/window_types.h"
 
 namespace gfx {
@@ -51,6 +51,10 @@ class WindowTreeHost;
 // Defined in window_property.h (which we do not include)
 template<typename T>
 struct WindowProperty;
+
+namespace subtle {
+class PropertyHelper;
+}
 
 namespace test {
 class WindowTestApi;
@@ -223,7 +227,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // Add/remove observer.
   void AddObserver(WindowObserver* observer);
   void RemoveObserver(WindowObserver* observer);
-  bool HasObserver(WindowObserver* observer);
+  bool HasObserver(const WindowObserver* observer) const;
 
   void set_ignore_events(bool ignore_events) { ignore_events_ = ignore_events; }
   bool ignore_events() const { return ignore_events_; }
@@ -332,7 +336,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   friend class test::WindowTestApi;
   friend class LayoutManager;
   friend class WindowTargeter;
-
+  friend class subtle::PropertyHelper;
   // Called by the public {Set,Get,Clear}Property functions.
   int64 SetPropertyInternal(const void* key,
                             const char* name,

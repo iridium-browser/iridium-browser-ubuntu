@@ -26,6 +26,8 @@ class ServiceWorkerHandle;
 class ServiceWorkerProviderHost;
 class ServiceWorkerRegistration;
 class ServiceWorkerRegistrationHandle;
+class ServiceWorkerVersion;
+struct ServiceWorkerObjectInfo;
 struct ServiceWorkerRegistrationObjectInfo;
 struct ServiceWorkerVersionAttributes;
 
@@ -58,9 +60,12 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
       int provider_id,
       ServiceWorkerRegistration* registration);
 
-  void RegisterServiceWorkerHandle(scoped_ptr<ServiceWorkerHandle> handle);
-  void RegisterServiceWorkerRegistrationHandle(
-      scoped_ptr<ServiceWorkerRegistrationHandle> handle);
+  // Creates a ServiceWorkerHandle to retain |version| and returns a
+  // ServiceWorkerInfo with a newly created handle ID. The handle is held in
+  // the dispatcher host until its ref-count becomes zero via
+  // OnDecrementServiceWorkerRefCount.
+  ServiceWorkerObjectInfo CreateAndRegisterServiceWorkerHandle(
+      ServiceWorkerVersion* version);
 
   MessagePortMessageFilter* message_port_message_filter() {
     return message_port_message_filter_;
@@ -88,7 +93,7 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
                          int request_id,
                          int provider_id,
                          const GURL& document_url);
-  void OnProviderCreated(int provider_id);
+  void OnProviderCreated(int provider_id, int render_frame_id);
   void OnProviderDestroyed(int provider_id);
   void OnSetHostedVersionId(int provider_id, int64 version_id);
   void OnWorkerReadyForInspection(int embedded_worker_id);
@@ -117,6 +122,11 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
                              const base::string16& message,
                              const std::vector<int>& sent_message_port_ids);
   void OnServiceWorkerObjectDestroyed(int handle_id);
+  void OnTerminateWorker(int handle_id);
+
+  void RegisterServiceWorkerHandle(scoped_ptr<ServiceWorkerHandle> handle);
+  void RegisterServiceWorkerRegistrationHandle(
+      scoped_ptr<ServiceWorkerRegistrationHandle> handle);
 
   ServiceWorkerRegistrationHandle* FindRegistrationHandle(
       int provider_id,

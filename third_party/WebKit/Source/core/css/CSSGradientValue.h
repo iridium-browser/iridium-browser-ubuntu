@@ -35,7 +35,6 @@ namespace blink {
 
 class FloatPoint;
 class Gradient;
-class TextLinkColors;
 
 enum CSSGradientType {
     CSSDeprecatedLinearGradient,
@@ -58,7 +57,6 @@ public:
     CSSGradientColorStop() : m_colorIsDerivedFromElement(false) { };
     RefPtrWillBeMember<CSSPrimitiveValue> m_position; // percentage or length
     RefPtrWillBeMember<CSSPrimitiveValue> m_color;
-    Color m_resolvedColor;
     bool m_colorIsDerivedFromElement;
     bool operator==(const CSSGradientColorStop& other) const
     {
@@ -96,6 +94,8 @@ public:
 
     unsigned stopCount() const { return m_stops.size(); }
 
+    void appendCSSTextForDeprecatedColorStops(StringBuilder&) const;
+
     void sortStopsIfNeeded();
 
     bool isRepeating() const { return m_repeating; }
@@ -109,7 +109,6 @@ public:
     bool knownToBeOpaque(const RenderObject*) const;
 
     void loadSubimages(ResourceFetcher*) { }
-    PassRefPtrWillBeRawPtr<CSSGradientValue> gradientWithStylesResolved(const TextLinkColors&, Color currentColor);
 
     void traceAfterDispatch(Visitor*);
 
@@ -135,7 +134,7 @@ protected:
     {
     }
 
-    void addStops(Gradient*, const CSSToLengthConversionData&, float maxLengthForRepeat = 0);
+    void addStops(Gradient*, const CSSToLengthConversionData&, float maxLengthForRepeat, const RenderObject&);
 
     // Resolve points/radii to front end values.
     FloatPoint computeEndPoint(CSSPrimitiveValue*, CSSPrimitiveValue*, const CSSToLengthConversionData&, const IntSize&);
@@ -171,7 +170,7 @@ public:
     String customCSSText() const;
 
     // Create the gradient for a given size.
-    PassRefPtr<Gradient> createGradient(const CSSToLengthConversionData&, const IntSize&);
+    PassRefPtr<Gradient> createGradient(const CSSToLengthConversionData&, const IntSize&, const RenderObject&);
 
     PassRefPtrWillBeRawPtr<CSSLinearGradientValue> clone() const
     {
@@ -223,7 +222,7 @@ public:
     void setEndVerticalSize(PassRefPtrWillBeRawPtr<CSSPrimitiveValue> val) { m_endVerticalSize = val; }
 
     // Create the gradient for a given size.
-    PassRefPtr<Gradient> createGradient(const CSSToLengthConversionData&, const IntSize&);
+    PassRefPtr<Gradient> createGradient(const CSSToLengthConversionData&, const IntSize&, const RenderObject&);
 
     bool equals(const CSSRadialGradientValue&) const;
 

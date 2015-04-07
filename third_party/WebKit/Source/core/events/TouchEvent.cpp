@@ -30,7 +30,7 @@
 
 #include "core/events/EventDispatcher.h"
 #include "core/frame/FrameConsole.h"
-#include "core/frame/LocalFrame.h"
+#include "core/frame/LocalDOMWindow.h"
 #include "core/inspector/ConsoleMessage.h"
 
 namespace blink {
@@ -42,13 +42,16 @@ TouchEvent::TouchEvent()
 TouchEvent::TouchEvent(TouchList* touches, TouchList* targetTouches,
         TouchList* changedTouches, const AtomicString& type,
         PassRefPtrWillBeRawPtr<AbstractView> view,
-        bool ctrlKey, bool altKey, bool shiftKey, bool metaKey, bool cancelable)
+        bool ctrlKey, bool altKey, bool shiftKey, bool metaKey, bool cancelable, bool causesScrollingIfUncanceled,
+        double uiCreateTime)
     : UIEventWithKeyState(type, true, cancelable, view, 0,
                         ctrlKey, altKey, shiftKey, metaKey)
     , m_touches(touches)
     , m_targetTouches(targetTouches)
     , m_changedTouches(changedTouches)
+    , m_causesScrollingIfUncanceled(causesScrollingIfUncanceled)
 {
+    setUICreateTime(uiCreateTime);
 }
 
 TouchEvent::~TouchEvent()
@@ -96,8 +99,8 @@ void TouchEvent::preventDefault()
     // A common developer error is to wait too long before attempting to stop
     // scrolling by consuming a touchmove event. Generate a warning if this
     // event is uncancelable.
-    if (!cancelable() && view() && view()->frame()) {
-        view()->frame()->console().addMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel,
+    if (!cancelable() && view() && view()->isLocalDOMWindow() && view()->frame()) {
+        toLocalDOMWindow(view())->frame()->console().addMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel,
             "Ignored attempt to cancel a " + type() + " event with cancelable=false, for example because scrolling is in progress and cannot be interrupted."));
     }
 }
@@ -119,15 +122,15 @@ TouchEventDispatchMediator::TouchEventDispatchMediator(PassRefPtrWillBeRawPtr<To
 {
 }
 
-TouchEvent* TouchEventDispatchMediator::event() const
+TouchEvent& TouchEventDispatchMediator::event() const
 {
     return toTouchEvent(EventDispatchMediator::event());
 }
 
-bool TouchEventDispatchMediator::dispatchEvent(EventDispatcher* dispatcher) const
+bool TouchEventDispatchMediator::dispatchEvent(EventDispatcher& dispatcher) const
 {
-    event()->eventPath().adjustForTouchEvent(dispatcher->node(), *event());
-    return dispatcher->dispatch();
+    event().eventPath().adjustForTouchEvent(event());
+    return dispatcher.dispatch();
 }
 
 } // namespace blink

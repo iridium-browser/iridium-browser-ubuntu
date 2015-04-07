@@ -243,15 +243,11 @@ void AutoEnrollmentCheckScreen::SignalCompletion() {
 
   // Calling Finish() can cause |this| destruction, so let other methods finish
   // their work before.
-  weak_ptr_factory_.InvalidateWeakPtrs();
   base::MessageLoop::current()->PostTask(
-      FROM_HERE, base::Bind(&AutoEnrollmentCheckScreen::CallOnExit,
-                            weak_ptr_factory_.GetWeakPtr()));
-}
-
-void AutoEnrollmentCheckScreen::CallOnExit() {
-  get_base_screen_delegate()->OnExit(
-      BaseScreenDelegate::ENTERPRISE_AUTO_ENROLLMENT_CHECK_COMPLETED);
+      FROM_HERE,
+      base::Bind(
+          &AutoEnrollmentCheckScreen::Finish, weak_ptr_factory_.GetWeakPtr(),
+          BaseScreenDelegate::ENTERPRISE_AUTO_ENROLLMENT_CHECK_COMPLETED));
 }
 
 bool AutoEnrollmentCheckScreen::IsCompleted() const {

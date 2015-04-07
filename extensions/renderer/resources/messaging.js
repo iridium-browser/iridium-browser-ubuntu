@@ -216,6 +216,8 @@
   function dispatchOnConnect(portId,
                              channelName,
                              sourceTab,
+                             sourceFrameId,
+                             guestProcessId,
                              sourceExtensionId,
                              targetExtensionId,
                              sourceUrl,
@@ -244,7 +246,17 @@
       sender.url = sourceUrl;
     if (sourceTab)
       sender.tab = sourceTab;
-    if (tlsChannelId !== undefined)
+    if (sourceFrameId >= 0)
+      sender.frameId = sourceFrameId;
+    if (typeof guestProcessId != 'undefined') {
+      // Note that |guestProcessId| is not a standard field on MessageSender and
+      // should not be exposed to drive-by extensions; it is only exposed to
+      // component extensions.
+      logging.CHECK(processNatives.IsComponentExtension(),
+          "GuestProcessId can only be exposed to component extensions.");
+      sender.guestProcessId = guestProcessId;
+    }
+    if (typeof tlsChannelId != 'undefined')
       sender.tlsChannelId = tlsChannelId;
 
     // Special case for sendRequest/onRequest and sendMessage/onMessage.

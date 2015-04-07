@@ -226,12 +226,6 @@ Press Ctrl+Alt+Z to disable.
       <message name="IDS_ASH_STATUS_TRAY_EXIT_GUEST" desc="The label used for the button in the status tray to terminate a guest session.">
         Exit guest
       </message>
-      <message name="IDS_ASH_STATUS_TRAY_KIOSK_LABEL" desc="The label used in the system tray's user card to indicate that the current session is running in demo mode.">
-        Demo mode
-      </message>
-      <message name="IDS_ASH_STATUS_TRAY_EXIT_KIOSK" desc="The label used for the button in the status tray to terminate a session kiosk mode.">
-        Exit session
-      </message>
       <message name="IDS_ASH_STATUS_TRAY_EXIT_PUBLIC" desc="The label used for the button in the status tray to terminate a public account session. If the label is long, indicate where it may be broken into two lines by inserting \n instead of a whitespace.">
         Exit session
       </message>
@@ -383,10 +377,6 @@ Press Ctrl+Alt+Z to disable.
         Press Control Shift Q twice to quit.
       </message>
 
-      <message name="IDS_ASH_IME_INFOLIST_WINDOW_TITLE" desc="The title of the infolist window where the meanings and the usages of words are displayed.">
-        Information
-      </message>
-
       <message name="IDS_ASH_CONTROL_KEY" desc="Name of [Ctrl] key name. Shouldn't be translated in many languages actually. This name should be lower case.">
         ctrl
       </message>
@@ -421,6 +411,9 @@ Press Ctrl+Alt+Z to disable.
       <!-- Overview Mode -->
       <message name="IDS_ASH_OVERVIEW_BUTTON_ACCESSIBLE_NAME" desc="The accessible name for the Overview button in the system tray.">
         Toggle window overview
+      </message>
+      <message name="IDS_ASH_OVERVIEW_CLOSE_ITEM_BUTTON_ACCESSIBLE_NAME" desc="The accessible name for the close button on windows while in Overview mode.">
+        Close <ph name="WINDOW_TITLE">$1</ph>
       </message>
 
       <!-- ChromeOS-specific strings -->

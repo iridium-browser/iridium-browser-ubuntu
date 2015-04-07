@@ -19,13 +19,14 @@
 #include "base/synchronization/lock.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/io_thread.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_configurator.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/storage_partition_descriptor.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_usage_stats.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/resource_context.h"
 #include "net/cookies/cookie_monster.h"
@@ -183,10 +184,6 @@ class ProfileIOData {
     return &safe_browsing_enabled_;
   }
 
-  BooleanPrefMember* printing_enabled() const {
-    return &printing_enabled_;
-  }
-
   BooleanPrefMember* sync_disabled() const {
     return &sync_disabled_;
   }
@@ -238,7 +235,7 @@ class ProfileIOData {
   }
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
   const SupervisedUserURLFilter* supervised_user_url_filter() const {
     return supervised_user_url_filter_.get();
   }
@@ -327,7 +324,7 @@ class ProfileIOData {
     // and needs to be on the main thread.
     scoped_ptr<net::ProxyConfigService> proxy_config_service;
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
     scoped_refptr<const SupervisedUserURLFilter> supervised_user_url_filter;
 #endif
 
@@ -387,15 +384,15 @@ class ProfileIOData {
   }
 
   void set_data_reduction_proxy_statistics_prefs(
-      scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
+      base::WeakPtr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
           data_reduction_proxy_statistics_prefs) {
     data_reduction_proxy_statistics_prefs_ =
-        data_reduction_proxy_statistics_prefs.Pass();
+        data_reduction_proxy_statistics_prefs;
   }
 
-  data_reduction_proxy::DataReductionProxyStatisticsPrefs*
+  base::WeakPtr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
       data_reduction_proxy_statistics_prefs() const {
-    return data_reduction_proxy_statistics_prefs_.get();
+    return data_reduction_proxy_statistics_prefs_;
   }
 
   void set_data_reduction_proxy_usage_stats(
@@ -414,16 +411,16 @@ class ProfileIOData {
     data_reduction_proxy_unavailable_callback_ = unavailable_callback;
   }
 
-  DataReductionProxyChromeConfigurator*
-      data_reduction_proxy_chrome_configurator() const {
-    return data_reduction_proxy_chrome_configurator_.get();
+  data_reduction_proxy::DataReductionProxyConfigurator*
+  data_reduction_proxy_configurator() const {
+    return data_reduction_proxy_configurator_.get();
   }
 
-  void set_data_reduction_proxy_chrome_configurator(
-      scoped_ptr<DataReductionProxyChromeConfigurator>
-          data_reduction_proxy_chrome_configurator) const {
-    data_reduction_proxy_chrome_configurator_ =
-        data_reduction_proxy_chrome_configurator.Pass();
+  void set_data_reduction_proxy_configurator(
+      scoped_ptr<data_reduction_proxy::DataReductionProxyConfigurator>
+          data_reduction_proxy_configurator) const {
+    data_reduction_proxy_configurator_ =
+        data_reduction_proxy_configurator.Pass();
   }
 
   data_reduction_proxy::DataReductionProxyAuthRequestHandler*
@@ -438,8 +435,16 @@ class ProfileIOData {
         data_reduction_proxy_auth_request_handler.Pass();
   }
 
-  ChromeNetworkDelegate* network_delegate() const {
-    return network_delegate_.get();
+  data_reduction_proxy::DataReductionProxyEventStore*
+      data_reduction_proxy_event_store() const {
+    return data_reduction_proxy_event_store_.get();
+  }
+
+  void set_data_reduction_proxy_event_store(
+      scoped_ptr<data_reduction_proxy::DataReductionProxyEventStore>
+          data_reduction_proxy_event_store) const {
+    data_reduction_proxy_event_store_ =
+        data_reduction_proxy_event_store.Pass();
   }
 
   net::FraudulentCertificateReporter* fraudulent_certificate_reporter() const {
@@ -521,6 +526,7 @@ class ProfileIOData {
   // Does the actual initialization of the ProfileIOData subtype. Subtypes
   // should use the static helper functions above to implement this.
   virtual void InitializeInternal(
+      scoped_ptr<ChromeNetworkDelegate> chrome_network_delegate,
       ProfileParams* profile_params,
       content::ProtocolHandlerMap* protocol_handlers,
       content::URLRequestInterceptorScopedVector
@@ -607,8 +613,9 @@ class ProfileIOData {
   mutable BooleanPrefMember enable_referrers_;
   mutable BooleanPrefMember enable_do_not_track_;
   mutable BooleanPrefMember force_safesearch_;
+  mutable BooleanPrefMember force_google_safesearch_;
+  mutable BooleanPrefMember force_youtube_safety_mode_;
   mutable BooleanPrefMember safe_browsing_enabled_;
-  mutable BooleanPrefMember printing_enabled_;
   mutable BooleanPrefMember sync_disabled_;
   mutable BooleanPrefMember signin_allowed_;
   mutable IntegerPrefMember network_prediction_options_;
@@ -646,15 +653,16 @@ class ProfileIOData {
       data_reduction_proxy_params_;
   mutable scoped_ptr<data_reduction_proxy::DataReductionProxyUsageStats>
       data_reduction_proxy_usage_stats_;
-  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
-            data_reduction_proxy_statistics_prefs_;
+  mutable base::WeakPtr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
+      data_reduction_proxy_statistics_prefs_;
   mutable base::Callback<void(bool)> data_reduction_proxy_unavailable_callback_;
-  mutable scoped_ptr<DataReductionProxyChromeConfigurator>
-      data_reduction_proxy_chrome_configurator_;
+  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyConfigurator>
+      data_reduction_proxy_configurator_;
   mutable scoped_ptr<data_reduction_proxy::DataReductionProxyAuthRequestHandler>
       data_reduction_proxy_auth_request_handler_;
+  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyEventStore>
+      data_reduction_proxy_event_store_;
 
-  mutable scoped_ptr<ChromeNetworkDelegate> network_delegate_;
   mutable scoped_ptr<net::FraudulentCertificateReporter>
       fraudulent_certificate_reporter_;
   mutable scoped_ptr<net::ProxyService> proxy_service_;
@@ -693,7 +701,7 @@ class ProfileIOData {
   mutable scoped_ptr<ChromeHttpUserAgentSettings>
       chrome_http_user_agent_settings_;
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
   mutable scoped_refptr<const SupervisedUserURLFilter>
       supervised_user_url_filter_;
 #endif

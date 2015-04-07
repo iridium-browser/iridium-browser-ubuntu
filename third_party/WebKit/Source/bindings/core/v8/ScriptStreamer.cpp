@@ -12,6 +12,7 @@
 #include "core/dom/PendingScript.h"
 #include "core/fetch/ScriptResource.h"
 #include "core/frame/Settings.h"
+#include "core/html/parser/TextResourceDecoder.h"
 #include "platform/SharedBuffer.h"
 #include "platform/TraceEvent.h"
 #include "public/platform/Platform.h"
@@ -88,9 +89,8 @@ private:
 class SourceStream : public v8::ScriptCompiler::ExternalSourceStream {
     WTF_MAKE_NONCOPYABLE(SourceStream);
 public:
-    SourceStream(ScriptStreamer* streamer)
+    SourceStream()
         : v8::ScriptCompiler::ExternalSourceStream()
-        , m_streamer(streamer)
         , m_cancelled(false)
         , m_dataPosition(0) { }
 
@@ -123,10 +123,10 @@ public:
         m_dataQueue.finish();
     }
 
-    void didReceiveData()
+    void didReceiveData(ScriptStreamer* streamer, size_t lengthOfBOM)
     {
         ASSERT(isMainThread());
-        prepareDataOnMainThread();
+        prepareDataOnMainThread(streamer, lengthOfBOM);
     }
 
     void cancel()
@@ -145,19 +145,22 @@ public:
     }
 
 private:
-    void prepareDataOnMainThread()
+    void prepareDataOnMainThread(ScriptStreamer* streamer, size_t lengthOfBOM)
     {
         ASSERT(isMainThread());
         // The Resource must still be alive; otherwise we should've cancelled
         // the streaming (if we have cancelled, the background thread is not
         // waiting).
-        ASSERT(m_streamer->resource());
+        ASSERT(streamer->resource());
 
-        if (m_streamer->resource()->cachedMetadata(V8ScriptRunner::tagForCodeCache())) {
+        // BOM can only occur at the beginning of the data.
+        ASSERT(lengthOfBOM == 0 || m_dataPosition == 0);
+
+        if (streamer->resource()->cachedMetadata(V8ScriptRunner::tagForCodeCache(streamer->resource()))) {
             // The resource has a code cache, so it's unnecessary to stream and
             // parse the code. Cancel the streaming and resume the non-streaming
             // code path.
-            m_streamer->suppressStreaming();
+            streamer->suppressStreaming();
             {
                 MutexLocker locker(m_mutex);
                 m_cancelled = true;
@@ -168,9 +171,7 @@ private:
 
         if (!m_resourceBuffer) {
             // We don't have a buffer yet. Try to get it from the resource.
-            SharedBuffer* buffer = m_streamer->resource()->resourceBuffer();
-            if (!buffer)
-                return;
+            SharedBuffer* buffer = streamer->resource()->resourceBuffer();
             m_resourceBuffer = RefPtr<SharedBuffer>(buffer);
         }
 
@@ -190,18 +191,19 @@ private:
         }
         // Copy the data chunks into a new buffer, since we're going to give the
         // data to a background thread.
-        if (dataLength > 0) {
+        if (dataLength > lengthOfBOM) {
+            dataLength -= lengthOfBOM;
             uint8_t* copiedData = new uint8_t[dataLength];
             unsigned offset = 0;
             for (size_t i = 0; i < chunks.size(); ++i) {
-                memcpy(copiedData + offset, chunks[i], chunkLengths[i]);
-                offset += chunkLengths[i];
+                memcpy(copiedData + offset, chunks[i] + lengthOfBOM, chunkLengths[i] - lengthOfBOM);
+                offset += chunkLengths[i] - lengthOfBOM;
+                // BOM is only in the first chunk
+                lengthOfBOM = 0;
             }
             m_dataQueue.produce(copiedData, dataLength);
         }
     }
-
-    ScriptStreamer* m_streamer;
 
     // For coordinating between the main thread and background thread tasks.
     // Guarded by m_mutex.
@@ -223,6 +225,27 @@ void ScriptStreamer::startStreaming(PendingScript& script, Settings* settings, S
     bool startedStreaming = startStreamingInternal(script, settings, scriptState, scriptType);
     if (!startedStreaming)
         blink::Platform::current()->histogramEnumeration(startedStreamingHistogramName(scriptType), 0, 2);
+}
+
+bool ScriptStreamer::convertEncoding(const char* encodingName, v8::ScriptCompiler::StreamedSource::Encoding* encoding)
+{
+    // Here's a list of encodings we can use for streaming. These are
+    // the canonical names.
+    if (strcmp(encodingName, "windows-1252") == 0
+        || strcmp(encodingName, "ISO-8859-1") == 0
+        || strcmp(encodingName, "US-ASCII") == 0) {
+        *encoding = v8::ScriptCompiler::StreamedSource::ONE_BYTE;
+        return true;
+    }
+    if (strcmp(encodingName, "UTF-8") == 0) {
+        *encoding = v8::ScriptCompiler::StreamedSource::UTF8;
+        return true;
+    }
+    // We don't stream other encodings; especially we don't stream two
+    // byte scripts to avoid the handling of endianness. Most scripts
+    // are Latin1 or UTF-8 anyway, so this should be enough for most
+    // real world purposes.
+    return false;
 }
 
 void ScriptStreamer::streamingCompleteOnBackgroundThread()
@@ -266,17 +289,6 @@ void ScriptStreamer::suppressStreaming()
     m_streamingSuppressed = true;
 }
 
-unsigned ScriptStreamer::cachedDataType() const
-{
-    if (m_compileOptions == v8::ScriptCompiler::kProduceParserCache) {
-        return V8ScriptRunner::tagForParserCache();
-    }
-    if (m_compileOptions == v8::ScriptCompiler::kProduceCodeCache) {
-        return V8ScriptRunner::tagForCodeCache();
-    }
-    return 0;
-}
-
 void ScriptStreamer::notifyAppendData(ScriptResource* resource)
 {
     ASSERT(isMainThread());
@@ -286,36 +298,34 @@ void ScriptStreamer::notifyAppendData(ScriptResource* resource)
         if (m_streamingSuppressed)
             return;
     }
+    size_t lengthOfBOM = 0;
     if (!m_haveEnoughDataForStreaming) {
         // Even if the first data chunk is small, the script can still be big
         // enough - wait until the next data chunk comes before deciding whether
         // to start the streaming.
-        if (resource->resourceBuffer()->size() < kSmallScriptThreshold) {
+        ASSERT(resource->resourceBuffer());
+        if (resource->resourceBuffer()->size() < kSmallScriptThreshold)
             return;
-        }
         m_haveEnoughDataForStreaming = true;
         const char* histogramName = startedStreamingHistogramName(m_scriptType);
 
         // Encoding should be detected only when we have some data. It's
         // possible that resource->encoding() returns a different encoding
-        // before the loading has started and after we got some data.
-        WTF::TextEncoding textEncoding(resource->encoding());
-        const char* encodingName = textEncoding.name();
+        // before the loading has started and after we got some data.  In
+        // addition, check for byte order marks. Note that checking the byte
+        // order mark might change the encoding. We cannot decode the full text
+        // here, because it might contain incomplete UTF-8 characters. Also note
+        // that have at least kSmallScriptThreshold worth of data, which is more
+        // than enough for detecting a BOM.
+        const char* data = 0;
+        unsigned length = resource->resourceBuffer()->getSomeData(data, 0);
 
-        // Here's a list of encodings we can use for streaming. These are
-        // the canonical names.
-        v8::ScriptCompiler::StreamedSource::Encoding encoding;
-        if (strcmp(encodingName, "windows-1252") == 0
-            || strcmp(encodingName, "ISO-8859-1") == 0
-            || strcmp(encodingName, "US-ASCII") == 0) {
-            encoding = v8::ScriptCompiler::StreamedSource::ONE_BYTE;
-        } else if (strcmp(encodingName, "UTF-8") == 0) {
-            encoding = v8::ScriptCompiler::StreamedSource::UTF8;
-        } else {
-            // We don't stream other encodings; especially we don't stream two
-            // byte scripts to avoid the handling of byte order marks. Most
-            // scripts are Latin1 or UTF-8 anyway, so this should be enough for
-            // most real world purposes.
+        OwnPtr<TextResourceDecoder> decoder(TextResourceDecoder::create("application/javascript", resource->encoding()));
+        lengthOfBOM = decoder->checkForBOM(data, length);
+
+        // Maybe the encoding changed because we saw the BOM; get the encoding
+        // from the decoder.
+        if (!convertEncoding(decoder->encoding().name(), &m_encoding)) {
             suppressStreaming();
             blink::Platform::current()->histogramEnumeration(histogramName, 0, 2);
             return;
@@ -338,9 +348,9 @@ void ScriptStreamer::notifyAppendData(ScriptResource* resource)
 
         ASSERT(!m_stream);
         ASSERT(!m_source);
-        m_stream = new SourceStream(this);
+        m_stream = new SourceStream();
         // m_source takes ownership of m_stream.
-        m_source = adoptPtr(new v8::ScriptCompiler::StreamedSource(m_stream, encoding));
+        m_source = adoptPtr(new v8::ScriptCompiler::StreamedSource(m_stream, m_encoding));
 
         ScriptState::Scope scope(m_scriptState.get());
         WTF::OwnPtr<v8::ScriptCompiler::ScriptStreamingTask> scriptStreamingTask(adoptPtr(v8::ScriptCompiler::StartStreamingScript(m_scriptState->isolate(), m_source.get(), m_compileOptions)));
@@ -363,7 +373,7 @@ void ScriptStreamer::notifyAppendData(ScriptResource* resource)
         blink::Platform::current()->histogramEnumeration(histogramName, 1, 2);
     }
     if (m_stream)
-        m_stream->didReceiveData();
+        m_stream->didReceiveData(this, lengthOfBOM);
 }
 
 void ScriptStreamer::notifyFinished(Resource* resource)
@@ -429,6 +439,7 @@ ScriptStreamer::ScriptStreamer(ScriptResource* resource, PendingScript::Type scr
     , m_scriptType(scriptType)
     , m_scriptStreamingMode(mode)
     , m_mainThreadWaitingForParserThread(false)
+    , m_encoding(v8::ScriptCompiler::StreamedSource::TWO_BYTE) // Unfortunately there's no dummy encoding value in the enum; let's use one we don't stream.
 {
 }
 
@@ -527,7 +538,7 @@ bool ScriptStreamer::startStreamingInternal(PendingScript& script, Settings* set
     // default, we generate the parser cache for streamed scripts, to emulate
     // the non-streaming behavior (see V8ScriptRunner::compileScript).
     v8::ScriptCompiler::CompileOptions compileOption = v8::ScriptCompiler::kProduceParserCache;
-    if (settings->v8CacheOptions() == V8CacheOptionsCode)
+    if (settings->v8CacheOptions() == V8CacheOptionsCode || settings->v8CacheOptions() == V8CacheOptionsCodeCompressed)
         compileOption = v8::ScriptCompiler::kProduceCodeCache;
 
     // The Resource might go out of scope if the script is no longer

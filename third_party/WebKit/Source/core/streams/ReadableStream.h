@@ -11,7 +11,7 @@
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "bindings/core/v8/V8Binding.h"
-#include "core/dom/ContextLifecycleObserver.h"
+#include "core/dom/ActiveDOMObject.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
 #include "wtf/PassRefPtr.h"
@@ -23,8 +23,9 @@ class DOMException;
 class ExceptionState;
 class UnderlyingSource;
 
-class ReadableStream : public GarbageCollectedFinalized<ReadableStream>, public ScriptWrappable {
+class ReadableStream : public GarbageCollectedFinalized<ReadableStream>, public ScriptWrappable, public ActiveDOMObject {
     DEFINE_WRAPPERTYPEINFO();
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(ReadableStream);
 public:
     enum State {
         Readable,
@@ -33,8 +34,6 @@ public:
         Errored,
     };
 
-    // FIXME: Define Strategy here.
-    // FIXME: Add |strategy| constructor parameter.
     // After ReadableStream construction, |didSourceStart| must be called when
     // |source| initialization succeeds and |error| must be called when
     // |source| initialization fails.
@@ -48,7 +47,7 @@ public:
     String stateString() const;
 
     virtual ScriptValue read(ScriptState*, ExceptionState&) = 0;
-    ScriptPromise wait(ScriptState*);
+    ScriptPromise ready(ScriptState*);
     ScriptPromise cancel(ScriptState*, ScriptValue reason);
     ScriptPromise closed(ScriptState*);
 
@@ -57,31 +56,33 @@ public:
 
     void didSourceStart();
 
-    virtual void trace(Visitor*);
+    bool hasPendingActivity() const override;
+    virtual void trace(Visitor*) override;
 
 protected:
-    bool enqueuePreliminaryCheck(size_t chunkSize);
-    bool enqueuePostAction(size_t totalQueueSize);
+    bool enqueuePreliminaryCheck();
+    bool enqueuePostAction();
     void readPreliminaryCheck(ExceptionState&);
     void readPostAction();
 
 private:
-    typedef ScriptPromiseProperty<Member<ReadableStream>, V8UndefinedType, RefPtrWillBeMember<DOMException> > WaitPromise;
-    typedef ScriptPromiseProperty<Member<ReadableStream>, V8UndefinedType, RefPtrWillBeMember<DOMException> > ClosedPromise;
+    typedef ScriptPromiseProperty<Member<ReadableStream>, ToV8UndefinedGenerator, RefPtrWillBeMember<DOMException> > WaitPromise;
+    typedef ScriptPromiseProperty<Member<ReadableStream>, ToV8UndefinedGenerator, RefPtrWillBeMember<DOMException> > ClosedPromise;
 
     virtual bool isQueueEmpty() const = 0;
     virtual void clearQueue() = 0;
+    // This function will call ReadableStream::error on error.
+    virtual bool shouldApplyBackpressure() = 0;
 
-    void callOrSchedulePull();
+    void callPullIfNeeded();
 
     Member<UnderlyingSource> m_source;
     bool m_isStarted;
     bool m_isDraining;
     bool m_isPulling;
-    bool m_isSchedulingPull;
     State m_state;
 
-    Member<WaitPromise> m_wait;
+    Member<WaitPromise> m_ready;
     Member<ClosedPromise> m_closed;
     RefPtrWillBeMember<DOMException> m_exception;
 };

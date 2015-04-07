@@ -11,9 +11,7 @@ component("input_events") {
     "mojo_input_events_export.h",
   ]
 
-  defines = [
-    "MOJO_INPUT_EVENTS_IMPLEMENTATION",
-  ]
+  defines = [ "MOJO_INPUT_EVENTS_IMPLEMENTATION" ]
 
   deps = [
     "//base",
@@ -22,7 +20,7 @@ component("input_events") {
     "//mojo/converters/geometry",
     "//mojo/environment:chromium",
     "//mojo/public/c/system:for_component",
-    "//mojo/services/public/interfaces/input_events",
-    "//mojo/services/public/interfaces/geometry",
+    "//mojo/services/input_events/public/interfaces",
+    "//mojo/services/geometry/public/interfaces",
   ]
 }

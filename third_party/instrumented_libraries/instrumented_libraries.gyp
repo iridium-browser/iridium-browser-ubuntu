@@ -83,6 +83,7 @@
         # Don't add this target to the dependencies of targets with type=none.
         'link_dependency': 1,
       },
+      # NOTE: Please keep install-build-deps.sh in sync with this list.
       'dependencies': [
         '<(_sanitizer_type)-freetype',
         '<(_sanitizer_type)-libcairo2',
@@ -142,6 +143,7 @@
         }, {
           'dependencies': [
             '<(_sanitizer_type)-libtasn1-6',
+            '<(_sanitizer_type)-harfbuzz',
           ],
         }],
         ['msan==1', {
@@ -154,28 +156,19 @@
             '<(_sanitizer_type)-libpng12-0',
           ],
         }],
-      ],
-      'actions': [
-        {
-          'action_name': 'fix_rpaths',
-          'inputs': [
-            'fix_rpaths.sh',
+        ['chromeos==1', {
+          'dependencies': [
+            '<(_sanitizer_type)-brltty',
+            '<(_sanitizer_type)-libva1',
           ],
-          'outputs': [
-            '<(PRODUCT_DIR)/instrumented_libraries/<(_sanitizer_type)/rpaths.fixed.txt',
-          ],
-          'action': [
-            './fix_rpaths.sh',
-            '<(PRODUCT_DIR)/instrumented_libraries/<(_sanitizer_type)'
-          ],
-        },
+        }]
       ],
       'direct_dependent_settings': {
         'target_conditions': [
           ['_toolset=="target"', {
             'ldflags': [
               # Add RPATH to result binary to make it linking instrumented libraries ($ORIGIN means relative RPATH)
-              '-Wl,-R,\$$ORIGIN/instrumented_libraries/<(_sanitizer_type)/lib/:\$$ORIGIN/instrumented_libraries/<(_sanitizer_type)/usr/lib/x86_64-linux-gnu/',
+              '-Wl,-R,\$$ORIGIN/instrumented_libraries/<(_sanitizer_type)/lib/',
               '-Wl,-z,origin',
             ],
           }],
@@ -328,6 +321,12 @@
       'package_name': 'libxcb1',
       'dependencies=': [],
       'extra_configure_flags': ['--disable-build-docs'],
+      'conditions': [
+        ['"<(_ubuntu_release)"=="precise"', {
+          # Backport fix for https://bugs.freedesktop.org/show_bug.cgi?id=54671
+          'patch': 'patches/libxcb1.precise.diff',
+        }],
+      ],
       # Required on Trusty due to autoconf version mismatch.
       'run_before_build': 'scripts/autoreconf.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
@@ -421,6 +420,10 @@
       'conditions': [
         ['"<(_ubuntu_release)"=="precise"', {
           'patch': 'patches/pulseaudio.precise.diff',
+          'jobs': 1,
+        }, {
+          # New location of libpulsecommon.
+          'package_ldflags': [ '-Wl,-R,XORIGIN/pulseaudio/.' ],
         }],
       ],
       'extra_configure_flags': [
@@ -432,7 +435,6 @@
           '--disable-neon-opt'
       ],
       'run_before_build': 'scripts/pulseaudio.sh',
-      'jobs': 1,
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -502,8 +504,7 @@
           # TODO(earthdok): find a better fix.
           '--disable-gudev'
       ],
-      # Required on Trusty due to autoconf version mismatch.
-      'run_before_build': 'scripts/autoreconf.sh',
+      'run_before_build': 'scripts/udev.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -664,6 +665,48 @@
       ],
       'dependencies=': [],
       'run_before_build': 'scripts/autogen.sh',
+      'includes': ['standard_instrumented_package_target.gypi'],
+    },
+    {
+      'package_name': 'harfbuzz',
+      'package_cflags': ['-Wno-c++11-narrowing'],
+      'extra_configure_flags': [
+          # From debian/rules.
+          '--with-graphite2=yes',
+          '--with-gobject',
+          # See above.
+          '--disable-introspection',
+      ],
+      'dependencies=': [],
+      'includes': ['standard_instrumented_package_target.gypi'],
+    },
+    {
+      'package_name': 'brltty',
+      'extra_configure_flags': [
+          # From debian/rules.
+          '--without-viavoice',
+          '--without-theta',
+          '--without-swift',
+          '--bindir=/sbin',
+          '--with-curses=ncursesw',
+          '--disable-stripping',
+          # We don't need any of those.
+          '--disable-java-bindings',
+          '--disable-lisp-bindings',
+          '--disable-ocaml-bindings',
+          '--disable-python-bindings',
+          '--disable-tcl-bindings'
+      ],
+      'dependencies=': [],
+      'includes': ['standard_instrumented_package_target.gypi'],
+    },
+    {
+      'package_name': 'libva1',
+      'dependencies=': [],
+      # Backport a use-after-free fix:
+      # http://cgit.freedesktop.org/libva/diff/va/va.c?h=staging&id=d4988142a3f2256e38c5c5cdcdfc1b4f5f3c1ea9
+      'patch': 'patches/libva1.diff',
+      'run_before_build': 'scripts/libva1.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
   ],

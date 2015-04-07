@@ -19,11 +19,12 @@ namespace content {
 namespace webcrypto {
 
 class CryptoData;
+class GenerateKeyResult;
 class Status;
 
 // The values of these constants correspond with the "enc" parameter of
 // EVP_CipherInit_ex(), do not change.
-enum EncryptOrDecrypt { DECRYPT=0, ENCRYPT=1 };
+enum EncryptOrDecrypt { DECRYPT = 0, ENCRYPT = 1 };
 
 const EVP_MD* GetDigest(blink::WebCryptoAlgorithmId id);
 
@@ -40,23 +41,40 @@ Status AeadEncryptDecrypt(EncryptOrDecrypt mode,
                           const EVP_AEAD* aead_alg,
                           std::vector<uint8_t>* buffer);
 
+// Generates a random secret key of the given bit length. If the bit length is
+// not a multiple of 8, then the resulting key will have ceil(keylen_bits / 8)
+// bytes, and the "unused" bits will be set to zero. This function does not do
+// any validation checks on the provided parameters.
+Status GenerateWebCryptoSecretKey(const blink::WebCryptoKeyAlgorithm& algorithm,
+                                  bool extractable,
+                                  blink::WebCryptoKeyUsageMask usages,
+                                  unsigned int keylen_bits,
+                                  GenerateKeyResult* result);
+
+// Creates a WebCrypto secret key given a the raw data. The provided |key_data|
+// will be copied into the new key. This function does not do any validation
+// checks for the provided parameters.
+Status CreateWebCryptoSecretKey(const CryptoData& key_data,
+                                const blink::WebCryptoKeyAlgorithm& algorithm,
+                                bool extractable,
+                                blink::WebCryptoKeyUsageMask usages,
+                                blink::WebCryptoKey* key);
+
 // Creates a WebCrypto public key given an EVP_PKEY. This step includes
 // exporting the key to SPKI format, for use by serialization later.
-Status CreateWebCryptoPublicKey(
-    crypto::ScopedEVP_PKEY public_key,
-    const blink::WebCryptoKeyAlgorithm& algorithm,
-    bool extractable,
-    blink::WebCryptoKeyUsageMask usages,
-    blink::WebCryptoKey* key);
+Status CreateWebCryptoPublicKey(crypto::ScopedEVP_PKEY public_key,
+                                const blink::WebCryptoKeyAlgorithm& algorithm,
+                                bool extractable,
+                                blink::WebCryptoKeyUsageMask usages,
+                                blink::WebCryptoKey* key);
 
 // Creates a WebCrypto private key given an EVP_PKEY. This step includes
 // exporting the key to PKCS8 format, for use by serialization later.
-Status CreateWebCryptoPrivateKey(
-    crypto::ScopedEVP_PKEY private_key,
-    const blink::WebCryptoKeyAlgorithm& algorithm,
-    bool extractable,
-    blink::WebCryptoKeyUsageMask usages,
-    blink::WebCryptoKey* key);
+Status CreateWebCryptoPrivateKey(crypto::ScopedEVP_PKEY private_key,
+                                 const blink::WebCryptoKeyAlgorithm& algorithm,
+                                 bool extractable,
+                                 blink::WebCryptoKeyUsageMask usages,
+                                 blink::WebCryptoKey* key);
 
 // Imports SPKI bytes to an EVP_PKEY for a public key. The resulting asymmetric
 // key may be invalid, and should be verified using something like

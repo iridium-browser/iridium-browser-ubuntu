@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+#include <ctype.h>
 
 #include "talk/app/webrtc/jsepicecandidate.h"
 #include "talk/app/webrtc/jsepsessiondescription.h"
@@ -43,7 +44,6 @@
 #include "webrtc/p2p/base/constants.h"
 #include "webrtc/p2p/base/port.h"
 #include "talk/session/media/mediasession.h"
-#include "talk/session/media/mediasessionclient.h"
 #include "webrtc/base/common.h"
 #include "webrtc/base/logging.h"
 #include "webrtc/base/messagedigest.h"
@@ -457,7 +457,8 @@ static bool GetLine(const std::string& message,
   // where <type> MUST be exactly one case-significant character and
   // <value> is structured text whose format depends on <type>.
   // Whitespace MUST NOT be used on either side of the "=" sign.
-  if (cline[0] == kSdpDelimiterSpace ||
+  if (line->length() < 3 ||
+      !islower(cline[0]) ||
       cline[1] != kSdpDelimiterEqual ||
       cline[2] == kSdpDelimiterSpace) {
     *pos = line_begin;
@@ -1089,12 +1090,10 @@ bool ParseCandidate(const std::string& message, Candidate* candidate,
     }
   }
 
-  // Empty string as the candidate id and network name.
   const std::string id;
-  const std::string network_name;
   *candidate = Candidate(id, component_id, cricket::ProtoToString(protocol),
-      address, priority, username, password, candidate_type, network_name,
-      generation, foundation);
+                         address, priority, username, password, candidate_type,
+                         generation, foundation);
   candidate->set_related_address(related_address);
   candidate->set_tcptype(tcptype);
   return true;

@@ -17,6 +17,8 @@ source_set("test_support") {
     "expectations/expectation.h",
     "expectations/parser.cc",
     "expectations/parser.h",
+    "gtest_util.cc",
+    "gtest_util.h",
     "gtest_xml_util.cc",
     "gtest_xml_util.h",
     "histogram_tester.cc",
@@ -113,7 +115,7 @@ source_set("test_support") {
     "//base/third_party/dynamic_annotations",
     "//testing/gmock",
     "//testing/gtest",
-    "//third_party/libxml"
+    "//third_party/libxml",
   ]
 
   if (!is_posix) {

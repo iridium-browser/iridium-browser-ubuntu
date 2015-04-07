@@ -39,7 +39,6 @@
 <translation id="3883381313049582448">Utilizar palavra-passe gerada pelo Chromium</translation>
 <translation id="3549345495227188780">Introdução ao SO Chromium</translation>
 <translation id="1668054258064581266">Depois de remover a sua conta do Chromium, poderá ter de recarregar os separadores abertos para que as alterações tenham efeito.</translation>
-<translation id="6953661834318318668">Barra de Ferramentas do Chromium</translation>
 <translation id="4285930937574705105">A instalação falhou devido a um erro não especificado. Se o Chromium estiver em execução, feche-o e tente de novo.</translation>
 <translation id="1396446129537741364">O Chromium está a tentar mostrar palavras-passe.</translation>
 <translation id="8987477933582888019">Navegador de Internet</translation>
@@ -94,6 +93,7 @@
 <translation id="7473891865547856676">Não, obrigado</translation>
 <translation id="9191268552238695869">Um administrador instalou o Chromium neste sistema e está disponível para todos os utilizadores. O Chromium ao nível do sistema substituirá agora a instalação ao nível do utilizador.</translation>
 <translation id="3509308970982693815">Feche todas as janelas do Chromium e tente novamente.</translation>
+<translation id="8851136666856101339">main</translation>
 <translation id="4077262827416206768">Feche todas as janelas do Chromium e reinicie o Chromium para que esta alteração seja aplicada.</translation>
 <translation id="6475912303565314141">Também controla a página apresentada quando inicia o Chromium.</translation>
 <translation id="1725059042853530269">O ficheiro <ph name="FILE_NAME"/> pode prejudicar a sua experiência de navegação, pelo que foi bloqueado pelo Chromium.</translation>
@@ -157,6 +157,7 @@
 <translation id="5909170354645388250">Não utilizado no Chromium. Marcador de posição para manter mapas de recursos em sincronização. Prevê um argumento: $1.</translation>
 <translation id="1144202035120576837">O <ph name="SITE"/> normalmente utiliza a encriptação para proteger as suas informações. Quando o Chromium tentou ligar-se a <ph name="SITE"/> desta vez, o Website devolveu credenciais
 invulgares e incorretas. É possível que um utilizador mal intencionado esteja a tentar simular ser <ph name="SITE"/> ou que um ecrã de início de sessão Wi-Fi tenha interrompido a ligação. As suas informações ainda estão seguras, porque o Chromium interrompeu a ligação antes de qualquer troca de dados.</translation>
+<translation id="2316129865977710310">Não, obrigado</translation>
 <translation id="7937630085815544518">Iniciou sessão no Chromium com a conta <ph name="USER_EMAIL_ADDRESS"/>. Utilize a mesma conta para iniciar sessão novamente.</translation>
 <translation id="2685838254101182273">O Chromium já não se atualiza nem suporta mais esta versão do seu sistema operativo.</translation>
 <translation id="8684913864886094367">O Chromium não foi corretamente encerrado.</translation>
@@ -170,6 +171,7 @@ invulgares e incorretas. É possível que um utilizador mal intencionado esteja 
 <translation id="2648074677641340862">Ocorreu um erro no sistema operativo durante a instalação. Transfira novamente o Chromium.</translation>
 <translation id="5942520288919337908"><ph name="EXTENSION_NAME"/> foi adicionada ao Chromium.</translation>
 <translation id="549669000822060376">Aguarde até que o Chromium instale as atualizações do sistema mais recentes.</translation>
+<translation id="1240763998429950591">Não foi possível atualizar o Chromium para a versão mais recente, pelo que não está a beneficiar das funcionalidades e das correções de segurança novas. Tem de atualizar o Chromium.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">envia uma palavra e o contexto à Pesquisa Google, devolvendo definições, imagens, resultados de pesquisa e outras informações.</translation>
 <translation id="4559775032954821361">Aceda ao
@@ -207,6 +209,7 @@ Algumas funcionalidades podem não estar disponíveis. Especifique um diretório
 <translation id="2966088006374919794">O Chromium precisa de iniciar uma aplicação externa para processar links de <ph name="SCHEME"/>. O link solicitado é <ph name="PROTOLINK"/>.</translation>
 <translation id="2558235863893655150">Pretende que o Chromium guarde a sua palavra-passe?</translation>
 <translation id="6485906693002546646">Está a utilizar <ph name="PROFILE_EMAIL"/> para sincronizar os seus conteúdos do Chromium. Para atualizar a preferência de sincronização ou utilizar o Chromium sem uma Conta Google, aceda a <ph name="SETTINGS_LINK"/>.</translation>
+<translation id="705851970750939768">Atualizar o Chromium</translation>
 <translation id="5772805321386874569">(é necessário <ph name="BEGIN_BUTTON"/>reiniciar<ph name="END_BUTTON"/> o Chromium)</translation>
 <translation id="1688750314291223739">Configure a Sincronização para guardar as suas funcionalidades personalizadas do navegador para a Web e aceder às mesmas a partir do Chromium em qualquer computador.</translation>
 <translation id="8610831143142469229">Permita que o Chromium aceda à rede nas definições da sua firewall ou antivírus.</translation>

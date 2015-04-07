@@ -290,12 +290,6 @@ class CONTENT_EXPORT RenderViewHostImpl
   // Creates a full screen RenderWidget.
   void CreateNewFullscreenWidget(int route_id);
 
-#if defined(ENABLE_BROWSER_CDMS)
-  MediaWebContentsObserver* media_web_contents_observer() {
-    return media_web_contents_observer_.get();
-  }
-#endif
-
   int main_frame_routing_id() const {
     return main_frame_routing_id_;
   }
@@ -368,7 +362,8 @@ class CONTENT_EXPORT RenderViewHostImpl
   void OnUpdateDragCursor(blink::WebDragOperation drag_operation);
   void OnTargetDropACK();
   void OnTakeFocus(bool reverse);
-  void OnFocusedNodeChanged(bool is_editable_node);
+  void OnFocusedNodeChanged(bool is_editable_node,
+                            const gfx::Rect& node_bounds_in_viewport);
   void OnClosePageACK();
   void OnDidZoomURL(double zoom_level, const GURL& url);
   void OnRunFileChooser(const FileChooserParams& params);
@@ -388,7 +383,15 @@ class CONTENT_EXPORT RenderViewHostImpl
   // to fire.
   static const int64 kUnloadTimeoutMS;
 
+  // Returns whether the current RenderProcessHost has read access to the files
+  // reported in |state|.
   bool CanAccessFilesOfPageState(const PageState& state) const;
+
+  // Grants the current RenderProcessHost read access to any file listed in
+  // |validated_state|.  It is important that the PageState has been validated
+  // upon receipt from the renderer process to prevent it from forging access to
+  // files without the user's consent.
+  void GrantFileAccessFromPageState(const PageState& validated_state);
 
   // The number of RenderFrameHosts which have a reference to this RVH.
   int frames_ref_count_;
@@ -447,11 +450,6 @@ class CONTENT_EXPORT RenderViewHostImpl
 
   // Set to true if we requested the on screen keyboard to be displayed.
   bool virtual_keyboard_requested_;
-
-#if defined(ENABLE_BROWSER_CDMS)
-  // Manages all the media player and CDM managers and forwards IPCs to them.
-  scoped_ptr<MediaWebContentsObserver> media_web_contents_observer_;
-#endif
 
   // True if the current focused element is editable.
   bool is_focused_element_editable_;

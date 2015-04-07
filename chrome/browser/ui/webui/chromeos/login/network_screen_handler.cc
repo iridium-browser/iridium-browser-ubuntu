@@ -6,16 +6,19 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/memory/weak_ptr.h"
+#include "base/command_line.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_runner_util.h"
+#include "base/threading/worker_pool.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
-#include "chrome/browser/chromeos/base/locale_util.h"
-#include "chrome/browser/chromeos/customization_document.h"
+#include "chrome/browser/chromeos/customization/customization_document.h"
 #include "chrome/browser/chromeos/idle_detector.h"
 #include "chrome/browser/chromeos/login/screens/core_oobe_actor.h"
+#include "chrome/browser/chromeos/login/screens/network_model.h"
 #include "chrome/browser/chromeos/login/ui/input_events_blocker.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/chromeos/system/timezone_util.h"
@@ -23,40 +26,19 @@
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/ime/extension_ime_util.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state_handler.h"
+#include "components/user_manager/user_manager.h"
+#include "content/public/browser/browser_thread.h"
+#include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
 
 namespace {
-
 const char kJsScreenPath[] = "login.NetworkScreen";
-
-// JS API callbacks names.
-const char kJsApiNetworkOnExit[] = "networkOnExit";
-const char kJsApiNetworkOnLanguageChanged[] = "networkOnLanguageChanged";
-const char kJsApiNetworkOnInputMethodChanged[] = "networkOnInputMethodChanged";
-const char kJsApiNetworkOnTimezoneChanged[] = "networkOnTimezoneChanged";
-
-// For "UI Language" drop-down menu at OOBE screen we need to decide which
-// entry to mark "selected". If user has just selected "requested_locale",
-// but "loaded_locale" was actually loaded, we mark original user choice
-// "selected" only if loaded_locale is a backup for "requested_locale".
-std::string CalculateSelectedLanguage(const std::string& requested_locale,
-                                      const std::string& loaded_locale) {
-  std::string resolved_locale;
-  if (!l10n_util::CheckAndResolveLocale(requested_locale, &resolved_locale))
-    return loaded_locale;
-
-  if (resolved_locale == loaded_locale)
-    return requested_locale;
-
-  return loaded_locale;
-}
-
 }  // namespace
 
 namespace chromeos {
@@ -65,32 +47,18 @@ namespace chromeos {
 
 NetworkScreenHandler::NetworkScreenHandler(CoreOobeActor* core_oobe_actor)
     : BaseScreenHandler(kJsScreenPath),
-      screen_(NULL),
       core_oobe_actor_(core_oobe_actor),
-      is_continue_enabled_(false),
-      show_on_init_(false),
-      weak_ptr_factory_(this) {
+      model_(nullptr),
+      show_on_init_(false) {
   DCHECK(core_oobe_actor_);
-
-  input_method::InputMethodManager* manager =
-      input_method::InputMethodManager::Get();
-  manager->AddObserver(this);
 }
 
 NetworkScreenHandler::~NetworkScreenHandler() {
-  if (screen_)
-    screen_->OnActorDestroyed(this);
-
-  input_method::InputMethodManager* manager =
-      input_method::InputMethodManager::Get();
-  manager->RemoveObserver(this);
+  if (model_)
+    model_->OnViewDestroyed(this);
 }
 
 // NetworkScreenHandler, NetworkScreenActor implementation: --------------------
-
-void NetworkScreenHandler::SetDelegate(NetworkScreenActor::Delegate* screen) {
-  screen_ = screen;
-}
 
 void NetworkScreenHandler::PrepareToShow() {
 }
@@ -101,19 +69,16 @@ void NetworkScreenHandler::Show() {
     return;
   }
 
-  // Here we should handle default locales, for which we do not have UI
-  // resources. This would load fallback, but properly show "selected" locale
-  // in the UI.
-  if (selected_language_code_.empty()) {
-    const StartupCustomizationDocument* startup_manifest =
-        StartupCustomizationDocument::GetInstance();
-    SetApplicationLocale(startup_manifest->initial_locale_default());
-  }
-
   PrefService* prefs = g_browser_process->local_state();
   if (prefs->GetBoolean(prefs::kFactoryResetRequested)) {
     if (core_oobe_actor_)
       core_oobe_actor_->ShowDeviceResetScreen();
+
+    return;
+  } else if (prefs->GetBoolean(prefs::kDebuggingFeaturesRequested)) {
+    if (core_oobe_actor_)
+      core_oobe_actor_->ShowEnableDebuggingScreen();
+
     return;
   }
 
@@ -123,11 +88,26 @@ void NetworkScreenHandler::Show() {
   handler->SetTechnologyEnabled(NetworkTypePattern::NonVirtual(),
                                 true,
                                 chromeos::network_handler::ErrorCallback());
-  ShowScreen(OobeUI::kScreenOobeNetwork, NULL);
+
+  base::DictionaryValue network_screen_params;
+  network_screen_params.SetBoolean("isDeveloperMode",
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kSystemDevMode));
+  ShowScreen(OobeUI::kScreenOobeNetwork, &network_screen_params);
   core_oobe_actor_->InitDemoModeDetection();
 }
 
 void NetworkScreenHandler::Hide() {
+}
+
+void NetworkScreenHandler::Bind(NetworkModel& model) {
+  model_ = &model;
+  BaseScreenHandler::SetBaseScreen(model_);
+}
+
+void NetworkScreenHandler::Unbind() {
+  model_ = nullptr;
+  BaseScreenHandler::SetBaseScreen(nullptr);
 }
 
 void NetworkScreenHandler::ShowError(const base::string16& message) {
@@ -139,15 +119,20 @@ void NetworkScreenHandler::ClearErrors() {
     core_oobe_actor_->ClearErrors();
 }
 
+void NetworkScreenHandler::StopDemoModeDetection() {
+  core_oobe_actor_->StopDemoModeDetection();
+}
+
 void NetworkScreenHandler::ShowConnectingStatus(
     bool connecting,
     const base::string16& network_id) {
 }
 
-void NetworkScreenHandler::EnableContinue(bool enabled) {
-  is_continue_enabled_ = enabled;
-  if (page_is_ready())
-    CallJS("enableContinueButton", enabled);
+void NetworkScreenHandler::ReloadLocalizedContent() {
+  base::DictionaryValue localized_strings;
+  static_cast<OobeUI*>(web_ui()->GetController())
+      ->GetLocalizedStrings(&localized_strings);
+  core_oobe_actor_->ReloadContent(localized_strings);
 }
 
 // NetworkScreenHandler, BaseScreenHandler implementation: --------------------
@@ -168,179 +153,75 @@ void NetworkScreenHandler::DeclareLocalizedValues(
   builder->Add("selectTimezone", IDS_OPTIONS_SETTINGS_TIMEZONE_DESCRIPTION);
   builder->Add("proxySettings", IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON);
   builder->Add("continueButton", IDS_NETWORK_SELECTION_CONTINUE_BUTTON);
+  builder->Add("debuggingFeaturesLink", IDS_NETWORK_ENABLE_DEV_FEATURES_LINK);
 }
 
 void NetworkScreenHandler::GetAdditionalParameters(
     base::DictionaryValue* dict) {
   const std::string application_locale =
       g_browser_process->GetApplicationLocale();
-  const std::string selected_language = selected_language_code_.empty() ?
-      application_locale : selected_language_code_;
   const std::string selected_input_method =
       input_method::InputMethodManager::Get()
           ->GetActiveIMEState()
           ->GetCurrentInputMethod()
           .id();
 
-  dict->Set("languageList",
-            GetUILanguageList(NULL, selected_language).release());
-  dict->Set("inputMethodsList",
-            GetAndActivateLoginKeyboardLayouts(
-                application_locale, selected_input_method).release());
+  scoped_ptr<base::ListValue> language_list;
+  if (model_) {
+    if (model_->GetLanguageList() &&
+        model_->GetLanguageListLocale() == application_locale) {
+      language_list.reset(model_->GetLanguageList()->DeepCopy());
+    } else {
+      model_->UpdateLanguageList();
+    }
+  }
+
+  if (!language_list.get())
+    language_list.reset(GetMinimalUILanguageList().release());
+
+  // GetAdditionalParameters() is called when OOBE language is updated.
+  // This happens in two diferent cases:
+  //
+  // 1) User selects new locale on OOBE screen. We need to sync active input
+  // methods with locale, so EnableLoginLayouts() is needed.
+  //
+  // 2) This is signin to public session. User has selected some locale & input
+  // method on "Public Session User POD". After "Login" button is pressed,
+  // new user session is created, locale & input method are changed (both
+  // asynchronously).
+  // But after public user session is started, "Terms of Service" dialog is
+  // shown. It is a part of OOBE UI screens, so it initiates reload of UI
+  // strings in new locale. It also happens asynchronously, that leads to race
+  // between "locale change", "input method change" and
+  // "EnableLoginLayouts()".  This way EnableLoginLayouts() happens after user
+  // input method has been changed, resetting input method to hardware default.
+  //
+  // So we need to disable activation of login layouts if we are already in
+  // active user session.
+  //
+  const bool enable_layouts =
+      !user_manager::UserManager::Get()->IsUserLoggedIn();
+
+  dict->Set("languageList", language_list.release());
+  dict->Set(
+      "inputMethodsList",
+      GetAndActivateLoginKeyboardLayouts(
+          application_locale, selected_input_method, enable_layouts).release());
   dict->Set("timezoneList", GetTimezoneList());
 }
 
 void NetworkScreenHandler::Initialize() {
-  EnableContinue(is_continue_enabled_);
   if (show_on_init_) {
     show_on_init_ = false;
     Show();
   }
 
-  timezone_subscription_ = CrosSettings::Get()->AddSettingsObserver(
-      kSystemTimezone,
-      base::Bind(&NetworkScreenHandler::OnSystemTimezoneChanged,
-                 base::Unretained(this)));
-  OnSystemTimezoneChanged();
+  // Reload localized strings if they are already resolved.
+  if (model_ && model_->GetLanguageList())
+    ReloadLocalizedContent();
 }
-
-// NetworkScreenHandler, WebUIMessageHandler implementation: -------------------
-
-void NetworkScreenHandler::RegisterMessages() {
-  AddCallback(kJsApiNetworkOnExit, &NetworkScreenHandler::HandleOnExit);
-  AddCallback(kJsApiNetworkOnLanguageChanged,
-              &NetworkScreenHandler::SetApplicationLocale);
-  AddCallback(kJsApiNetworkOnInputMethodChanged,
-              &NetworkScreenHandler::SetInputMethod);
-  AddCallback(kJsApiNetworkOnTimezoneChanged,
-              &NetworkScreenHandler::SetTimezone);
-}
-
 
 // NetworkScreenHandler, private: ----------------------------------------------
-
-void NetworkScreenHandler::HandleOnExit() {
-  core_oobe_actor_->StopDemoModeDetection();
-  ClearErrors();
-  if (screen_)
-    screen_->OnContinuePressed();
-}
-
-struct NetworkScreenHandlerOnLanguageChangedCallbackData {
-  explicit NetworkScreenHandlerOnLanguageChangedCallbackData(
-      const base::WeakPtr<NetworkScreenHandler>& handler)
-      : handler(handler) {}
-
-  base::WeakPtr<NetworkScreenHandler> handler;
-
-  // Block UI while resource bundle is being reloaded.
-  chromeos::InputEventsBlocker input_events_blocker;
-};
-
-// static
-void NetworkScreenHandler::OnLanguageChangedCallback(
-    scoped_ptr<NetworkScreenHandlerOnLanguageChangedCallbackData> context,
-    const std::string& requested_locale,
-    const std::string& loaded_locale,
-    const bool success) {
-  if (!context || !context->handler)
-    return;
-
-  NetworkScreenHandler* const self = context->handler.get();
-
-  if (success) {
-    if (requested_locale == loaded_locale) {
-      self->selected_language_code_ = requested_locale;
-    } else {
-      self->selected_language_code_ =
-          CalculateSelectedLanguage(requested_locale, loaded_locale);
-    }
-  } else {
-    self->selected_language_code_ = loaded_locale;
-  }
-
-  self->ReloadLocalizedContent();
-
-  // We still do not have device owner, so owner settings are not applied.
-  // But Guest session can be started before owner is created, so we need to
-  // save locale settings directly here.
-  g_browser_process->local_state()->SetString(prefs::kApplicationLocale,
-                                              self->selected_language_code_);
-
-  AccessibilityManager::Get()->OnLocaleChanged();
-}
-
-std::string NetworkScreenHandler::GetApplicationLocale() const {
-  return locale_;
-}
-
-std::string NetworkScreenHandler::GetInputMethod() const {
-  return input_method_;
-}
-
-std::string NetworkScreenHandler::GetTimezone() const {
-  return timezone_;
-}
-
-void NetworkScreenHandler::SetApplicationLocale(const std::string& locale) {
-  const std::string app_locale = g_browser_process->GetApplicationLocale();
-  if (app_locale == locale)
-    return;
-
-  locale_ = locale;
-  base::WeakPtr<NetworkScreenHandler> weak_self =
-      weak_ptr_factory_.GetWeakPtr();
-  scoped_ptr<NetworkScreenHandlerOnLanguageChangedCallbackData> callback_data(
-      new NetworkScreenHandlerOnLanguageChangedCallbackData(weak_self));
-  scoped_ptr<locale_util::SwitchLanguageCallback> callback(
-      new locale_util::SwitchLanguageCallback(
-          base::Bind(&NetworkScreenHandler::OnLanguageChangedCallback,
-                     base::Passed(callback_data.Pass()))));
-  locale_util::SwitchLanguage(locale,
-                              true /* enableLocaleKeyboardLayouts */,
-                              true /* login_layouts_only */,
-                              callback.Pass());
-}
-
-void NetworkScreenHandler::SetInputMethod(const std::string& input_method) {
-  input_method_ = input_method;
-  input_method::InputMethodManager::Get()
-      ->GetActiveIMEState()
-      ->ChangeInputMethod(input_method, false /* show_message */);
-}
-
-void NetworkScreenHandler::SetTimezone(
-    const std::string& timezone_id) {
-  std::string current_timezone_id;
-  CrosSettings::Get()->GetString(kSystemTimezone, &current_timezone_id);
-  if (current_timezone_id == timezone_id)
-    return;
-
-  timezone_ = timezone_id;
-  CrosSettings::Get()->SetString(kSystemTimezone, timezone_id);
-}
-
-void NetworkScreenHandler::OnSystemTimezoneChanged() {
-  std::string current_timezone_id;
-  CrosSettings::Get()->GetString(kSystemTimezone, &current_timezone_id);
-  CallJS("setTimezone", current_timezone_id);
-}
-
-void NetworkScreenHandler::InputMethodChanged(
-    input_method::InputMethodManager* manager, bool show_message) {
-  CallJS("setInputMethod",
-         manager->GetActiveIMEState()->GetCurrentInputMethod().id());
-}
-
-void NetworkScreenHandler::ReloadLocalizedContent() {
-  base::DictionaryValue localized_strings;
-  static_cast<OobeUI*>(web_ui()->GetController())
-      ->GetLocalizedStrings(&localized_strings);
-  core_oobe_actor_->ReloadContent(localized_strings);
-
-  // Buttons are recreated, updated "Continue" button state.
-  EnableContinue(is_continue_enabled_);
-}
 
 // static
 base::ListValue* NetworkScreenHandler::GetTimezoneList() {

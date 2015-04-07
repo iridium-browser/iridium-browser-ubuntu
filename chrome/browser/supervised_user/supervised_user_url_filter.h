@@ -12,7 +12,6 @@
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/values.h"
@@ -51,7 +50,7 @@ class SupervisedUserURLFilter
     BLOCK,
     HISTOGRAM_BOUNDING_VALUE
   };
-  enum FilteringBehaviorSource {
+  enum FilteringBehaviorReason {
     DEFAULT,
     ASYNC_CHECKER,
     BLACKLIST,
@@ -59,7 +58,7 @@ class SupervisedUserURLFilter
   };
 
   typedef base::Callback<void(FilteringBehavior,
-                              FilteringBehaviorSource,
+                              FilteringBehaviorReason,
                               bool /* uncertain */)>
       FilteringBehaviorCallback;
 
@@ -73,6 +72,10 @@ class SupervisedUserURLFilter
   SupervisedUserURLFilter();
 
   static FilteringBehavior BehaviorFromInt(int behavior_value);
+
+  static int GetBlockMessageID(FilteringBehaviorReason reason);
+
+  static bool ReasonIsAutomatic(FilteringBehaviorReason reason);
 
   // Normalizes a URL for matching purposes.
   static GURL Normalize(const GURL& url);
@@ -124,7 +127,8 @@ class SupervisedUserURLFilter
 
   // Asynchronously loads the specified site lists and updates the
   // filter to recognize each site on them.
-  void LoadWhitelists(ScopedVector<SupervisedUserSiteList> site_lists);
+  void LoadWhitelists(
+      const std::vector<scoped_refptr<SupervisedUserSiteList> >& site_lists);
 
   // Sets the static blacklist of blocked hosts.
   void SetBlacklist(SupervisedUserBlacklist* blacklist);
@@ -144,8 +148,7 @@ class SupervisedUserURLFilter
   // Initializes the experimental asynchronous checker.
   // |cx| is the identifier of the Custom Search Engine to use.
   void InitAsyncURLChecker(net::URLRequestContextGetter* context,
-                           const std::string& cx,
-                           const std::string& api_key);
+                           const std::string& cx);
   // Returns whether the asynchronous checker is set up.
   bool HasAsyncURLChecker() const;
 
@@ -159,7 +162,7 @@ class SupervisedUserURLFilter
   void SetContents(scoped_ptr<Contents> url_matcher);
 
   FilteringBehavior GetFilteringBehaviorForURL(
-      const GURL& url, bool manual_only, FilteringBehaviorSource* source) const;
+      const GURL& url, bool manual_only, FilteringBehaviorReason* reason) const;
 
   void CheckCallback(const FilteringBehaviorCallback& callback,
                      const GURL& url,

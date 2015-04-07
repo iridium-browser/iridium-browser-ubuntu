@@ -56,15 +56,13 @@ class AccountsOptionsTest : public LoginManagerTest {
     LoginManagerTest::TearDownOnMainThread();
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     LoginManagerTest::SetUpCommandLine(command_line);
   }
 
  protected:
   void CheckAccountsUI(const user_manager::User* user, bool is_owner) {
     Profile* profile = ProfileHelper::Get()->GetProfileByUserUnsafe(user);
-    profile->GetPrefs()->SetString(prefs::kGoogleServicesUsername,
-                                   user->email());
 
     ui_test_utils::BrowserAddedObserver observer;
     Browser* browser = CreateBrowser(profile);

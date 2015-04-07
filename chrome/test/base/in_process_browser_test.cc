@@ -153,7 +153,7 @@ void InProcessBrowserTest::SetUp() {
   // Browser tests will create their own g_browser_process later.
   DCHECK(!g_browser_process);
 
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
   // Auto-reload breaks many browser tests, which assume error pages won't be
   // reloaded out from under them. Tests that expect or desire this behavior can
@@ -205,7 +205,8 @@ void InProcessBrowserTest::SetUp() {
   // Although Ash officially is only supported for users on Win7+, we still run
   // ash_unittests on Vista builders, so we still need to initialize COM.
   if (version >= base::win::VERSION_VISTA &&
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests)) {
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests)) {
     com_initializer_.reset(new base::win::ScopedCOMInitializer());
     ui::win::CreateATLModuleIfNeeded();
     if (version >= base::win::VERSION_WIN8)
@@ -216,7 +217,8 @@ void InProcessBrowserTest::SetUp() {
   BrowserTestBase::SetUp();
 }
 
-void InProcessBrowserTest::PrepareTestCommandLine(CommandLine* command_line) {
+void InProcessBrowserTest::PrepareTestCommandLine(
+    base::CommandLine* command_line) {
   // Propagate commandline settings from test_launcher_utils.
   test_launcher_utils::PrepareBrowserCommandLineForTests(command_line);
 
@@ -259,7 +261,7 @@ void InProcessBrowserTest::PrepareTestCommandLine(CommandLine* command_line) {
 }
 
 bool InProcessBrowserTest::CreateUserDataDirectory() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   base::FilePath user_data_dir =
       command_line->GetSwitchValuePath(switches::kUserDataDir);
   if (user_data_dir.empty()) {
@@ -283,24 +285,31 @@ void InProcessBrowserTest::TearDown() {
   BrowserTestBase::TearDown();
 }
 
+// TODO(alexmos): This function should expose success of the underlying
+// navigation to tests, which should make sure navigations succeed when
+// appropriate. See https://crbug.com/425335
 void InProcessBrowserTest::AddTabAtIndexToBrowser(
     Browser* browser,
     int index,
     const GURL& url,
-    ui::PageTransition transition) {
+    ui::PageTransition transition,
+    bool check_navigation_success) {
   chrome::NavigateParams params(browser, url, transition);
   params.tabstrip_index = index;
   params.disposition = NEW_FOREGROUND_TAB;
   chrome::Navigate(&params);
 
-  content::WaitForLoadStop(params.target_contents);
+  if (check_navigation_success)
+    content::WaitForLoadStop(params.target_contents);
+  else
+    content::WaitForLoadStopWithoutSuccessCheck(params.target_contents);
 }
 
 void InProcessBrowserTest::AddTabAtIndex(
     int index,
     const GURL& url,
     ui::PageTransition transition) {
-  AddTabAtIndexToBrowser(browser(), index, url, transition);
+  AddTabAtIndexToBrowser(browser(), index, url, transition, true);
 }
 
 bool InProcessBrowserTest::SetUpUserDataDirectory() {
@@ -357,10 +366,11 @@ void InProcessBrowserTest::AddBlankTabAndShow(Browser* browser) {
 }
 
 #if !defined(OS_MACOSX)
-CommandLine InProcessBrowserTest::GetCommandLineForRelaunch() {
-  CommandLine new_command_line(CommandLine::ForCurrentProcess()->GetProgram());
-  CommandLine::SwitchMap switches =
-      CommandLine::ForCurrentProcess()->GetSwitches();
+base::CommandLine InProcessBrowserTest::GetCommandLineForRelaunch() {
+  base::CommandLine new_command_line(
+      base::CommandLine::ForCurrentProcess()->GetProgram());
+  base::CommandLine::SwitchMap switches =
+      base::CommandLine::ForCurrentProcess()->GetSwitches();
   switches.erase(switches::kUserDataDir);
   switches.erase(content::kSingleProcessTestsFlag);
   switches.erase(switches::kSingleProcess);
@@ -370,8 +380,8 @@ CommandLine InProcessBrowserTest::GetCommandLineForRelaunch() {
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   new_command_line.AppendSwitchPath(switches::kUserDataDir, user_data_dir);
 
-  for (CommandLine::SwitchMap::const_iterator iter = switches.begin();
-        iter != switches.end(); ++iter) {
+  for (base::CommandLine::SwitchMap::const_iterator iter = switches.begin();
+       iter != switches.end(); ++iter) {
     new_command_line.AppendSwitchNative((*iter).first, (*iter).second);
   }
   return new_command_line;

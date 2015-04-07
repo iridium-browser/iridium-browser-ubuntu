@@ -26,10 +26,9 @@
 #include "core/rendering/RenderMenuList.h"
 
 #include "core/HTMLNames.h"
-#include "core/accessibility/AXMenuList.h"
-#include "core/accessibility/AXObjectCache.h"
 #include "core/css/CSSFontSelector.h"
 #include "core/css/resolver/StyleResolver.h"
+#include "core/dom/AXObjectCache.h"
 #include "core/dom/NodeRenderStyle.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
@@ -178,7 +177,6 @@ void RenderMenuList::updateOptionsWidth()
     float maxOptionWidth = 0;
     const WillBeHeapVector<RawPtrWillBeMember<HTMLElement> >& listItems = selectElement()->listItems();
     int size = listItems.size();
-    FontCachePurgePreventer fontCachePurgePreventer;
 
     for (int i = 0; i < size; ++i) {
         HTMLElement* element = listItems[i];
@@ -321,15 +319,12 @@ LayoutRect RenderMenuList::controlClipRect(const LayoutPoint& additionalOffset) 
     // Clip to the intersection of the content box and the content box for the inner box
     // This will leave room for the arrows which sit in the inner box padding,
     // and if the inner box ever spills out of the outer box, that will get clipped too.
-    LayoutRect outerBox(additionalOffset.x() + borderLeft() + paddingLeft(),
-                   additionalOffset.y() + borderTop() + paddingTop(),
-                   contentWidth(),
-                   contentHeight());
+    LayoutRect outerBox = contentBoxRect();
+    outerBox.moveBy(additionalOffset);
 
-    LayoutRect innerBox(additionalOffset.x() + m_innerBlock->x() + m_innerBlock->paddingLeft(),
-                   additionalOffset.y() + m_innerBlock->y() + m_innerBlock->paddingTop(),
-                   m_innerBlock->contentWidth(),
-                   m_innerBlock->contentHeight());
+    LayoutRect innerBox(additionalOffset + m_innerBlock->location()
+        + LayoutSize(m_innerBlock->paddingLeft(), m_innerBlock->paddingTop())
+        , m_innerBlock->contentSize());
 
     return intersection(outerBox, innerBox);
 }

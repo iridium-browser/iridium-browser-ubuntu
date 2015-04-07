@@ -28,7 +28,9 @@ NinjaTargetWriter::NinjaTargetWriter(const Target* target,
     : settings_(target->settings()),
       target_(target),
       out_(out),
-      path_output_(settings_->build_settings()->build_dir(), ESCAPE_NINJA) {
+      path_output_(settings_->build_settings()->build_dir(),
+                   settings_->build_settings()->root_path_utf8(),
+                   ESCAPE_NINJA) {
 }
 
 NinjaTargetWriter::~NinjaTargetWriter() {
@@ -174,8 +176,9 @@ OutputFile NinjaTargetWriter::WriteInputDepsStampAndGetDep(
   // optimal thing in all cases.
 
   OutputFile input_stamp_file(
-      RebaseSourceAbsolutePath(GetTargetOutputDir(target_).value(),
-                               settings_->build_settings()->build_dir()));
+      RebasePath(GetTargetOutputDir(target_).value(),
+                 settings_->build_settings()->build_dir(),
+                 settings_->build_settings()->root_path_utf8()));
   input_stamp_file.value().append(target_->label().name());
   input_stamp_file.value().append(".inputdeps.stamp");
 
@@ -211,10 +214,8 @@ OutputFile NinjaTargetWriter::WriteInputDepsStampAndGetDep(
 
   // Hard dependencies that are direct or indirect dependencies.
   const std::set<const Target*>& hard_deps = target_->recursive_hard_deps();
-  for (std::set<const Target*>::const_iterator i = hard_deps.begin();
-       i != hard_deps.end(); ++i) {
-    unique_deps.insert(*i);
-  }
+  for (const auto& dep : hard_deps)
+    unique_deps.insert(dep);
 
   // Extra hard dependencies passed in.
   unique_deps.insert(extra_hard_deps.begin(), extra_hard_deps.end());
@@ -227,11 +228,10 @@ OutputFile NinjaTargetWriter::WriteInputDepsStampAndGetDep(
   for (size_t i = 0; i < toolchain_deps.size(); i++)
     unique_deps.insert(toolchain_deps[i].ptr);
 
-  for (std::set<const Target*>::const_iterator i = unique_deps.begin();
-       i != unique_deps.end(); ++i) {
-    DCHECK(!(*i)->dependency_output_file().value().empty());
+  for (const auto& dep : unique_deps) {
+    DCHECK(!dep->dependency_output_file().value().empty());
     out_ << " ";
-    path_output_.WriteFile(out_, (*i)->dependency_output_file());
+    path_output_.WriteFile(out_, dep->dependency_output_file());
   }
 
   out_ << "\n";

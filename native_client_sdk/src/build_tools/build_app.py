@@ -9,8 +9,8 @@ import os
 import re
 import sys
 
-if sys.version_info < (2, 6, 0):
-  sys.stderr.write("python 2.6 or later is required run this script\n")
+if sys.version_info < (2, 7, 0):
+  sys.stderr.write("python 2.7 or later is required run this script\n")
   sys.exit(1)
 
 import buildbot_common
@@ -90,7 +90,7 @@ def main(args):
   except ImportError:
     pass
 
-  options, args = parser.parse_args(args[1:])
+  options, args = parser.parse_args(args)
 
   if options.channel:
     if options.channel not in ('Dev', 'Beta'):
@@ -181,4 +181,4 @@ def main(args):
 
 
 if __name__ == '__main__':
-  sys.exit(main(sys.argv))
+  sys.exit(main(sys.argv[1:]))

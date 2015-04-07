@@ -14,6 +14,8 @@
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "webkit/common/gpu/grcontext_for_webgraphicscontext3d.h"
 
+using gpu_blink::WebGraphicsContext3DInProcessCommandBufferImpl;
+
 namespace webkit {
 namespace gpu {
 
@@ -102,7 +104,8 @@ bool ContextProviderInProcess::BindToCurrentThread() {
 
   std::string unique_context_name =
       base::StringPrintf("%s-%p", debug_name_.c_str(), context3d_.get());
-  context3d_->pushGroupMarkerEXT(unique_context_name.c_str());
+  context3d_->traceBeginCHROMIUM("gpu_toplevel",
+                                 unique_context_name.c_str());
 
   lost_context_callback_proxy_.reset(new LostContextCallbackProxy(this));
   return true;
@@ -151,8 +154,7 @@ class GrContext* ContextProviderInProcess::GrContext() {
   if (gr_context_)
     return gr_context_->get();
 
-  gr_context_.reset(
-      new webkit::gpu::GrContextForWebGraphicsContext3D(context3d_.get()));
+  gr_context_.reset(new GrContextForWebGraphicsContext3D(context3d_.get()));
   return gr_context_->get();
 }
 

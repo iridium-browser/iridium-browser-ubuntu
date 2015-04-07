@@ -44,15 +44,11 @@ class PrerenderTabHelper
     EVENT_MAX_VALUE
   };
 
-  static void CreateForWebContentsWithPasswordManager(
-      content::WebContents* web_contents,
-      password_manager::PasswordManager* password_manager);
-
   ~PrerenderTabHelper() override;
 
   // content::WebContentsObserver implementation.
   void DidGetRedirectForResourceRequest(
-      content::RenderViewHost* render_view_host,
+      content::RenderFrameHost* render_frame_host,
       const content::ResourceRedirectDetails& details) override;
   void DidStopLoading(content::RenderViewHost* render_view_host) override;
   void DidStartProvisionalLoadForFrame(
@@ -79,8 +75,7 @@ class PrerenderTabHelper
   void WouldHavePrerenderedNextLoad(Origin origin);
 
  private:
-  PrerenderTabHelper(content::WebContents* web_contents,
-                     password_manager::PasswordManager* password_manager);
+  explicit PrerenderTabHelper(content::WebContents* web_contents);
   friend class content::WebContentsUserData<PrerenderTabHelper>;
 
   void RecordEvent(Event event) const;

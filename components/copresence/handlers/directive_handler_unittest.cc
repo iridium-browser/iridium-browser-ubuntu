@@ -2,10 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "components/copresence/handlers/directive_handler.h"
+#include <string>
+#include <vector>
 
+#include "base/bind.h"
 #include "base/time/time.h"
 #include "components/copresence/handlers/audio/audio_directive_handler.h"
+#include "components/copresence/handlers/directive_handler_impl.h"
 #include "components/copresence/proto/data.pb.h"
 #include "components/copresence/test/stub_whispernet_client.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -23,10 +26,12 @@ const int64 kDefaultTtl = 600000;  // 10 minutes
 
 namespace copresence {
 
-Directive CreateDirective(const std::string& publish_id,
-                          const std::string& subscribe_id,
-                          const std::string& token,
-                          int64 ttl_ms) {
+void IgnoreDirectiveUpdates(const std::vector<Directive>& /* directives */) {}
+
+const Directive CreateDirective(const std::string& publish_id,
+                                const std::string& subscribe_id,
+                                const std::string& token,
+                                int64 ttl_ms) {
   Directive directive;
   directive.set_instruction_type(TOKEN);
   directive.set_published_message_id(publish_id);
@@ -41,9 +46,9 @@ Directive CreateDirective(const std::string& publish_id,
   return directive;
 }
 
-Directive CreateDirective(const std::string& publish_id,
-                          const std::string& subscribe_id,
-                          const std::string& token) {
+const Directive CreateDirective(const std::string& publish_id,
+                                const std::string& subscribe_id,
+                                const std::string& token) {
   return CreateDirective(publish_id, subscribe_id, token, kDefaultTtl);
 }
 
@@ -54,11 +59,10 @@ class FakeAudioDirectiveHandler final : public AudioDirectiveHandler {
   void Initialize(WhispernetClient* /* whispernet_client */,
                   const TokensCallback& /* tokens_cb */) override {}
 
-  void AddInstruction(const TokenInstruction& instruction,
-                      const std::string& /* op_id */,
-                      base::TimeDelta ttl) override {
-    added_tokens_.push_back(instruction.token_id());
-    added_ttls_.push_back(ttl.InMilliseconds());
+  void AddInstruction(const Directive& directive,
+                      const std::string& /* op_id */) override {
+    added_tokens_.push_back(directive.token_instruction().token_id());
+    added_ttls_.push_back(directive.ttl_millis());
   }
 
   void RemoveInstructions(const std::string& op_id) override {
@@ -99,6 +103,7 @@ class DirectiveHandlerTest : public testing::Test {
       : whispernet_client_(new StubWhispernetClient),
         audio_handler_(new FakeAudioDirectiveHandler),
         directive_handler_(
+            base::Bind(&IgnoreDirectiveUpdates),
             make_scoped_ptr<AudioDirectiveHandler>(audio_handler_)) {}
 
  protected:
@@ -108,7 +113,7 @@ class DirectiveHandlerTest : public testing::Test {
 
   scoped_ptr<WhispernetClient> whispernet_client_;
   FakeAudioDirectiveHandler* audio_handler_;
-  DirectiveHandler directive_handler_;
+  DirectiveHandlerImpl directive_handler_;
 };
 
 TEST_F(DirectiveHandlerTest, DirectiveTtl) {

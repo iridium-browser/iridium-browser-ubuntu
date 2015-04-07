@@ -28,13 +28,16 @@
 
 #include "SkImageFilter.h"
 #include "SkMatrix44.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/TraceEvent.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/graphics/FirstPaintInvalidationTracking.h"
+#include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsLayerFactory.h"
 #include "platform/graphics/Image.h"
 #include "platform/graphics/filters/SkiaImageFilterBuilder.h"
+#include "platform/graphics/paint/DisplayItemList.h"
 #include "platform/graphics/skia/NativeImageSkia.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "platform/text/TextStream.h"
@@ -253,6 +256,11 @@ void GraphicsLayer::setReplicatedByLayer(GraphicsLayer* layer)
 
 void GraphicsLayer::setOffsetFromRenderer(const IntSize& offset, ShouldSetNeedsDisplay shouldSetNeedsDisplay)
 {
+    setOffsetDoubleFromRenderer(offset);
+}
+
+void GraphicsLayer::setOffsetDoubleFromRenderer(const DoubleSize& offset, ShouldSetNeedsDisplay shouldSetNeedsDisplay)
+{
     if (offset == m_offsetFromRenderer)
         return;
 
@@ -271,6 +279,12 @@ void GraphicsLayer::paintGraphicsLayerContents(GraphicsContext& context, const I
         m_debugInfo.clearAnnotatedInvalidateRects();
     incrementPaintCount();
     m_client->paintContents(this, context, m_paintingPhase, clip);
+#ifndef NDEBUG
+    if (m_displayItemList) {
+        ASSERT(RuntimeEnabledFeatures::slimmingPaintEnabled());
+        context.fillRect(clip, Color(0xFF, 0, 0));
+    }
+#endif
 }
 
 void GraphicsLayer::updateChildList()
@@ -888,6 +902,9 @@ void GraphicsLayer::setNeedsDisplay()
         addRepaintRect(FloatRect(FloatPoint(), m_size));
         for (size_t i = 0; i < m_linkHighlights.size(); ++i)
             m_linkHighlights[i]->invalidate();
+
+        if (RuntimeEnabledFeatures::slimmingPaintEnabled())
+            displayItemList()->invalidateAll();
     }
 }
 
@@ -993,6 +1010,12 @@ void GraphicsLayer::setFilters(const FilterOperations& filters)
     m_layer->layer()->setFilters(*webFilters);
 }
 
+void GraphicsLayer::setFilterLevel(SkPaint::FilterLevel filterLevel)
+{
+    if (m_imageLayer)
+        m_imageLayer->setNearestNeighbor(filterLevel == SkPaint::kNone_FilterLevel);
+}
+
 void GraphicsLayer::setPaintingPhase(GraphicsLayerPaintingPhase phase)
 {
     if (m_paintingPhase == phase)
@@ -1053,6 +1076,15 @@ void GraphicsLayer::didScroll()
         // FIXME: Remove the toFloatPoint(). crbug.com/414283.
         m_scrollableArea->scrollToOffsetWithoutAnimation(toFloatPoint(newPosition));
     }
+}
+
+DisplayItemList* GraphicsLayer::displayItemList()
+{
+    if (!RuntimeEnabledFeatures::slimmingPaintEnabled())
+        return 0;
+    if (!m_displayItemList)
+        m_displayItemList = DisplayItemList::create();
+    return m_displayItemList.get();
 }
 
 } // namespace blink

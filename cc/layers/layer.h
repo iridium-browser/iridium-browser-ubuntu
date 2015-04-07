@@ -24,6 +24,7 @@
 #include "cc/layers/paint_properties.h"
 #include "cc/layers/render_surface.h"
 #include "cc/output/filter_operations.h"
+#include "cc/trees/property_tree.h"
 #include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkImageFilter.h"
@@ -56,6 +57,7 @@ class LayerAnimationEventObserver;
 class LayerClient;
 class LayerImpl;
 class LayerTreeHost;
+class LayerTreeHostCommon;
 class LayerTreeImpl;
 class PriorityCalculator;
 class RenderingStatsInstrumentation;
@@ -177,10 +179,11 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   void SetTransform(const gfx::Transform& transform);
   const gfx::Transform& transform() const { return transform_; }
   bool TransformIsAnimating() const;
+  bool AnimationsPreserveAxisAlignment() const;
   bool transform_is_invertible() const { return transform_is_invertible_; }
 
   void SetTransformOrigin(const gfx::Point3F&);
-  gfx::Point3F transform_origin() { return transform_origin_; }
+  gfx::Point3F transform_origin() const { return transform_origin_; }
 
   void SetScrollParent(Layer* parent);
 
@@ -255,13 +258,11 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
            draw_properties_.render_target->render_surface());
     return draw_properties_.render_target;
   }
-  RenderSurface* render_surface() const {
-    return draw_properties_.render_surface.get();
-  }
   int num_unclipped_descendants() const {
     return draw_properties_.num_unclipped_descendants;
   }
 
+  RenderSurface* render_surface() const { return render_surface_.get(); }
   void SetScrollOffset(const gfx::ScrollOffset& scroll_offset);
   gfx::ScrollOffset scroll_offset() const { return scroll_offset_; }
   void SetScrollOffsetFromImplSide(const gfx::ScrollOffset& scroll_offset);
@@ -376,6 +377,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
 
   void CreateRenderSurface();
   void ClearRenderSurface();
+
   void ClearRenderSurfaceLayerList();
 
   // The contents scale converts from logical, non-page-scaled pixels to target
@@ -462,6 +464,47 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   void Set3dSortingContextId(int id);
   int sorting_context_id() const { return sorting_context_id_; }
 
+  void set_transform_tree_index(int index) { transform_tree_index_ = index; }
+  void set_clip_tree_index(int index) { clip_tree_index_ = index; }
+  int clip_tree_index() const { return clip_tree_index_; }
+  int transform_tree_index() const { return transform_tree_index_; }
+
+  void set_offset_to_transform_parent(gfx::Vector2dF offset) {
+    offset_to_transform_parent_ = offset;
+  }
+  gfx::Vector2dF offset_to_transform_parent() const {
+    return offset_to_transform_parent_;
+  }
+
+  // TODO(vollick): Once we transition to transform and clip trees, rename these
+  // functions and related values.  The "from property trees" functions below
+  // use the transform and clip trees.  Eventually, we will use these functions
+  // to compute the official values, but these functions are retained for
+  // testing purposes until we've migrated.
+
+  const gfx::Rect& visible_rect_from_property_trees() const {
+    return visible_rect_from_property_trees_;
+  }
+  void set_visible_rect_from_property_trees(const gfx::Rect& rect) {
+    visible_rect_from_property_trees_ = rect;
+  }
+
+  gfx::Transform screen_space_transform_from_property_trees(
+      const TransformTree& tree) const;
+  gfx::Transform draw_transform_from_property_trees(
+      const TransformTree& tree) const;
+
+  // TODO(vollick): These values are temporary and will be removed as soon as
+  // render surface determinations are moved out of CDP. They only exist because
+  // certain logic depends on whether or not a layer would render to a separate
+  // surface, but CDP destroys surfaces and targets it doesn't need, so without
+  // this boolean, this is impossible to determine after the fact without
+  // wastefully recomputing it. This is public for the time being so that it can
+  // be accessed from CDP.
+  bool has_render_surface() const {
+    return has_render_surface_;
+  }
+
  protected:
   friend class LayerImpl;
   friend class TreeSynchronizer;
@@ -541,9 +584,13 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
 
  private:
   friend class base::RefCounted<Layer>;
-
+  friend class LayerTreeHostCommon;
   void SetParent(Layer* layer);
   bool DescendantIsFixedToContainerLayer() const;
+
+  // This should only be called during BeginMainFrame since it does not
+  // trigger a Commit.
+  void SetHasRenderSurface(bool has_render_surface);
 
   // Returns the index of the child or -1 if not found.
   int IndexOfChild(const Layer* reference);
@@ -589,6 +636,10 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   // this layer.
   int scroll_clip_layer_id_;
   int num_descendants_that_draw_content_;
+  int transform_tree_index_;
+  int opacity_tree_index_;
+  int clip_tree_index_;
+  gfx::Vector2dF offset_to_transform_parent_;
   bool should_scroll_on_main_thread_ : 1;
   bool have_wheel_event_handlers_ : 1;
   bool have_scroll_event_handlers_ : 1;
@@ -607,6 +658,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   bool draw_checkerboard_for_missing_tiles_ : 1;
   bool force_render_surface_ : 1;
   bool transform_is_invertible_ : 1;
+  bool has_render_surface_ : 1;
   Region non_fast_scrollable_region_;
   Region touch_event_handler_region_;
   gfx::PointF position_;
@@ -640,7 +692,11 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   DrawProperties<Layer> draw_properties_;
 
   PaintProperties paint_properties_;
+  // TODO(awoloszyn): This is redundant with has_render_surface_,
+  // and should get removed once it is no longer needed on main thread.
+  scoped_ptr<RenderSurface> render_surface_;
 
+  gfx::Rect visible_rect_from_property_trees_;
   DISALLOW_COPY_AND_ASSIGN(Layer);
 };
 

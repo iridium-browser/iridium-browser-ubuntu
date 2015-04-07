@@ -23,9 +23,9 @@
 #include "core/rendering/svg/RenderSVGResourceContainer.h"
 #include "core/svg/SVGClipPathElement.h"
 
-namespace blink {
+class SkPicture;
 
-class DisplayList;
+namespace blink {
 
 class RenderSVGResourceClipper final : public RenderSVGResourceContainer {
 public:
@@ -66,10 +66,10 @@ public:
 private:
     bool tryPathOnlyClipping(GraphicsContext*, const AffineTransform&, const FloatRect&);
     void drawClipMaskContent(GraphicsContext*, const FloatRect& targetBoundingBox);
-    void createDisplayList(GraphicsContext*);
+    void createPicture(GraphicsContext*);
     void calculateClipContentPaintInvalidationRect();
 
-    RefPtr<DisplayList> m_clipContentDisplayList;
+    RefPtr<const SkPicture> m_clipContentPicture;
     FloatRect m_clipBoundaries;
 
     // Reference cycle detection.

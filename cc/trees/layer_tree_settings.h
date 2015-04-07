@@ -8,6 +8,7 @@
 #include "base/basictypes.h"
 #include "cc/base/cc_export.h"
 #include "cc/debug/layer_tree_debug_state.h"
+#include "cc/output/renderer_settings.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -18,23 +19,20 @@ class CC_EXPORT LayerTreeSettings {
   LayerTreeSettings();
   ~LayerTreeSettings();
 
+  RendererSettings renderer_settings;
   bool impl_side_painting;
-  bool allow_antialiasing;
-  bool force_antialiasing;
-  bool force_blending_with_shaders;
   bool throttle_frame_production;
   bool single_thread_proxy_scheduler;
-  bool begin_frame_scheduling_enabled;
+  bool use_external_begin_frame_source;
+  bool forward_begin_frames_to_children;
   bool main_frame_before_activation_enabled;
   bool using_synchronous_renderer_compositor;
   bool disable_hi_res_timer_tasks_on_battery;
   bool report_overscroll_only_for_scrollable_axes;
   bool per_tile_painting_enabled;
-  bool partial_swap_enabled;
   bool accelerated_animation_enabled;
   bool can_use_lcd_text;
   bool use_distance_field_text;
-  bool should_clear_root_render_pass;
   bool gpu_rasterization_enabled;
   bool gpu_rasterization_forced;
   bool create_low_res_tiling;
@@ -48,17 +46,18 @@ class CC_EXPORT LayerTreeSettings {
   int scrollbar_fade_delay_ms;
   int scrollbar_fade_resize_delay_ms;
   int scrollbar_fade_duration_ms;
+  float scrollbar_show_scale_threshold;
   SkColor solid_color_scrollbar_color;
   bool calculate_top_controls_position;
   bool timeout_and_draw_when_animation_checkerboards;
   int maximum_number_of_failed_draws_before_draw_is_forced_;
   bool layer_transforms_should_scale_layer_contents;
+  bool layers_always_allowed_lcd_text;
   float minimum_contents_scale;
   float low_res_contents_scale_factor;
-  float top_controls_height;
   float top_controls_show_threshold;
   float top_controls_hide_threshold;
-  double refresh_rate;
+  double background_animation_rate;
   size_t max_partial_texture_updates;
   gfx::Size default_tile_size;
   gfx::Size max_untiled_layer_size;
@@ -67,20 +66,21 @@ class CC_EXPORT LayerTreeSettings {
   bool use_pinch_zoom_scrollbars;
   bool use_pinch_virtual_viewport;
   size_t max_tiles_for_interest_area;
-  float skewport_target_time_multiplier;
+  float skewport_target_time_in_seconds;
   int skewport_extrapolation_limit_in_content_pixels;
   size_t max_unused_resource_memory_percentage;
   size_t max_memory_for_prepaint_percentage;
-  int highp_threshold_min;
   bool strict_layer_property_change_checking;
   bool use_one_copy;
   bool use_zero_copy;
+  bool enable_elastic_overscroll;
+  unsigned use_image_texture_target;
   bool ignore_root_layer_flings;
-  bool use_rgba_4444_textures;
-  size_t texture_id_allocation_chunk_size;
   size_t scheduled_raster_task_limit;
   bool use_occlusion_for_tile_prioritization;
   bool record_full_layer;
+  bool use_display_lists;
+  bool verify_property_trees;
 
   LayerTreeDebugState initial_debug_state;
 };

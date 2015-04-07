@@ -14,12 +14,10 @@ component("geometry") {
     "//ui/gfx/geometry",
     "//mojo/environment:chromium",
     "//mojo/public/c/system:for_component",
-    "//mojo/services/public/interfaces/geometry",
+    "//mojo/services/geometry/public/interfaces",
   ]
 
-  defines = [
-    "MOJO_GEOMETRY_IMPLEMENTATION",
-  ]
+  defines = [ "MOJO_GEOMETRY_IMPLEMENTATION" ]
 
   sources = [
     "geometry_type_converters.cc",

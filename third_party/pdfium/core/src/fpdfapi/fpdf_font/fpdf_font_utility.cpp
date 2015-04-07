@@ -8,7 +8,6 @@
 #include "../../../include/fpdfapi/fpdf_resource.h"
 #include "../../../include/fxcodec/fx_codec.h"
 #include "font_int.h"
-#ifndef _FPDFAPI_MINI_
 typedef struct {
     FXSYS_FILE*	m_pFile;
     int		m_nFiles;
@@ -17,7 +16,7 @@ typedef struct {
 } FXFC_PACKAGE;
 FX_LPVOID FXFC_LoadPackage(FX_LPCSTR name)
 {
-    FXSYS_FILE* file = FXSYS_fopen(name, (FX_LPCSTR)"rb");
+    FXSYS_FILE* file = FXSYS_fopen(name, "rb");
     if (file == NULL) {
         return NULL;
     }
@@ -93,4 +92,3 @@ FX_LPBYTE CPDF_FXMP::GetRecord(FX_DWORD index)
     }
     return m_pTable + (index - m_pHeader->dwStartIndex) * m_pHeader->dwRecordSize;
 }
-#endif

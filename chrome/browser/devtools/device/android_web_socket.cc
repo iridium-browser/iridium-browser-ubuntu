@@ -9,7 +9,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "net/server/web_socket.h"
+#include "net/server/web_socket_encoder.h"
 #include "net/socket/stream_socket.h"
 
 using content::BrowserThread;
@@ -25,10 +25,12 @@ class AndroidDeviceManager::AndroidWebSocket::WebSocketImpl {
  public:
    WebSocketImpl(scoped_refptr<base::MessageLoopProxy> response_message_loop,
                  base::WeakPtr<AndroidWebSocket> weak_socket,
+                 const std::string& extensions,
                  scoped_ptr<net::StreamSocket> socket)
-                 : response_message_loop_(response_message_loop),
-                   weak_socket_(weak_socket),
-                   socket_(socket.Pass()) {
+       : response_message_loop_(response_message_loop),
+         weak_socket_(weak_socket),
+         socket_(socket.Pass()),
+         encoder_(net::WebSocketEncoder::CreateClient(extensions)) {
     thread_checker_.DetachFromThread();
   }
 
@@ -44,7 +46,8 @@ class AndroidDeviceManager::AndroidWebSocket::WebSocketImpl {
     if (!socket_)
       return;
     int mask = base::RandInt(0, 0x7FFFFFFF);
-    std::string encoded_frame = WebSocket::EncodeFrameHybi17(message, mask);
+    std::string encoded_frame;
+    encoder_->EncodeFrame(message, mask, &encoded_frame);
     request_buffer_ += encoded_frame;
     if (request_buffer_.length() == encoded_frame.length())
       SendPendingRequests(0);
@@ -71,16 +74,16 @@ class AndroidDeviceManager::AndroidWebSocket::WebSocketImpl {
 
     int bytes_consumed;
     std::string output;
-    WebSocket::ParseResult parse_result = WebSocket::DecodeFrameHybi17(
-        response_buffer_, false, &bytes_consumed, &output);
+    WebSocket::ParseResult parse_result = encoder_->DecodeFrame(
+        response_buffer_, &bytes_consumed, &output);
 
     while (parse_result == WebSocket::FRAME_OK) {
       response_buffer_ = response_buffer_.substr(bytes_consumed);
       response_message_loop_->PostTask(
           FROM_HERE,
           base::Bind(&AndroidWebSocket::OnFrameRead, weak_socket_, output));
-      parse_result = WebSocket::DecodeFrameHybi17(
-          response_buffer_, false, &bytes_consumed, &output);
+      parse_result = encoder_->DecodeFrame(
+          response_buffer_, &bytes_consumed, &output);
     }
 
     if (parse_result == WebSocket::FRAME_ERROR ||
@@ -121,6 +124,7 @@ class AndroidDeviceManager::AndroidWebSocket::WebSocketImpl {
   scoped_refptr<base::MessageLoopProxy> response_message_loop_;
   base::WeakPtr<AndroidWebSocket> weak_socket_;
   scoped_ptr<net::StreamSocket> socket_;
+  scoped_ptr<net::WebSocketEncoder> encoder_;
   std::string response_buffer_;
   std::string request_buffer_;
   base::ThreadChecker thread_checker_;
@@ -141,7 +145,7 @@ AndroidDeviceManager::AndroidWebSocket::AndroidWebSocket(
   DCHECK(device_);
   device_->sockets_.insert(this);
   device_->HttpUpgrade(
-      socket_name, url,
+      socket_name, url, net::WebSocketEncoder::kClientExtensions,
       base::Bind(&AndroidWebSocket::Connected, weak_factory_.GetWeakPtr()));
 }
 
@@ -163,6 +167,7 @@ void AndroidDeviceManager::AndroidWebSocket::SendFrame(
 
 void AndroidDeviceManager::AndroidWebSocket::Connected(
     int result,
+    const std::string& extensions,
     scoped_ptr<net::StreamSocket> socket) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (result != net::OK || !socket.get()) {
@@ -171,6 +176,7 @@ void AndroidDeviceManager::AndroidWebSocket::Connected(
   }
   socket_impl_ = new WebSocketImpl(base::MessageLoopProxy::current(),
                                    weak_factory_.GetWeakPtr(),
+                                   extensions,
                                    socket.Pass());
   device_->message_loop_proxy_->PostTask(
       FROM_HERE,

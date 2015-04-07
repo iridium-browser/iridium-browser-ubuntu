@@ -47,7 +47,6 @@
 #include "platform/TraceEvent.h"
 #include "public/platform/WebMediaSource.h"
 #include "public/platform/WebSourceBuffer.h"
-#include "wtf/Uint8Array.h"
 #include "wtf/text/CString.h"
 
 using blink::WebMediaSource;
@@ -285,7 +284,8 @@ void MediaSource::trace(Visitor* visitor)
     visitor->trace(m_sourceBuffers);
     visitor->trace(m_activeSourceBuffers);
     visitor->registerWeakMembers<MediaSource, &MediaSource::clearWeakMembers>(this);
-    EventTargetWithInlineData::trace(visitor);
+    RefCountedGarbageCollectedEventTargetWithInlineData<MediaSource>::trace(visitor);
+    ActiveDOMObject::trace(visitor);
 }
 
 void MediaSource::setWebMediaSourceAndOpen(PassOwnPtr<WebMediaSource> webMediaSource)
@@ -359,6 +359,34 @@ PassRefPtrWillBeRawPtr<TimeRanges> MediaSource::buffered() const
     }
 
     return intersectionRanges.release();
+}
+
+PassRefPtrWillBeRawPtr<TimeRanges> MediaSource::seekable() const
+{
+    // Implements MediaSource algorithm for HTMLMediaElement.seekable.
+    // https://dvcs.w3.org/hg/html-media/raw-file/default/media-source/media-source.html#htmlmediaelement-extensions
+
+    double sourceDuration = duration();
+    // If duration equals NaN: Return an empty TimeRanges object.
+    if (std::isnan(sourceDuration))
+        return TimeRanges::create();
+
+    // If duration equals positive Infinity:
+    if (sourceDuration == std::numeric_limits<double>::infinity()) {
+        RefPtrWillBeRawPtr<TimeRanges> buffered = m_attachedElement->buffered();
+
+        // 1. If the HTMLMediaElement.buffered attribute returns an empty TimeRanges object, then
+        // return an empty TimeRanges object and abort these steps.
+        if (buffered->length() == 0)
+            return TimeRanges::create();
+
+        // 2. Return a single range with a start time of 0 and an end time equal to the highest end
+        // time reported by the HTMLMediaElement.buffered attribute.
+        return TimeRanges::create(0, buffered->end(buffered->length() - 1, ASSERT_NO_EXCEPTION));
+    }
+
+    // 3. Otherwise: Return a single range with a start time of 0 and an end time equal to duration.
+    return TimeRanges::create(0, sourceDuration);
 }
 
 void MediaSource::setDuration(double duration, ExceptionState& exceptionState)

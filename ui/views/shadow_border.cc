@@ -5,8 +5,8 @@
 #include "ui/views/shadow_border.h"
 
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/insets.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/shadow_value.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/views/view.h"

@@ -13,6 +13,7 @@
 #include "base/values.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/base/network_activity_monitor.h"
 #include "net/http/transport_security_state.h"
 #include "net/quic/crypto/proof_verifier_chromium.h"
 #include "net/quic/crypto/quic_server_info.h"
@@ -155,10 +156,9 @@ QuicClientSession::QuicClientSession(
     TransportSecurityState* transport_security_state,
     scoped_ptr<QuicServerInfo> server_info,
     const QuicConfig& config,
-    bool is_secure,
     base::TaskRunner* task_runner,
     NetLog* net_log)
-    : QuicClientSessionBase(connection, config, is_secure),
+    : QuicClientSessionBase(connection, config),
       require_confirmation_(false),
       stream_factory_(stream_factory),
       socket_(socket.Pass()),
@@ -186,7 +186,7 @@ void QuicClientSession::InitializeSession(
     const QuicServerId& server_id,
     QuicCryptoClientConfig* crypto_config,
     QuicCryptoClientStreamFactory* crypto_client_stream_factory) {
-  server_host_port_ = server_id.host_port_pair();
+  server_id_ = server_id;
   crypto_stream_.reset(
       crypto_client_stream_factory ?
           crypto_client_stream_factory->CreateQuicCryptoClientStream(
@@ -286,6 +286,24 @@ QuicClientSession::~QuicClientSession() {
     }
   }
   const QuicConnectionStats stats = connection()->GetStats();
+  if (server_info_ && stats.min_rtt_us > 0) {
+    base::TimeTicks wait_for_data_start_time =
+        server_info_->wait_for_data_start_time();
+    base::TimeTicks wait_for_data_end_time =
+        server_info_->wait_for_data_end_time();
+    if (!wait_for_data_start_time.is_null() &&
+        !wait_for_data_end_time.is_null()) {
+      base::TimeDelta wait_time =
+          wait_for_data_end_time - wait_for_data_start_time;
+      const base::HistogramBase::Sample kMaxWaitToRtt = 1000;
+      base::HistogramBase::Sample wait_to_rtt =
+          static_cast<base::HistogramBase::Sample>(
+              100 * wait_time.InMicroseconds() / stats.min_rtt_us);
+      UMA_HISTOGRAM_CUSTOM_COUNTS("Net.QuicServerInfo.WaitForDataReadyToRtt",
+                                  wait_to_rtt, 0, kMaxWaitToRtt, 50);
+    }
+  }
+
   if (stats.max_sequence_reordering == 0)
     return;
   const base::HistogramBase::Sample kMaxReordering = 100;
@@ -300,8 +318,9 @@ QuicClientSession::~QuicClientSession() {
     UMA_HISTOGRAM_CUSTOM_COUNTS("Net.QuicSession.MaxReorderingTimeLongRtt",
                                 reordering, 0, kMaxReordering, 50);
   }
-  UMA_HISTOGRAM_COUNTS("Net.QuicSession.MaxReordering",
-                       stats.max_sequence_reordering);
+  UMA_HISTOGRAM_COUNTS(
+      "Net.QuicSession.MaxReordering",
+      static_cast<base::HistogramBase::Sample>(stats.max_sequence_reordering));
 }
 
 void QuicClientSession::OnStreamFrames(
@@ -433,7 +452,7 @@ bool QuicClientSession::GetSSLInfo(SSLInfo* ssl_info) const {
   // Report the TLS cipher suite that most closely resembles the crypto
   // parameters of the QUIC connection.
   QuicTag aead = crypto_stream_->crypto_negotiated_params().aead;
-  int cipher_suite;
+  uint16 cipher_suite;
   int security_bits;
   switch (aead) {
     case kAESG:
@@ -449,9 +468,7 @@ bool QuicClientSession::GetSSLInfo(SSLInfo* ssl_info) const {
       return false;
   }
   int ssl_connection_status = 0;
-  ssl_connection_status |=
-      (cipher_suite & SSL_CONNECTION_CIPHERSUITE_MASK) <<
-       SSL_CONNECTION_CIPHERSUITE_SHIFT;
+  ssl_connection_status |= cipher_suite;
   ssl_connection_status |=
       (SSL_CONNECTION_VERSION_QUIC & SSL_CONNECTION_VERSION_MASK) <<
        SSL_CONNECTION_VERSION_SHIFT;
@@ -475,11 +492,7 @@ int QuicClientSession::CryptoConnect(bool require_confirmation,
   handshake_start_ = base::TimeTicks::Now();
   RecordHandshakeState(STATE_STARTED);
   DCHECK(flow_controller());
-  if (!crypto_stream_->CryptoConnect()) {
-    // TODO(wtc): change crypto_stream_.CryptoConnect() to return a
-    // QuicErrorCode and map it to a net error code.
-    return ERR_CONNECTION_FAILED;
-  }
+  crypto_stream_->CryptoConnect();
 
   if (IsCryptoHandshakeConfirmed())
     return OK;
@@ -518,8 +531,13 @@ int QuicClientSession::GetNumSentClientHellos() const {
   return crypto_stream_->num_sent_client_hellos();
 }
 
-bool QuicClientSession::CanPool(const std::string& hostname) const {
+bool QuicClientSession::CanPool(const std::string& hostname,
+                                PrivacyMode privacy_mode) const {
   DCHECK(connection()->connected());
+  if (privacy_mode != server_id_.privacy_mode()) {
+    // Privacy mode must always match.
+    return false;
+  }
   SSLInfo ssl_info;
   if (!GetSSLInfo(&ssl_info) || !ssl_info.cert.get()) {
     // We can always pool with insecure QUIC sessions.
@@ -527,7 +545,7 @@ bool QuicClientSession::CanPool(const std::string& hostname) const {
   }
 
   return SpdySession::CanPool(transport_security_state_, ssl_info,
-                              server_host_port_.host(), hostname);
+                              server_id_.host(), hostname);
 }
 
 QuicDataStream* QuicClientSession::CreateIncomingDataStream(
@@ -584,6 +602,20 @@ void QuicClientSession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
   if (event == HANDSHAKE_CONFIRMED) {
     UMA_HISTOGRAM_TIMES("Net.QuicSession.HandshakeConfirmedTime",
                         base::TimeTicks::Now() - handshake_start_);
+    if (server_info_) {
+      // Track how long it has taken to finish handshake once we start waiting
+      // for reading of QUIC server information from disk cache. We could use
+      // this data to compare total time taken if we were to cancel the disk
+      // cache read vs waiting for the read to complete.
+      base::TimeTicks wait_for_data_start_time =
+          server_info_->wait_for_data_start_time();
+      if (!wait_for_data_start_time.is_null()) {
+        UMA_HISTOGRAM_TIMES(
+            "Net.QuicServerInfo.WaitForDataReady.HandshakeConfirmedTime",
+            base::TimeTicks::Now() - wait_for_data_start_time);
+      }
+    }
+
     ObserverSet::iterator it = observers_.begin();
     while (it != observers_.end()) {
       Observer* observer = *it;
@@ -634,6 +666,18 @@ void QuicClientSession::OnConnectionClosed(QuicErrorCode error,
             "Net.QuicSession.TimedOutWithOpenStreams.ConsecutiveTLPCount",
             connection()->sent_packet_manager().consecutive_tlp_count());
       }
+      if (connection()->sent_packet_manager().HasUnackedPackets()) {
+        UMA_HISTOGRAM_TIMES(
+            "Net.QuicSession.LocallyTimedOutWithOpenStreams."
+                "TimeSinceLastReceived.UnackedPackets",
+            NetworkActivityMonitor::GetInstance()->GetTimeSinceLastReceived());
+      } else {
+        UMA_HISTOGRAM_TIMES(
+            "Net.QuicSession.LocallyTimedOutWithOpenStreams."
+                "TimeSinceLastReceived.NoUnackedPackets",
+            NetworkActivityMonitor::GetInstance()->GetTimeSinceLastReceived());
+      }
+
     } else {
       UMA_HISTOGRAM_COUNTS(
           "Net.QuicSession.ConnectionClose.NumOpenStreams.HandshakeTimedOut",

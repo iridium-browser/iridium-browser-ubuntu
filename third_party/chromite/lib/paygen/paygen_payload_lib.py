@@ -4,6 +4,8 @@
 
 """Hold the functions that do the real work generating payloads."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import base64
@@ -47,7 +49,7 @@ class _PaygenPayload(object):
 
   # GeneratorUri uses these to ensure we don't use generators that are too
   # old to be supported.
-  MINIMUM_GENERATOR_VERSION = '6303.0.0'
+  MINIMUM_GENERATOR_VERSION = '6351.0.0'
   MINIMUM_GENERATOR_URI = (
       'gs://chromeos-releases/canary-channel/x86-mario/%s/au-generator.zip' %
       MINIMUM_GENERATOR_VERSION)
@@ -341,12 +343,27 @@ class _PaygenPayload(object):
 
     with tempfile.NamedTemporaryFile('rb') as payload_hash_file:
       cmd = ['delta_generator',
-             '-in_file', self.payload_file,
-             '-out_hash_file', payload_hash_file.name,
-             '-signature_size', ':'.join(signature_sizes)]
+             '-in_file=' + self.payload_file,
+             '-out_hash_file=' + payload_hash_file.name,
+             '-signature_size=' + ':'.join(signature_sizes)]
 
       self._RunGeneratorCmd(cmd)
       return payload_hash_file.read()
+
+  def _MetadataSize(self):
+    """Discover the metadata size.
+
+    The payload generator should return this information when calculating the
+    metadata hash, but would require a lot of new plumbing. Instead we just
+    look it up ourselves.
+
+    Returns:
+      int value of the metadata size.
+    """
+    with open(self.payload_file) as payload_file:
+      payload = self._update_payload.Payload(payload_file)
+      payload.Init()
+      return payload.data_offset
 
   def _GenMetadataHash(self):
     """Generate a hash of payload and metadata.
@@ -363,9 +380,9 @@ class _PaygenPayload(object):
 
     with tempfile.NamedTemporaryFile('rb') as metadata_hash_file:
       cmd = ['delta_generator',
-             '-in_file', self.payload_file,
-             '-out_metadata_hash_file', metadata_hash_file.name,
-             '-signature_size', ':'.join(signature_sizes)]
+             '-in_file=' + self.payload_file,
+             '-out_metadata_hash_file=' + metadata_hash_file.name,
+             '-signature_size=' + ':'.join(signature_sizes)]
 
       self._RunGeneratorCmd(cmd)
       return metadata_hash_file.read()
@@ -438,9 +455,9 @@ class _PaygenPayload(object):
     signature_file_names = [f.name for f in signature_files]
 
     cmd = ['delta_generator',
-           '-in_file', self.payload_file,
-           '-signature_file', ':'.join(signature_file_names),
-           '-out_file', self.signed_payload_file]
+           '-in_file=' + self.payload_file,
+           '-signature_file=' + ':'.join(signature_file_names),
+           '-out_file=' + self.signed_payload_file]
 
     self._RunGeneratorCmd(cmd)
 
@@ -479,6 +496,8 @@ class _PaygenPayload(object):
       "version": 1,
       "sha1_hex": <payload sha1 hash as a hex encoded string>,
       "sha256_hex": <payload sha256 hash as a hex encoded string>,
+      "md5_hex": <payload md5 hash as a hex encoded string>,
+      "metadata_size": <integer of payload metadata covered by signature>,
       "metadata_signature": <metadata signature as base64 encoded string or nil>
     }
 
@@ -487,6 +506,7 @@ class _PaygenPayload(object):
     """
     # Locate everything we put in the json.
     sha1_hex, sha256_hex = filelib.ShaSums(self.payload_file)
+    md5_hex = filelib.MD5Sum(self.payload_file)
 
     metadata_signature = None
     if metadata_signatures:
@@ -502,6 +522,8 @@ class _PaygenPayload(object):
       'version': DESCRIPTION_FILE_VERSION,
       'sha1_hex': sha1_hex,
       'sha256_hex': sha256_hex,
+      'md5_hex': md5_hex,
+      'metadata_size': self._MetadataSize(),
       'metadata_signature': metadata_signature,
     }
 
@@ -534,8 +556,10 @@ class _PaygenPayload(object):
     metadata_hash = self._GenMetadataHash()
 
     # Sign them.
+    # pylint: disable=unpacking-non-sequence
     payload_signatures, metadata_signatures = self._SignHashes(
         [payload_hash, metadata_hash])
+    # pylint: enable=unpacking-non-sequence
 
     # Insert payload signature(s).
     self._InsertPayloadSignatures(payload_signatures)

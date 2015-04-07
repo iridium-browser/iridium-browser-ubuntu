@@ -14,6 +14,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/numerics/safe_math.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
@@ -66,7 +67,7 @@ bool GetUniformNameSansElement(
     return false;
   }
 
-  GLint index = 0;
+  base::CheckedNumeric<GLint> index = 0;
   size_t last = name.size() - 1;
   for (size_t pos = open_pos + 1; pos < last; ++pos) {
     int8 digit = name[pos] - '0';
@@ -75,8 +76,11 @@ bool GetUniformNameSansElement(
     }
     index = index * 10 + digit;
   }
+  if (!index.IsValid()) {
+    return false;
+  }
 
-  *element_index = index;
+  *element_index = index.ValueOrDie();
   *new_name = name.substr(0, open_pos);
   return true;
 }
@@ -400,8 +404,8 @@ void Program::Update() {
   }
 
 #if !defined(NDEBUG)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableGPUServiceLoggingGPU)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableGPUServiceLoggingGPU)) {
     DVLOG(1) << "----: attribs for service_id: " << service_id();
     for (size_t ii = 0; ii < attrib_infos_.size(); ++ii) {
       const VertexAttrib& info = attrib_infos_[ii];
@@ -478,8 +482,8 @@ void Program::Update() {
   }
 
 #if !defined(NDEBUG)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableGPUServiceLoggingGPU)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableGPUServiceLoggingGPU)) {
     DVLOG(1) << "----: uniforms for service_id: " << service_id();
     for (size_t ii = 0; ii < uniform_infos_.size(); ++ii) {
       const UniformInfo& info = uniform_infos_[ii];

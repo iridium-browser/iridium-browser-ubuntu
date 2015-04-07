@@ -34,9 +34,6 @@ class GCMDriver {
   typedef base::Callback<void(const GCMClient::GCMStatistics& stats)>
       GetGCMStatisticsCallback;
 
-  // Returns true if the GCM is allowed for all users.
-  static bool IsAllowedForAllUsers();
-
   GCMDriver();
   virtual ~GCMDriver();
 
@@ -137,6 +134,10 @@ class GCMDriver {
   // Getter and setter of last token fetch time.
   virtual base::Time GetLastTokenFetchTime() = 0;
   virtual void SetLastTokenFetchTime(const base::Time& time) = 0;
+
+  // Sets whether or not GCM should try to wake the system from suspend in order
+  // to send a heartbeat message.
+  virtual void WakeFromSuspendForHeartbeat(bool wake) = 0;
 
  protected:
   // Ensures that the GCM service starts (if necessary conditions are met).

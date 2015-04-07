@@ -32,6 +32,7 @@
 #define WebViewClient_h
 
 #include "../platform/WebGraphicsContext3D.h"
+#include "../platform/WebPageVisibilityState.h"
 #include "../platform/WebString.h"
 #include "WebAXEnums.h"
 #include "WebContentDetectionResult.h"
@@ -40,7 +41,6 @@
 #include "WebFileChooserParams.h"
 #include "WebFrame.h"
 #include "WebNavigatorContentUtilsClient.h"
-#include "WebPageVisibilityState.h"
 #include "WebPopupType.h"
 #include "WebTextAffinity.h"
 #include "WebTextDirection.h"
@@ -49,26 +49,18 @@
 namespace blink {
 
 class WebAXObject;
-class WebCompositorOutputSurface;
 class WebDateTimeChooserCompletion;
 class WebDragData;
-class WebElement;
 class WebFileChooserCompletion;
-class WebGestureEvent;
 class WebHitTestResult;
 class WebImage;
-class WebInputElement;
-class WebKeyboardEvent;
 class WebNode;
-class WebPushClient;
-class WebRange;
 class WebSpeechRecognizer;
 class WebStorageNamespace;
 class WebURL;
 class WebURLRequest;
 class WebView;
 class WebWidget;
-struct WebConsoleMessage;
 struct WebDateTimeChooserParams;
 struct WebPoint;
 struct WebPopupMenuInfo;
@@ -280,11 +272,6 @@ public:
     {
         return WebPageVisibilityStateVisible;
     }
-
-
-    // Push Messaging -------------------------------------------------------
-
-    virtual WebPushClient* webPushClient() { return 0; }
 
 
     // Content detection ----------------------------------------------------

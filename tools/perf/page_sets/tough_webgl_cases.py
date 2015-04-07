@@ -25,7 +25,7 @@ class ToughWebglCasesPage(page_module.Page):
         'document.readyState == "complete"')
     action_runner.Wait(2)
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     action_runner.Wait(5)
 
 
@@ -37,7 +37,8 @@ class ToughWebglCasesPageSet(page_set_module.PageSet):
 
   def __init__(self):
     super(ToughWebglCasesPageSet, self).__init__(
-      archive_data_file='data/tough_webgl_cases.json')
+      archive_data_file='data/tough_webgl_cases.json',
+      bucket=page_set_module.PUBLIC_BUCKET)
 
     urls_list = [
       # pylint: disable=C0301
@@ -55,4 +56,4 @@ class ToughWebglCasesPageSet(page_set_module.PageSet):
       'http://webglsamples.googlecode.com/hg/dynamic-cubemap/dynamic-cubemap.html'
     ]
     for url in urls_list:
-      self.AddPage(ToughWebglCasesPage(url, self))
+      self.AddUserStory(ToughWebglCasesPage(url, self))

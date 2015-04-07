@@ -32,7 +32,6 @@ from chromite.scripts import pushimage
 import mock
 
 
-# pylint: disable=W0212
 class RunBuildScriptTest(cros_test_lib.TempDirTestCase):
   """Test RunBuildScript in a variety of cases."""
 
@@ -133,12 +132,12 @@ class RunTestSuiteTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
   def testSimple(self):
     """Test SIMPLE config."""
     self._RunTestSuite(constants.SIMPLE_AU_TEST_TYPE)
-    self.assertCommandContains(['--quick'])
+    self.assertCommandContains(['--quick_update'])
 
   def testSmoke(self):
     """Test SMOKE config."""
     self._RunTestSuite(constants.SMOKE_SUITE_TEST_TYPE)
-    self.assertCommandContains(['--quick', '--only_verify'])
+    self.assertCommandContains(['--only_verify'])
 
 
 class ChromeSDKTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
@@ -167,13 +166,35 @@ class ChromeSDKTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
     self.assertCommandContains(['debug', self.BOARD] + list(self.EXTRA_ARGS) +
                                list(self.EXTRA_ARGS2) + self.CMD, cwd=self.CWD)
 
-  def testNinja(self):
-    """Test that running ninja is possible."""
+  def testNinjaWithNaclUseFlag(self):
+    """Test that running ninja is possible.
+
+    Verify that nacl_helper is built when the 'nacl' USE flag is specified
+    for chromeos-base/chromeos-chrome.
+    """
+    self.rc.AddCmdResult(partial_mock.In('qlist-%s' % self.BOARD),
+                         output='%s ninja nacl gold' % constants.CHROME_CP)
     self.inst.Ninja(self.BOARD)
     self.assertCommandContains([self.BOARD], cwd=self.CWD)
+    self.assertCommandContains(['nacl_helper'])
+
+  def testNinjaWithoutNaclUseFlag(self):
+    """Test that running ninja is possible.
+
+    Verify that nacl_helper is not built when no 'nacl' USE flag is specified
+    for chromeos-base/chromeos-chrome.
+    """
+    self.rc.AddCmdResult(partial_mock.In('qlist-%s' % self.BOARD),
+                         output='%s' % constants.CHROME_CP)
+    self.inst.Ninja(self.BOARD)
+    self.assertCommandContains([self.BOARD], cwd=self.CWD)
+    self.assertCommandContains(['nacl_helper'], expected=False)
+
 
 class HWLabCommandsTest(cros_build_lib_unittest.RunCommandTestCase):
   """Test commands related to HWLab tests."""
+
+  # pylint: disable=protected-access
 
   def setUp(self):
     self._build = 'test-build'
@@ -186,6 +207,8 @@ class HWLabCommandsTest(cros_build_lib_unittest.RunCommandTestCase):
     self._priority = 'test-priority'
     self._timeout_mins = 23
     self._retry = False
+    self._minimum_duts = 2
+    self._suite_min_duts = 2
 
   def testRunHWTestSuiteMinimal(self):
     """Test RunHWTestSuite without optional arguments."""
@@ -201,26 +224,28 @@ class HWLabCommandsTest(cros_build_lib_unittest.RunCommandTestCase):
     commands.RunHWTestSuite(self._build, self._suite, self._board,
                             self._pool, self._num, self._file_bugs,
                             self._wait_for_results, self._priority,
-                            self._timeout_mins, self._retry, debug=False)
+                            self._timeout_mins, self._retry,
+                            self._minimum_duts, self._suite_min_duts,
+                            debug=False)
     self.assertCommandCalled([
         commands._AUTOTEST_RPC_CLIENT, commands._AUTOTEST_RPC_HOSTNAME,
         'RunSuite', '--build', 'test-build', '--suite_name', 'test-suite',
         '--board', 'test-board', '--pool', 'test-pool', '--num', '42',
         '--file_bugs', 'True', '--no_wait', 'True',
         '--priority', 'test-priority', '--timeout_mins', '23',
-        '--retry', 'False',
+        '--retry', 'False', '--minimum_duts', '2', '--suite_min_duts', '2',
     ], error_code_ok=True)
 
   def testRunHWTestSuiteFailure(self):
     """Test RunHWTestSuite when ERROR is returned."""
     self.rc.SetDefaultCmdResult(returncode=1)
-    self.assertRaises(commands.TestFailure, commands.RunHWTestSuite,
+    self.assertRaises(failures_lib.TestFailure, commands.RunHWTestSuite,
                       self._build, self._suite, self._board, debug=False)
 
   def testRunHWTestSuiteTimedOut(self):
     """Test RunHWTestSuite when SUITE_TIMEOUT is returned."""
     self.rc.SetDefaultCmdResult(returncode=4)
-    self.assertRaises(commands.SuiteTimedOut, commands.RunHWTestSuite,
+    self.assertRaises(failures_lib.SuiteTimedOut, commands.RunHWTestSuite,
                       self._build, self._suite, self._board, debug=False)
 
   def testRunHWTestSuiteInfraFail(self):
@@ -232,7 +257,13 @@ class HWLabCommandsTest(cros_build_lib_unittest.RunCommandTestCase):
   def testRunHWTestBoardNotAvailable(self):
     """Test RunHWTestSuite when BOARD_NOT_AVAILABLE is returned."""
     self.rc.SetDefaultCmdResult(returncode=5)
-    self.assertRaises(commands.BoardNotAvailable, commands.RunHWTestSuite,
+    self.assertRaises(failures_lib.BoardNotAvailable, commands.RunHWTestSuite,
+                      self._build, self._suite, self._board, debug=False)
+
+  def testRunHWTestTestWarning(self):
+    """Test RunHWTestSuite when WARNING is returned."""
+    self.rc.SetDefaultCmdResult(returncode=2)
+    self.assertRaises(failures_lib.TestWarning, commands.RunHWTestSuite,
                       self._build, self._suite, self._board, debug=False)
 
 
@@ -265,20 +296,25 @@ class CBuildBotTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
 
   def testVerifyBinpkgMissing(self):
     """Test case where binpkg is missing."""
-    self.rc.AddCmdResult(partial_mock.ListRegex(r'emerge'),
+    self.rc.AddCmdResult(
+        partial_mock.ListRegex(r'emerge'),
         output='\n[ebuild] %s' % constants.CHROME_CP)
-    self.assertRaises(commands.MissingBinpkg, commands.VerifyBinpkg,
-        self._buildroot, self._board, constants.CHROME_CP)
+    self.assertRaises(
+        commands.MissingBinpkg, commands.VerifyBinpkg,
+        self._buildroot, self._board, constants.CHROME_CP, packages=())
 
   def testVerifyBinpkgPresent(self):
     """Test case where binpkg is present."""
-    self.rc.AddCmdResult(partial_mock.ListRegex(r'emerge'),
+    self.rc.AddCmdResult(
+        partial_mock.ListRegex(r'emerge'),
         output='\n[binary] %s' % constants.CHROME_CP)
-    commands.VerifyBinpkg(self._buildroot, self._board, constants.CHROME_CP)
+    commands.VerifyBinpkg(self._buildroot, self._board, constants.CHROME_CP,
+                          packages=())
 
   def testVerifyChromeNotInstalled(self):
     """Test case where Chrome is not installed at all."""
-    commands.VerifyBinpkg(self._buildroot, self._board, constants.CHROME_CP)
+    commands.VerifyBinpkg(self._buildroot, self._board, constants.CHROME_CP,
+                          packages=())
 
   def testBuild(self, default=False, **kwargs):
     """Base case where Build is called with minimal options."""
@@ -339,27 +375,27 @@ f6b0b80d5f2d9a2fb41ebb6e2cee7ad8 *./updater4.sh
     commands.GenerateBreakpadSymbols(self.tempdir, self._board, False)
     self.assertCommandContains(['--board=%s' % self._board])
 
-  @mock.patch('chromite.scripts.upload_symbols.UploadSymbols')
-  def testUploadSymbols(self, sym_mock, official=False, cnt=None):
+  def testUploadSymbols(self, official=False, cnt=None):
     """Test UploadSymbols Command."""
-    sym_mock.side_effect = [0]
     commands.UploadSymbols(self.tempdir, self._board, official, cnt, None)
-    self.assertEquals(sym_mock.call_count, 1)
-    _, kwargs = sym_mock.call_args
-    self.assertEquals(kwargs['official'], official)
-    self.assertEquals(kwargs['upload_limit'], cnt)
+    self.assertCommandContains(['--board', self._board])
+    self.assertCommandContains(['--official_build'], expected=official)
+    self.assertCommandContains(['--upload-limit'], expected=cnt is not None)
+    self.assertCommandContains(['--failed-list'], expected=False)
 
   def testOfficialUploadSymbols(self):
     """Test uploading symbols for official builds"""
-    # Seems pylint can't grasp the @mock.patch decorator.
-    # pylint: disable=E1120
     self.testUploadSymbols(official=True)
 
   def testLimitUploadSymbols(self):
     """Test uploading a limited number of symbols"""
-    # Seems pylint can't grasp the @mock.patch decorator.
-    # pylint: disable=E1120
     self.testUploadSymbols(cnt=10)
+
+  def testFailedUploadSymbols(self):
+    """Test when uploading fails"""
+    self.rc.SetDefaultCmdResult(returncode=1, error='i am sad')
+    # This should not throw an exception.
+    commands.UploadSymbols(self.tempdir, self._board, None, None, None)
 
   def testPushImages(self):
     """Test PushImages Command."""
@@ -387,7 +423,8 @@ f6b0b80d5f2d9a2fb41ebb6e2cee7ad8 *./updater4.sh
   def testCompleteBuildImage(self):
     """Test Complete BuildImage Command."""
     images_to_build = ['bob', 'carol', 'ted', 'alice']
-    commands.BuildImage(self._buildroot, self._board, images_to_build,
+    commands.BuildImage(
+        self._buildroot, self._board, images_to_build,
         rootfs_verification=False, extra_env={'LOVE': 'free'},
         disk_layout='2+2', version='1969')
     self.assertCommandContains(['./build_image'])
@@ -413,6 +450,11 @@ f6b0b80d5f2d9a2fb41ebb6e2cee7ad8 *./updater4.sh
     """Verifies that we can get the chrome lkgm with a chrome revision."""
     self._TestChromeLKGM('deadbeef' * 5)
 
+  def testAbortHWTests(self):
+    """Verifies that HWTests are aborted for a specific non-CQ config."""
+    commands.AbortHWTests('my_config', 'my_version', debug=False)
+    self.assertCommandContains(['-i', 'my_config/my_version'])
+
   def testAbortCQHWTests(self):
     commands.AbortCQHWTests('my-version', debug=False)
     self.assertCommandContains(['cp'])
@@ -427,32 +469,71 @@ f6b0b80d5f2d9a2fb41ebb6e2cee7ad8 *./updater4.sh
 
 
 class BuildTarballTests(cros_build_lib_unittest.RunCommandTempDirTestCase):
-  """Tests related to BuildAUTestTarball."""
+  """Tests related to Building the Test Tarball Artifacts."""
 
   def setUp(self):
     self._buildroot = os.path.join(self.tempdir, 'buildroot')
     os.makedirs(self._buildroot)
     self._board = 'test-board'
+    self._cwd = os.path.abspath(
+        os.path.join(self._buildroot, 'chroot', 'build', self._board,
+                     constants.AUTOTEST_BUILD_PATH, '..'))
+    self._tarball_dir = self.tempdir
 
   def testBuildAUTestTarball(self):
     """Tests that our call to generate an au test tarball is correct."""
-    tarball_dir = self.tempdir
     archive_url = 'gs://mytest/path/version'
     with mock.patch.object(commands, 'BuildTarball') as m:
       tarball_path = commands.BuildAUTestTarball(
-          self._buildroot, self._board, tarball_dir, 'R26-3928.0.0',
+          self._buildroot, self._board, self._tarball_dir, 'R26-3928.0.0',
           archive_url)
       m.assert_called_once_with(self._buildroot, ['autotest/au_control_files'],
-                                os.path.join(tarball_dir, 'au_control.tar.bz2'),
-                                cwd=tarball_dir)
+                                os.path.join(self._tarball_dir,
+                                             'au_control.tar.bz2'),
+                                cwd=self._tarball_dir)
 
-      self.assertEquals(os.path.join(tarball_dir, 'au_control.tar.bz2'),
+      self.assertEquals(os.path.join(self._tarball_dir, 'au_control.tar.bz2'),
                         tarball_path)
 
     # Full release test with partial args defined.
     self.assertCommandContains(['site_utils/autoupdate/full_release_test.py',
                                 '--archive_url', archive_url, '3928.0.0',
                                 self._board])
+
+  def testBuildFullAutotestTarball(self):
+    """Tests that our call to generate the full autotest tarball is correct."""
+    with mock.patch.object(commands, 'BuildTarball') as m:
+      m.return_value.returncode = 0
+      commands.BuildFullAutotestTarball(self._buildroot, self._board,
+                                        self._tarball_dir)
+      m.assert_called_once_with(self._buildroot, ['autotest'],
+                                os.path.join(self._tarball_dir,
+                                             'autotest.tar.bz2'),
+                                cwd=self._cwd, error_code_ok=True)
+
+  def testBuildAutotestPackagesTarball(self):
+    """Tests that generating the autotest packages tarball is correct."""
+    with mock.patch.object(commands, 'BuildTarball') as m:
+      commands.BuildAutotestPackagesTarball(self._buildroot, self._cwd,
+                                            self._tarball_dir)
+      m.assert_called_once_with(self._buildroot, ['autotest/packages'],
+                                os.path.join(self._tarball_dir,
+                                             'autotest_packages.tar'),
+                                cwd=self._cwd, compressed=False)
+
+  def testBuildAutotestControlFilesTarball(self):
+    """Tests that generating the autotest control files tarball is correct."""
+    control_file_list = ['autotest/client/site_tests/testA/control',
+                         'autotest/server/site_tests/testB/control']
+    with mock.patch.object(commands, 'FindFilesWithPattern') as find_mock:
+      find_mock.return_value = control_file_list
+      with mock.patch.object(commands, 'BuildTarball') as tar_mock:
+        commands.BuildAutotestControlFilesTarball(self._buildroot, self._cwd,
+                                                  self._tarball_dir)
+        tar_mock.assert_called_once_with(self._buildroot, control_file_list,
+                                         os.path.join(self._tarball_dir,
+                                                      'control_files.tar'),
+                                         cwd=self._cwd, compressed=False)
 
 
 class UnmockedTests(cros_test_lib.TempDirTestCase):
@@ -515,15 +596,16 @@ class UnmockedTests(cros_test_lib.TempDirTestCase):
     # Assorted set of file names, some of which are supposed to be included in
     # the archive.
     fw_files = (
-      'dts/emeraldlake2.dts',
-      'image-link.rw.bin',
-      'nv_image-link.bin',
-      'pci8086,0166.rom',
-      'seabios.cbfs',
-      'u-boot.elf',
-      'u-boot_netboot.bin',
-      'updater-link.rw.sh',
-      'x86-memtest')
+        'dts/emeraldlake2.dts',
+        'image-link.rw.bin',
+        'nv_image-link.bin',
+        'pci8086,0166.rom',
+        'seabios.cbfs',
+        'u-boot.elf',
+        'u-boot_netboot.bin',
+        'updater-link.rw.sh',
+        'x86-memtest',
+    )
     # Files which should be included in the archive.
     fw_archived_files = fw_files + ('dts/',)
     board = 'link'
@@ -644,12 +726,12 @@ class ImageTestCommandsTest(cros_build_lib_unittest.RunCommandTestCase):
                           self._result_dir)
     self.assertCommandContains(
         [
-          'sudo', '--',
-          os.path.join(self._build, 'chromite', 'bin', 'test_image'),
-          '--board', self._board,
-          '--test_results_root',
-          cros_build_lib.ToChrootPath(self._result_dir),
-          cros_build_lib.ToChrootPath(self._image_dir),
+            'sudo', '--',
+            os.path.join(self._build, 'chromite', 'bin', 'test_image'),
+            '--board', self._board,
+            '--test_results_root',
+            cros_build_lib.ToChrootPath(self._result_dir),
+            cros_build_lib.ToChrootPath(self._image_dir),
         ],
         enter_chroot=True,
     )

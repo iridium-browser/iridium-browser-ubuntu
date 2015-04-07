@@ -31,6 +31,9 @@
   <message name="IDS_AUTOFILL_CC_VISA" desc="Visa credit card name.">
     Visa
   </message>
+  <message name="IDS_AUTOFILL_CC_GENERIC" desc="Generic credit card name.">
+    Card
+  </message>
   <message name="IDS_AUTOFILL_ADDRESS_LINE_SEPARATOR" desc="The separator character used to join multi-line addresses.">
     , '''
   </message>
@@ -123,5 +126,13 @@
       Enable Autofill using Contacts…
     </message>
   </if>
+
+  <message name="IDS_AUTOFILL_SCAN_CREDIT_CARD" desc="An item in the autofill popup that triggers a new credit card to be scanned using the camera on the device.">
+    Scan new card
+  </message>
+
+  <message name="IDS_AUTOFILL_PASSWORD_FIELD_SUGGESTIONS_TITLE" desc="Text shown as the title of the suggestion drop down when a password field is clicked.">
+    Use password for:
+  </message>
 
 </grit-part>

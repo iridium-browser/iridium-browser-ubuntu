@@ -3,14 +3,16 @@ caitkp@chromium.org
 erikwright@chromium.org
 jochen@chromium.org
 
-per-file app_modal_dialog*=avi@chromium.org
+per-file app_modal*=avi@chromium.org
 
 # Can not match autofill* due to crbug.com/397984
 per-file autofill.gypi=estade@chromium.org
 per-file autofill.gypi=isherman@chromium.org
+per-file autofill_scaled_resources.grdp=estade@chromium.org
 per-file autofill_strings.grdp=estade@chromium.org
 per-file autofill_strings.grdp=isherman@chromium.org
 
+per-file bookmark_bar_strings.grdp=sky@chromium.org
 per-file bookmarks.gypi=sky@chromium.org
 
 per-file cloud_devices*=gene@chromium.org
@@ -43,6 +45,9 @@ per-file data_reduction_proxy*=bolian@chromium.org
 
 per-file devtools_bridge.gyp=mnaganov@chromium.org
 per-file devtools_bridge.gyp=serya@chromium.org
+
+per-file dns_prefetch*=jar@chromium.org
+per-file dns_prefetch*=ttuttle@chromium.org
 
 per-file dom_distiller*=bengr@chromium.org
 per-file dom_distiller*=cjhopman@chromium.org
@@ -77,6 +82,8 @@ per-file gcm*=zea@chromium.org
 
 per-file google*=isherman@chromium.org
 per-file google*=pkasting@chromium.org
+
+per-file handoff.gypi=erikchen@chromium.org
 
 per-file history.gypi=sky@chromium.org
 # Temporary for the duration of the history componentization.
@@ -129,6 +136,9 @@ per-file onc.gypi=gspencer@chromium.org
 per-file onc.gypi=pneubeck@chromium.org
 per-file onc.gypi=stevenjb@chromium.org
 
+per-file packed_ct_ev_whitelist.gypi=eranm@chromium.org
+per-file packed_ct_ev_whitelist.gypi=rsleevi@chromium.org
+
 per-file pairing.gypi=achuith@chromium.org
 per-file pairing.gypi=dzhioev@chromium.org
 per-file pairing.gypi=zork@chromium.org
@@ -152,12 +162,9 @@ per-file precache*=bengr@chromium.org
 per-file precache*=sclittle@chromium.org
 
 per-file policy*=mnissler@chromium.org
-per-file policy*=pastarmovj@chromium.org
-per-file policy*=joaodasilva@chromium.org
 per-file policy*=bartfab@chromium.org
 per-file policy*=atwilson@chromium.org
 per-file policy*=pneubeck@chromium.org
-per-file policy*=dconnelly@chromium.org
 
 per-file proximity_auth*=isherman@chromium.org
 per-file proximity_auth*=tbarzic@chromium.org
@@ -203,6 +210,7 @@ per-file sync_driver*=haitaol@chromium.org
 per-file sync_driver*=maniscalco@chromium.org
 per-file sync_driver*=pavely@chromium.org
 per-file sync_driver*=rlarocque@chromium.org
+per-file sync_driver*=stanisc@chromium.org
 per-file sync_driver*=tim@chromium.org
 per-file sync_driver*=zea@chromium.org
 
@@ -223,10 +231,6 @@ per-file translate_strings.grdp=toyoshim@chromium.org
 
 per-file startup_metric_utils.gypi=jeremy@chromium.org
 
-per-file usb_service.gypi=pfeldman@chromium.org
-per-file usb_service.gypi=rockot@chromium.org
-per-file usb_service.gypi=rpaquay@chromium.org
-
 per-file user_manager.gypi=antrim@chromium.org
 per-file user_manager.gypi=dpolukhin@chromium.org
 per-file user_manager.gypi=dzhioev@chromium.org
@@ -243,6 +247,15 @@ per-file user_prefs.gypi=pam@chromium.org
 per-file variations.gypi=asvitkine@chromium.org
 per-file variations.gypi=jwd@chromium.org
 per-file variations.gypi=stevet@chromium.org
+
+per-file webdata.gypi=pkasting@chromium.org
+per-file webdata_services.gypi=pkasting@chromium.org
+
+per-file webp_transcode.gypi=droger@chromium.org
+per-file webp_transcode.gypi=sdefresne@chromium.org
+
+per-file web_resource.gypi=asvitkine@chromium.org
+per-file web_resource.gypi=stevet@chromium.org
 
 per-file wifi.gypi=mef@chromium.org
 

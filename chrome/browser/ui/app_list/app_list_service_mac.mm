@@ -11,7 +11,6 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
-#include "base/mac/mac_util.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
@@ -150,10 +149,7 @@ void CreateAppListShim(const base::FilePath& profile_path) {
   if (installed_version == 0)
     shortcut_locations.in_quick_launch_bar = true;
 
-  web_app::CreateShortcutsWithInfo(web_app::SHORTCUT_CREATION_AUTOMATED,
-                                   shortcut_locations,
-                                   shortcut_info,
-                                   extensions::FileHandlersInfo());
+  web_app::CreateNonAppShortcut(shortcut_locations, shortcut_info);
 
   local_state->SetInteger(prefs::kAppLauncherShortcutVersion,
                           kShortcutVersion);
@@ -375,7 +371,7 @@ void AppListServiceMac::Init(Profile* initial_profile) {
   // OnShimLaunch(). Note that if --silent-launch is not also passed, the window
   // will instead populate via StartupBrowserCreator::Launch(). Shim-initiated
   // launches will always have --silent-launch.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kShowAppList))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kShowAppList))
     ShowWindowNearDock();
 }
 
@@ -411,6 +407,10 @@ void AppListServiceMac::DismissAppList() {
   [animation_controller_ animateWindow:[window_controller_ window]
                           targetOrigin:last_start_origin_
                                closing:YES];
+}
+
+void AppListServiceMac::ShowForCustomLauncherPage(Profile* profile) {
+  NOTIMPLEMENTED();
 }
 
 bool AppListServiceMac::IsAppListVisible() const {

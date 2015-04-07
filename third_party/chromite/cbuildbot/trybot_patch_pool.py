@@ -57,8 +57,7 @@ class TrybotPatchPool(object):
       for key in kwargs:
         if getattr(patch, key, object()) != kwargs[key]:
           return False
-      else:
-        return True
+      return True
 
     return self.FilterFn(AttributeFilter)
 
@@ -72,7 +71,7 @@ class TrybotPatchPool(object):
     """
     f = filter_fn
     if negate:
-      f = lambda p : not filter_fn(p)
+      f = lambda p: not filter_fn(p)
 
     return self.__class__(
         gerrit_patches=filter(f, self.gerrit_patches),

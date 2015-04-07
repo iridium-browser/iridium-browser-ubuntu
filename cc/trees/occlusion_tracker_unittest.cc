@@ -127,6 +127,9 @@ struct OcclusionTrackerTestMainThreadTypes {
     *layer = NULL;
     return ref;
   }
+  static void SetForceRenderSurface(LayerType* layer, bool force) {
+    layer->SetForceRenderSurface(force);
+  }
 
   static void DestroyLayer(LayerPtrType* layer) { *layer = NULL; }
 
@@ -156,6 +159,9 @@ struct OcclusionTrackerTestImplThreadTypes {
     return layer->Pass();
   }
 
+  static void SetForceRenderSurface(LayerType* layer, bool force) {
+    layer->SetHasRenderSurface(force);
+  }
   static void DestroyLayer(LayerPtrType* layer) { layer->reset(); }
 
   static void RecursiveUpdateNumChildren(LayerType* layer) {
@@ -174,7 +180,7 @@ template <typename Types> class OcclusionTrackerTest : public testing::Test {
 
   virtual void RunMyTest() = 0;
 
-  virtual void TearDown() { DestroyLayers(); }
+  void TearDown() override { DestroyLayers(); }
 
   typename Types::HostType* GetHost();
 
@@ -189,6 +195,7 @@ template <typename Types> class OcclusionTrackerTest : public testing::Test {
     DCHECK(!root_.get());
     root_ = Types::PassLayerPtr(&layer);
 
+    Types::SetForceRenderSurface(layer_ptr, true);
     SetRootLayerOnMainThread(layer_ptr);
 
     return layer_ptr;
@@ -211,7 +218,7 @@ template <typename Types> class OcclusionTrackerTest : public testing::Test {
                                            const gfx::Size& bounds) {
     typename Types::LayerType* layer =
         CreateLayer(parent, transform, position, bounds);
-    layer->SetForceRenderSurface(true);
+    Types::SetForceRenderSurface(layer, true);
     return layer;
   }
 
@@ -272,7 +279,7 @@ template <typename Types> class OcclusionTrackerTest : public testing::Test {
       bool opaque) {
     typename Types::ContentLayerType* layer =
         CreateDrawingLayer(parent, transform, position, bounds, opaque);
-    layer->SetForceRenderSurface(true);
+    Types::SetForceRenderSurface(layer, true);
     return layer;
   }
 
@@ -300,12 +307,12 @@ template <typename Types> class OcclusionTrackerTest : public testing::Test {
         CopyOutputRequest::CreateBitmapRequest(base::Bind(
             &OcclusionTrackerTest<Types>::CopyOutputCallback,
             base::Unretained(this))));
+    layer->SetHasRenderSurface(true);
     layer->PassCopyRequests(&requests);
   }
 
   void CalcDrawEtc(TestContentLayerImpl* root) {
     DCHECK(root == root_.get());
-    DCHECK(!root->render_surface());
 
     Types::RecursiveUpdateNumChildren(root);
     LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting inputs(
@@ -517,7 +524,7 @@ class OcclusionTrackerTestIdentityTransforms
   explicit OcclusionTrackerTestIdentityTransforms(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
 
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* root = this->CreateRoot(
         this->identity_matrix, gfx::PointF(), gfx::Size(200, 200));
     typename Types::ContentLayerType* parent = this->CreateDrawingLayer(
@@ -551,7 +558,7 @@ class OcclusionTrackerTestRotatedChild : public OcclusionTrackerTest<Types> {
  protected:
   explicit OcclusionTrackerTestRotatedChild(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform layer_transform;
     layer_transform.Translate(250.0, 250.0);
     layer_transform.Rotate(90.0);
@@ -590,7 +597,7 @@ class OcclusionTrackerTestTranslatedChild : public OcclusionTrackerTest<Types> {
  protected:
   explicit OcclusionTrackerTestTranslatedChild(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform layer_transform;
     layer_transform.Translate(20.0, 20.0);
 
@@ -628,7 +635,7 @@ class OcclusionTrackerTestChildInRotatedChild
  protected:
   explicit OcclusionTrackerTestChildInRotatedChild(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform child_transform;
     child_transform.Translate(250.0, 250.0);
     child_transform.Rotate(90.0);
@@ -726,7 +733,7 @@ class OcclusionTrackerTestScaledRenderSurface
   explicit OcclusionTrackerTestScaledRenderSurface(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
 
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* parent = this->CreateRoot(
         this->identity_matrix, gfx::PointF(), gfx::Size(200, 200));
 
@@ -734,7 +741,7 @@ class OcclusionTrackerTestScaledRenderSurface
     layer1_matrix.Scale(2.0, 2.0);
     typename Types::ContentLayerType* layer1 = this->CreateDrawingLayer(
         parent, layer1_matrix, gfx::PointF(), gfx::Size(100, 100), true);
-    layer1->SetForceRenderSurface(true);
+    Types::SetForceRenderSurface(layer1, true);
 
     gfx::Transform layer2_matrix;
     layer2_matrix.Translate(25.0, 25.0);
@@ -769,7 +776,7 @@ class OcclusionTrackerTestVisitTargetTwoTimes
  protected:
   explicit OcclusionTrackerTestVisitTargetTwoTimes(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* root = this->CreateRoot(
         this->identity_matrix, gfx::PointF(), gfx::Size(200, 200));
     typename Types::LayerType* surface = this->CreateSurface(
@@ -835,7 +842,7 @@ class OcclusionTrackerTestSurfaceRotatedOffAxis
  protected:
   explicit OcclusionTrackerTestSurfaceRotatedOffAxis(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform child_transform;
     child_transform.Translate(250.0, 250.0);
     child_transform.Rotate(95.0);
@@ -848,9 +855,8 @@ class OcclusionTrackerTestSurfaceRotatedOffAxis
         this->identity_matrix, gfx::PointF(), gfx::Size(1000, 1000));
     typename Types::ContentLayerType* parent = this->CreateDrawingLayer(
         root, this->identity_matrix, gfx::PointF(), gfx::Size(100, 100), true);
-    typename Types::LayerType* child = this->CreateLayer(
+    typename Types::LayerType* child = this->CreateSurface(
         parent, child_transform, gfx::PointF(30.f, 30.f), gfx::Size(500, 500));
-    child->SetMasksToBounds(true);
     typename Types::ContentLayerType* layer = this->CreateDrawingLayer(
         child, layer_transform, gfx::PointF(), gfx::Size(500, 500), true);
     this->CalcDrawEtc(root);
@@ -887,7 +893,7 @@ class OcclusionTrackerTestSurfaceWithTwoOpaqueChildren
  protected:
   explicit OcclusionTrackerTestSurfaceWithTwoOpaqueChildren(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform child_transform;
     child_transform.Translate(250.0, 250.0);
     child_transform.Rotate(90.0);
@@ -975,7 +981,7 @@ class OcclusionTrackerTestOverlappingSurfaceSiblings
  protected:
   explicit OcclusionTrackerTestOverlappingSurfaceSiblings(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* parent = this->CreateRoot(
         this->identity_matrix, gfx::PointF(), gfx::Size(100, 100));
     parent->SetMasksToBounds(true);
@@ -1035,7 +1041,7 @@ class OcclusionTrackerTestOverlappingSurfaceSiblingsWithTwoTransforms
   explicit OcclusionTrackerTestOverlappingSurfaceSiblingsWithTwoTransforms(
       bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform child1_transform;
     child1_transform.Translate(250.0, 250.0);
     child1_transform.Rotate(-90.0);
@@ -1141,7 +1147,7 @@ class OcclusionTrackerTestFilters : public OcclusionTrackerTest<Types> {
  protected:
   explicit OcclusionTrackerTestFilters(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform layer_transform;
     layer_transform.Translate(250.0, 250.0);
     layer_transform.Rotate(90.0);
@@ -1169,14 +1175,17 @@ class OcclusionTrackerTestFilters : public OcclusionTrackerTest<Types> {
                                  gfx::Size(500, 500),
                                  true);
 
+    Types::SetForceRenderSurface(blur_layer, true);
     FilterOperations filters;
     filters.Append(FilterOperation::CreateBlurFilter(10.f));
     blur_layer->SetFilters(filters);
 
+    Types::SetForceRenderSurface(opaque_layer, true);
     filters.Clear();
     filters.Append(FilterOperation::CreateGrayscaleFilter(0.5f));
     opaque_layer->SetFilters(filters);
 
+    Types::SetForceRenderSurface(opacity_layer, true);
     filters.Clear();
     filters.Append(FilterOperation::CreateOpacityFilter(0.5f));
     opacity_layer->SetFilters(filters);
@@ -1241,7 +1250,7 @@ class OcclusionTrackerTestReplicaDoesOcclude
  protected:
   explicit OcclusionTrackerTestReplicaDoesOcclude(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* parent = this->CreateRoot(
         this->identity_matrix, gfx::PointF(), gfx::Size(100, 200));
     typename Types::LayerType* surface = this->CreateDrawingSurface(
@@ -1275,7 +1284,7 @@ class OcclusionTrackerTestReplicaWithClipping
  protected:
   explicit OcclusionTrackerTestReplicaWithClipping(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* parent = this->CreateRoot(
         this->identity_matrix, gfx::PointF(), gfx::Size(100, 170));
     parent->SetMasksToBounds(true);
@@ -1317,7 +1326,7 @@ class OcclusionTrackerTestReplicaWithMask : public OcclusionTrackerTest<Types> {
  protected:
   explicit OcclusionTrackerTestReplicaWithMask(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* parent = this->CreateRoot(
         this->identity_matrix, gfx::PointF(), gfx::Size(100, 200));
     typename Types::LayerType* surface =
@@ -1357,7 +1366,7 @@ class OcclusionTrackerTestOpaqueContentsRegionEmpty
  protected:
   explicit OcclusionTrackerTestOpaqueContentsRegionEmpty(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* parent = this->CreateRoot(
         this->identity_matrix, gfx::PointF(), gfx::Size(300, 300));
     typename Types::ContentLayerType* layer =
@@ -1392,7 +1401,7 @@ class OcclusionTrackerTestOpaqueContentsRegionNonEmpty
  protected:
   explicit OcclusionTrackerTestOpaqueContentsRegionNonEmpty(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* parent = this->CreateRoot(
         this->identity_matrix, gfx::PointF(), gfx::Size(300, 300));
     typename Types::ContentLayerType* layer =
@@ -1449,7 +1458,7 @@ class OcclusionTrackerTestUnsorted3dLayers
  protected:
   explicit OcclusionTrackerTestUnsorted3dLayers(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     // Currently, The main thread layer iterator does not iterate over 3d items
     // in sorted order, because layer sorting is not performed on the main
     // thread.  Because of this, the occlusion tracker cannot assume that a 3d
@@ -1502,7 +1511,7 @@ class OcclusionTrackerTestLayerBehindCameraDoesNotOcclude
   explicit OcclusionTrackerTestLayerBehindCameraDoesNotOcclude(
       bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform transform;
     transform.Translate(50.0, 50.0);
     transform.ApplyPerspectiveDepth(100.0);
@@ -1542,7 +1551,7 @@ class OcclusionTrackerTestLargePixelsOccludeInsideClipRect
   explicit OcclusionTrackerTestLargePixelsOccludeInsideClipRect(
       bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform transform;
     transform.Translate(50.0, 50.0);
     transform.ApplyPerspectiveDepth(100.0);
@@ -1586,7 +1595,7 @@ class OcclusionTrackerTestAnimationOpacity1OnMainThread
  protected:
   explicit OcclusionTrackerTestAnimationOpacity1OnMainThread(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     // parent
     // +--layer
     // +--surface
@@ -1705,7 +1714,7 @@ class OcclusionTrackerTestAnimationOpacity0OnMainThread
  protected:
   explicit OcclusionTrackerTestAnimationOpacity0OnMainThread(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* parent = this->CreateRoot(
         this->identity_matrix, gfx::PointF(), gfx::Size(300, 300));
     typename Types::ContentLayerType* layer =
@@ -1816,7 +1825,7 @@ class OcclusionTrackerTestAnimationTranslateOnMainThread
   explicit OcclusionTrackerTestAnimationTranslateOnMainThread(
       bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* parent = this->CreateRoot(
         this->identity_matrix, gfx::PointF(), gfx::Size(300, 300));
     typename Types::ContentLayerType* layer =
@@ -1946,7 +1955,7 @@ class OcclusionTrackerTestSurfaceOcclusionTranslatesToParent
   explicit OcclusionTrackerTestSurfaceOcclusionTranslatesToParent(
       bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform surface_transform;
     surface_transform.Translate(300.0, 300.0);
     surface_transform.Scale(2.0, 2.0);
@@ -2001,7 +2010,7 @@ class OcclusionTrackerTestSurfaceOcclusionTranslatesWithClipping
   explicit OcclusionTrackerTestSurfaceOcclusionTranslatesWithClipping(
       bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* parent = this->CreateRoot(
         this->identity_matrix, gfx::PointF(), gfx::Size(300, 300));
     parent->SetMasksToBounds(true);
@@ -2036,7 +2045,7 @@ class OcclusionTrackerTestSurfaceWithReplicaUnoccluded
  protected:
   explicit OcclusionTrackerTestSurfaceWithReplicaUnoccluded(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* parent = this->CreateRoot(
         this->identity_matrix, gfx::PointF(), gfx::Size(100, 200));
     typename Types::LayerType* surface =
@@ -2096,7 +2105,7 @@ class OcclusionTrackerTestSurfaceChildOfSurface
  protected:
   explicit OcclusionTrackerTestSurfaceChildOfSurface(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     // This test verifies that the surface cliprect does not end up empty and
     // clip away the entire unoccluded rect.
 
@@ -2194,7 +2203,7 @@ class OcclusionTrackerTestDontOccludePixelsNeededForBackgroundFilter
   explicit OcclusionTrackerTestDontOccludePixelsNeededForBackgroundFilter(
       bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform scale_by_half;
     scale_by_half.Scale(0.5, 0.5);
 
@@ -2229,8 +2238,8 @@ class OcclusionTrackerTestDontOccludePixelsNeededForBackgroundFilter
                                    gfx::PointF(50.f, 50.f),
                                    gfx::Size(100, 100),
                                    false);
+      Types::SetForceRenderSurface(filtered_surface, true);
       filtered_surface->SetBackgroundFilters(filters);
-
       gfx::Rect occlusion_rect;
       switch (i) {
         case LEFT:
@@ -2318,7 +2327,7 @@ class OcclusionTrackerTestTwoBackgroundFiltersReduceOcclusionTwice
   explicit OcclusionTrackerTestTwoBackgroundFiltersReduceOcclusionTwice(
       bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform scale_by_half;
     scale_by_half.Scale(0.5, 0.5);
 
@@ -2341,6 +2350,8 @@ class OcclusionTrackerTestTwoBackgroundFiltersReduceOcclusionTwice
                                  true);
 
     // Filters make the layers own surfaces.
+    Types::SetForceRenderSurface(filtered_surface1, true);
+    Types::SetForceRenderSurface(filtered_surface2, true);
     FilterOperations filters;
     filters.Append(FilterOperation::CreateBlurFilter(1.f));
     filtered_surface1->SetBackgroundFilters(filters);
@@ -2393,7 +2404,7 @@ class OcclusionTrackerTestDontReduceOcclusionBelowBackgroundFilter
   explicit OcclusionTrackerTestDontReduceOcclusionBelowBackgroundFilter(
       bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform scale_by_half;
     scale_by_half.Scale(0.5, 0.5);
 
@@ -2427,6 +2438,7 @@ class OcclusionTrackerTestDontReduceOcclusionBelowBackgroundFilter
                              gfx::Size());
 
     // Filters make the layer own a surface.
+    Types::SetForceRenderSurface(filtered_surface, true);
     FilterOperations filters;
     filters.Append(FilterOperation::CreateBlurFilter(3.f));
     filtered_surface->SetBackgroundFilters(filters);
@@ -2477,7 +2489,7 @@ class OcclusionTrackerTestDontReduceOcclusionIfBackgroundFilterIsOccluded
   explicit OcclusionTrackerTestDontReduceOcclusionIfBackgroundFilterIsOccluded(
       bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform scale_by_half;
     scale_by_half.Scale(0.5, 0.5);
 
@@ -2501,6 +2513,7 @@ class OcclusionTrackerTestDontReduceOcclusionIfBackgroundFilterIsOccluded
                                  true);
 
     // Filters make the layer own a surface.
+    Types::SetForceRenderSurface(filtered_surface, true);
     FilterOperations filters;
     filters.Append(FilterOperation::CreateBlurFilter(3.f));
     filtered_surface->SetBackgroundFilters(filters);
@@ -2550,7 +2563,7 @@ class OcclusionTrackerTestReduceOcclusionWhenBackgroundFilterIsPartiallyOccluded
   OcclusionTrackerTestReduceOcclusionWhenBackgroundFilterIsPartiallyOccluded(
       bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform scale_by_half;
     scale_by_half.Scale(0.5, 0.5);
 
@@ -2597,6 +2610,7 @@ class OcclusionTrackerTestReduceOcclusionWhenBackgroundFilterIsPartiallyOccluded
                                  true);
 
     // Filters make the layer own a surface.
+    Types::SetForceRenderSurface(filtered_surface, true);
     FilterOperations filters;
     filters.Append(FilterOperation::CreateBlurFilter(3.f));
     filtered_surface->SetBackgroundFilters(filters);
@@ -2662,7 +2676,7 @@ class OcclusionTrackerTestMinimumTrackingSize
  protected:
   explicit OcclusionTrackerTestMinimumTrackingSize(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Size tracking_size(100, 100);
     gfx::Size below_tracking_size(99, 99);
 
@@ -2708,7 +2722,7 @@ class OcclusionTrackerTestScaledLayerIsClipped
  protected:
   explicit OcclusionTrackerTestScaledLayerIsClipped(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform scale_transform;
     scale_transform.Scale(512.0, 512.0);
 
@@ -2745,7 +2759,7 @@ class OcclusionTrackerTestScaledLayerInSurfaceIsClipped
  protected:
   explicit OcclusionTrackerTestScaledLayerInSurfaceIsClipped(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform scale_transform;
     scale_transform.Scale(512.0, 512.0);
 
@@ -2786,7 +2800,7 @@ class OcclusionTrackerTestCopyRequestDoesOcclude
  protected:
   explicit OcclusionTrackerTestCopyRequestDoesOcclude(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* root = this->CreateRoot(
         this->identity_matrix, gfx::Point(), gfx::Size(400, 400));
     typename Types::ContentLayerType* parent = this->CreateDrawingLayer(
@@ -2833,7 +2847,7 @@ class OcclusionTrackerTestHiddenCopyRequestDoesNotOcclude
   explicit OcclusionTrackerTestHiddenCopyRequestDoesNotOcclude(
       bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     typename Types::ContentLayerType* root = this->CreateRoot(
         this->identity_matrix, gfx::Point(), gfx::Size(400, 400));
     typename Types::ContentLayerType* parent = this->CreateDrawingLayer(
@@ -2879,7 +2893,7 @@ class OcclusionTrackerTestOccludedLayer : public OcclusionTrackerTest<Types> {
  protected:
   explicit OcclusionTrackerTestOccludedLayer(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform translate;
     translate.Translate(10.0, 20.0);
     typename Types::ContentLayerType* root = this->CreateRoot(
@@ -2970,7 +2984,7 @@ class OcclusionTrackerTestUnoccludedLayerQuery
  protected:
   explicit OcclusionTrackerTestUnoccludedLayerQuery(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform translate;
     translate.Translate(10.0, 20.0);
     typename Types::ContentLayerType* root = this->CreateRoot(
@@ -3136,7 +3150,7 @@ class OcclusionTrackerTestUnoccludedSurfaceQuery
  protected:
   explicit OcclusionTrackerTestUnoccludedSurfaceQuery(bool opaque_layers)
       : OcclusionTrackerTest<Types>(opaque_layers) {}
-  void RunMyTest() {
+  void RunMyTest() override {
     gfx::Transform translate;
     translate.Translate(10.0, 20.0);
     typename Types::ContentLayerType* root = this->CreateRoot(

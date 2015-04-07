@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/callback.h"
 #include "base/macros.h"
 #include "components/copresence/public/whispernet_client.h"
 
@@ -27,7 +27,9 @@ class StubWhispernetClient final : public WhispernetClient {
   void Shutdown() override {}
 
   void EncodeToken(const std::string& token, AudioType type) override;
-  void DecodeSamples(AudioType type, const std::string& samples) override;
+  void DecodeSamples(AudioType type,
+                     const std::string& samples,
+                     const size_t token_length[2]) override;
   void DetectBroadcast() override {}
 
   void RegisterTokensCallback(const TokensCallback& tokens_cb) override;

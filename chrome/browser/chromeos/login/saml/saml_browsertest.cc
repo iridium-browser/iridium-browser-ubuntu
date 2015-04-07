@@ -285,7 +285,7 @@ class SamlTest : public InProcessBrowserTest {
     host_resolver()->AddRule("*", "127.0.0.1");
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kLoginManager);
     command_line->AppendSwitch(switches::kForceLoginManagerInTests);
     command_line->AppendSwitch(::switches::kDisableBackgroundNetworking);
@@ -460,7 +460,7 @@ IN_PROC_BROWSER_TEST_F(SamlTest, SamlUI) {
   StartSamlAndWaitForIdpPageLoad(kFirstSAMLUserEmail);
 
   // Saml flow UI expectations.
-  JsExpect("$('gaia-signin').classList.contains('saml')");
+  JsExpect("$('gaia-signin').classList.contains('full-width')");
   JsExpect("!$('cancel-add-user-button').hidden");
 
   // Click on 'cancel'.
@@ -476,7 +476,7 @@ IN_PROC_BROWSER_TEST_F(SamlTest, SamlUI) {
   } while (message != "\"GaiaLoaded\"");
 
   // Saml flow is gone.
-  JsExpect("!$('gaia-signin').classList.contains('saml')");
+  JsExpect("!$('gaia-signin').classList.contains('full-width')");
 }
 
 // Tests the sign-in flow when the credentials passing API is used.
@@ -509,11 +509,44 @@ IN_PROC_BROWSER_TEST_F(SamlTest, ScrapedSingle) {
   // Lands on confirm password screen.
   OobeScreenWaiter(OobeDisplay::SCREEN_CONFIRM_PASSWORD).Wait();
 
-  // Enter an unknown password should go back to confirm password screen.
+  // Entering an unknown password should go back to the confirm password screen.
   SendConfirmPassword("wrong_password");
   OobeScreenWaiter(OobeDisplay::SCREEN_CONFIRM_PASSWORD).Wait();
 
-  // Enter a known password should finish login and start session.
+  // Entering a known password should finish login and start session.
+  SendConfirmPassword("fake_password");
+  content::WindowedNotificationObserver(
+      chrome::NOTIFICATION_SESSION_STARTED,
+      content::NotificationService::AllSources()).Wait();
+}
+
+// Tests password scraping from a dynamically created password field.
+IN_PROC_BROWSER_TEST_F(SamlTest, ScrapedDynamic) {
+  fake_saml_idp()->SetLoginHTMLTemplate("saml_login.html");
+  StartSamlAndWaitForIdpPageLoad(kFirstSAMLUserEmail);
+
+  ExecuteJsInSigninFrame(
+    "(function() {"
+      "var newPassInput = document.createElement('input');"
+      "newPassInput.id = 'DynamicallyCreatedPassword';"
+      "newPassInput.type = 'password';"
+      "newPassInput.name = 'Password';"
+      "document.forms[0].appendChild(newPassInput);"
+    "})();");
+
+  // Fill-in the SAML IdP form and submit.
+  SetSignFormField("Email", "fake_user");
+  SetSignFormField("DynamicallyCreatedPassword", "fake_password");
+  ExecuteJsInSigninFrame("document.getElementById('Submit').click();");
+
+  // Lands on confirm password screen.
+  OobeScreenWaiter(OobeDisplay::SCREEN_CONFIRM_PASSWORD).Wait();
+
+  // Entering an unknown password should go back to the confirm password screen.
+  SendConfirmPassword("wrong_password");
+  OobeScreenWaiter(OobeDisplay::SCREEN_CONFIRM_PASSWORD).Wait();
+
+  // Entering a known password should finish login and start session.
   SendConfirmPassword("fake_password");
   content::WindowedNotificationObserver(
       chrome::NOTIFICATION_SESSION_STARTED,
@@ -664,7 +697,7 @@ class SAMLEnrollmentTest : public SamlTest,
 
   // SamlTest:
   void SetUp() override;
-  void SetUpCommandLine(CommandLine* command_line) override;
+  void SetUpCommandLine(base::CommandLine* command_line) override;
   void SetUpOnMainThread() override;
   void StartSamlAndWaitForIdpPageLoad(const std::string& gaia_email) override;
 
@@ -705,7 +738,7 @@ void SAMLEnrollmentTest::SetUp() {
   SamlTest::SetUp();
 }
 
-void SAMLEnrollmentTest::SetUpCommandLine(CommandLine* command_line) {
+void SAMLEnrollmentTest::SetUpCommandLine(base::CommandLine* command_line) {
   command_line->AppendSwitchASCII(policy::switches::kDeviceManagementUrl,
                                   test_server_->GetServiceURL().spec());
   command_line->AppendSwitch(policy::switches::kDisablePolicyKeyVerification);

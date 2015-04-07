@@ -21,6 +21,16 @@ function getScrollbarWidth() {
 }
 
 /**
+ * Return the filename component of a URL.
+ * @param {string} url The URL to get the filename from.
+ * @return {string} The filename component.
+ */
+function getFilenameFromURL(url) {
+  var components = url.split(/\/|\\/);
+  return components[components.length - 1];
+}
+
+/**
  * The minimum number of pixels to offset the toolbar by from the bottom and
  * right side of the screen.
  */
@@ -33,8 +43,9 @@ PDFViewer.MIN_TOOLBAR_OFFSET = 15;
  *     contained in the PDF.
  */
 function PDFViewer(streamDetails) {
-  this.streamDetails = streamDetails;
-  this.loaded = false;
+  this.streamDetails_ = streamDetails;
+  this.loaded_ = false;
+  this.parentWindow_ = null;
 
   // The sizer element is placed behind the plugin element to cause scrollbars
   // to be displayed in the window. It is sized according to the document size
@@ -55,12 +66,11 @@ function PDFViewer(streamDetails) {
                                 this.beforeZoom_.bind(this),
                                 this.afterZoom_.bind(this),
                                 getScrollbarWidth());
-
   // Create the plugin object dynamically so we can set its src. The plugin
   // element is sized to fill the entire window and is set to be fixed
   // positioning, acting as a viewport. The plugin renders into this viewport
   // according to the scroll position of the window.
-  this.plugin_ = document.createElement('object');
+  this.plugin_ = document.createElement('embed');
   // NOTE: The plugin's 'id' field must be set to 'plugin' since
   // chrome/renderer/printing/print_web_view_helper.cc actually references it.
   this.plugin_.id = 'plugin';
@@ -71,31 +81,22 @@ function PDFViewer(streamDetails) {
   // Handle scripting messages from outside the extension that wish to interact
   // with it. We also send a message indicating that extension has loaded and
   // is ready to receive messages.
-  window.addEventListener('message', this.handleScriptingMessage_.bind(this),
+  window.addEventListener('message', this.handleScriptingMessage.bind(this),
                           false);
-  this.sendScriptingMessage_({type: 'readyToReceive'});
 
-  this.plugin_.setAttribute('src', this.streamDetails.originalUrl);
-  this.plugin_.setAttribute('stream-url', this.streamDetails.streamUrl);
+  document.title = getFilenameFromURL(this.streamDetails_.originalUrl);
+  this.plugin_.setAttribute('src', this.streamDetails_.originalUrl);
+  this.plugin_.setAttribute('stream-url', this.streamDetails_.streamUrl);
   var headers = '';
-  for (var header in this.streamDetails.responseHeaders) {
+  for (var header in this.streamDetails_.responseHeaders) {
     headers += header + ': ' +
-        this.streamDetails.responseHeaders[header] + '\n';
+        this.streamDetails_.responseHeaders[header] + '\n';
   }
   this.plugin_.setAttribute('headers', headers);
 
-  if (window.top == window)
+  if (!this.streamDetails_.embedded)
     this.plugin_.setAttribute('full-frame', '');
   document.body.appendChild(this.plugin_);
-
-  // TODO(raymes): Remove this spurious message once crbug.com/388606 is fixed.
-  // This is a hack to initialize pepper sync scripting and avoid re-entrancy.
-  this.plugin_.postMessage({
-    type: 'viewport',
-    zoom: 1,
-    xOffset: 0,
-    yOffset: 0
-  });
 
   // Setup the button event listeners.
   $('fit-to-width-button').addEventListener('click',
@@ -106,17 +107,20 @@ function PDFViewer(streamDetails) {
       this.viewport_.zoomIn.bind(this.viewport_));
   $('zoom-out-button').addEventListener('click',
       this.viewport_.zoomOut.bind(this.viewport_));
-  $('save-button-link').href = this.streamDetails.originalUrl;
+  $('save-button').addEventListener('click', this.save_.bind(this));
   $('print-button').addEventListener('click', this.print_.bind(this));
 
   // Setup the keyboard event listener.
   document.onkeydown = this.handleKeyEvent_.bind(this);
 
   // Set up the zoom API.
-  if (chrome.tabs) {
-    chrome.tabs.setZoomSettings({mode: 'manual', scope: 'per-tab'},
+  if (this.shouldManageZoom_()) {
+    chrome.tabs.setZoomSettings(this.streamDetails_.tabId,
+                                {mode: 'manual', scope: 'per-tab'},
                                 this.afterZoom_.bind(this));
     chrome.tabs.onZoomChange.addListener(function(zoomChangeInfo) {
+      if (zoomChangeInfo.tabId != this.streamDetails_.tabId)
+        return;
       // If the zoom level is close enough to the current zoom level, don't
       // change it. This avoids us getting into an infinite loop of zoom changes
       // due to floating point error.
@@ -132,7 +136,7 @@ function PDFViewer(streamDetails) {
   }
 
   // Parse open pdf parameters.
-  var paramsParser = new OpenPDFParamsParser(this.streamDetails.originalUrl);
+  var paramsParser = new OpenPDFParamsParser(this.streamDetails_.originalUrl);
   this.urlParams_ = paramsParser.urlParams;
 }
 
@@ -185,14 +189,16 @@ PDFViewer.prototype = {
         pageDownHandler();
         return;
       case 37:  // Left arrow key.
-        // Go to the previous page if there are no horizontal scrollbars.
-        if (!this.viewport_.documentHasScrollbars().x) {
-          this.viewport_.goToPage(this.viewport_.getMostVisiblePage() - 1);
-          // Since we do the movement of the page.
-          e.preventDefault();
-        } else if (fromScriptingAPI) {
-          position.x -= Viewport.SCROLL_INCREMENT;
-          this.viewport.position = position;
+        if (!(e.altKey || e.ctrlKey || e.metaKey || e.shiftKey)) {
+          // Go to the previous page if there are no horizontal scrollbars.
+          if (!this.viewport_.documentHasScrollbars().x) {
+            this.viewport_.goToPage(this.viewport_.getMostVisiblePage() - 1);
+            // Since we do the movement of the page.
+            e.preventDefault();
+          } else if (fromScriptingAPI) {
+            position.x -= Viewport.SCROLL_INCREMENT;
+            this.viewport.position = position;
+          }
         }
         return;
       case 38:  // Up arrow key.
@@ -202,14 +208,16 @@ PDFViewer.prototype = {
         }
         return;
       case 39:  // Right arrow key.
-        // Go to the next page if there are no horizontal scrollbars.
-        if (!this.viewport_.documentHasScrollbars().x) {
-          this.viewport_.goToPage(this.viewport_.getMostVisiblePage() + 1);
-          // Since we do the movement of the page.
-          e.preventDefault();
-        } else if (fromScriptingAPI) {
-          position.x += Viewport.SCROLL_INCREMENT;
-          this.viewport.position = position;
+        if (!(e.altKey || e.ctrlKey || e.metaKey || e.shiftKey)) {
+          // Go to the next page if there are no horizontal scrollbars.
+          if (!this.viewport_.documentHasScrollbars().x) {
+            this.viewport_.goToPage(this.viewport_.getMostVisiblePage() + 1);
+            // Since we do the movement of the page.
+            e.preventDefault();
+          } else if (fromScriptingAPI) {
+            position.x += Viewport.SCROLL_INCREMENT;
+            this.viewport.position = position;
+          }
         }
         return;
       case 40:  // Down arrow key.
@@ -223,15 +231,6 @@ PDFViewer.prototype = {
           this.plugin_.postMessage({
             type: 'selectAll',
           });
-        }
-        return;
-      case 83:  // s key.
-        if (e.ctrlKey || e.metaKey) {
-          // Simulate a click on the button so that the <a download ...>
-          // attribute is used.
-          $('save-button-link').click();
-          // Since we do the saving of the page.
-          e.preventDefault();
         }
         return;
       case 80:  // p key.
@@ -265,6 +264,16 @@ PDFViewer.prototype = {
   print_: function() {
     this.plugin_.postMessage({
       type: 'print',
+    });
+  },
+
+  /**
+   * @private
+   * Notify the plugin to save.
+   */
+  save_: function() {
+    this.plugin_.postMessage({
+      type: 'save',
     });
   },
 
@@ -310,9 +319,7 @@ PDFViewer.prototype = {
       if (this.lastViewportPosition_)
         this.viewport_.position = this.lastViewportPosition_;
       this.handleURLParams_();
-      this.loaded = true;
-      var loadEvent = new Event('pdfload');
-      window.dispatchEvent(loadEvent);
+      this.loaded_ = true;
       this.sendScriptingMessage_({
         type: 'documentLoaded'
       });
@@ -342,7 +349,6 @@ PDFViewer.prototype = {
       case 'documentDimensions':
         this.documentDimensions_ = message.data;
         this.viewport_.setDocumentDimensions(this.documentDimensions_);
-        this.toolbar_.style.visibility = 'visible';
         // If we received the document dimensions, the password was good so we
         // can dismiss the password screen.
         if (this.passwordScreen_.active)
@@ -393,10 +399,11 @@ PDFViewer.prototype = {
       case 'setTranslatedStrings':
         this.passwordScreen_.text = message.data.getPasswordString;
         this.progressBar_.text = message.data.loadingString;
+        this.progressBar_.style.visibility = 'visible';
         this.errorScreen_.text = message.data.loadFailedString;
         break;
       case 'cancelStreamUrl':
-        chrome.streamsPrivate.abort(this.streamDetails.streamUrl);
+        chrome.streamsPrivate.abort(this.streamDetails_.streamUrl);
         break;
     }
   },
@@ -420,9 +427,10 @@ PDFViewer.prototype = {
   afterZoom_: function() {
     var position = this.viewport_.position;
     var zoom = this.viewport_.zoom;
-    if (chrome.tabs && !this.setZoomInProgress_) {
+    if (this.shouldManageZoom_() && !this.setZoomInProgress_) {
       this.setZoomInProgress_ = true;
-      chrome.tabs.setZoom(zoom, this.setZoomComplete_.bind(this, zoom));
+      chrome.tabs.setZoom(this.streamDetails_.tabId, zoom,
+                          this.setZoomComplete_.bind(this, zoom));
     }
     this.plugin_.postMessage({
       type: 'viewport',
@@ -442,10 +450,12 @@ PDFViewer.prototype = {
    */
   setZoomComplete_: function(lastZoom) {
     var zoom = this.viewport_.zoom;
-    if (zoom != lastZoom)
-      chrome.tabs.setZoom(zoom, this.setZoomComplete_.bind(this, zoom));
-    else
+    if (zoom != lastZoom) {
+      chrome.tabs.setZoom(this.streamDetails_.tabId, zoom,
+                          this.setZoomComplete_.bind(this, zoom));
+    } else {
       this.setZoomInProgress_ = false;
+    }
   },
 
   /**
@@ -477,6 +487,11 @@ PDFViewer.prototype = {
       toolbarBottom -= scrollbarWidth;
     this.toolbar_.style.right = toolbarRight + 'px';
     this.toolbar_.style.bottom = toolbarBottom + 'px';
+    // Hide the toolbar if it doesn't fit in the viewport.
+    if (this.toolbar_.offsetLeft < 0 || this.toolbar_.offsetTop < 0)
+      this.toolbar_.style.visibility = 'hidden';
+    else
+      this.toolbar_.style.visibility = 'visible';
 
     // Update the page indicator.
     var visiblePage = this.viewport_.getMostVisiblePage();
@@ -507,7 +522,7 @@ PDFViewer.prototype = {
    * plugin.
    * @param {MessageObject} message the message to handle.
    */
-  handleScriptingMessage_: function(message) {
+  handleScriptingMessage: function(message) {
     switch (message.data.type.toString()) {
       case 'getAccessibilityJSON':
       case 'loadPreviewPage':
@@ -549,8 +564,19 @@ PDFViewer.prototype = {
         e.keyCode = message.data.keyCode;
         this.handleKeyEvent_(e);
         break;
+      case 'setParentWindow':
+        if (this.parentWindow_ != message.source) {
+          this.parentWindow_ = message.source;
+          // If the document has already loaded, we always send a message that
+          // indicates that so that the embedder is aware.
+          if (this.loaded_) {
+            this.sendScriptingMessage_({
+              type: 'documentLoaded'
+            });
+          }
+        }
+        break;
     }
-
   },
 
   /**
@@ -560,7 +586,19 @@ PDFViewer.prototype = {
    * @param {Object} message the message to send.
    */
   sendScriptingMessage_: function(message) {
-    window.parent.postMessage(message, '*');
+    if (this.parentWindow_)
+      this.parentWindow_.postMessage(message, '*');
+  },
+
+  /**
+   * @private
+   * Return whether this PDFViewer should manage zoom for its containing page.
+   * @return {boolean} Whether this PDFViewer should manage zoom for its
+   *     containing page.
+   */
+  shouldManageZoom_: function() {
+    return !!(chrome.tabs && !this.streamDetails_.embedded &&
+              this.streamDetails_.tabId != -1);
   },
 
   /**

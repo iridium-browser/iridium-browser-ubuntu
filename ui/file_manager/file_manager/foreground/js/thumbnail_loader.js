@@ -12,14 +12,19 @@
  *     default: IMAGE.
  * @param {Object=} opt_metadata Metadata object.
  * @param {string=} opt_mediaType Media type.
- * @param {ThumbnailLoader.UseEmbedded=} opt_useEmbedded If to use embedded
- *     jpeg thumbnail if available. Default: USE_EMBEDDED.
+ * @param {Array<ThumbnailLoader.LoadTarget>=} opt_loadTargets The list of load
+ *     targets in preferential order. The default value is [CONTENT_METADATA,
+ *     EXTERNAL_METADATA, FILE_ENTRY].
  * @param {number=} opt_priority Priority, the highest is 0. default: 2.
  * @constructor
  */
 function ThumbnailLoader(entry, opt_loaderType, opt_metadata, opt_mediaType,
-    opt_useEmbedded, opt_priority) {
-  opt_useEmbedded = opt_useEmbedded || ThumbnailLoader.UseEmbedded.USE_EMBEDDED;
+    opt_loadTargets, opt_priority) {
+  var loadTargets = opt_loadTargets || [
+    ThumbnailLoader.LoadTarget.CONTENT_METADATA,
+    ThumbnailLoader.LoadTarget.EXTERNAL_METADATA,
+    ThumbnailLoader.LoadTarget.FILE_ENTRY
+  ];
 
   this.mediaType_ = opt_mediaType || FileType.getMediaType(entry);
   this.loaderType_ = opt_loaderType || ThumbnailLoader.LoaderType.IMAGE;
@@ -27,8 +32,15 @@ function ThumbnailLoader(entry, opt_loaderType, opt_metadata, opt_mediaType,
   this.priority_ = (opt_priority !== undefined) ? opt_priority : 2;
   this.transform_ = null;
 
+  /**
+   * @type {?ThumbnailLoader.LoadTarget}
+   * @private
+   */
+  this.loadTarget_ = null;
+
   if (!opt_metadata) {
     this.thumbnailUrl_ = entry.toURL();  // Use the URL directly.
+    this.loadTarget_ = ThumbnailLoader.LoadTarget.FILE_ENTRY;
     return;
   }
 
@@ -37,33 +49,39 @@ function ThumbnailLoader(entry, opt_loaderType, opt_metadata, opt_mediaType,
   if (opt_metadata.external && opt_metadata.external.customIconUrl)
     this.fallbackUrl_ = opt_metadata.external.customIconUrl;
 
-  // Fetch the rotation from the external properties (if available).
-  var externalTransform;
-  if (opt_metadata.external &&
-      opt_metadata.external.imageRotation !== undefined) {
-    externalTransform = {
-      scaleX: 1,
-      scaleY: 1,
-      rotate90: opt_metadata.external.imageRotation / 90
-    };
+  for (var i = 0; i < loadTargets.length; i++) {
+    switch (loadTargets[i]) {
+      case ThumbnailLoader.LoadTarget.CONTENT_METADATA:
+        if (opt_metadata.thumbnail && opt_metadata.thumbnail.url) {
+          this.thumbnailUrl_ = opt_metadata.thumbnail.url;
+          this.thumbnailTransform =
+              opt_metadata.thumbnail && opt_metadata.thumbnail.transform;
+          this.loadTarget_ = ThumbnailLoader.LoadTarget.CONTENT_METADATA;
+        }
+        break;
+      case ThumbnailLoader.LoadTarget.EXTERNAL_METADATA:
+        if (opt_metadata.external && opt_metadata.external.thumbnailUrl &&
+            (!opt_metadata.external.dirty || !FileType.isImage(entry))) {
+          this.thumbnailUrl_ = opt_metadata.external.thumbnailUrl;
+          this.loadTarget_ = ThumbnailLoader.LoadTarget.EXTERNAL_METADATA;
+        }
+        break;
+      case ThumbnailLoader.LoadTarget.FILE_ENTRY:
+        if (FileType.isImage(entry)) {
+          this.thumbnailUrl_ = entry.toURL();
+          this.transform_ =
+              opt_metadata.media && opt_metadata.media.imageTransform;
+          this.loadTarget_ = ThumbnailLoader.LoadTarget.FILE_ENTRY;
+        }
+        break;
+      default:
+        assertNotReached('Unkonwn load type: ' + loadTargets[i]);
+    }
+    if (this.thumbnailUrl_)
+      break;
   }
 
-  if (((opt_metadata.thumbnail && opt_metadata.thumbnail.url) ||
-       (opt_metadata.external && opt_metadata.external.thumbnailUrl)) &&
-      opt_useEmbedded === ThumbnailLoader.UseEmbedded.USE_EMBEDDED) {
-    // If the thumbnail generated from the local cache (metadata.thumbnail.url)
-    // is available, use it. If not, use the one passed from the external
-    // provider (metadata.external.thumbnailUrl).
-    this.thumbnailUrl_ =
-        (opt_metadata.thumbnail && opt_metadata.thumbnail.url) ||
-        (opt_metadata.external && opt_metadata.external.thumbnailUrl);
-    this.transform_ = externalTransform !== undefined ? externalTransform :
-        (opt_metadata.thumbnail && opt_metadata.thumbnail.transform);
-  } else if (FileType.isImage(entry)) {
-    this.thumbnailUrl_ = entry.toURL();
-    this.transform_ = externalTransform !== undefined ? externalTransform :
-        opt_metadata.media && opt_metadata.media.imageTransform;
-  } else if (this.fallbackUrl_) {
+  if (!this.thumbnailUrl_ && this.fallbackUrl_) {
     // Use fallback as the primary thumbnail.
     this.thumbnailUrl_ = this.fallbackUrl_;
     this.fallbackUrl_ = null;
@@ -108,13 +126,16 @@ ThumbnailLoader.LoaderType = {
 };
 
 /**
- * Whether to use the embedded thumbnail, or not. The embedded thumbnail may
- * be small.
- * @enum {number}
+ * Load target of ThumbnailLoader.
+ * @enum {string}
  */
-ThumbnailLoader.UseEmbedded = {
-  USE_EMBEDDED: 0,
-  NO_EMBEDDED: 1
+ThumbnailLoader.LoadTarget = {
+  // e.g. Drive thumbnail, FSP thumbnail.
+  EXTERNAL_METADATA: 'externalMetadata',
+  // e.g. EXIF thumbnail.
+  CONTENT_METADATA: 'contentMetadata',
+  // Image file itself.
+  FILE_ENTRY: 'fileEntry'
 };
 
 /**
@@ -130,6 +151,14 @@ ThumbnailLoader.THUMBNAIL_MAX_WIDTH = 500;
  * @type {number}
  */
 ThumbnailLoader.THUMBNAIL_MAX_HEIGHT = 500;
+
+/**
+ * Returns the target of loading.
+ * @return {?ThumbnailLoader.LoadTarget}
+ */
+ThumbnailLoader.prototype.getLoadTarget = function() {
+  return this.loadTarget_;
+};
 
 /**
  * Loads and attaches an image.
@@ -186,14 +215,20 @@ ThumbnailLoader.prototype.load = function(box, fillMode, opt_optimizationMode,
                          this.metadata_.filesystem &&
                          this.metadata_.filesystem.modificationTime &&
                          this.metadata_.filesystem.modificationTime.getTime();
-  this.taskId_ = util.loadImage(
-      this.image_,
+  this.taskId_ = ImageLoaderClient.loadToImage(
       this.thumbnailUrl_,
-      { maxWidth: ThumbnailLoader.THUMBNAIL_MAX_WIDTH,
+      this.image_,
+      {
+        maxWidth: ThumbnailLoader.THUMBNAIL_MAX_WIDTH,
         maxHeight: ThumbnailLoader.THUMBNAIL_MAX_HEIGHT,
         cache: true,
         priority: this.priority_,
-        timestamp: modificationTime },
+        timestamp: modificationTime
+      },
+      function() {},
+      function() {
+        this.image_.onerror(new Event('load-error'));
+      }.bind(this),
       function() {
         if (opt_optimizationMode ==
             ThumbnailLoader.OptimizationMode.DISCARD_DETACHED &&
@@ -212,7 +247,7 @@ ThumbnailLoader.prototype.cancel = function() {
   if (this.taskId_) {
     this.image_.onload = function() {};
     this.image_.onerror = function() {};
-    util.cancelLoadImage(this.taskId_);
+    ImageLoaderClient.getInstance().cancel(this.taskId_);
     this.taskId_ = null;
   }
 };
@@ -269,14 +304,20 @@ ThumbnailLoader.prototype.loadDetachedImage = function(callback) {
                          this.metadata_.filesystem &&
                          this.metadata_.filesystem.modificationTime &&
                          this.metadata_.filesystem.modificationTime.getTime();
-  this.taskId_ = util.loadImage(
-      this.image_,
+  this.taskId_ = ImageLoaderClient.loadToImage(
       this.thumbnailUrl_,
-      { maxWidth: ThumbnailLoader.THUMBNAIL_MAX_WIDTH,
+      this.image_,
+      {
+        maxWidth: ThumbnailLoader.THUMBNAIL_MAX_WIDTH,
         maxHeight: ThumbnailLoader.THUMBNAIL_MAX_HEIGHT,
         cache: true,
         priority: this.priority_,
-        timestamp: modificationTime });
+        timestamp: modificationTime
+      },
+      function() {},
+      function() {
+        this.image_.onerror(new Event('load-error'));
+      }.bind(this));
 };
 
 /**

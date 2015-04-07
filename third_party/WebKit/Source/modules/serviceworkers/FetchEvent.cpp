@@ -5,7 +5,7 @@
 #include "config.h"
 #include "FetchEvent.h"
 
-#include "modules/serviceworkers/Request.h"
+#include "modules/fetch/Request.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScope.h"
 #include "wtf/RefPtr.h"
 
@@ -33,6 +33,7 @@ bool FetchEvent::isReload() const
 
 void FetchEvent::respondWith(ScriptState* scriptState, const ScriptValue& value, ExceptionState& exceptionState)
 {
+    stopImmediatePropagation();
     m_observer->respondWith(scriptState, value, exceptionState);
 }
 

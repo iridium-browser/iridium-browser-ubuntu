@@ -45,6 +45,7 @@
 <translation id="568643307450491754">Trova i tuoi Preferiti nel menu Chrome o sulla barra dei Preferiti.</translation>
 <translation id="8556340503434111824">È disponibile una nuova versione di Google Chrome con una velocità senza precedenti.</translation>
 <translation id="8987477933582888019">Browser web</translation>
+<translation id="3749644715096758981">Non è stato possibile aggiornare Chrome alla versione più recente, quindi non potrai utilizzare le nuove funzioni e gli aggiornamenti di sicurezza. Devi aggiornare Chrome.</translation>
 <translation id="4728575227883772061">Installazione non riuscita a causa di un errore non specificato. Se Google Chrome è attivo, chiudilo e riprova.</translation>
 <translation id="3080151273017101988">Continua a eseguire applicazioni in background dopo la chiusura di Google Chrome</translation>
 <translation id="4149882025268051530">Il programma di installazione non è riuscito a decomprimere il file. Scarica nuovamente Google Chrome.</translation>
@@ -83,6 +84,7 @@
 <translation id="225614027745146050">Benvenuto</translation>
 <translation id="7473891865547856676">No grazie</translation>
 <translation id="3149510190863420837">Applicazioni Chrome</translation>
+<translation id="8851136666856101339">main</translation>
 <translation id="7473136999113284234">Chrome si aggiorna automaticamente per consentirti di avere sempre la versione più recente.</translation>
 <translation id="7084448929020576097"><ph name="FILE_NAME"/> è dannoso ed è stato bloccato da Chrome.</translation>
 <translation id="6368958679917195344">Chrome OS è reso possibile da <ph name="BEGIN_LINK_CROS_OSS"/>software open source<ph name="END_LINK_CROS_OSS"/> aggiuntivi.</translation>
@@ -136,7 +138,6 @@ Se il problema non si risolve, dovresti riselezionare questa opzione per ottener
 <translation id="5855036575689098185">Il software in esecuzione sul computer non è compatibile con Google Chrome.</translation>
 <translation id="7164397146364144019">Puoi contribuire a rendere Chrome più sicuro e più facile da utilizzare segnalando automaticamente a Google dettagli dei possibili incidenti di sicurezza.</translation>
 <translation id="8008534537613507642">Reinstalla Chrome</translation>
-<translation id="2044287590254833138">Barra degli strumenti di Google Chrome</translation>
 <translation id="8862326446509486874">Non disponi dei diritti appropriati per l'installazione a livello di sistema. Prova a eseguire nuovamente il programma di installazione come Amministratore.</translation>
 <translation id="2874156562296220396">Google Chrome è reso possibile dal progetto open source <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> e da altri <ph name="BEGIN_LINK_OSS"/>software open source<ph name="END_LINK_OSS"/>.</translation>
 <translation id="7191567847629796517">Google Chrome OS non supporta l'avvio di un'applicazione esterna per gestire i link <ph name="SCHEME"/>. Il link richiesto è <ph name="PROTOLINK"/>.</translation>
@@ -148,6 +149,7 @@ Se il problema non si risolve, dovresti riselezionare questa opzione per ottener
 <translation id="2290095356545025170">Sei sicuro di voler disinstallare Google Chrome?</translation>
 <translation id="7062966102157262887">È in corso un download. Vuoi uscire da Google Chrome e annullare il download?</translation>
 <translation id="4273752058983339720">Google Chrome è stato configurato per avviarsi automaticamente all'accensione del computer.</translation>
+<translation id="2316129865977710310">No, grazie</translation>
 <translation id="415994390253732730">Chrome ha un comportamento insolito?</translation>
 <translation id="1104959162601287462">Informazioni su &amp;Chrome OS</translation>
 <translation id="5328989068199000832">Google Chrome Binaries</translation>
@@ -248,6 +250,7 @@ Se il problema non si risolve, dovresti riattivare questa opzione per ottenere p
 <translation id="6626317981028933585">Le impostazioni di Mozilla Firefox non sono disponibili finché il browser è in esecuzione. Per importare queste impostazioni in Google Chrome, salva i tuoi file e chiudi tutte le finestre di Firefox, quindi fai clic su Continua.</translation>
 <translation id="7242029209006116544">Stai per accedere con un account gestito e per dare al relativo amministratore il controllo del tuo profilo Google Chrome. I tuoi dati di Chrome, come app, Preferiti, cronologia, password e altre impostazioni, verranno collegati definitivamente a <ph name="USER_NAME"/>. Potrai eliminare questi dati tramite la Dashboard di Google Account, ma non potrai associare questi dati a un altro account. Se preferisci puoi creare un nuovo profilo per mantenere separati i dati di Chrome esistenti. <ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">Controlla anche la pagina visualizzata all'avvio di Chrome o quando esegui ricerche dalla Omnibox.</translation>
+<translation id="1553358976309200471">Aggiorna Chrome</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Copyright <ph name="YEAR"/> Google Inc. Tutti i diritti riservati.</translation>
 <translation id="1698376642261615901">Google Chrome è un browser web che apre pagine e applicazioni web con grande velocità. È veloce, stabile e facile da utilizzare. Esplora il Web in modo più sicuro grazie alla protezione contro malware e phishing incorporata in Google Chrome.</translation>

@@ -77,6 +77,8 @@ class ChromeUserManagerImpl
   virtual void Shutdown() override;
   virtual user_manager::UserList GetUsersAllowedForMultiProfile()
       const override;
+  virtual user_manager::UserList GetUsersAllowedForSupervisedUsersCreation()
+      const override;
   virtual user_manager::UserList GetUnlockUsers() const override;
   virtual void SessionStarted() override;
   virtual void SaveUserOAuthStatus(
@@ -140,7 +142,6 @@ class ChromeUserManagerImpl
   virtual void RegularUserLoggedIn(const std::string& user_id) override;
   virtual void RegularUserLoggedInAsEphemeral(
       const std::string& user_id) override;
-  virtual void RetailModeUserLoggedIn() override;
   virtual void SupervisedUserLoggedIn(const std::string& user_id) override;
 
  private:

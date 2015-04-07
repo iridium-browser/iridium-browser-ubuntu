@@ -70,7 +70,7 @@ class AppShimQuitTest : public PlatformAppBrowserTest {
     extensions::ExtensionRegistry* registry =
         extensions::ExtensionRegistry::Get(profile());
     extension_id_ =
-        GetExtensionByPath(&registry->enabled_extensions(), app_path_)->id();
+        GetExtensionByPath(registry->enabled_extensions(), app_path_)->id();
     host_.reset(new FakeHost(profile()->GetPath().BaseName(),
                              extension_id_,
                              handler_));
@@ -85,7 +85,7 @@ class AppShimQuitTest : public PlatformAppBrowserTest {
     content::RunAllPendingInMessageLoop();
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     PlatformAppBrowserTest::SetUpCommandLine(command_line);
     // Simulate an app shim initiated launch, i.e. launch app but not browser.
     app_path_ = test_data_dir_

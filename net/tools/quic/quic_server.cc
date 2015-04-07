@@ -67,6 +67,22 @@ void QuicServer::Initialize() {
 #if MMSG_MORE
   use_recvmmsg_ = true;
 #endif
+
+  // If an initial flow control window has not explicitly been set, then use a
+  // sensible value for a server: 1 MB for session, 64 KB for each stream.
+  const uint32 kInitialSessionFlowControlWindow = 1 * 1024 * 1024;  // 1 MB
+  const uint32 kInitialStreamFlowControlWindow = 64 * 1024;         // 64 KB
+  if (config_.GetInitialStreamFlowControlWindowToSend() ==
+      kMinimumFlowControlSendWindow) {
+    config_.SetInitialStreamFlowControlWindowToSend(
+        kInitialStreamFlowControlWindow);
+  }
+  if (config_.GetInitialSessionFlowControlWindowToSend() ==
+      kMinimumFlowControlSendWindow) {
+    config_.SetInitialSessionFlowControlWindowToSend(
+        kInitialSessionFlowControlWindow);
+  }
+
   epoll_server_.set_timeout_in_us(50 * 1000);
   // Initialize the in memory cache now.
   QuicInMemoryCache::GetInstance();
@@ -204,7 +220,7 @@ void QuicServer::OnEvent(int fd, EpollEvent* event) {
 bool QuicServer::ReadAndDispatchSinglePacket(int fd,
                                              int port,
                                              ProcessPacketInterface* processor,
-                                             uint32* packets_dropped) {
+                                             QuicPacketCount* packets_dropped) {
   // Allocate some extra space so we can send an error if the client goes over
   // the limit.
   char buf[2 * kMaxPacketSize];

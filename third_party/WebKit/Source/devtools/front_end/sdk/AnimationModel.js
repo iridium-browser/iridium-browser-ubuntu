@@ -11,18 +11,21 @@
 WebInspector.AnimationModel = function(target)
 {
     WebInspector.SDKModel.call(this, WebInspector.AnimationModel, target);
-
     this._agent = target.animationAgent();
-    /** @type {!Object.<*, !Array.<function(?Array.<!WebInspector.AnimationModel.AnimationPlayer>)>>} */
-    this._nodeIdToCallbackData = {};
+    target.registerAnimationDispatcher(new WebInspector.AnimationDispatcher(this));
+}
+
+WebInspector.AnimationModel.Events = {
+    AnimationPlayerCreated: "AnimationPlayerCreated"
 }
 
 WebInspector.AnimationModel.prototype = {
     /**
      * @param {!DOMAgent.NodeId} nodeId
+     * @param {boolean} showSubtreeAnimations
      * @param {function(?Array.<!WebInspector.AnimationModel.AnimationPlayer>)} userCallback
      */
-    getAnimationPlayers: function(nodeId, userCallback)
+    getAnimationPlayers: function(nodeId, showSubtreeAnimations, userCallback)
     {
         /**
          * @param {?Protocol.Error} error
@@ -31,29 +34,44 @@ WebInspector.AnimationModel.prototype = {
          */
         function resultCallback(error, payloads)
         {
-            var callbacks = this._nodeIdToCallbackData[nodeId];
-            delete this._nodeIdToCallbackData[nodeId];
             if (error) {
-                callbacks.forEach(function(callback) {
-                    callback(null);
-                });
+                userCallback(null);
                 return;
             }
-            var animationPlayers = payloads.map(WebInspector.AnimationModel.AnimationPlayer.parsePayload.bind(null, target));
-
-            callbacks.forEach(function(callback) {
-                callback(animationPlayers);
-            });
+            userCallback(payloads.map(WebInspector.AnimationModel.AnimationPlayer.parsePayload.bind(null, this.target())));
         }
 
-        if (this._nodeIdToCallbackData[nodeId]) {
-            this._nodeIdToCallbackData[nodeId].push(userCallback);
-            return;
-        }
+        this._agent.getAnimationPlayersForNode(nodeId, showSubtreeAnimations, resultCallback.bind(this));
+    },
 
-        var target = this.target();
-        this._nodeIdToCallbackData[nodeId] = [userCallback];
-        this._agent.getAnimationPlayersForNode(nodeId, resultCallback.bind(this));
+    /**
+     * @param {!DOMAgent.NodeId} nodeId
+     * @param {boolean} showSubtreeAnimations
+     */
+    startListening: function(nodeId, showSubtreeAnimations)
+    {
+        if (!this._enabled)
+            this._agent.enable(this._wasEnabled.bind(this));
+        this._agent.startListening(nodeId, showSubtreeAnimations);
+    },
+
+    stopListening: function()
+    {
+        this._agent.stopListening();
+    },
+
+    _wasEnabled: function()
+    {
+        this._enabled = true;
+    },
+
+    /**
+     * @param {!AnimationAgent.AnimationPlayer} payload
+     */
+    animationPlayerCreated: function(payload)
+    {
+        var player = WebInspector.AnimationModel.AnimationPlayer.parsePayload(this.target(), payload);
+        this.dispatchEventToListeners(WebInspector.AnimationModel.Events.AnimationPlayerCreated, player);
     },
 
     __proto__: WebInspector.SDKModel.prototype
@@ -110,7 +128,7 @@ WebInspector.AnimationModel.AnimationPlayer.prototype = {
     /**
      * @return {boolean}
      */
-    paused: function ()
+    paused: function()
     {
         return this._payload.pausedState;
     },
@@ -195,10 +213,8 @@ WebInspector.AnimationModel.AnimationPlayer.prototype = {
          */
         function mycallback(error, currentTime, isRunning)
         {
-            if (error) {
-                console.error(error);
+            if (error)
                 return;
-            }
             callback(currentTime, isRunning);
         }
         this.target().animationModel._agent.getAnimationPlayerState(this.id(), mycallback);
@@ -295,6 +311,28 @@ WebInspector.AnimationModel.AnimationNode.prototype = {
     },
 
     /**
+     * @param {function(?WebInspector.DOMNode)} callback
+     */
+    getNode: function(callback)
+    {
+        /**
+         * @this {WebInspector.AnimationModel.AnimationNode}
+         * @param {?Array.<number>} nodeIds
+         */
+        function nodePushedCallback(nodeIds)
+        {
+            if (nodeIds)
+                this.nodeId = nodeIds[0];
+            callback(this.target().domModel.nodeForId(this.nodeId));
+        }
+
+        if (this.nodeId)
+            callback(this.target().domModel.nodeForId(this.nodeId));
+        else
+            this._target.domModel.pushNodesByBackendIdsToFrontend([this._payload.backendNodeId], nodePushedCallback.bind(this));
+    },
+
+    /**
      * @return {?WebInspector.AnimationModel.KeyframesRule}
      */
     keyframesRule: function()
@@ -381,4 +419,24 @@ WebInspector.AnimationModel.KeyframeStyle.prototype = {
     },
 
     __proto__: WebInspector.SDKObject.prototype
+}
+
+/**
+ * @constructor
+ * @implements {AnimationAgent.Dispatcher}
+ */
+WebInspector.AnimationDispatcher = function(animationModel)
+{
+    this._animationModel = animationModel;
+}
+
+WebInspector.AnimationDispatcher.prototype = {
+    /**
+     * @override
+     * @param {!AnimationAgent.AnimationPlayer} payload
+     */
+    animationPlayerCreated: function(payload)
+    {
+        this._animationModel.animationPlayerCreated(payload);
+    }
 }

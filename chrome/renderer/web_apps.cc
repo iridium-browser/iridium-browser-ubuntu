@@ -24,7 +24,7 @@
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebNode.h"
 #include "third_party/WebKit/public/web/WebNodeList.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 #include "url/gurl.h"
 
 using blink::WebDocument;
@@ -147,10 +147,10 @@ void ParseWebAppFromWebDocument(WebFrame* frame,
       // "apple-touch-icon-precomposed".
       if (LowerCaseEqualsASCII(rel, "icon") ||
           LowerCaseEqualsASCII(rel, "shortcut icon") ||
-          (CommandLine::ForCurrentProcess()->
-              HasSwitch(switches::kEnableStreamlinedHostedApps) &&
-            (LowerCaseEqualsASCII(rel, "apple-touch-icon") ||
-             LowerCaseEqualsASCII(rel, "apple-touch-icon-precomposed")))) {
+          (base::CommandLine::ForCurrentProcess()->HasSwitch(
+               switches::kEnableNewBookmarkApps) &&
+           (LowerCaseEqualsASCII(rel, "apple-touch-icon") ||
+            LowerCaseEqualsASCII(rel, "apple-touch-icon-precomposed")))) {
         AddInstallIcon(elem, &app_info->icons);
       }
     } else if (elem.hasHTMLTagName("meta") && elem.hasAttribute("name")) {

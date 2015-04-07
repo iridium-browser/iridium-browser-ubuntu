@@ -5,6 +5,8 @@
 #ifndef CHROMEOS_NETWORK_NETWORK_STATE_H_
 #define CHROMEOS_NETWORK_NETWORK_STATE_H_
 
+#include <stdint.h>
+
 #include <string>
 #include <vector>
 
@@ -33,16 +35,15 @@ namespace chromeos {
 class CHROMEOS_EXPORT NetworkState : public ManagedState {
  public:
   explicit NetworkState(const std::string& path);
-  virtual ~NetworkState();
+  ~NetworkState() override;
 
   // ManagedState overrides
   // If you change this method, update GetProperties too.
-  virtual bool PropertyChanged(const std::string& key,
-                               const base::Value& value) override;
-  virtual bool InitialPropertiesReceived(
+  bool PropertyChanged(const std::string& key,
+                       const base::Value& value) override;
+  bool InitialPropertiesReceived(
       const base::DictionaryValue& properties) override;
-  virtual void GetStateProperties(
-      base::DictionaryValue* dictionary) const override;
+  void GetStateProperties(base::DictionaryValue* dictionary) const override;
 
   void IPConfigPropertiesChanged(const base::DictionaryValue& properties);
 
@@ -51,7 +52,7 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
 
   // Accessors
   bool visible() const { return visible_; }
-  const std::string& security() const { return security_; }
+  const std::string& security_class() const { return security_class_; }
   const std::string& device_path() const { return device_path_; }
   const std::string& guid() const { return guid_; }
   const std::string& profile_path() const { return profile_path_; }
@@ -79,6 +80,7 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
 
   // Wifi property accessors
   const std::string& eap_method() const { return eap_method_; }
+  const std::vector<uint8_t>& raw_ssid() const { return raw_ssid_; }
 
   // Cellular property accessors
   const std::string& network_technology() const {
@@ -89,9 +91,6 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   const std::string& roaming() const { return roaming_; }
   const std::string& payment_url() const { return payment_url_; }
   bool cellular_out_of_credits() const { return cellular_out_of_credits_; }
-
-  // Whether this network has a CACertNSS nickname set.
-  bool HasCACertNSS() const { return has_ca_cert_nss_; }
 
   // Returns true if |connection_state_| is a connected/connecting state.
   bool IsConnectedState() const;
@@ -137,12 +136,13 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   // Network Service properties. Avoid adding any additional properties here.
   // Instead use NetworkConfigurationHandler::GetProperties() to asynchronously
   // request properties from Shill.
-  std::string security_;
+  std::string security_class_;
   std::string eap_method_;  // Needed for WiFi EAP networks
   std::string device_path_;
   std::string guid_;
   std::string connection_state_;
   std::string profile_path_;
+  std::vector<uint8_t> raw_ssid_;  // Unknown encoding. Not necessarily UTF-8.
   bool connectable_;
 
   // Reflects the current Shill Service.Error property. This might get cleared
@@ -172,10 +172,6 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   std::string roaming_;
   std::string payment_url_;
   bool cellular_out_of_credits_;
-
-  // Whether a deprecated CaCertNSS property of this network is set. Required
-  // for migration to PEM.
-  bool has_ca_cert_nss_;
 
   // TODO(pneubeck): Remove this once (Managed)NetworkConfigurationHandler
   // provides proxy configuration. crbug.com/241775

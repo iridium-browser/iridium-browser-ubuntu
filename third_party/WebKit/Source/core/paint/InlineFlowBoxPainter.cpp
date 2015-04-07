@@ -6,7 +6,7 @@
 #include "core/paint/InlineFlowBoxPainter.h"
 
 #include "core/paint/BoxPainter.h"
-#include "core/paint/DrawingRecorder.h"
+#include "core/paint/RenderDrawingRecorder.h"
 #include "core/rendering/InlineFlowBox.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderBlock.h"
@@ -17,7 +17,7 @@
 
 namespace blink {
 
-void InlineFlowBoxPainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset, const LayoutUnit lineTop, const LayoutUnit lineBottom)
+void InlineFlowBoxPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset, const LayoutUnit lineTop, const LayoutUnit lineBottom)
 {
     LayoutRect overflowRect(m_inlineFlowBox.visualOverflowRect(lineTop, lineBottom));
     m_inlineFlowBox.flipForWritingMode(overflowRect);
@@ -61,7 +61,9 @@ void InlineFlowBoxPainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintO
             }
         }
     } else if (paintInfo.phase == PaintPhaseMask) {
-        paintMask(paintInfo, paintOffset);
+        RenderDrawingRecorder recorder(paintInfo.context, m_inlineFlowBox.renderer(), paintInfo.phase, pixelSnappedIntRect(overflowRect));
+        if (!recorder.canUseCachedDrawing())
+            paintMask(paintInfo, paintOffset);
         return;
     } else if (paintInfo.phase == PaintPhaseForeground) {
         // Paint our background, border and box-shadow.
@@ -106,34 +108,12 @@ void InlineFlowBoxPainter::paintFillLayer(const PaintInfo& paintInfo, const Colo
         BoxPainter::paintFillLayerExtended(*m_inlineFlowBox.boxModelObject(), paintInfo, c, fillLayer, rect, BackgroundBleedNone, &m_inlineFlowBox, rect.size(), op);
     } else {
         // We have a fill image that spans multiple lines.
-        // We need to adjust tx and ty by the width of all previous lines.
-        // Think of background painting on inlines as though you had one long line, a single continuous
-        // strip. Even though that strip has been broken up across multiple lines, you still paint it
-        // as though you had one single line. This means each line has to pick up the background where
-        // the previous line left off.
-        LayoutUnit logicalOffsetOnLine = 0;
-        LayoutUnit totalLogicalWidth;
-        if (m_inlineFlowBox.renderer().style()->direction() == LTR) {
-            for (InlineFlowBox* curr = m_inlineFlowBox.prevLineBox(); curr; curr = curr->prevLineBox())
-                logicalOffsetOnLine += curr->logicalWidth();
-            totalLogicalWidth = logicalOffsetOnLine;
-            for (InlineFlowBox* curr = &m_inlineFlowBox; curr; curr = curr->nextLineBox())
-                totalLogicalWidth += curr->logicalWidth();
-        } else {
-            for (InlineFlowBox* curr = m_inlineFlowBox.nextLineBox(); curr; curr = curr->nextLineBox())
-                logicalOffsetOnLine += curr->logicalWidth();
-            totalLogicalWidth = logicalOffsetOnLine;
-            for (InlineFlowBox* curr = &m_inlineFlowBox; curr; curr = curr->prevLineBox())
-                totalLogicalWidth += curr->logicalWidth();
-        }
-        LayoutUnit stripX = rect.x() - (m_inlineFlowBox.isHorizontal() ? logicalOffsetOnLine : LayoutUnit());
-        LayoutUnit stripY = rect.y() - (m_inlineFlowBox.isHorizontal() ? LayoutUnit() : logicalOffsetOnLine);
-        LayoutUnit stripWidth = m_inlineFlowBox.isHorizontal() ? totalLogicalWidth : static_cast<LayoutUnit>(m_inlineFlowBox.width());
-        LayoutUnit stripHeight = m_inlineFlowBox.isHorizontal() ? static_cast<LayoutUnit>(m_inlineFlowBox.height()) : totalLogicalWidth;
-
+        // FIXME: frameSize ought to be the same as rect.size().
+        LayoutSize frameSize(m_inlineFlowBox.width().toLayoutUnit(), m_inlineFlowBox.height().toLayoutUnit());
+        LayoutRect imageStripPaintRect = paintRectForImageStrip(rect.location(), frameSize, m_inlineFlowBox.renderer().style()->direction());
         GraphicsContextStateSaver stateSaver(*paintInfo.context);
         paintInfo.context->clip(LayoutRect(rect.x(), rect.y(), m_inlineFlowBox.width(), m_inlineFlowBox.height()));
-        BoxPainter::paintFillLayerExtended(*m_inlineFlowBox.boxModelObject(), paintInfo, c, fillLayer, LayoutRect(stripX, stripY, stripWidth, stripHeight), BackgroundBleedNone, &m_inlineFlowBox, rect.size(), op);
+        BoxPainter::paintFillLayerExtended(*m_inlineFlowBox.boxModelObject(), paintInfo, c, fillLayer, imageStripPaintRect, BackgroundBleedNone, &m_inlineFlowBox, rect.size(), op);
     }
 }
 
@@ -153,7 +133,7 @@ static LayoutRect clipRectForNinePieceImageStrip(InlineFlowBox* box, const NineP
 {
     LayoutRect clipRect(paintRect);
     RenderStyle* style = box->renderer().style();
-    LayoutBoxExtent outsets = style->imageOutsets(image);
+    LayoutRectOutsets outsets = style->imageOutsets(image);
     if (box->isHorizontal()) {
         clipRect.setY(paintRect.y() - outsets.top());
         clipRect.setHeight(paintRect.height() + outsets.top() + outsets.bottom());
@@ -176,7 +156,37 @@ static LayoutRect clipRectForNinePieceImageStrip(InlineFlowBox* box, const NineP
     return clipRect;
 }
 
-void InlineFlowBoxPainter::paintBoxDecorationBackground(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+LayoutRect InlineFlowBoxPainter::paintRectForImageStrip(const LayoutPoint& paintOffset, const LayoutSize& frameSize, TextDirection direction) const
+{
+    // We have a fill/border/mask image that spans multiple lines.
+    // We need to adjust the offset by the width of all previous lines.
+    // Think of background painting on inlines as though you had one long line, a single continuous
+    // strip. Even though that strip has been broken up across multiple lines, you still paint it
+    // as though you had one single line. This means each line has to pick up the background where
+    // the previous line left off.
+    LayoutUnit logicalOffsetOnLine = 0;
+    LayoutUnit totalLogicalWidth;
+    if (direction == LTR) {
+        for (InlineFlowBox* curr = m_inlineFlowBox.prevLineBox(); curr; curr = curr->prevLineBox())
+            logicalOffsetOnLine += curr->logicalWidth();
+        totalLogicalWidth = logicalOffsetOnLine;
+        for (InlineFlowBox* curr = &m_inlineFlowBox; curr; curr = curr->nextLineBox())
+            totalLogicalWidth += curr->logicalWidth();
+    } else {
+        for (InlineFlowBox* curr = m_inlineFlowBox.nextLineBox(); curr; curr = curr->nextLineBox())
+            logicalOffsetOnLine += curr->logicalWidth();
+        totalLogicalWidth = logicalOffsetOnLine;
+        for (InlineFlowBox* curr = &m_inlineFlowBox; curr; curr = curr->prevLineBox())
+            totalLogicalWidth += curr->logicalWidth();
+    }
+    LayoutUnit stripX = paintOffset.x() - (m_inlineFlowBox.isHorizontal() ? logicalOffsetOnLine : LayoutUnit());
+    LayoutUnit stripY = paintOffset.y() - (m_inlineFlowBox.isHorizontal() ? LayoutUnit() : logicalOffsetOnLine);
+    LayoutUnit stripWidth = m_inlineFlowBox.isHorizontal() ? totalLogicalWidth : frameSize.width();
+    LayoutUnit stripHeight = m_inlineFlowBox.isHorizontal() ? frameSize.height() : totalLogicalWidth;
+    return LayoutRect(stripX, stripY, stripWidth, stripHeight);
+}
+
+void InlineFlowBoxPainter::paintBoxDecorationBackground(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     ASSERT(paintInfo.phase == PaintPhaseForeground);
     if (!paintInfo.shouldPaintWithinRoot(&m_inlineFlowBox.renderer()) || m_inlineFlowBox.renderer().style()->visibility() != VISIBLE)
@@ -203,7 +213,9 @@ void InlineFlowBoxPainter::paintBoxDecorationBackground(PaintInfo& paintInfo, co
 
     LayoutRect paintRect = LayoutRect(adjustedPaintOffset, frameRect.size());
 
-    DrawingRecorder recorder(paintInfo.context, &m_inlineFlowBox.renderer(), paintInfo.phase, pixelSnappedIntRect(paintRect));
+    RenderDrawingRecorder recorder(paintInfo.context, m_inlineFlowBox.renderer(), paintInfo.phase, pixelSnappedIntRect(paintRect));
+    if (recorder.canUseCachedDrawing())
+        return;
 
     // Shadow comes first and is behind the background and border.
     if (!m_inlineFlowBox.boxModelObject()->boxShadowShouldBeAppliedToBackground(BackgroundBleedNone, &m_inlineFlowBox))
@@ -228,33 +240,18 @@ void InlineFlowBoxPainter::paintBoxDecorationBackground(PaintInfo& paintInfo, co
             BoxPainter::paintBorder(*m_inlineFlowBox.boxModelObject(), paintInfo, paintRect, m_inlineFlowBox.renderer().style(m_inlineFlowBox.isFirstLineStyle()), BackgroundBleedNone, m_inlineFlowBox.includeLogicalLeftEdge(), m_inlineFlowBox.includeLogicalRightEdge());
         } else {
             // We have a border image that spans multiple lines.
-            // We need to adjust tx and ty by the width of all previous lines.
-            // Think of border image painting on inlines as though you had one long line, a single continuous
-            // strip. Even though that strip has been broken up across multiple lines, you still paint it
-            // as though you had one single line. This means each line has to pick up the image where
-            // the previous line left off.
             // FIXME: What the heck do we do with RTL here? The math we're using is obviously not right,
             // but it isn't even clear how this should work at all.
-            LayoutUnit logicalOffsetOnLine = 0;
-            for (InlineFlowBox* curr = m_inlineFlowBox.prevLineBox(); curr; curr = curr->prevLineBox())
-                logicalOffsetOnLine += curr->logicalWidth();
-            LayoutUnit totalLogicalWidth = logicalOffsetOnLine;
-            for (InlineFlowBox* curr = &m_inlineFlowBox; curr; curr = curr->nextLineBox())
-                totalLogicalWidth += curr->logicalWidth();
-            LayoutUnit stripX = adjustedPaintOffset.x() - (m_inlineFlowBox.isHorizontal() ? logicalOffsetOnLine : LayoutUnit());
-            LayoutUnit stripY = adjustedPaintOffset.y() - (m_inlineFlowBox.isHorizontal() ? LayoutUnit() : logicalOffsetOnLine);
-            LayoutUnit stripWidth = m_inlineFlowBox.isHorizontal() ? totalLogicalWidth : frameRect.width();
-            LayoutUnit stripHeight = m_inlineFlowBox.isHorizontal() ? frameRect.height() : totalLogicalWidth;
-
+            LayoutRect imageStripPaintRect = paintRectForImageStrip(adjustedPaintOffset, frameRect.size(), LTR);
             LayoutRect clipRect = clipRectForNinePieceImageStrip(&m_inlineFlowBox, borderImage, paintRect);
             GraphicsContextStateSaver stateSaver(*paintInfo.context);
             paintInfo.context->clip(clipRect);
-            BoxPainter::paintBorder(*m_inlineFlowBox.boxModelObject(), paintInfo, LayoutRect(stripX, stripY, stripWidth, stripHeight), m_inlineFlowBox.renderer().style(m_inlineFlowBox.isFirstLineStyle()));
+            BoxPainter::paintBorder(*m_inlineFlowBox.boxModelObject(), paintInfo, imageStripPaintRect, m_inlineFlowBox.renderer().style(m_inlineFlowBox.isFirstLineStyle()));
         }
     }
 }
 
-void InlineFlowBoxPainter::paintMask(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void InlineFlowBoxPainter::paintMask(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     if (!paintInfo.shouldPaintWithinRoot(&m_inlineFlowBox.renderer()) || m_inlineFlowBox.renderer().style()->visibility() != VISIBLE || paintInfo.phase != PaintPhaseMask)
         return;
@@ -299,25 +296,16 @@ void InlineFlowBoxPainter::paintMask(PaintInfo& paintInfo, const LayoutPoint& pa
     // The simple case is where we are the only box for this object. In those
     // cases only a single call to draw is required.
     if (!m_inlineFlowBox.prevLineBox() && !m_inlineFlowBox.nextLineBox()) {
-        BoxPainter::paintNinePieceImage(*m_inlineFlowBox.boxModelObject(), paintInfo.context, LayoutRect(adjustedPaintOffset, frameRect.size()), m_inlineFlowBox.renderer().style(), maskNinePieceImage, compositeOp);
+        BoxPainter::paintNinePieceImage(*m_inlineFlowBox.boxModelObject(), paintInfo.context, paintRect, m_inlineFlowBox.renderer().style(), maskNinePieceImage, compositeOp);
     } else {
         // We have a mask image that spans multiple lines.
-        // We need to adjust _tx and _ty by the width of all previous lines.
-        LayoutUnit logicalOffsetOnLine = 0;
-        for (InlineFlowBox* curr = m_inlineFlowBox.prevLineBox(); curr; curr = curr->prevLineBox())
-            logicalOffsetOnLine += curr->logicalWidth();
-        LayoutUnit totalLogicalWidth = logicalOffsetOnLine;
-        for (InlineFlowBox* curr = &m_inlineFlowBox; curr; curr = curr->nextLineBox())
-            totalLogicalWidth += curr->logicalWidth();
-        LayoutUnit stripX = adjustedPaintOffset.x() - (m_inlineFlowBox.isHorizontal() ? logicalOffsetOnLine : LayoutUnit());
-        LayoutUnit stripY = adjustedPaintOffset.y() - (m_inlineFlowBox.isHorizontal() ? LayoutUnit() : logicalOffsetOnLine);
-        LayoutUnit stripWidth = m_inlineFlowBox.isHorizontal() ? totalLogicalWidth : frameRect.width();
-        LayoutUnit stripHeight = m_inlineFlowBox.isHorizontal() ? frameRect.height() : totalLogicalWidth;
-
+        // FIXME: What the heck do we do with RTL here? The math we're using is obviously not right,
+        // but it isn't even clear how this should work at all.
+        LayoutRect imageStripPaintRect = paintRectForImageStrip(adjustedPaintOffset, frameRect.size(), LTR);
         LayoutRect clipRect = clipRectForNinePieceImageStrip(&m_inlineFlowBox, maskNinePieceImage, paintRect);
         GraphicsContextStateSaver stateSaver(*paintInfo.context);
         paintInfo.context->clip(clipRect);
-        BoxPainter::paintNinePieceImage(*m_inlineFlowBox.boxModelObject(), paintInfo.context, LayoutRect(stripX, stripY, stripWidth, stripHeight), m_inlineFlowBox.renderer().style(), maskNinePieceImage, compositeOp);
+        BoxPainter::paintNinePieceImage(*m_inlineFlowBox.boxModelObject(), paintInfo.context, imageStripPaintRect, m_inlineFlowBox.renderer().style(), maskNinePieceImage, compositeOp);
     }
 
     if (pushTransparencyLayer)

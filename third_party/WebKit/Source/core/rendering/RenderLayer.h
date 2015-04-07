@@ -116,8 +116,7 @@ public:
 
     void setLayerType(LayerType layerType) { m_layerType = layerType; }
 
-    bool isTransparent() const { return renderer()->isTransparent() || renderer()->hasBlendMode() || renderer()->hasMask(); }
-    RenderLayer* transparentPaintingAncestor();
+    bool isTransparent() const { return renderer()->isTransparent() || renderer()->style()->hasBlendMode() || renderer()->hasMask(); }
 
     bool isReflection() const { return renderer()->isReplica(); }
     RenderLayerReflectionInfo* reflectionInfo() { return m_reflectionInfo.get(); }
@@ -131,10 +130,13 @@ public:
         return curr;
     }
 
-    LayoutPoint location() const;
-    IntSize size() const;
+    const LayoutPoint& location() const { ASSERT(!m_needsPositionUpdate); return m_location; }
+    // FIXME: size() should ASSERT(!m_needsPositionUpdate) as well, but that fails in some tests,
+    // for example, fast/repaint/clipped-relative.html.
+    const IntSize& size() const { return m_size; }
+    void setSizeHackForRenderTreeAsText(const IntSize& size) { m_size = size; }
 
-    LayoutRect rect() const { return LayoutRect(location(), size()); }
+    LayoutRect rect() const { return LayoutRect(location(), LayoutSize(size())); }
 
     bool isRootLayer() const { return m_isRootLayer; }
 
@@ -145,6 +147,7 @@ public:
     void contentChanged(ContentChangeType);
 
     void updateLayerPositionsAfterLayout();
+    void updateLayerPositionsAfterOverflowScroll();
 
     bool isPaginated() const { return m_isPaginated; }
     RenderLayer* enclosingPaginationLayer() const { return m_enclosingPaginationLayer; }
@@ -152,8 +155,7 @@ public:
     void updateTransformationMatrix();
     RenderLayer* renderingContextRoot();
 
-    // Our current relative position offset.
-    const LayoutSize offsetForInFlowPosition() const;
+    const LayoutSize& offsetForInFlowPosition() const { return m_offsetForInFlowPosition; }
 
     void blockSelectionGapsBoundsChanged();
     void addBlockSelectionGapsBounds(const LayoutRect&);
@@ -186,9 +188,6 @@ public:
     bool hasVisibleNonLayerContent() const { return m_hasVisibleNonLayerContent; }
     bool hasNonCompositedChild() const { ASSERT(isAllowedToQueryCompositingState()); return m_hasNonCompositedChild; }
 
-    bool usedTransparency() const { return m_usedTransparency; }
-    void setUsedTransparency(bool usedTransparency) { m_usedTransparency = usedTransparency; }
-
     // Gets the nearest enclosing positioned ancestor layer (also includes
     // the <html> layer and the root layer).
     RenderLayer* enclosingPositionedAncestor() const;
@@ -215,6 +214,13 @@ public:
 
     void convertToLayerCoords(const RenderLayer* ancestorLayer, LayoutPoint&) const;
     void convertToLayerCoords(const RenderLayer* ancestorLayer, LayoutRect&) const;
+
+    // Does the same as convertToLayerCoords() when not in multicol. For multicol, however,
+    // convertToLayerCoords() calculates the offset in flow-thread coordinates (what the layout
+    // engine uses internally), while this method calculates the visual coordinates; i.e. it figures
+    // out which column the layer starts in and adds in the offset. See
+    // http://www.chromium.org/developers/design-documents/multi-column-layout for more info.
+    LayoutPoint visualOffsetFromAncestor(const RenderLayer* ancestorLayer) const;
 
     // The hitTest() method looks for mouse events by walking layers that intersect the point from front to back.
     bool hitTest(const HitTestRequest&, HitTestResult&);
@@ -287,8 +293,6 @@ public:
 
     // Don't null check this.
     CompositedLayerMapping* compositedLayerMapping() const;
-    // FIXME: This should return a reference.
-    CompositedLayerMapping* ensureCompositedLayerMapping();
     GraphicsLayer* graphicsLayerBacking() const;
     GraphicsLayer* graphicsLayerBackingForScrolling() const;
     // NOTE: If you are using hasCompositedLayerMapping to determine the state of compositing for this layer,
@@ -296,6 +300,7 @@ public:
     // then you may have incorrect logic. Use compositingState() instead.
     // FIXME: This is identical to null checking compositedLayerMapping(), why not just call that?
     bool hasCompositedLayerMapping() const { return m_compositedLayerMapping.get(); }
+    void ensureCompositedLayerMapping();
     void clearCompositedLayerMapping(bool layerBeingDestroyed = false);
     CompositedLayerMapping* groupedMapping() const { return m_groupedMapping; }
     void setGroupedMapping(CompositedLayerMapping* groupedMapping, bool layerBeingDestroyed = false);
@@ -462,7 +467,7 @@ public:
     RenderLayer* clipParent() const { return const_cast<RenderLayer*>(ancestorDependentCompositingInputs().clipParent); }
     bool hasAncestorWithClipPath() const { return ancestorDependentCompositingInputs().hasAncestorWithClipPath; }
     bool hasDescendantWithClipPath() const { return descendantDependentCompositingInputs().hasDescendantWithClipPath; }
-    bool hasNonIsolatedDescendantWithBlendMode() const { return descendantDependentCompositingInputs().hasNonIsolatedDescendantWithBlendMode; }
+    bool hasNonIsolatedDescendantWithBlendMode() const;
 
     bool lostGroupedMapping() const { ASSERT(isAllowedToQueryCompositingState()); return m_lostGroupedMapping; }
     void setLostGroupedMapping(bool b) { m_lostGroupedMapping = b; }
@@ -526,7 +531,11 @@ private:
 
     void dirtyAncestorChainHasSelfPaintingLayerDescendantStatus();
 
+    // Returns true if the position changed.
+    bool updateLayerPosition();
+
     void updateLayerPositionRecursive();
+    void updateLayerPositionsAfterScrollRecursive();
 
     void setNextSibling(RenderLayer* next) { m_next = next; }
     void setPreviousSibling(RenderLayer* prev) { m_previous = prev; }
@@ -590,6 +599,7 @@ private:
 
     void updatePaginationRecursive(bool needsPaginationUpdate = false);
     void updatePagination();
+    void clearPaginationRecursive();
 
     // FIXME: Temporary. Remove when new columns come online.
     bool useRegionBasedColumns() const;
@@ -608,10 +618,6 @@ private:
 
     const unsigned m_isRootLayer : 1;
 
-    unsigned m_usedTransparency : 1; // Tracks whether we need to close a transparent layer, i.e., whether
-                                 // we ended up painting this layer or any descendants (and therefore need to
-                                 // blend).
-
     unsigned m_visibleContentStatusDirty : 1;
     unsigned m_hasVisibleContent : 1;
     unsigned m_visibleDescendantStatusDirty : 1;
@@ -620,6 +626,10 @@ private:
     unsigned m_hasVisibleNonLayerContent : 1;
 
     unsigned m_isPaginated : 1; // If we think this layer is split by a multi-column ancestor, then this bit will be set.
+
+#if ENABLE(ASSERT)
+    unsigned m_needsPositionUpdate : 1;
+#endif
 
     unsigned m_3DTransformedDescendantStatusDirty : 1;
     // Set on a stacking context layer that has 3D descendants anywhere
@@ -655,6 +665,15 @@ private:
     RenderLayer* m_first;
     RenderLayer* m_last;
 
+    // Our current relative position offset.
+    LayoutSize m_offsetForInFlowPosition;
+
+    // Our (x,y) coordinates are in our parent layer's coordinate space.
+    LayoutPoint m_location;
+
+    // The layer's width/height
+    IntSize m_size;
+
     // Cached normal flow values for absolute positioned elements with static left/top values.
     LayoutUnit m_staticInlinePosition;
     LayoutUnit m_staticBlockPosition;
@@ -662,6 +681,13 @@ private:
     OwnPtr<TransformationMatrix> m_transform;
 
     // Pointer to the enclosing RenderLayer that caused us to be paginated. It is 0 if we are not paginated.
+    //
+    // See RenderMultiColumnFlowThread and
+    // https://sites.google.com/a/chromium.org/dev/developers/design-documents/multi-column-layout
+    // for more information about the multicol implementation. It's important to understand the
+    // difference between flow thread coordinates and visual coordinates when working with multicol
+    // in RenderLayer, since RenderLayer is one of the few places where we have to worry about the
+    // visual ones. Internally we try to use flow-thread coordinates whenever possible.
     RenderLayer* m_enclosingPaginationLayer;
 
     // These compositing reasons are updated whenever style changes, not while updating compositing layers.

@@ -8,6 +8,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/sys_info.h"
 #include "cc/base/switches.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_constants.h"
@@ -57,12 +58,18 @@ void SetContentCommandLineFlags(bool single_process,
   parsed_command_line->AppendSwitch(switches::kEnablePinch);
   parsed_command_line->AppendSwitch(switches::kEnableOverlayFullscreenVideo);
   parsed_command_line->AppendSwitch(switches::kEnableOverlayScrollbar);
-  parsed_command_line->AppendSwitch(switches::kEnableOverscrollNotifications);
   parsed_command_line->AppendSwitch(switches::kValidateInputEventStream);
 
-  // Run the GPU service as a thread in the browser instead of as a
-  // standalone process.
-  parsed_command_line->AppendSwitch(switches::kInProcessGPU);
+  // There is no software fallback on Android, so don't limit GPU crashes.
+  parsed_command_line->AppendSwitch(switches::kDisableGpuProcessCrashLimit);
+
+  // On legacy low-memory devices the behavior has not been studied with regard
+  // to having an extra process with similar priority as the foreground renderer
+  // and given that the system will often be looking for a process to be killed
+  // on such systems.
+  if (base::SysInfo::IsLowEndDevice())
+    parsed_command_line->AppendSwitch(switches::kInProcessGPU);
+
   parsed_command_line->AppendSwitch(switches::kDisableGpuShaderDiskCache);
 
   parsed_command_line->AppendSwitch(switches::kEnableViewportMeta);

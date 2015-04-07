@@ -19,7 +19,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string16.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
@@ -218,7 +217,8 @@ ProfileSyncService::ProfileSyncService(
       factory_(factory.Pass()),
       profile_(profile),
       sync_prefs_(profile_->GetPrefs()),
-      sync_service_url_(GetSyncServiceURL(*CommandLine::ForCurrentProcess())),
+      sync_service_url_(
+          GetSyncServiceURL(*base::CommandLine::ForCurrentProcess())),
       is_first_time_sync_configure_(false),
       backend_initialized_(false),
       sync_disabled_by_admin_(false),
@@ -233,34 +233,34 @@ ProfileSyncService::ProfileSyncService(
       configure_status_(DataTypeManager::UNKNOWN),
       oauth2_token_service_(oauth2_token_service),
       request_access_token_backoff_(&kRequestAccessTokenBackoffPolicy),
-      weak_factory_(this),
-      startup_controller_weak_factory_(this),
       connection_status_(syncer::CONNECTION_NOT_ATTEMPTED),
       last_get_token_error_(GoogleServiceAuthError::AuthErrorNone()),
       network_resources_(new syncer::HttpBridgeNetworkResources),
-      startup_controller_(
-          start_behavior,
-          oauth2_token_service,
-          &sync_prefs_,
-          signin_.get(),
-          base::Bind(&ProfileSyncService::StartUpSlowBackendComponents,
-                     startup_controller_weak_factory_.GetWeakPtr(),
-                     SYNC)),
-      backup_rollback_controller_(
-          &sync_prefs_,
-          signin_.get(),
-          base::Bind(&ProfileSyncService::StartUpSlowBackendComponents,
-                     startup_controller_weak_factory_.GetWeakPtr(),
-                     BACKUP),
-          base::Bind(&ProfileSyncService::StartUpSlowBackendComponents,
-                     startup_controller_weak_factory_.GetWeakPtr(),
-                     ROLLBACK)),
       backend_mode_(IDLE),
       need_backup_(false),
       backup_finished_(false),
       clear_browsing_data_(base::Bind(&ClearBrowsingData)),
-      browsing_data_remover_observer_(NULL) {
+      browsing_data_remover_observer_(NULL),
+      weak_factory_(this),
+      startup_controller_weak_factory_(this) {
   DCHECK(profile);
+  startup_controller_.reset(new browser_sync::StartupController(
+      start_behavior,
+      oauth2_token_service,
+      &sync_prefs_,
+      signin_.get(),
+      base::Bind(&ProfileSyncService::StartUpSlowBackendComponents,
+                 startup_controller_weak_factory_.GetWeakPtr(),
+                 SYNC)));
+  backup_rollback_controller_.reset(new browser_sync::BackupRollbackController(
+      &sync_prefs_,
+      signin_.get(),
+      base::Bind(&ProfileSyncService::StartUpSlowBackendComponents,
+                 startup_controller_weak_factory_.GetWeakPtr(),
+                 BACKUP),
+      base::Bind(&ProfileSyncService::StartUpSlowBackendComponents,
+                 startup_controller_weak_factory_.GetWeakPtr(),
+                 ROLLBACK)));
   syncer::SyncableService::StartSyncFlare flare(
       sync_start_util::GetFlareForSyncableService(profile->GetPath()));
   scoped_ptr<browser_sync::LocalSessionEventRouter> router(
@@ -343,7 +343,7 @@ void ProfileSyncService::Initialize() {
         sync_prefs_.GetFirstSyncTime().is_null();
 
     // Try to resume rollback if it didn't finish in last session.
-    running_rollback = backup_rollback_controller_.StartRollback();
+    running_rollback = backup_rollback_controller_->StartRollback();
   } else {
     need_backup_ = false;
   }
@@ -356,8 +356,8 @@ void ProfileSyncService::Initialize() {
   DCHECK(!running_rollback);
 #endif
 
-  startup_controller_.Reset(GetRegisteredDataTypes());
-  startup_controller_.TryStart();
+  startup_controller_->Reset(GetRegisteredDataTypes());
+  startup_controller_->TryStart();
 }
 
 void ProfileSyncService::TrySyncDatatypePrefRecovery() {
@@ -605,7 +605,7 @@ void ProfileSyncService::OnDataTypeRequestsSyncStartup(
     return;
   }
 
-  startup_controller_.OnDataTypeRequestsSyncStartup(type);
+  startup_controller_->OnDataTypeRequestsSyncStartup(type);
 }
 
 void ProfileSyncService::StartUpSlowBackendComponents(
@@ -638,7 +638,7 @@ void ProfileSyncService::StartUpSlowBackendComponents(
 
   if (mode == SYNC && NeedBackup() && !backup_finished_) {
     if (backend_mode_ != BACKUP)
-      backup_rollback_controller_.StartBackup();
+      backup_rollback_controller_->StartBackup();
     return;
   }
 
@@ -718,7 +718,7 @@ void ProfileSyncService::OnGetTokenSuccess(
   if (HasSyncingBackend())
     backend_->UpdateCredentials(GetCredentials());
   else
-    startup_controller_.TryStart();
+    startup_controller_->TryStart();
 }
 
 void ProfileSyncService::OnGetTokenFailure(
@@ -766,11 +766,6 @@ void ProfileSyncService::OnGetTokenFailure(
 
 void ProfileSyncService::OnRefreshTokenAvailable(
     const std::string& account_id) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "422460 ProfileSyncService::OnRefreshTokenAvailable"));
-
   if (account_id == signin_->GetAccountIdToUse())
     OnRefreshTokensLoaded();
 }
@@ -799,7 +794,7 @@ void ProfileSyncService::OnRefreshTokensLoaded() {
   if (HasSyncingBackend()) {
     RequestAccessToken();
   } else {
-    startup_controller_.TryStart();
+    startup_controller_->TryStart();
   }
 }
 
@@ -868,7 +863,7 @@ void ProfileSyncService::ShutdownImpl(syncer::ShutdownReason reason) {
   weak_factory_.InvalidateWeakPtrs();
 
   if (backend_mode_ == SYNC)
-    startup_controller_.Reset(GetRegisteredDataTypes());
+    startup_controller_->Reset(GetRegisteredDataTypes());
 
   // Don't let backup block sync regardless backup succeeded or not.
   if (backend_mode_ == BACKUP)
@@ -1009,7 +1004,7 @@ void ProfileSyncService::UpdateBackendInitUMA(bool success) {
 
   base::Time on_backend_initialized_time = base::Time::Now();
   base::TimeDelta delta = on_backend_initialized_time -
-      startup_controller_.start_backend_time();
+      startup_controller_->start_backend_time();
   if (is_first_time_sync_configure_) {
     UMA_HISTOGRAM_LONG_TIMES("Sync.BackendInitializeFirstTime", delta);
   } else {
@@ -1049,7 +1044,7 @@ void ProfileSyncService::PostBackendInitialization() {
     UpdateLastSyncedTime();
   }
 
-  if (startup_controller_.auto_start_enabled() && !FirstSetupInProgress()) {
+  if (startup_controller_->auto_start_enabled() && !FirstSetupInProgress()) {
     // Backend is initialized but we're not in sync setup, so this must be an
     // autostart - mark our sync setup as completed and we'll start syncing
     // below.
@@ -1420,7 +1415,7 @@ void ProfileSyncService::OnActionableError(const SyncProtocolError& error) {
       // TODO(lipalani) : if setup in progress we want to display these
       // actions in the popup. The current experience might not be optimal for
       // the user. We just dismiss the dialog.
-      if (startup_controller_.setup_in_progress()) {
+      if (startup_controller_->setup_in_progress()) {
         StopSyncingPermanently();
         expect_sync_configuration_aborted_ = true;
       }
@@ -1431,21 +1426,21 @@ void ProfileSyncService::OnActionableError(const SyncProtocolError& error) {
                                    ERROR_REASON_ACTIONABLE_ERROR);
       break;
     case syncer::DISABLE_SYNC_AND_ROLLBACK:
-      backup_rollback_controller_.OnRollbackReceived();
+      backup_rollback_controller_->OnRollbackReceived();
       // Fall through to shutdown backend and sign user out.
     case syncer::DISABLE_SYNC_ON_CLIENT:
       StopSyncingPermanently();
 #if !defined(OS_CHROMEOS)
       // On desktop Chrome, sign out the user after a dashboard clear.
       // Skip sign out on ChromeOS/Android.
-      if (!startup_controller_.auto_start_enabled()) {
+      if (!startup_controller_->auto_start_enabled()) {
         SigninManagerFactory::GetForProfile(profile_)->SignOut(
             signin_metrics::SERVER_FORCED_DISABLE);
       }
 #endif
       break;
     case syncer::ROLLBACK_DONE:
-      backup_rollback_controller_.OnRollbackDone();
+      backup_rollback_controller_->OnRollbackDone();
       break;
     case syncer::STOP_SYNC_FOR_DISABLED_ACCOUNT:
       // Sync disabled by domain admin. we should stop syncing until next
@@ -1460,7 +1455,7 @@ void ProfileSyncService::OnActionableError(const SyncProtocolError& error) {
 
   if (error.action == syncer::DISABLE_SYNC_ON_CLIENT ||
       (error.action == syncer::DISABLE_SYNC_AND_ROLLBACK &&
-          !backup_rollback_controller_.StartRollback())) {
+          !backup_rollback_controller_->StartRollback())) {
     // Clean up backup data for sign-out only or when rollback is disabled.
     CleanUpBackup();
   } else if (error.action == syncer::ROLLBACK_DONE) {
@@ -1635,15 +1630,15 @@ std::string ProfileSyncService::QuerySyncStatusSummaryString() {
 }
 
 std::string ProfileSyncService::GetBackendInitializationStateString() const {
-  return startup_controller_.GetBackendInitializationStateString();
+  return startup_controller_->GetBackendInitializationStateString();
 }
 
 bool ProfileSyncService::auto_start_enabled() const {
-  return startup_controller_.auto_start_enabled();
+  return startup_controller_->auto_start_enabled();
 }
 
 bool ProfileSyncService::setup_in_progress() const {
-  return startup_controller_.setup_in_progress();
+  return startup_controller_->setup_in_progress();
 }
 
 bool ProfileSyncService::QueryDetailedSyncStatus(
@@ -1664,15 +1659,15 @@ const AuthError& ProfileSyncService::GetAuthError() const {
 }
 
 bool ProfileSyncService::FirstSetupInProgress() const {
-  return !HasSyncSetupCompleted() && startup_controller_.setup_in_progress();
+  return !HasSyncSetupCompleted() && startup_controller_->setup_in_progress();
 }
 
 void ProfileSyncService::SetSetupInProgress(bool setup_in_progress) {
   // This method is a no-op if |setup_in_progress_| remains unchanged.
-  if (startup_controller_.setup_in_progress() == setup_in_progress)
+  if (startup_controller_->setup_in_progress() == setup_in_progress)
     return;
 
-  startup_controller_.set_setup_in_progress(setup_in_progress);
+  startup_controller_->set_setup_in_progress(setup_in_progress);
   if (!setup_in_progress && backend_initialized())
     ReconfigureDatatypeManager();
   NotifyObservers();
@@ -1760,7 +1755,8 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
     sync_driver::user_selectable_type::PROXY_TABS,
   };
 
-  COMPILE_ASSERT(33 == syncer::MODEL_TYPE_COUNT, UpdateCustomConfigHistogram);
+  static_assert(34 == syncer::MODEL_TYPE_COUNT,
+                "custom config histogram must be updated");
 
   if (!sync_everything) {
     const syncer::ModelTypeSet current_types = GetPreferredDataTypes();
@@ -1939,7 +1935,7 @@ void ProfileSyncService::ConfigureDataTypeManager() {
   // start syncing data until the user is done configuring encryption options,
   // etc. ReconfigureDatatypeManager() will get called again once the UI calls
   // SetSetupInProgress(false).
-  if (backend_mode_ == SYNC && startup_controller_.setup_in_progress())
+  if (backend_mode_ == SYNC && startup_controller_->setup_in_progress())
     return;
 
   bool restart = false;
@@ -2260,7 +2256,7 @@ void ProfileSyncService::OnSyncManagedPrefChange(bool is_sync_managed) {
     DisableForUser();
   } else {
     // Sync is no longer disabled by policy. Try starting it up if appropriate.
-    startup_controller_.TryStart();
+    startup_controller_->TryStart();
   }
 }
 
@@ -2457,7 +2453,7 @@ void ProfileSyncService::GetAllNodes(
 }
 
 bool ProfileSyncService::HasObserver(
-    ProfileSyncServiceBase::Observer* observer) const {
+    const ProfileSyncServiceBase::Observer* observer) const {
   return observers_.HasObserver(observer);
 }
 
@@ -2473,7 +2469,8 @@ void ProfileSyncService::SyncEvent(SyncEventCodes code) {
 bool ProfileSyncService::IsSyncEnabled() {
   // We have switches::kEnableSync just in case we need to change back to
   // sync-disabled-by-default on a platform.
-  return !CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableSync);
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableSync);
 }
 
 bool ProfileSyncService::IsManaged() const {
@@ -2501,11 +2498,8 @@ SigninManagerBase* ProfileSyncService::signin() const {
 void ProfileSyncService::UnsuppressAndStart() {
   DCHECK(profile_);
   sync_prefs_.SetStartSuppressed(false);
-  if (signin_.get() && !signin_->GetOriginal()->IsAuthenticated()) {
-    signin_->GetOriginal()->SetAuthenticatedUsername(
-        profile_->GetPrefs()->GetString(prefs::kGoogleServicesUsername));
-  }
-  startup_controller_.TryStart();
+  DCHECK(!signin_.get() || signin_->GetOriginal()->IsAuthenticated());
+  startup_controller_->TryStart();
 }
 
 void ProfileSyncService::AcknowledgeSyncedTypes() {
@@ -2728,8 +2722,8 @@ void ProfileSyncService::CheckSyncBackupCallback(base::Time backup_time) {
 }
 
 void ProfileSyncService::TryStartSyncAfterBackup() {
-  startup_controller_.Reset(GetRegisteredDataTypes());
-  startup_controller_.TryStart();
+  startup_controller_->Reset(GetRegisteredDataTypes());
+  startup_controller_->TryStart();
 }
 
 void ProfileSyncService::CleanUpBackup() {

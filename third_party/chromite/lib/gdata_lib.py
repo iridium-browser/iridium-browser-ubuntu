@@ -4,6 +4,8 @@
 
 """Library for interacting with gdata (i.e. Google Docs, Tracker, etc)."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import functools
@@ -239,6 +241,9 @@ class Issue(object):
 
   def InitFromTracker(self, t_issue, project_name):
     """Initialize |self| from tracker issue |t_issue|"""
+    # The __slots__ logic above confuses pylint.
+    # https://bitbucket.org/logilab/pylint/issue/380/
+    # pylint: disable=assigning-non-slot
 
     self.id = int(t_issue.id.text.split('/')[-1])
     self.labels = [label.text for label in t_issue.label]
@@ -390,8 +395,10 @@ class TrackerComm(object):
 
 
 class SpreadsheetRow(dict):
-  """Minor semi-immutable extension of dict to keep the original spreadsheet
-  row object and spreadsheet row number as attributes.
+  """Minor semi-immutable extension of dict to hold spreadsheet data.
+
+  This lets us keep the original spreadsheet row object and spreadsheet row
+  number as attributes.
 
   No changes are made to equality checking or anything else, so client code
   that wishes to handle this as a pure dict can.

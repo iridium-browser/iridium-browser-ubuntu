@@ -17,6 +17,7 @@
 #include "webrtc/common_types.h"
 #include "webrtc/frame_callback.h"
 #include "webrtc/modules/remote_bitrate_estimator/rate_statistics.h"
+#include "webrtc/modules/video_coding/main/interface/video_coding_defines.h"
 #include "webrtc/video_engine/include/vie_codec.h"
 #include "webrtc/video_engine/include/vie_rtp_rtcp.h"
 #include "webrtc/video_receive_stream.h"
@@ -29,23 +30,24 @@ class CriticalSectionWrapper;
 class ViECodec;
 class ViEDecoderObserver;
 
-namespace internal {
-
 class ReceiveStatisticsProxy : public ViEDecoderObserver,
+                               public VCMReceiveStatisticsCallback,
                                public RtcpStatisticsCallback,
                                public StreamDataCountersCallback {
  public:
-  ReceiveStatisticsProxy(uint32_t ssrc,
-                         Clock* clock,
-                         ViERTP_RTCP* rtp_rtcp,
-                         ViECodec* codec,
-                         int channel);
+  ReceiveStatisticsProxy(uint32_t ssrc, Clock* clock);
   virtual ~ReceiveStatisticsProxy();
 
   VideoReceiveStream::Stats GetStats() const;
 
   void OnDecodedFrame();
   void OnRenderedFrame();
+
+  // Overrides VCMReceiveStatisticsCallback
+  virtual void OnReceiveRatesUpdated(uint32_t bitRate,
+                                     uint32_t frameRate) OVERRIDE;
+  virtual void OnFrameCountsUpdated(const FrameCounts& frame_counts) OVERRIDE;
+  virtual void OnDiscardedPacketsUpdated(int discarded_packets) OVERRIDE;
 
   // Overrides ViEDecoderObserver.
   virtual void IncomingCodecChanged(const int video_channel,
@@ -59,24 +61,20 @@ class ReceiveStatisticsProxy : public ViEDecoderObserver,
                              int target_delay_ms,
                              int jitter_buffer_ms,
                              int min_playout_delay_ms,
-                             int render_delay_ms) OVERRIDE {}
+                             int render_delay_ms) OVERRIDE;
   virtual void RequestNewKeyFrame(const int video_channel) OVERRIDE {}
 
-  // Overrides RtcpStatisticsBallback.
+  // Overrides RtcpStatisticsCallback.
   virtual void StatisticsUpdated(const webrtc::RtcpStatistics& statistics,
                                  uint32_t ssrc) OVERRIDE;
+  virtual void CNameChanged(const char* cname, uint32_t ssrc) OVERRIDE;
 
   // Overrides StreamDataCountersCallback.
   virtual void DataCountersUpdated(const webrtc::StreamDataCounters& counters,
                                    uint32_t ssrc) OVERRIDE;
 
  private:
-  std::string GetCName() const;
-
-  const int channel_;
   Clock* const clock_;
-  ViECodec* const codec_;
-  ViERTP_RTCP* const rtp_rtcp_;
 
   scoped_ptr<CriticalSectionWrapper> crit_;
   VideoReceiveStream::Stats stats_ GUARDED_BY(crit_);
@@ -84,6 +82,5 @@ class ReceiveStatisticsProxy : public ViEDecoderObserver,
   RateStatistics renders_fps_estimator_ GUARDED_BY(crit_);
 };
 
-}  // namespace internal
 }  // namespace webrtc
 #endif  // WEBRTC_VIDEO_RECEIVE_STATISTICS_PROXY_H_

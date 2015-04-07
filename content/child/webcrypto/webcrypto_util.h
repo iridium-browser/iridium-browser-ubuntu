@@ -19,15 +19,6 @@ namespace webcrypto {
 
 class Status;
 
-// Converts a JWK "key_ops" array to the corresponding WebCrypto usages.
-CONTENT_EXPORT Status
-    GetWebCryptoUsagesFromJwkKeyOps(const base::ListValue* key_ops,
-                                    blink::WebCryptoKeyUsageMask* usages);
-
-// Composes a JWK key_ops array from a Web Crypto usage mask.
-base::ListValue* CreateJwkKeyOpsFromWebCryptoUsages(
-    blink::WebCryptoKeyUsageMask usages);
-
 // Creates a WebCryptoAlgorithm without any parameters.
 CONTENT_EXPORT blink::WebCryptoAlgorithm CreateAlgorithm(
     blink::WebCryptoAlgorithmId id);
@@ -36,6 +27,11 @@ CONTENT_EXPORT blink::WebCryptoAlgorithm CreateAlgorithm(
 // the specified algorithm ID. It is an error to call this method with a hash
 // algorithm that is not SHA*.
 CONTENT_EXPORT blink::WebCryptoAlgorithm CreateHmacImportAlgorithm(
+    blink::WebCryptoAlgorithmId hash_id,
+    unsigned int length_bits);
+
+// Same as above but without specifying a length.
+CONTENT_EXPORT blink::WebCryptoAlgorithm CreateHmacImportAlgorithmNoLength(
     blink::WebCryptoAlgorithmId hash_id);
 
 // Creates an import algorithm for RSA algorithms that take a hash.
@@ -43,6 +39,11 @@ CONTENT_EXPORT blink::WebCryptoAlgorithm CreateHmacImportAlgorithm(
 CONTENT_EXPORT blink::WebCryptoAlgorithm CreateRsaHashedImportAlgorithm(
     blink::WebCryptoAlgorithmId id,
     blink::WebCryptoAlgorithmId hash_id);
+
+// Creates an import algorithm for EC keys.
+CONTENT_EXPORT blink::WebCryptoAlgorithm CreateEcImportAlgorithm(
+    blink::WebCryptoAlgorithmId id,
+    blink::WebCryptoNamedCurve named_curve);
 
 // Returns true if the set bits in b make up a subset of the set bits in a.
 bool ContainsKeyUsages(blink::WebCryptoKeyUsageMask a,
@@ -60,10 +61,17 @@ Status GetAesKeyGenLengthInBits(const blink::WebCryptoAesKeyGenParams* params,
 Status GetHmacKeyGenLengthInBits(const blink::WebCryptoHmacKeyGenParams* params,
                                  unsigned int* keylen_bits);
 
+// Gets the requested key length in bits for an HMAC import operation.
+Status GetHmacImportKeyLengthBits(
+    const blink::WebCryptoHmacImportParams* params,
+    unsigned int key_data_byte_length,
+    unsigned int* keylen_bits);
+
 Status VerifyAesKeyLengthForImport(unsigned int keylen_bytes);
 
 Status CheckKeyCreationUsages(blink::WebCryptoKeyUsageMask all_possible_usages,
-                              blink::WebCryptoKeyUsageMask actual_usages);
+                              blink::WebCryptoKeyUsageMask actual_usages,
+                              bool allow_empty_usages);
 
 // Extracts the public exponent and modulus length from the Blink parameters.
 // On success it is guaranteed that:
@@ -75,6 +83,54 @@ Status GetRsaKeyGenParameters(
     const blink::WebCryptoRsaHashedKeyGenParams* params,
     unsigned int* public_exponent,
     unsigned int* modulus_length_bits);
+
+// Verifies that |usages| is valid when importing a key of the given format.
+Status VerifyUsagesBeforeImportAsymmetricKey(
+    blink::WebCryptoKeyFormat format,
+    blink::WebCryptoKeyUsageMask all_public_key_usages,
+    blink::WebCryptoKeyUsageMask all_private_key_usages,
+    blink::WebCryptoKeyUsageMask usages);
+
+// Truncates an octet string to a particular bit length. This is accomplished by
+// resizing to the closest byte length, and then zero-ing the unused
+// least-significant bits of the final byte.
+//
+// It is an error to call this function with a bit length that is larger than
+// that of |bytes|.
+//
+// TODO(eroman): This operation is not yet defined by the WebCrypto spec,
+// however this is a reasonable interpretation:
+// https://www.w3.org/Bugs/Public/show_bug.cgi?id=27402
+void TruncateToBitLength(size_t length_bits, std::vector<uint8_t>* bytes);
+
+// Rounds a bit count (up) to the nearest byte count.
+//
+// This is mathematically equivalent to (x + 7) / 8, however has no
+// possibility of integer overflow.
+template <typename T>
+T NumBitsToBytes(T x) {
+  return (x / 8) + (7 + (x % 8)) / 8;
+}
+
+// The "get key length" operation for AES keys.
+Status GetAesKeyLength(const blink::WebCryptoAlgorithm& key_length_algorithm,
+                       bool* has_length_bits,
+                       unsigned int* length_bits);
+
+// The "get key length" operation for HMAC keys.
+Status GetHmacKeyLength(const blink::WebCryptoAlgorithm& key_length_algorithm,
+                        bool* has_length_bits,
+                        unsigned int* length_bits);
+
+// Splits the combined usages given to GenerateKey() into the respective usages
+// for the public key and private key. Returns an error if the usages are
+// invalid.
+Status GetUsagesForGenerateAsymmetricKey(
+    blink::WebCryptoKeyUsageMask combined_usages,
+    blink::WebCryptoKeyUsageMask all_public_usages,
+    blink::WebCryptoKeyUsageMask all_private_usages,
+    blink::WebCryptoKeyUsageMask* public_usages,
+    blink::WebCryptoKeyUsageMask* private_usages);
 
 }  // namespace webcrypto
 

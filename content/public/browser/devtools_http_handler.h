@@ -32,7 +32,7 @@ class DevToolsHttpHandler {
   // and instantiating server socket.
   class CONTENT_EXPORT ServerSocketFactory {
    public:
-    ServerSocketFactory(const std::string& address, int port, int backlog);
+    ServerSocketFactory(const std::string& address, uint16 port, int backlog);
     virtual ~ServerSocketFactory();
 
     // Returns a new instance of ServerSocket or NULL if an error occurred.
@@ -46,7 +46,7 @@ class DevToolsHttpHandler {
     virtual scoped_ptr<net::ServerSocket> Create() const = 0;
 
     const std::string address_;
-    const int port_;
+    const uint16 port_;
     const int backlog_;
 
    private:
@@ -72,14 +72,9 @@ class DevToolsHttpHandler {
       DevToolsHttpHandlerDelegate* delegate,
       const base::FilePath& active_port_output_directory);
 
-  // Called from the main thread in order to stop protocol handler.
-  // Automatically destroys the handler instance.
-  virtual void Stop() = 0;
+  // Returns the URL for the file at |path| in frontend.
+  virtual GURL GetFrontendURL(const std::string& path) = 0;
 
-  // Returns the URL for the address to debug |agent_host|.
-  virtual GURL GetFrontendURL() = 0;
-
- protected:
   virtual ~DevToolsHttpHandler() {}
 };
 

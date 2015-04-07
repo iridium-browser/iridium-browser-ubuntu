@@ -45,6 +45,7 @@
 <translation id="568643307450491754">Tìm dấu trang của bạn trong menu Chrome hoặc trên thanh dấu trang.</translation>
 <translation id="8556340503434111824">Hiện đã có phiên bản mới của Google Chrome và phiên bản này nhanh hơn bao giờ hết.</translation>
 <translation id="8987477933582888019">Trình duyệt web</translation>
+<translation id="3749644715096758981">Chrome không thể cập nhật lên phiên bản mới nhất, do đó, bạn đang bỏ lỡ các tính năng và bản sửa lỗi bảo mật mới. Bạn cần cập nhật Chrome.</translation>
 <translation id="4728575227883772061">Không cài đặt được do lỗi chưa xác định. Nếu Google Chrome hiện đang chạy, vui lòng đóng Google Chrome và thử lại.</translation>
 <translation id="3080151273017101988">Tiếp tục chạy các ứng dụng nền khi Google Chrome đóng</translation>
 <translation id="4149882025268051530">Trình cài đặt không thể giải nén lưu trữ được. Vui lòng tải xuống lại Google Chrome.</translation>
@@ -85,6 +86,7 @@
 <translation id="225614027745146050">Chào mừng</translation>
 <translation id="7473891865547856676">Không, cảm ơn</translation>
 <translation id="3149510190863420837">Ứng dụng Chrome</translation>
+<translation id="8851136666856101339">chính</translation>
 <translation id="7473136999113284234">Chrome tự động cập nhật nên bạn luôn có phiên bản mới nhất.</translation>
 <translation id="7084448929020576097"><ph name="FILE_NAME"/> là tệp độc hại và Chrome đã chặn tệp này.</translation>
 <translation id="6368958679917195344">Chrome OS trở nên khả thi là nhờ <ph name="BEGIN_LINK_CROS_OSS"/>phần mềm nguồn mở<ph name="END_LINK_CROS_OSS"/> bổ sung.</translation>
@@ -147,7 +149,6 @@ Một số tính năng có thể không khả dụng. Vui lòng chỉ định th
 <translation id="5855036575689098185">Phần mềm đang chạy trên máy tính của bạn không tương thích với Google Chrome.</translation>
 <translation id="7164397146364144019">Bạn có thể giúp Chrome an toàn và dễ sử dụng hơn bằng cách tự động báo cáo với Google chi tiết về sự cố bảo mật có thể xảy ra.</translation>
 <translation id="8008534537613507642">Cài đặt lại Chrome</translation>
-<translation id="2044287590254833138">Thanh công cụ Google Chrome</translation>
 <translation id="8862326446509486874">Bạn không có quyền thích hợp để cài đặt cấp hệ thống. Thử chạy lại trình cài đặt với vai trò Quản trị viên.</translation>
 <translation id="2874156562296220396">Google Chrome được xây dựng bằng dự án nguồn mở <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> và <ph name="BEGIN_LINK_OSS"/>phần mềm nguồn mở<ph name="END_LINK_OSS"/> khác.</translation>
 <translation id="7191567847629796517">Google Chrome OS không hỗ trợ chạy ứng dụng bên ngoài để xử lý các liên kết <ph name="SCHEME"/>. Liên kết được yêu cầu là <ph name="PROTOLINK"/>.</translation>
@@ -159,6 +160,7 @@ Một số tính năng có thể không khả dụng. Vui lòng chỉ định th
 <translation id="2290095356545025170">Bạn có chắc chắn muốn gỡ cài đặt Google Chrome không?</translation>
 <translation id="7062966102157262887">Quá trình tải xuống hiện đang diễn ra. Bạn có muốn thoát Google Chrome và hủy tải xuống không?</translation>
 <translation id="4273752058983339720">Google Chrome được định cấu hình để tự động chạy khi bạn khởi động máy tính của mình.</translation>
+<translation id="2316129865977710310">Không, cảm ơn</translation>
 <translation id="415994390253732730">Chrome hoạt động không bình thường?</translation>
 <translation id="1104959162601287462">Giới thiệu về &amp;hệ điều hành Chrome</translation>
 <translation id="5328989068199000832">Google Chrome Binaries</translation>
@@ -261,6 +263,7 @@ Một số tính năng có thể không khả dụng. Vui lòng chỉ định th
 <translation id="6626317981028933585">Thật đáng tiếc, cài đặt Mozilla Firefox của bạn không có sẵn khi trình duyệt đang chạy. Để nhập những cài đặt đó vào Google Chrome, hãy lưu công việc của bạn và đóng tất cả cửa sổ Firefox. Sau đó, nhấp Tiếp tục.</translation>
 <translation id="7242029209006116544">Bạn đang đăng nhập bằng tài khoản được quản lý và cấp cho quản trị viên của tài khoản quyền kiểm soát cấu hình trên Google Chrome của bạn. Dữ liệu Chrome của bạn, chẳng hạn như ứng dụng, dấu trang, lịch sử, mật khẩu và các cài đặt khác sẽ vĩnh viễn được liên kết với <ph name="USER_NAME"/>. Bạn có thể xóa dữ liệu này thông qua Trang tổng quan của tài khoản Google nhưng không thể liên kết dữ liệu này với tài khoản khác. Bạn có thể tùy chọn tạo một cấu hình mới để giữ cho dữ liệu Chrome hiện có của bạn riêng biệt. <ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">Tiện ích này cũng điều khiển trang nào được hiển thị khi bạn khởi động Chrome hoặc tìm kiếm từ Thanh địa chỉ.</translation>
+<translation id="1553358976309200471">Cập nhật Chrome</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Bản quyền <ph name="YEAR"/> Google Inc. Mọi quyền được bảo lưu.</translation>
 <translation id="1698376642261615901">Google Chrome là một trình duyệt web chạy các trang web và ứng dụng với tốc độ cực nhanh. Trình duyệt này nhanh, ổn định và dễ sử dụng. Duyệt web an toàn hơn với tính năng ngăn chặn phần mềm độc hại và lừa đảo được tích hợp trong Google Chrome.</translation>

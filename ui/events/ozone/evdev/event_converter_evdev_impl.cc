@@ -14,20 +14,30 @@
 
 namespace ui {
 
+// Values for EV_KEY.
+const int kKeyReleaseValue = 0;
+const int kKeyRepeatValue = 2;
+
 EventConverterEvdevImpl::EventConverterEvdevImpl(
     int fd,
     base::FilePath path,
     int id,
+    InputDeviceType type,
+    const EventDeviceInfo& devinfo,
     EventModifiersEvdev* modifiers,
+    MouseButtonMapEvdev* button_map,
     CursorDelegateEvdev* cursor,
     KeyboardEvdev* keyboard,
     const EventDispatchCallback& callback)
-    : EventConverterEvdev(fd, path, id),
+    : EventConverterEvdev(fd, path, id, type),
+      has_keyboard_(devinfo.HasKeyboard()),
+      has_touchpad_(devinfo.HasTouchpad()),
       x_offset_(0),
       y_offset_(0),
       cursor_(cursor),
       keyboard_(keyboard),
       modifiers_(modifiers),
+      button_map_(button_map),
       callback_(callback) {
 }
 
@@ -52,6 +62,14 @@ void EventConverterEvdevImpl::OnFileCanReadWithoutBlocking(int fd) {
   ProcessEvents(inputs, read_size / sizeof(*inputs));
 }
 
+bool EventConverterEvdevImpl::HasKeyboard() const {
+  return has_keyboard_;
+}
+
+bool EventConverterEvdevImpl::HasTouchpad() const {
+  return has_touchpad_;
+}
+
 void EventConverterEvdevImpl::ProcessEvents(const input_event* inputs,
                                             int count) {
   for (int i = 0; i < count; ++i) {
@@ -71,13 +89,18 @@ void EventConverterEvdevImpl::ProcessEvents(const input_event* inputs,
 }
 
 void EventConverterEvdevImpl::ConvertKeyEvent(const input_event& input) {
+  // Ignore repeat events.
+  if (input.value == kKeyRepeatValue)
+    return;
+
   // Mouse processing.
   if (input.code >= BTN_MOUSE && input.code < BTN_JOYSTICK) {
     DispatchMouseButton(input);
     return;
   }
+
   // Keyboard processing.
-  keyboard_->OnKeyChange(input.code, input.value != 0);
+  keyboard_->OnKeyChange(input.code, input.value != kKeyReleaseValue);
 }
 
 void EventConverterEvdevImpl::ConvertMouseMoveEvent(const input_event& input) {
@@ -98,11 +121,12 @@ void EventConverterEvdevImpl::DispatchMouseButton(const input_event& input) {
     return;
 
   unsigned int modifier;
-  if (input.code == BTN_LEFT)
+  const int button = button_map_->GetMappedButton(input.code);
+  if (button == BTN_LEFT)
     modifier = EVDEV_MODIFIER_LEFT_MOUSE_BUTTON;
-  else if (input.code == BTN_RIGHT)
+  else if (button == BTN_RIGHT)
     modifier = EVDEV_MODIFIER_RIGHT_MOUSE_BUTTON;
-  else if (input.code == BTN_MIDDLE)
+  else if (button == BTN_MIDDLE)
     modifier = EVDEV_MODIFIER_MIDDLE_MOUSE_BUTTON;
   else
     return;
@@ -111,8 +135,8 @@ void EventConverterEvdevImpl::DispatchMouseButton(const input_event& input) {
   modifiers_->UpdateModifier(modifier, input.value);
   callback_.Run(make_scoped_ptr(
       new MouseEvent(input.value ? ET_MOUSE_PRESSED : ET_MOUSE_RELEASED,
-                     cursor_->location(),
-                     cursor_->location(),
+                     cursor_->GetLocation(),
+                     cursor_->GetLocation(),
                      modifiers_->GetModifierFlags() | flag,
                      flag)));
 }
@@ -125,8 +149,8 @@ void EventConverterEvdevImpl::FlushEvents() {
 
   callback_.Run(make_scoped_ptr(
       new MouseEvent(ui::ET_MOUSE_MOVED,
-                     cursor_->location(),
-                     cursor_->location(),
+                     cursor_->GetLocation(),
+                     cursor_->GetLocation(),
                      modifiers_->GetModifierFlags(),
                      /* changed_button_flags */ 0)));
   x_offset_ = 0;

@@ -65,8 +65,8 @@ void PowerButtonController::OnPowerButtonEvent(
   if (volume_down_pressed_ && down &&
       Shell::GetInstance()->maximize_mode_controller()->
         IsMaximizeModeWindowManagerEnabled()) {
-    Shell::GetInstance()->accelerator_controller()->PerformAction(
-        ash::TAKE_SCREENSHOT, ui::Accelerator());
+    Shell::GetInstance()->accelerator_controller()->PerformActionIfEnabled(
+        ash::TAKE_SCREENSHOT);
     return;
   }
 
@@ -82,7 +82,7 @@ void PowerButtonController::OnPowerButtonEvent(
           !controller_->LockRequested()) {
         controller_->StartLockAnimationAndLockImmediately(false);
       } else {
-        controller_->RequestShutdown();
+        controller_->RequestShutdown(LockStateController::POWER_OFF);
       }
     }
   } else {  // !has_legacy_power_button_

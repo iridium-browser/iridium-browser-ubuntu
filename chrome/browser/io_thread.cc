@@ -43,8 +43,8 @@
 #include "chrome/common/pref_names.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_delegate.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_protocol.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/policy/core/common/policy_service.h"
@@ -53,9 +53,11 @@
 #include "content/public/browser/cookie_store_factory.h"
 #include "net/base/host_mapping_rules.h"
 #include "net/base/net_util.h"
+#include "net/cert/cert_policy_enforcer.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/cert_verify_proc.h"
 #include "net/cert/ct_known_logs.h"
+#include "net/cert/ct_known_logs_static.h"
 #include "net/cert/ct_log_verifier.h"
 #include "net/cert/ct_verifier.h"
 #include "net/cert/multi_log_ct_verifier.h"
@@ -74,6 +76,7 @@
 #include "net/proxy/proxy_service.h"
 #include "net/quic/crypto/crypto_protocol.h"
 #include "net/quic/quic_protocol.h"
+#include "net/quic/quic_utils.h"
 #include "net/socket/tcp_client_socket.h"
 #include "net/spdy/spdy_session.h"
 #include "net/ssl/channel_id_service.h"
@@ -101,6 +104,10 @@
 #include "net/ocsp/nss_ocsp.h"
 #endif
 
+#if defined(OS_ANDROID)
+#include "base/android/build_info.h"
+#endif
+
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/net/cert_verify_proc_chromeos.h"
 #include "chromeos/network/host_resolver_impl_chromeos.h"
@@ -121,8 +128,6 @@ const char kTCPFastOpenHttpsEnabledGroupName[] = "HttpsEnabled";
 const char kQuicFieldTrialName[] = "QUIC";
 const char kQuicFieldTrialEnabledGroupName[] = "Enabled";
 const char kQuicFieldTrialHttpsEnabledGroupName[] = "HttpsEnabled";
-const char kQuicFieldTrialPacketLengthSuffix[] = "BytePackets";
-const char kQuicFieldTrialPacingSuffix[] = "WithPacing";
 
 // The SPDY trial composes two different trial plus control groups:
 //  * A "holdback" group with SPDY disabled, and corresponding control
@@ -168,7 +173,8 @@ class SystemURLRequestContext : public net::URLRequestContext {
 
 scoped_ptr<net::HostResolver> CreateGlobalHostResolver(net::NetLog* net_log) {
   TRACE_EVENT0("startup", "IOThread::CreateGlobalHostResolver");
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
 
   net::HostResolver::Options options;
 
@@ -291,7 +297,7 @@ ConstructSystemRequestContext(IOThread::Globals* globals,
   return context;
 }
 
-int GetSwitchValueAsInt(const CommandLine& command_line,
+int GetSwitchValueAsInt(const base::CommandLine& command_line,
                         const std::string& switch_name) {
   int value;
   if (!base::StringToInt(command_line.GetSwitchValueASCII(switch_name),
@@ -320,6 +326,17 @@ bool IsStaleWhileRevalidateEnabled(const base::CommandLine& command_line) {
   const std::string group_name =
       base::FieldTrialList::FindFullName(kStaleWhileRevalidateFieldTrialName);
   return group_name == "Enabled";
+}
+
+bool IsCertificateTransparencyRequiredForEV(
+    const base::CommandLine& command_line) {
+  const std::string group_name =
+      base::FieldTrialList::FindFullName("CTRequiredForEVTrial");
+
+  if (command_line.HasSwitch(switches::kRequireCTForEV))
+    return true;
+
+  return group_name == "RequirementEnforced";
 }
 
 }  // namespace
@@ -478,6 +495,8 @@ IOThread::IOThread(
       &system_enable_referrers_,
       NULL,
       NULL,
+      NULL,
+      NULL,
       local_state);
   ssl_config_service_manager_.reset(
       SSLConfigServiceManager::CreateDefaultManager(local_state));
@@ -562,7 +581,8 @@ void IOThread::InitAsync() {
   net::SetMessageLoopForNSSHttpIO();
 #endif
 
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
 
   DCHECK(!globals_);
   globals_ = new Globals;
@@ -581,17 +601,29 @@ void IOThread::InitAsync() {
       extension_event_router_forwarder_;
 #endif
 
-  ChromeNetworkDelegate* network_delegate =
+  scoped_ptr<ChromeNetworkDelegate> chrome_network_delegate(
       new ChromeNetworkDelegate(extension_event_router_forwarder(),
-                                &system_enable_referrers_);
+                                &system_enable_referrers_));
 
   if (command_line.HasSwitch(switches::kEnableClientHints))
-    network_delegate->SetEnableClientHints();
+    chrome_network_delegate->SetEnableClientHints();
 
 #if defined(ENABLE_EXTENSIONS)
   if (command_line.HasSwitch(switches::kDisableExtensionsHttpThrottling))
-    network_delegate->NeverThrottleRequests();
+    chrome_network_delegate->NeverThrottleRequests();
 #endif
+
+  SetupDataReductionProxy();
+
+  // This is the same as in ProfileImplIOData except that it does not collect
+  // usage stats.
+  data_reduction_proxy::DataReductionProxyNetworkDelegate* network_delegate =
+      new data_reduction_proxy::DataReductionProxyNetworkDelegate(
+          chrome_network_delegate.Pass(),
+          globals_->data_reduction_proxy_params.get(),
+          globals_->data_reduction_proxy_auth_request_handler.get(),
+          data_reduction_proxy::DataReductionProxyNetworkDelegate::
+              ProxyConfigGetter());
 
   globals_->system_network_delegate.reset(network_delegate);
   globals_->host_resolver = CreateGlobalHostResolver(net_log_);
@@ -639,9 +671,12 @@ void IOThread::InitAsync() {
     }
   }
 
-  globals_->ssl_config_service = GetSSLConfigService();
+  net::CertPolicyEnforcer* policy_enforcer = NULL;
+  policy_enforcer = new net::CertPolicyEnforcer(
+      IsCertificateTransparencyRequiredForEV(command_line));
+  globals_->cert_policy_enforcer.reset(policy_enforcer);
 
-  SetupDataReductionProxy(network_delegate);
+  globals_->ssl_config_service = GetSSLConfigService();
 
   globals_->http_auth_handler_factory.reset(CreateDefaultAuthHandlerFactory(
       globals_->host_resolver.get()));
@@ -778,7 +813,7 @@ void IOThread::CleanUp() {
   base::debug::LeakTracker<SystemURLRequestContextGetter>::CheckForLeaks();
 }
 
-void IOThread::InitializeNetworkOptions(const CommandLine& command_line) {
+void IOThread::InitializeNetworkOptions(const base::CommandLine& command_line) {
   // Only handle use-spdy command line flags if "spdy.disabled" preference is
   // not disabled via policy.
   if (is_spdy_disabled_by_policy_) {
@@ -803,18 +838,11 @@ void IOThread::InitializeNetworkOptions(const CommandLine& command_line) {
     } else if (command_line.HasSwitch(switches::kEnableNpnHttpOnly)) {
       globals_->next_protos = net::NextProtosHttpOnly();
       globals_->use_alternate_protocols.set(false);
-    } else if (command_line.HasSwitch(switches::kEnableWebSocketOverSpdy)) {
-      // Use the current SPDY default (SPDY/3.1).
-      globals_->next_protos = net::NextProtosSpdy31();
-      globals_->use_alternate_protocols.set(true);
     } else {
       // No SPDY command-line flags have been specified. Examine trial groups.
       ConfigureSpdyFromTrial(
           base::FieldTrialList::FindFullName(kSpdyFieldTrialName), globals_);
     }
-
-    if (command_line.HasSwitch(switches::kEnableWebSocketOverSpdy))
-      globals_->enable_websocket_over_spdy.set(true);
   }
 
   ConfigureTCPFastOpen(command_line);
@@ -825,7 +853,7 @@ void IOThread::InitializeNetworkOptions(const CommandLine& command_line) {
   // HttpNetworkSession::Params.
 }
 
-void IOThread::ConfigureTCPFastOpen(const CommandLine& command_line) {
+void IOThread::ConfigureTCPFastOpen(const base::CommandLine& command_line) {
   const std::string trial_group =
       base::FieldTrialList::FindFullName(kTCPFastOpenFieldTrialName);
   if (trial_group == kTCPFastOpenHttpsEnabledGroupName)
@@ -859,8 +887,8 @@ void IOThread::ConfigureSpdyFromTrial(base::StringPiece spdy_trial_group,
     globals->next_protos = net::NextProtosSpdy31();
     globals->use_alternate_protocols.set(true);
   } else {
-    // Use the current SPDY default (SPDY/3.1).
-    globals->next_protos = net::NextProtosSpdy31();
+    // By default, enable HTTP/2.
+    globals->next_protos = net::NextProtosSpdy4Http2();
     globals->use_alternate_protocols.set(true);
   }
 }
@@ -992,6 +1020,7 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
     net::HttpNetworkSession::Params* params) {
   params->host_resolver = globals.host_resolver.get();
   params->cert_verifier = globals.cert_verifier.get();
+  params->cert_policy_enforcer = globals.cert_policy_enforcer.get();
   params->channel_id_service = globals.system_channel_id_service.get();
   params->transport_security_state = globals.transport_security_state.get();
   params->ssl_config_service = globals.ssl_config_service.get();
@@ -1028,8 +1057,6 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
       &params->use_alternate_protocols);
   globals.alternate_protocol_probability_threshold.CopyToIfSet(
       &params->alternate_protocol_probability_threshold);
-  globals.enable_websocket_over_spdy.CopyToIfSet(
-      &params->enable_websocket_over_spdy);
 
   globals.enable_quic.CopyToIfSet(&params->enable_quic);
   globals.quic_always_require_handshake_confirmation.CopyToIfSet(
@@ -1038,6 +1065,12 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
       &params->quic_disable_connection_pooling);
   globals.quic_load_server_info_timeout_ms.CopyToIfSet(
       &params->quic_load_server_info_timeout_ms);
+  globals.quic_disable_loading_server_info_for_new_servers.CopyToIfSet(
+      &params->quic_disable_loading_server_info_for_new_servers);
+  globals.quic_load_server_info_timeout_srtt_multiplier.CopyToIfSet(
+      &params->quic_load_server_info_timeout_srtt_multiplier);
+  globals.quic_enable_truncated_connection_ids.CopyToIfSet(
+      &params->quic_enable_truncated_connection_ids);
   globals.enable_quic_port_selection.CopyToIfSet(
       &params->enable_quic_port_selection);
   globals.quic_max_packet_length.CopyToIfSet(&params->quic_max_packet_length);
@@ -1094,7 +1127,8 @@ void IOThread::InitSystemRequestContextOnIOThread() {
   DCHECK(!globals_->system_proxy_service.get());
   DCHECK(system_proxy_config_service_.get());
 
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   globals_->system_proxy_service.reset(
       ProxyServiceFactory::CreateProxyService(
           net_log_,
@@ -1127,7 +1161,7 @@ void IOThread::UpdateDnsClientEnabled() {
   globals()->host_resolver->SetDnsClientEnabled(*dns_client_enabled_);
 }
 
-void IOThread::ConfigureQuic(const CommandLine& command_line) {
+void IOThread::ConfigureQuic(const base::CommandLine& command_line) {
   // Always fetch the field trial group to ensure it is reported correctly.
   // The command line flags will be associated with a group that is reported
   // so long as trial is actually queried.
@@ -1141,8 +1175,7 @@ void IOThread::ConfigureQuic(const CommandLine& command_line) {
   ConfigureQuicGlobals(command_line, group, params, globals_);
 }
 
-void IOThread::SetupDataReductionProxy(
-    ChromeNetworkDelegate* network_delegate) {
+void IOThread::SetupDataReductionProxy() {
   // TODO(kundaji): Move flags initialization to DataReductionProxyParams and
   // merge with flag initialization in
   // data_reduction_proxy_chrome_settings_factory.cc.
@@ -1157,6 +1190,13 @@ void IOThread::SetupDataReductionProxy(
       IsIncludedInHoldbackFieldTrial()) {
     flags |= data_reduction_proxy::DataReductionProxyParams::kHoldback;
   }
+#if defined(OS_ANDROID)
+  if (data_reduction_proxy::DataReductionProxyParams::
+          IsIncludedInAndroidOnePromoFieldTrial(
+              base::android::BuildInfo::GetInstance()->android_build_fp())) {
+    flags |= data_reduction_proxy::DataReductionProxyParams::kPromoAllowed;
+  }
+#endif
   globals_->data_reduction_proxy_params.reset(
       new data_reduction_proxy::DataReductionProxyParams(flags));
   globals_->data_reduction_proxy_auth_request_handler.reset(
@@ -1168,14 +1208,6 @@ void IOThread::SetupDataReductionProxy(
       new data_reduction_proxy::DataReductionProxyDelegate(
           globals_->data_reduction_proxy_auth_request_handler.get(),
           globals_->data_reduction_proxy_params.get()));
-  // This is the same as in ProfileImplIOData except that we do not collect
-  // usage stats.
-  network_delegate->set_data_reduction_proxy_params(
-      globals_->data_reduction_proxy_params.get());
-  network_delegate->set_data_reduction_proxy_auth_request_handler(
-      globals_->data_reduction_proxy_auth_request_handler.get());
-  network_delegate->set_on_resolve_proxy_handler(
-      base::Bind(data_reduction_proxy::OnResolveProxyHandler));
 }
 
 // static
@@ -1196,6 +1228,16 @@ void IOThread::ConfigureQuicGlobals(
     if (load_server_info_timeout_ms != 0) {
       globals->quic_load_server_info_timeout_ms.set(
           load_server_info_timeout_ms);
+    }
+    globals->quic_disable_loading_server_info_for_new_servers.set(
+        ShouldDisableLoadingServerInfoForNewServers(quic_trial_params));
+    float load_server_info_timeout_srtt_multiplier =
+        GetQuicLoadServerInfoTimeoutSrttMultiplier(quic_trial_params);
+    globals->quic_enable_truncated_connection_ids.set(
+        ShouldQuicEnableTruncatedConnectionIds(quic_trial_params));
+    if (load_server_info_timeout_srtt_multiplier != 0) {
+      globals->quic_load_server_info_timeout_srtt_multiplier.set(
+          load_server_info_timeout_srtt_multiplier);
     }
     globals->enable_quic_port_selection.set(
         ShouldEnableQuicPortSelection(command_line));
@@ -1247,7 +1289,7 @@ void IOThread::ConfigureQuicGlobals(
   }
 }
 
-bool IOThread::ShouldEnableQuic(const CommandLine& command_line,
+bool IOThread::ShouldEnableQuic(const base::CommandLine& command_line,
                                 base::StringPiece quic_trial_group) {
   if (command_line.HasSwitch(switches::kDisableQuic))
     return false;
@@ -1260,7 +1302,7 @@ bool IOThread::ShouldEnableQuic(const CommandLine& command_line,
 }
 
 bool IOThread::ShouldEnableQuicPortSelection(
-      const CommandLine& command_line) {
+    const base::CommandLine& command_line) {
   if (command_line.HasSwitch(switches::kDisableQuicPortSelection))
     return false;
 
@@ -1271,7 +1313,7 @@ bool IOThread::ShouldEnableQuicPortSelection(
 }
 
 bool IOThread::ShouldEnableQuicPacing(
-    const CommandLine& command_line,
+    const base::CommandLine& command_line,
     base::StringPiece quic_trial_group,
     const VariationParameters& quic_trial_params) {
   if (command_line.HasSwitch(switches::kEnableQuicPacing))
@@ -1280,19 +1322,16 @@ bool IOThread::ShouldEnableQuicPacing(
   if (command_line.HasSwitch(switches::kDisableQuicPacing))
     return false;
 
-  if (LowerCaseEqualsASCII(
+  return LowerCaseEqualsASCII(
       GetVariationParam(quic_trial_params, "enable_pacing"),
-      "true"))
-    return true;
-
-  return quic_trial_group.ends_with(kQuicFieldTrialPacingSuffix);
+      "true");
 }
 
 net::QuicTagVector IOThread::GetQuicConnectionOptions(
-    const CommandLine& command_line,
+    const base::CommandLine& command_line,
     const VariationParameters& quic_trial_params) {
   if (command_line.HasSwitch(switches::kQuicConnectionOptions)) {
-    return ParseQuicConnectionOptions(
+    return net::QuicUtils::ParseQuicConnectionOptions(
         command_line.GetSwitchValueASCII(switches::kQuicConnectionOptions));
   }
 
@@ -1305,27 +1344,7 @@ net::QuicTagVector IOThread::GetQuicConnectionOptions(
       return net::QuicTagVector();
   }
 
-  return ParseQuicConnectionOptions(it->second);
-}
-
-// static
-net::QuicTagVector IOThread::ParseQuicConnectionOptions(
-    const std::string& connection_options) {
-  net::QuicTagVector options;
-  std::vector<std::string> tokens;
-  base::SplitString(connection_options, ',', &tokens);
-  // Tokens are expected to be no more than 4 characters long, but we
-  // handle overflow gracefully.
-  for (std::vector<std::string>::iterator token = tokens.begin();
-       token != tokens.end(); ++token) {
-    uint32 option = 0;
-    for (size_t i = token->length() ; i > 0; --i) {
-      option <<= 8;
-      option |= static_cast<unsigned char>((*token)[i - 1]);
-    }
-    options.push_back(static_cast<net::QuicTag>(option));
-  }
-  return options;
+  return net::QuicUtils::ParseQuicConnectionOptions(it->second);
 }
 
 // static
@@ -1384,8 +1403,37 @@ int IOThread::GetQuicLoadServerInfoTimeout(
 }
 
 // static
+bool IOThread::ShouldDisableLoadingServerInfoForNewServers(
+    const VariationParameters& quic_trial_params) {
+  return LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params,
+                        "disable_loading_server_info_for_new_servers"),
+      "true");
+}
+
+// static
+float IOThread::GetQuicLoadServerInfoTimeoutSrttMultiplier(
+    const VariationParameters& quic_trial_params) {
+  double value;
+  if (base::StringToDouble(GetVariationParam(quic_trial_params,
+                                             "load_server_info_time_to_srtt"),
+                           &value)) {
+    return (float)value;
+  }
+  return 0.0f;
+}
+
+// static
+bool IOThread::ShouldQuicEnableTruncatedConnectionIds(
+    const VariationParameters& quic_trial_params) {
+  return LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "enable_truncated_connection_ids"),
+      "true");
+}
+
+// static
 size_t IOThread::GetQuicMaxPacketLength(
-    const CommandLine& command_line,
+    const base::CommandLine& command_line,
     base::StringPiece quic_trial_group,
     const VariationParameters& quic_trial_params) {
   if (command_line.HasSwitch(switches::kQuicMaxPacketLength)) {
@@ -1404,30 +1452,12 @@ size_t IOThread::GetQuicMaxPacketLength(
                          &value)) {
     return value;
   }
-
-  // Format of the packet length group names is:
-  //   (Https)?Enabled<length>BytePackets.
-  base::StringPiece length_str(quic_trial_group);
-  if (length_str.starts_with(kQuicFieldTrialEnabledGroupName)) {
-    length_str.remove_prefix(strlen(kQuicFieldTrialEnabledGroupName));
-  } else if (length_str.starts_with(kQuicFieldTrialHttpsEnabledGroupName)) {
-    length_str.remove_prefix(strlen(kQuicFieldTrialHttpsEnabledGroupName));
-  } else {
-    return 0;
-  }
-  if (!length_str.ends_with(kQuicFieldTrialPacketLengthSuffix)) {
-    return 0;
-  }
-  length_str.remove_suffix(strlen(kQuicFieldTrialPacketLengthSuffix));
-  if (!base::StringToUint(length_str, &value)) {
-    return 0;
-  }
-  return value;
+  return 0;
 }
 
 // static
 net::QuicVersion IOThread::GetQuicVersion(
-    const CommandLine& command_line,
+    const base::CommandLine& command_line,
     const VariationParameters& quic_trial_params) {
   if (command_line.HasSwitch(switches::kQuicVersion)) {
     return ParseQuicVersion(

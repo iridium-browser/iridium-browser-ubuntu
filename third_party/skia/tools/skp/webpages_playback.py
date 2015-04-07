@@ -7,8 +7,8 @@
 
 To archive webpages and store SKP files (archives should be rarely updated):
 
-cd ../buildbot/slave/skia_slave_scripts
-python webpages_playback.py --dest_gsbase=gs://rmistry --record \
+cd skia
+python tools/skp/webpages_playback.py --dest_gsbase=gs://rmistry --record \
 --page_sets=all --skia_tools=/home/default/trunk/out/Debug/ \
 --browser_executable=/tmp/chromium/out/Release/chrome
 
@@ -16,8 +16,8 @@ python webpages_playback.py --dest_gsbase=gs://rmistry --record \
 To replay archived webpages and re-generate SKP files (should be run whenever
 SkPicture.PICTURE_VERSION changes):
 
-cd ../buildbot/slave/skia_slave_scripts
-python webpages_playback.py --dest_gsbase=gs://rmistry \
+cd skia
+python tools/skp/webpages_playback.py --dest_gsbase=gs://rmistry \
 --page_sets=all --skia_tools=/home/default/trunk/out/Debug/ \
 --browser_executable=/tmp/chromium/out/Release/chrome
 
@@ -25,8 +25,8 @@ python webpages_playback.py --dest_gsbase=gs://rmistry \
 Specify the --page_sets flag (default value is 'all') to pick a list of which
 webpages should be archived and/or replayed. Eg:
 
---page_sets=page_sets/skia_yahooanswers_desktop.json,\
-page_sets/skia_wikipedia_galaxynexus.json
+--page_sets=tools/skp/page_sets/skia_yahooanswers_desktop.py,\
+tools/skp/page_sets/skia_googlecalendar_nexus10.py
 
 The --browser_executable flag should point to the browser binary you want to use
 to capture archives and/or capture SKP files. Majority of the time it should be
@@ -42,8 +42,6 @@ The --skia_tools flag if specified will allow this script to run
 debugger, render_pictures, and render_pdfs on the captured
 SKP(s). The tools are run after all SKPs are succesfully captured to make sure
 they can be added to the buildbots with no breakages.
-To preview the captured SKP before proceeding to the next page_set specify both
---skia_tools and --view_debugger_output.
 """
 
 import glob
@@ -109,6 +107,10 @@ GS_FINE_GRAINED_ACL_LIST = [
    gs_utils.GSUtils.Permission.READ),
 ]
 
+def remove_prefix(s, prefix):
+  if s.startswith(prefix):
+    return s[len(prefix):]
+  return s
 
 class SkPicturePlayback(object):
   """Class that archives or replays webpages and creates SKPs."""
@@ -177,7 +179,7 @@ class SkPicturePlayback(object):
       raw_input("Please press a key when you are ready to proceed...")
     elif not os.path.isfile(CREDENTIALS_FILE_PATH):
       # Download the credentials.json file from Google Storage.
-      gs_bucket = self._dest_gsbase.lstrip(gs_utils.GS_PREFIX)
+      gs_bucket = remove_prefix(self._dest_gsbase.lstrip(), gs_utils.GS_PREFIX)
       gs_utils.GSUtils().download_file(gs_bucket, CREDENTIALS_GS_PATH,
                                        CREDENTIALS_FILE_PATH)
 
@@ -295,7 +297,7 @@ class SkPicturePlayback(object):
       ]
       render_pdfs_cmd = [
           os.path.join(self._skia_tools, 'render_pdfs'),
-          self._local_skp_dir
+          '-r', self._local_skp_dir
       ]
 
       for tools_cmd in (render_pictures_cmd, render_pdfs_cmd):
@@ -308,7 +310,7 @@ class SkPicturePlayback(object):
       if not self._non_interactive:
         print '\n\n=======Running debugger======='
         os.system('%s %s' % (os.path.join(self._skia_tools, 'debugger'),
-                             os.path.join(self._local_skp_dir, '*')))
+                             self._local_skp_dir))
 
     print '\n\n'
 
@@ -319,7 +321,7 @@ class SkPicturePlayback(object):
       if self._alternate_upload_dir:
         dest_dir_name = self._alternate_upload_dir
 
-      gs_bucket = self._dest_gsbase.lstrip(gs_utils.GS_PREFIX)
+      gs_bucket = remove_prefix(self._dest_gsbase.lstrip(), gs_utils.GS_PREFIX)
       gs_utils.GSUtils().upload_dir_contents(
           LOCAL_PLAYBACK_ROOT_DIR, gs_bucket, dest_dir_name,
           upload_if=gs_utils.GSUtils.UploadIf.IF_MODIFIED,
@@ -382,7 +384,7 @@ class SkPicturePlayback(object):
                                      'webpages_archive',
                                      page_set_json_name)
     gs = gs_utils.GSUtils()
-    gs_bucket = self._dest_gsbase.lstrip(gs_utils.GS_PREFIX)
+    gs_bucket = remove_prefix(self._dest_gsbase.lstrip(), gs_utils.GS_PREFIX)
     if (gs.does_storage_object_exist(gs_bucket, wpr_source) and
         gs.does_storage_object_exist(gs_bucket, page_set_source)):
       gs.download_file(gs_bucket, wpr_source,

@@ -33,7 +33,6 @@ public:
     virtual LayoutRect visualOverflowRect() const override final;
 
     virtual LayoutRect clippedOverflowRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, const PaintInvalidationState* = 0) const override final;
-    virtual void computeFloatRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, FloatRect&, const PaintInvalidationState*) const override final;
 
     virtual void mapLocalToContainer(const RenderLayerModelObject* paintInvalidationContainer, TransformState&, MapCoordinatesFlags = ApplyContainerFlip, bool* wasFixed = 0, const PaintInvalidationState* = 0) const override final;
     virtual const RenderObject* pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap&) const override final;
@@ -44,8 +43,12 @@ public:
 
     virtual void invalidateTreeIfNeeded(const PaintInvalidationState&) override;
 
+    // Transitioning out of SVG painters requires updating the PaintInfo rect which is only used by non-SVG painters.
+    void updatePaintInfoRect(IntRect&);
+
 protected:
     virtual void willBeDestroyed() override;
+    virtual void mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect&, const PaintInvalidationState*) const override final;
 
     AffineTransform m_localTransform;
 
@@ -58,6 +61,8 @@ private:
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle) override final;
 
     virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) override;
+
+    AffineTransform m_cachedPaintInvalidationTransform;
 };
 
 }

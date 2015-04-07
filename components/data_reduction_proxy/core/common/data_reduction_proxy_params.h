@@ -68,10 +68,6 @@ class DataReductionProxyParams {
   // a promotion for the data reduction proxy.
   static bool IsIncludedInPromoFieldTrial();
 
-  // Returns true if this client is part of a field trial that uses preconnect
-  // hinting.
-  static bool IsIncludedInPreconnectHintingFieldTrial();
-
   // Returns true if this client is part of a field trial that bypasses the
   // proxy if the request resource type is on the critical path (e.g. HTML).
   static bool IsIncludedInCriticalPathBypassFieldTrial();
@@ -89,6 +85,18 @@ class DataReductionProxyParams {
   // response code is expected to have a data reduction proxy via header, but
   // the data reduction proxy via header is missing.
   static bool IsIncludedInRemoveMissingViaHeaderOtherBypassFieldTrial();
+
+  // Returns true if this client is part of a field trial that relaxes the
+  // |MISSING_VIA_HEADER_OTHER| proxy bypass case. In this experiment, if a
+  // response with a data reduction proxy via header has been received through
+  // the proxy since the last network change, then don't bypass on missing via
+  // headers in responses with non-4xx response codes.
+  static bool IsIncludedInRelaxMissingViaHeaderOtherBypassFieldTrial();
+
+  // Returns true if this client is part of the field trial that should display
+  // a promotion for the data reduction proxy on Android One devices.
+  static bool IsIncludedInAndroidOnePromoFieldTrial(
+      const char* build_fingerprint);
 
   // Constructs configuration parameters. If |kAllowed|, then the standard
   // data reduction proxy configuration is allowed to be used. If
@@ -147,8 +155,10 @@ class DataReductionProxyParams {
   // reduction proxies in min_retry_delay (if not NULL). If there are no
   // bypassed data reduction proxies for the request scheme, returns false and
   // does not assign min_retry_delay.
-  bool AreDataReductionProxiesBypassed(const net::URLRequest& request,
-                                       base::TimeDelta* min_retry_delay) const;
+  bool AreDataReductionProxiesBypassed(
+      const net::URLRequest& request,
+      const net::ProxyConfig& data_reduction_proxy_config,
+      base::TimeDelta* min_retry_delay) const;
 
   // Checks if all configured data reduction proxies are in the retry map.
   // Returns true if the request is bypassed by all configured data reduction
@@ -280,6 +290,10 @@ class DataReductionProxyParams {
   virtual std::string GetDefaultProbeURL() const;
   virtual std::string GetDefaultWarmupURL() const;
 
+ protected:
+  GURL origin_;
+  GURL fallback_origin_;
+
  private:
   // Checks if the primary and fallback data reduction proxies are in the retry
   // map. Returns true if the request is bypassed by both data reduction
@@ -293,8 +307,6 @@ class DataReductionProxyParams {
 
   DataReductionProxyParams& operator=(const DataReductionProxyParams& params);
 
-  GURL origin_;
-  GURL fallback_origin_;
   GURL ssl_origin_;
   GURL alt_origin_;
   GURL alt_fallback_origin_;

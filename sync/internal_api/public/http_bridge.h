@@ -13,6 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/timer/timer.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -70,7 +71,6 @@ class SYNC_EXPORT_PRIVATE HttpBridge
     ~RequestContext() override;
 
    private:
-    net::URLRequestContext* const baseline_context_;
     const scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
     scoped_ptr<net::HttpUserAgentSettings> http_user_agent_settings_;
     scoped_ptr<net::URLRequestJobFactory> job_factory_;
@@ -129,6 +129,10 @@ class SYNC_EXPORT_PRIVATE HttpBridge
 
   // net::URLFetcherDelegate implementation.
   void OnURLFetchComplete(const net::URLFetcher* source) override;
+  void OnURLFetchDownloadProgress(const net::URLFetcher* source,
+                                  int64 current, int64 total) override;
+  void OnURLFetchUploadProgress(const net::URLFetcher* source,
+                                int64 current, int64 total) override;
 
   net::URLRequestContextGetter* GetRequestContextGetterForTest() const;
 
@@ -153,9 +157,13 @@ class SYNC_EXPORT_PRIVATE HttpBridge
   // a reference to |this| is held while flushing any pending fetch completion
   // callbacks coming from the IO thread en route to finally destroying the
   // fetcher.
-  void DestroyURLFetcherOnIOThread(net::URLFetcher* fetcher);
+  void DestroyURLFetcherOnIOThread(net::URLFetcher* fetcher,
+                                   base::Timer* fetch_timer);
 
   void UpdateNetworkTime();
+
+  // Helper method to abort the request if we timed out.
+  void OnURLFetchTimedOut();
 
   // The message loop of the thread we were created on. This is the thread that
   // will block on MakeSynchronousPost while the IO thread fetches data from
@@ -202,6 +210,10 @@ class SYNC_EXPORT_PRIVATE HttpBridge
     int error_code;
     std::string response_content;
     scoped_refptr<net::HttpResponseHeaders> response_headers;
+
+    // Timer to ensure http requests aren't stalled. Reset every time upload or
+    // download progress is made.
+    scoped_ptr<base::Timer> http_request_timeout_timer;
   };
 
   // This lock synchronizes use of state involved in the flow to fetch a URL

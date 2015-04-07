@@ -83,6 +83,8 @@
         'logging/stats_event_subscriber_unittest.cc',
         'net/cast_transport_sender_impl_unittest.cc',
         'net/frame_id_wrap_helper_test.cc',
+        'net/mock_cast_transport_sender.cc',
+        'net/mock_cast_transport_sender.h',
         'net/pacing/mock_paced_packet_sender.cc',
         'net/pacing/mock_paced_packet_sender.h',
         'net/pacing/paced_sender_unittest.cc',
@@ -340,6 +342,29 @@
           }
         ]
       }
-    ]
-  ], # targets
+    ],
+    ['OS=="ios" or OS=="mac"', {
+      'targets': [
+        {
+          # GN version: //media/cast:cast_h264_vt_encoder_unittests
+          'target_name': 'cast_h264_vt_encoder_unittests',
+          'type': '<(gtest_target_type)',
+          'include_dirs': [
+            '<(DEPTH)/',
+          ],
+          'dependencies': [
+            'cast_base',
+            'cast_sender',
+            'cast_test_utility',
+            '<(DEPTH)/base/base.gyp:test_support_base',
+            '<(DEPTH)/testing/gmock.gyp:gmock',
+            '<(DEPTH)/testing/gtest.gyp:gtest',
+            '<(DEPTH)/third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+          ],
+          'sources': [
+            'sender/h264_vt_encoder_unittest.cc',
+          ],
+      }], # targets
+    }], # OS=="ios" or OS=="mac"
+  ], # conditions
 }

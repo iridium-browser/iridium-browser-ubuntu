@@ -40,9 +40,6 @@ public:
     }
 
 protected:
-    virtual void clear(SkColor color) SK_OVERRIDE {
-        NothingToDo();
-    }
     virtual void drawPaint(const SkDraw& draw, const SkPaint& paint) SK_OVERRIDE {
         SkBitmap bm;
 
@@ -82,8 +79,9 @@ protected:
             SkRect mappedRect;
             draw.fMatrix->mapRect(&mappedRect, rect);
             SkRect clipRect = SkRect::Make(draw.fRC->getBounds());
-            mappedRect.intersect(clipRect);
-            fPRCont->add(bm.pixelRef(), mappedRect);
+            if (mappedRect.intersect(clipRect)) {
+                fPRCont->add(bm.pixelRef(), mappedRect);
+            }
         }
     }
     virtual void drawOval(const SkDraw& draw, const SkRect& rect,
@@ -302,11 +300,11 @@ private:
         NotSupported();
     }
 
-    virtual SkBaseDevice* onCreateDevice(const SkImageInfo& info, Usage usage) SK_OVERRIDE {
+    virtual SkBaseDevice* onCreateCompatibleDevice(const CreateInfo& info) SK_OVERRIDE {
         // we expect to only get called via savelayer, in which case it is fine.
-        SkASSERT(kSaveLayer_Usage == usage);
+        SkASSERT(kSaveLayer_Usage == info.fUsage);
         return SkNEW_ARGS(SkGatherPixelRefsAndRectsDevice,
-                          (info.width(), info.height(), fPRCont));
+                          (info.fInfo.width(), info.fInfo.height(), fPRCont));
     }
 
     static void NotSupported() {

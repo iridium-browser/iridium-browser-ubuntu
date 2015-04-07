@@ -22,6 +22,8 @@ class AppControllerProfileObserver;
 class BookmarkMenuBridge;
 class CommandUpdater;
 class GURL;
+class HandoffActiveURLObserverBridge;
+@class HandoffManager;
 class HistoryMenuBridge;
 class Profile;
 @class ProfileMenuController;
@@ -49,8 +51,13 @@ class WorkAreaWatcherObserver;
   scoped_ptr<AppControllerProfileObserver> profileInfoCacheObserver_;
 
   // Management of the bookmark menu which spans across all windows
-  // (and Browser*s).
-  scoped_ptr<BookmarkMenuBridge> bookmarkMenuBridge_;
+  // (and Browser*s). |profileBookmarkMenuBridgeMap_| is a cache that owns one
+  // pointer to a BookmarkMenuBridge for each profile. |bookmarkMenuBridge_| is
+  // a weak pointer that is updated to match the corresponding cache entry
+  // during a profile switch.
+  BookmarkMenuBridge* bookmarkMenuBridge_;
+  std::map<Profile*, BookmarkMenuBridge*> profileBookmarkMenuBridgeMap_;
+
   scoped_ptr<HistoryMenuBridge> historyMenuBridge_;
 
   // Controller that manages main menu items for packaged apps.
@@ -92,6 +99,13 @@ class WorkAreaWatcherObserver;
 
   // Displays a notification when quitting while apps are running.
   scoped_refptr<QuitWithAppsController> quitWithAppsController_;
+
+  // Responsible for maintaining all state related to the Handoff feature.
+  base::scoped_nsobject<HandoffManager> handoffManager_;
+
+  // Observes changes to the active URL.
+  scoped_ptr<HandoffActiveURLObserverBridge>
+      handoff_active_url_observer_bridge_;
 }
 
 @property(readonly, nonatomic) BOOL startupComplete;

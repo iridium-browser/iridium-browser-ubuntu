@@ -16,6 +16,7 @@
 
 #include "webrtc/common_video/interface/video_image.h"
 #include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
+#include "webrtc/frame_callback.h"
 #include "webrtc/modules/pacing/include/paced_sender.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp.h"
 #include "webrtc/modules/utility/interface/process_thread.h"
@@ -29,9 +30,9 @@
 #include "webrtc/system_wrappers/interface/metrics.h"
 #include "webrtc/system_wrappers/interface/tick_util.h"
 #include "webrtc/system_wrappers/interface/trace_event.h"
+#include "webrtc/video/send_statistics_proxy.h"
 #include "webrtc/video_engine/include/vie_codec.h"
 #include "webrtc/video_engine/include/vie_image_process.h"
-#include "webrtc/frame_callback.h"
 #include "webrtc/video_engine/vie_defines.h"
 
 namespace webrtc {
@@ -95,9 +96,9 @@ class ViEBitrateObserver : public BitrateObserver {
   }
   virtual ~ViEBitrateObserver() {}
   // Implements BitrateObserver.
-  virtual void OnNetworkChanged(const uint32_t bitrate_bps,
-                                const uint8_t fraction_lost,
-                                const uint32_t rtt) {
+  virtual void OnNetworkChanged(uint32_t bitrate_bps,
+                                uint8_t fraction_lost,
+                                uint32_t rtt) {
     owner_->OnNetworkChanged(bitrate_bps, fraction_lost, rtt);
   }
  private:
@@ -117,7 +118,7 @@ class ViEPacedSenderCallback : public PacedSender::Callback {
     return owner_->TimeToSendPacket(ssrc, sequence_number, capture_time_ms,
                                     retransmission);
   }
-  virtual int TimeToSendPadding(int bytes) {
+  virtual size_t TimeToSendPadding(size_t bytes) {
     return owner_->TimeToSendPadding(bytes);
   }
  private:
@@ -158,7 +159,8 @@ ViEEncoder::ViEEncoder(int32_t engine_id,
     qm_callback_(NULL),
     video_suspended_(false),
     pre_encode_callback_(NULL),
-    start_ms_(Clock::GetRealTimeClock()->TimeInMilliseconds()) {
+    start_ms_(Clock::GetRealTimeClock()->TimeInMilliseconds()),
+    send_statistics_proxy_(NULL) {
   RtpRtcp::Configuration configuration;
   configuration.id = ViEModuleId(engine_id_, channel_id_);
   configuration.audio = false;  // Video.
@@ -241,10 +243,9 @@ ViEEncoder::~ViEEncoder() {
 }
 
 void ViEEncoder::UpdateHistograms() {
-  const float kMinCallLengthInMinutes = 0.5f;
-  float elapsed_minutes =
-      (Clock::GetRealTimeClock()->TimeInMilliseconds() - start_ms_) / 60000.0f;
-  if (elapsed_minutes < kMinCallLengthInMinutes) {
+  int64_t elapsed_sec =
+      (Clock::GetRealTimeClock()->TimeInMilliseconds() - start_ms_) / 1000;
+  if (elapsed_sec < metrics::kMinRunTimeInSeconds) {
     return;
   }
   webrtc::VCMFrameCount frames;
@@ -388,6 +389,7 @@ int32_t ViEEncoder::SetEncoder(const webrtc::VideoCodec& video_codec) {
                                           video_codec.minBitrate * 1000,
                                           kTransmissionMaxBitrateMultiplier *
                                           video_codec.maxBitrate * 1000);
+  bitrate_controller_->SetCodecMode(video_codec.mode);
 
   CriticalSectionScoped crit(data_cs_.get());
   int pad_up_to_bitrate_kbps = video_codec.startBitrate;
@@ -443,7 +445,7 @@ bool ViEEncoder::TimeToSendPacket(uint32_t ssrc,
                                              capture_time_ms, retransmission);
 }
 
-int ViEEncoder::TimeToSendPadding(int bytes) {
+size_t ViEEncoder::TimeToSendPadding(size_t bytes) {
   bool send_padding;
   {
     CriticalSectionScoped cs(data_cs_.get());
@@ -501,8 +503,7 @@ RtpRtcp* ViEEncoder::SendRtpRtcpModule() {
 
 void ViEEncoder::DeliverFrame(int id,
                               I420VideoFrame* video_frame,
-                              int num_csrcs,
-                              const uint32_t CSRC[kRtpCsrcSize]) {
+                              const std::vector<uint32_t>& csrcs) {
   if (default_rtp_rtcp_->SendingMedia() == false) {
     // We've paused or we have no channels attached, don't encode.
     return;
@@ -528,16 +529,16 @@ void ViEEncoder::DeliverFrame(int id,
   video_frame->set_timestamp(time_stamp);
 
   // Make sure the CSRC list is correct.
-  if (num_csrcs > 0) {
-    uint32_t tempCSRC[kRtpCsrcSize];
-    for (int i = 0; i < num_csrcs; i++) {
-      if (CSRC[i] == 1) {
-        tempCSRC[i] = default_rtp_rtcp_->SSRC();
+  if (csrcs.size() > 0) {
+    std::vector<uint32_t> temp_csrcs(csrcs.size());
+    for (size_t i = 0; i < csrcs.size(); i++) {
+      if (csrcs[i] == 1) {
+        temp_csrcs[i] = default_rtp_rtcp_->SSRC();
       } else {
-        tempCSRC[i] = CSRC[i];
+        temp_csrcs[i] = csrcs[i];
       }
     }
-    default_rtp_rtcp_->SetCSRCs(tempCSRC, (uint8_t) num_csrcs);
+    default_rtp_rtcp_->SetCsrcs(temp_csrcs);
   }
 
   I420VideoFrame* decimated_frame = NULL;
@@ -546,7 +547,7 @@ void ViEEncoder::DeliverFrame(int id,
     {
       CriticalSectionScoped cs(callback_cs_.get());
       if (effect_filter_) {
-        unsigned int length =
+        size_t length =
             CalcBufferSize(kI420, video_frame->width(), video_frame->height());
         scoped_ptr<uint8_t[]> video_buffer(new uint8_t[length]);
         ExtractBuffer(*video_frame, length, video_buffer.get());
@@ -726,23 +727,19 @@ void ViEEncoder::SetSenderBufferingMode(int target_delay_ms) {
 }
 
 int32_t ViEEncoder::SendData(
-    const FrameType frame_type,
     const uint8_t payload_type,
-    const uint32_t time_stamp,
-    int64_t capture_time_ms,
-    const uint8_t* payload_data,
-    const uint32_t payload_size,
+    const EncodedImage& encoded_image,
     const webrtc::RTPFragmentationHeader& fragmentation_header,
     const RTPVideoHeader* rtp_video_hdr) {
+  if (send_statistics_proxy_ != NULL) {
+    send_statistics_proxy_->OnSendEncodedImage(encoded_image, rtp_video_hdr);
+  }
   // New encoded data, hand over to the rtp module.
-  return default_rtp_rtcp_->SendOutgoingData(frame_type,
-                                             payload_type,
-                                             time_stamp,
-                                             capture_time_ms,
-                                             payload_data,
-                                             payload_size,
-                                             &fragmentation_header,
-                                             rtp_video_hdr);
+  return default_rtp_rtcp_->SendOutgoingData(
+      VCMEncodedFrame::ConvertFrameType(encoded_image._frameType), payload_type,
+      encoded_image._timeStamp, encoded_image.capture_time_ms_,
+      encoded_image._buffer, encoded_image._length, &fragmentation_header,
+      rtp_video_hdr);
 }
 
 int32_t ViEEncoder::ProtectionRequest(
@@ -759,6 +756,7 @@ int32_t ViEEncoder::ProtectionRequest(
 
 int32_t ViEEncoder::SendStatistics(const uint32_t bit_rate,
                                    const uint32_t frame_rate) {
+  bitrate_controller_->SetBitrateSent(bit_rate);
   CriticalSectionScoped cs(callback_cs_.get());
   if (codec_observer_) {
     codec_observer_->OutgoingRate(channel_id_, frame_rate, bit_rate);
@@ -869,9 +867,9 @@ void ViEEncoder::SetMinTransmitBitrate(int min_transmit_bitrate_kbps) {
 }
 
 // Called from ViEBitrateObserver.
-void ViEEncoder::OnNetworkChanged(const uint32_t bitrate_bps,
-                                  const uint8_t fraction_lost,
-                                  const uint32_t round_trip_time_ms) {
+void ViEEncoder::OnNetworkChanged(uint32_t bitrate_bps,
+                                  uint8_t fraction_lost,
+                                  uint32_t round_trip_time_ms) {
   LOG(LS_VERBOSE) << "OnNetworkChanged, bitrate" << bitrate_bps
                   << " packet loss " << fraction_lost
                   << " rtt " << round_trip_time_ms;
@@ -987,6 +985,11 @@ void ViEEncoder::RegisterPostEncodeImageCallback(
 
 void ViEEncoder::DeRegisterPostEncodeImageCallback() {
   vcm_.RegisterPostEncodeImageCallback(NULL);
+}
+
+void ViEEncoder::RegisterSendStatisticsProxy(
+    SendStatisticsProxy* send_statistics_proxy) {
+  send_statistics_proxy_ = send_statistics_proxy;
 }
 
 QMVideoSettingsCallback::QMVideoSettingsCallback(VideoProcessingModule* vpm)

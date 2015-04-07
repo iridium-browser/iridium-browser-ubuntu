@@ -4,8 +4,11 @@
 
 """Common functions for interacting with git and repo."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
+import collections
 import errno
 import hashlib
 import logging
@@ -63,8 +66,8 @@ GIT_TRANSIENT_ERRORS = (
     # crbug.com/187444
     r'RPC failed; result=\d+, HTTP code = \d+',
 
-    # crbug.com/315421
-    r'The requested URL returned error: 500 while accessing',
+    # crbug.com/315421, b2/18249316
+    r'The requested URL returned error: 5',
 
     # crbug.com/388876
     r'Connection timed out',
@@ -75,6 +78,10 @@ GIT_TRANSIENT_ERRORS_RE = re.compile('|'.join(GIT_TRANSIENT_ERRORS),
 
 DEFAULT_RETRY_INTERVAL = 3
 DEFAULT_RETRIES = 5
+
+
+class GitException(Exception):
+  """An exception related to git."""
 
 
 class RemoteRef(object):
@@ -362,7 +369,7 @@ class Manifest(object):
       manifest_include_dir: If given, this is where to start looking for
         include targets.
     """
-
+    self.source = source
     self.default = {}
     self.checkouts_by_path = {}
     self.checkouts_by_name = {}
@@ -423,7 +430,8 @@ class Manifest(object):
       attrs.setdefault(key, self.default.get(key))
 
     remote = attrs['remote']
-    assert remote in self.remotes
+    assert remote in self.remotes, ('%s: %s not in %s' %
+        (self.source, remote, self.remotes))
     remote_name = attrs['remote_alias'] = self.remotes[remote]['alias']
 
     # 'repo manifest -r' adds an 'upstream' attribute to the project tag for the
@@ -996,7 +1004,135 @@ def CreateBranch(git_repo, branch, branch_point='HEAD', track=False):
   RunGit(git_repo, cmd)
 
 
-def GitPush(git_repo, refspec, push_to, dryrun=False, force=False, retry=True):
+def AddPath(path):
+  """Use 'git add' on a path.
+
+  Args:
+    path: Path to the git repository and the path to add.
+  """
+  dirname, filename = os.path.split(path)
+  RunGit(dirname, ['add', '--', filename])
+
+
+def RmPath(path):
+  """Use 'git rm' on a file.
+
+  Args:
+    path: Path to the git repository and the path to rm.
+  """
+  dirname, filename = os.path.split(path)
+  RunGit(dirname, ['rm', '--', filename])
+
+
+def GetObjectAtRev(git_repo, obj, rev):
+  """Return the contents of a git object at a particular revision.
+
+  This could be used to look at an old version of a file or directory, for
+  instance, without modifying the working directory.
+
+  Args:
+    git_repo: Path to a directory in the git repository to query.
+    obj: The name of the object to read.
+    rev: The revision to retrieve.
+
+  Returns:
+    The content of the object.
+  """
+  rev_obj = '%s:%s' % (rev, obj)
+  return RunGit(git_repo, ['show', rev_obj]).output
+
+
+def RevertPath(git_repo, filename, rev):
+  """Revert a single file back to a particular revision and 'add' it with git.
+
+  Args:
+    git_repo: Path to the directory holding the file.
+    filename: Name of the file to revert.
+    rev: Revision to revert the file to.
+  """
+  RunGit(git_repo, ['checkout', rev, '--', filename])
+
+
+def Commit(git_repo, message, amend=False):
+  """Commit with git.
+
+  Args:
+    git_repo: Path to the git repository to commit in.
+    message: Commit message to use.
+    amend: Whether to 'amend' the CL, default False
+
+  Returns:
+    The Gerrit Change-ID assigned to the CL if it exists.
+  """
+  cmd = ['commit', '-m', message]
+  if amend:
+    cmd.append('--amend')
+  RunGit(git_repo, cmd)
+
+  log = RunGit(git_repo, ['log', '-n', '1', '--format=format:%B']).output
+  match = re.search('Change-Id: (?P<ID>I[a-fA-F0-9]*)', log)
+  return match.group('ID') if match else None
+
+
+_raw_diff_components = ('src_mode', 'dst_mode', 'src_sha', 'dst_sha',
+                        'status', 'score', 'src_file', 'dst_file')
+# RawDiffEntry represents a line of raw formatted git diff output.
+RawDiffEntry = collections.namedtuple('RawDiffEntry', _raw_diff_components)
+
+
+# This regular expression pulls apart a line of raw formatted git diff output.
+DIFF_RE = re.compile(
+    r':(?P<src_mode>[0-7]*) (?P<dst_mode>[0-7]*) '
+    r'(?P<src_sha>[0-9a-f]*)(\.)* (?P<dst_sha>[0-9a-f]*)(\.)* '
+    r'(?P<status>[ACDMRTUX])(?P<score>[0-9]+)?\t'
+    r'(?P<src_file>[^\t]+)\t?(?P<dst_file>[^\t]+)?')
+
+
+def RawDiff(path, target):
+  """Return the parsed raw format diff of target
+
+  Args:
+    path: Path to the git repository to diff in.
+    target: The target to diff.
+
+  Returns:
+    A list of RawDiffEntry's.
+  """
+  entries = []
+
+  cmd = ['diff', '-M', '--raw', target]
+  diff = RunGit(path, cmd).output
+  diff_lines = diff.strip().split('\n')
+  for line in diff_lines:
+    match = DIFF_RE.match(line)
+    if not match:
+      raise GitException('Failed to parse diff output: %s' % line)
+    entries.append(RawDiffEntry(*match.group(*_raw_diff_components)))
+
+  return entries
+
+
+def UploadCL(git_repo, remote, branch, local_branch='HEAD', draft=False,
+             **kwargs):
+  """Upload a CL to gerrit. The CL should be checked out currently.
+
+  Args:
+    git_repo: Path to the git repository with the CL to upload checked out.
+    remote: The remote to upload the CL to.
+    branch: Branch to upload to.
+    local_branch: Branch to upload.
+    draft: Whether to upload as a draft.
+    kwargs: Extra options for GitPush. capture_output defaults to False so
+      that the URL for new or updated CLs is shown to the user.
+  """
+  ref = ('refs/drafts/%s' if draft else 'refs/for/%s') % branch
+  remote_ref = RemoteRef(remote, ref)
+  kwargs.setdefault('capture_output', False)
+  GitPush(git_repo, local_branch, remote_ref, **kwargs)
+
+
+def GitPush(git_repo, refspec, push_to, dryrun=False, force=False, retry=True,
+            capture_output=True):
   """Wrapper for pushing to a branch.
 
   Args:
@@ -1007,6 +1143,7 @@ def GitPush(git_repo, refspec, push_to, dryrun=False, force=False, retry=True):
       built into git.
     force: Whether to bypass non-fastforward checks.
     retry: Retry a push in case of transient errors.
+    capture_output: Whether to capture output for this command.
   """
   cmd = ['push', push_to.remote, '%s:%s' % (refspec, push_to.ref)]
 
@@ -1017,7 +1154,7 @@ def GitPush(git_repo, refspec, push_to, dryrun=False, force=False, retry=True):
   if force:
     cmd.append('--force')
 
-  RunGit(git_repo, cmd, retry=retry)
+  RunGit(git_repo, cmd, retry=retry, capture_output=capture_output)
 
 
 # TODO(build): Switch callers of this function to use CreateBranch instead.

@@ -14,6 +14,8 @@
 #include "ui/events/ozone/evdev/cursor_delegate_evdev.h"
 #include "ui/events/ozone/evdev/event_converter_evdev_impl.h"
 #include "ui/events/ozone/evdev/keyboard_evdev.h"
+#include "ui/events/ozone/evdev/mouse_button_map_evdev.h"
+#include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
 
 namespace ui {
 
@@ -23,13 +25,17 @@ class MockEventConverterEvdevImpl : public EventConverterEvdevImpl {
  public:
   MockEventConverterEvdevImpl(int fd,
                               EventModifiersEvdev* modifiers,
+                              MouseButtonMapEvdev* button_map,
                               CursorDelegateEvdev* cursor,
                               KeyboardEvdev* keyboard,
                               const EventDispatchCallback& callback)
       : EventConverterEvdevImpl(fd,
                                 base::FilePath(kTestDevicePath),
                                 1,
+                                INPUT_DEVICE_UNKNOWN,
+                                EventDeviceInfo(),
                                 modifiers,
+                                button_map,
                                 cursor,
                                 keyboard,
                                 callback) {
@@ -51,11 +57,18 @@ class MockCursorEvdev : public CursorDelegateEvdev {
                     const gfx::PointF& location) override {
     cursor_location_ = location;
   }
+  void MoveCursorTo(const gfx::PointF& location) override {
+    cursor_location_ = location;
+  }
   void MoveCursor(const gfx::Vector2dF& delta) override {
     cursor_location_ = gfx::PointF(delta.x(), delta.y());
   }
   bool IsCursorVisible() override { return 1; }
-  gfx::PointF location() override { return cursor_location_; }
+  gfx::Rect GetCursorConfinedBounds() override {
+    NOTIMPLEMENTED();
+    return gfx::Rect();
+  }
+  gfx::PointF GetLocation() override { return cursor_location_; }
 
  private:
   // The location of the mock cursor.
@@ -82,23 +95,23 @@ class EventConverterEvdevImplTest : public testing::Test {
 
     cursor_.reset(new ui::MockCursorEvdev());
     modifiers_.reset(new ui::EventModifiersEvdev());
+    button_map_.reset(new ui::MouseButtonMapEvdev());
 
     const ui::EventDispatchCallback callback =
         base::Bind(&EventConverterEvdevImplTest::DispatchEventForTest,
                    base::Unretained(this));
     keyboard_.reset(new ui::KeyboardEvdev(
-        modifiers_.get(), callback));
-    device_.reset(
-        new ui::MockEventConverterEvdevImpl(events_in_,
-                                            modifiers_.get(),
-                                            cursor_.get(),
-                                            keyboard_.get(),
-                                            callback));
+        modifiers_.get(),
+        ui::KeyboardLayoutEngineManager::GetKeyboardLayoutEngine(), callback));
+    device_.reset(new ui::MockEventConverterEvdevImpl(
+        events_in_, modifiers_.get(), button_map_.get(), cursor_.get(),
+        keyboard_.get(), callback));
   }
   void TearDown() override {
     device_.reset();
     keyboard_.reset();
     modifiers_.reset();
+    button_map_.reset();
     cursor_.reset();
     close(events_in_);
     close(events_out_);
@@ -107,6 +120,7 @@ class EventConverterEvdevImplTest : public testing::Test {
   ui::MockCursorEvdev* cursor() { return cursor_.get(); }
   ui::MockEventConverterEvdevImpl* device() { return device_.get(); }
   ui::EventModifiersEvdev* modifiers() { return modifiers_.get(); }
+  ui::MouseButtonMapEvdev* button_map() { return button_map_.get(); }
 
   unsigned size() { return dispatched_events_.size(); }
   ui::KeyEvent* dispatched_event(unsigned index) {
@@ -131,6 +145,7 @@ class EventConverterEvdevImplTest : public testing::Test {
 
   scoped_ptr<ui::MockCursorEvdev> cursor_;
   scoped_ptr<ui::EventModifiersEvdev> modifiers_;
+  scoped_ptr<ui::MouseButtonMapEvdev> button_map_;
   scoped_ptr<ui::KeyboardEvdev> keyboard_;
   scoped_ptr<ui::MockEventConverterEvdevImpl> device_;
 
@@ -193,7 +208,7 @@ TEST_F(EventConverterEvdevImplTest, KeyRepeat) {
   };
 
   dev->ProcessEvents(mock_kernel_queue, arraysize(mock_kernel_queue));
-  EXPECT_EQ(4u, size());
+  EXPECT_EQ(2u, size());
 
   ui::KeyEvent* event;
 
@@ -203,16 +218,6 @@ TEST_F(EventConverterEvdevImplTest, KeyRepeat) {
   EXPECT_EQ(0, event->flags());
 
   event = dispatched_event(1);
-  EXPECT_EQ(ui::ET_KEY_PRESSED, event->type());
-  EXPECT_EQ(ui::VKEY_BACK, event->key_code());
-  EXPECT_EQ(0, event->flags());
-
-  event = dispatched_event(2);
-  EXPECT_EQ(ui::ET_KEY_PRESSED, event->type());
-  EXPECT_EQ(ui::VKEY_BACK, event->key_code());
-  EXPECT_EQ(0, event->flags());
-
-  event = dispatched_event(3);
   EXPECT_EQ(ui::ET_KEY_RELEASED, event->type());
   EXPECT_EQ(ui::VKEY_BACK, event->key_code());
   EXPECT_EQ(0, event->flags());
@@ -442,7 +447,7 @@ TEST_F(EventConverterEvdevImplTest, MouseMove) {
 
   event = dispatched_mouse_event(0);
   EXPECT_EQ(ui::ET_MOUSE_MOVED, event->type());
-  EXPECT_EQ(cursor()->location(), gfx::PointF(4, 2));
+  EXPECT_EQ(cursor()->GetLocation(), gfx::PointF(4, 2));
 }
 
 TEST_F(EventConverterEvdevImplTest, UnmappedKeyPress) {

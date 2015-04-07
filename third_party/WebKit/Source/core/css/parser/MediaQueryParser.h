@@ -9,6 +9,7 @@
 #include "core/css/MediaQuery.h"
 #include "core/css/MediaQueryExp.h"
 #include "core/css/parser/CSSParserToken.h"
+#include "core/css/parser/CSSParserTokenRange.h"
 #include "core/css/parser/CSSParserValues.h"
 #include "core/css/parser/MediaQueryBlockWatcher.h"
 #include "wtf/text/WTFString.h"
@@ -31,7 +32,7 @@ public:
     MediaQueryData();
     void clear();
     bool addExpression();
-    void addParserValue(CSSParserTokenType, const CSSParserToken&);
+    bool tryAddParserValue(CSSParserTokenType, const CSSParserToken&);
     void setMediaType(const String&);
     PassOwnPtrWillBeRawPtr<MediaQuery> takeMediaQuery();
 
@@ -49,7 +50,8 @@ class MediaQueryParser {
     STACK_ALLOCATED();
 public:
     static PassRefPtrWillBeRawPtr<MediaQuerySet> parseMediaQuerySet(const String&);
-    static PassRefPtrWillBeRawPtr<MediaQuerySet> parseMediaCondition(CSSParserTokenIterator, CSSParserTokenIterator endToken);
+    static PassRefPtrWillBeRawPtr<MediaQuerySet> parseMediaQuerySet(CSSParserTokenRange);
+    static PassRefPtrWillBeRawPtr<MediaQuerySet> parseMediaCondition(CSSParserTokenRange);
 
 private:
     enum ParserType {
@@ -60,7 +62,7 @@ private:
     MediaQueryParser(ParserType);
     virtual ~MediaQueryParser();
 
-    PassRefPtrWillBeRawPtr<MediaQuerySet> parseImpl(CSSParserTokenIterator, CSSParserTokenIterator endToken);
+    PassRefPtrWillBeRawPtr<MediaQuerySet> parseImpl(CSSParserTokenRange);
 
     void processToken(const CSSParserToken&);
 

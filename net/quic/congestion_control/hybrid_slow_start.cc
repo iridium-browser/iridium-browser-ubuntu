@@ -16,13 +16,15 @@ namespace net {
 const int64 kHybridStartLowWindow = 16;
 // Number of delay samples for detecting the increase of delay.
 const uint32 kHybridStartMinSamples = 8;
-const int kHybridStartDelayFactorExp = 4;  // 2^4 = 16
+// Exit slow start if the min rtt has increased by more than 1/8th.
+const int kHybridStartDelayFactorExp = 3;  // 2^3 = 8
 // The original paper specifies 2 and 8ms, but those have changed over time.
 const int64 kHybridStartDelayMinThresholdUs = 4000;
 const int64 kHybridStartDelayMaxThresholdUs = 16000;
 
 HybridSlowStart::HybridSlowStart(const QuicClock* clock)
     : clock_(clock),
+      ack_train_detection_(true),
       started_(false),
       hystart_found_(NOT_FOUND),
       last_sent_sequence_number_(0),
@@ -84,12 +86,8 @@ bool HybridSlowStart::ShouldExitSlowStart(QuicTime::Delta latest_rtt,
   // more than the capacity.
   // This first trigger will not come into play until we hit roughly 9.6 Mbps
   // with delayed acks (or 4.8Mbps without delayed acks)
-  // TODO(ianswett): QUIC always uses delayed acks, even at the beginning, so
-  // this should likely be at least 4ms.
-  // TODO(pwestin): we need to make sure our pacing don't trigger this detector.
-  // TODO(ianswett): Pacing or other cases could be handled by checking the send
-  // time of the first acked packet in a receive round.
-  if (current_time.Subtract(last_close_ack_pair_time_).ToMicroseconds() <=
+  if (ack_train_detection_ &&
+      current_time.Subtract(last_close_ack_pair_time_).ToMicroseconds() <=
           kHybridStartDelayMinThresholdUs) {
     last_close_ack_pair_time_ = current_time;
     if (current_time.Subtract(round_start_).ToMicroseconds() >=

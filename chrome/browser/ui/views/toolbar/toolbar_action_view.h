@@ -65,10 +65,14 @@ class ToolbarActionView : public views::MenuButton,
     ~Delegate() override {}
   };
 
-  ToolbarActionView(scoped_ptr<ToolbarActionViewController> view_controller,
+  ToolbarActionView(ToolbarActionViewController* view_controller,
                     Browser* browser,
                     Delegate* delegate);
   ~ToolbarActionView() override;
+
+  // Modifies the given |border| in order to display a "popped out" for when
+  // an action wants to run.
+  static void DecorateWantsToRunBorder(views::LabelButtonBorder* border);
 
   // Overridden from views::View:
   void GetAccessibleState(ui::AXViewState* state) override;
@@ -99,12 +103,14 @@ class ToolbarActionView : public views::MenuButton,
   content::WebContents* GetCurrentWebContents() const override;
 
   ToolbarActionViewController* view_controller() {
-    return view_controller_.get();
+    return view_controller_;
   }
   Browser* browser() { return browser_; }
 
   // Returns button icon so it can be accessed during tests.
   gfx::ImageSkia GetIconForTest();
+
+  bool wants_to_run_for_testing() const { return wants_to_run_; }
 
  private:
   // Overridden from views::View:
@@ -114,6 +120,7 @@ class ToolbarActionView : public views::MenuButton,
   gfx::Size GetPreferredSize() const override;
   void PaintChildren(gfx::Canvas* canvas,
                      const views::CullSet& cull_set) override;
+  void OnPaintBorder(gfx::Canvas* canvas) override;
 
   // ToolbarActionViewDelegateViews:
   views::View* GetAsView() override;
@@ -128,13 +135,10 @@ class ToolbarActionView : public views::MenuButton,
   void CleanupPopup() override;
 
   // A lock to keep the MenuButton pressed when a menu or popup is visible.
-  // This needs to be destroyed after |view_controller_|, because
-  // |view_controller_|'s destructor can call CleanupPopup(), which uses this
-  // object.
   scoped_ptr<views::MenuButton::PressedLock> pressed_lock_;
 
   // The controller for this toolbar action view.
-  scoped_ptr<ToolbarActionViewController> view_controller_;
+  ToolbarActionViewController* view_controller_;
 
   // The associated browser.
   Browser* browser_;
@@ -144,6 +148,13 @@ class ToolbarActionView : public views::MenuButton,
 
   // Used to make sure we only register the command once.
   bool called_register_command_;
+
+  // The cached value of whether or not the action wants to run on the current
+  // tab.
+  bool wants_to_run_;
+
+  // A special border to draw when the action wants to run.
+  scoped_ptr<views::LabelButtonBorder> wants_to_run_border_;
 
   content::NotificationRegistrar registrar_;
 

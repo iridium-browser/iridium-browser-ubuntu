@@ -57,6 +57,34 @@ class BuildUnittest(unittest.TestCase):
       self.failUnlessEqual(1, len(deps))
       self.failUnlessEqual(deps[0],
           util.PathFromRoot('grit/testdata/substitute.xmb'))
+      
+  def testGenerateDepFileWithResourceIds(self):
+    output_dir = tempfile.mkdtemp()
+    builder = build.RcBuilder()
+    class DummyOpts(object):
+      def __init__(self):
+        self.input = util.PathFromRoot('grit/testdata/substitute_no_ids.grd')
+        self.verbose = False
+        self.extra_verbose = False
+    expected_dep_file = os.path.join(output_dir, 'substitute_no_ids.grd.d')
+    builder.Run(DummyOpts(), 
+		['-f', util.PathFromRoot('grit/testdata/resource_ids'),
+		'-o', output_dir,
+		'--depdir', output_dir,
+		'--depfile', expected_dep_file])
+
+    self.failUnless(os.path.isfile(expected_dep_file))
+    with open(expected_dep_file) as f:
+      line = f.readline()
+      (dep_output_file, deps_string) = line.split(': ')
+      deps = deps_string.split(' ')
+
+      self.failUnlessEqual("resource.h", dep_output_file)
+      self.failUnlessEqual(2, len(deps))
+      self.failUnlessEqual(deps[0],
+          util.PathFromRoot('grit/testdata/substitute.xmb'))
+      self.failUnlessEqual(deps[1],
+          util.PathFromRoot('grit/testdata/resource_ids'))
 
   def testAssertOutputs(self):
     output_dir = tempfile.mkdtemp()
@@ -244,6 +272,34 @@ class BuildUnittest(unittest.TestCase):
         whitelisted_ids,
         non_whitelisted_ids,
       )
+
+  def testWriteOnlyNew(self):
+    output_dir = tempfile.mkdtemp()
+    builder = build.RcBuilder()
+    class DummyOpts(object):
+      def __init__(self):
+        self.input = util.PathFromRoot('grit/testdata/substitute.grd')
+        self.verbose = False
+        self.extra_verbose = False
+    UNCHANGED = 10
+    header = os.path.join(output_dir, 'resource.h')
+
+    builder.Run(DummyOpts(), ['-o', output_dir])
+    self.failUnless(os.path.exists(header))
+    first_mtime = os.stat(header).st_mtime
+
+    os.utime(header, (UNCHANGED, UNCHANGED))
+    builder.Run(DummyOpts(), ['-o', output_dir, '--write-only-new', '0'])
+    self.failUnless(os.path.exists(header))
+    second_mtime = os.stat(header).st_mtime
+
+    os.utime(header, (UNCHANGED, UNCHANGED))
+    builder.Run(DummyOpts(), ['-o', output_dir, '--write-only-new', '1'])
+    self.failUnless(os.path.exists(header))
+    third_mtime = os.stat(header).st_mtime
+
+    self.assertTrue(abs(second_mtime - UNCHANGED) > 5)
+    self.assertTrue(abs(third_mtime - UNCHANGED) < 5)
 
 
 if __name__ == '__main__':

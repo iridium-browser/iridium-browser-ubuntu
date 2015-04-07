@@ -67,9 +67,11 @@ class WebFrameTestProxy : public Base {
   }
 
   virtual void didStartProvisionalLoad(blink::WebLocalFrame* frame,
-                                       bool isTransitionNavigation) {
+                                       bool isTransitionNavigation,
+                                       double triggeringEventTime) {
     base_proxy_->DidStartProvisionalLoad(frame);
-    Base::didStartProvisionalLoad(frame, isTransitionNavigation);
+    Base::didStartProvisionalLoad(
+        frame, isTransitionNavigation, triggeringEventTime);
   }
 
   virtual void didReceiveServerRedirectForProvisionalLoad(
@@ -127,10 +129,6 @@ class WebFrameTestProxy : public Base {
   virtual void didFinishLoad(blink::WebLocalFrame* frame) {
     Base::didFinishLoad(frame);
     base_proxy_->DidFinishLoad(frame);
-  }
-
-  virtual blink::WebNotificationPresenter* notificationPresenter() {
-    return base_proxy_->GetNotificationPresenter();
   }
 
   virtual void didChangeSelection(bool is_selection_empty) {

@@ -36,7 +36,7 @@ public:
 
     virtual bool isChildAllowed(RenderObject*, RenderStyle*) const override;
 
-    virtual void paint(PaintInfo&, const LayoutPoint&) override;
+    virtual void paint(const PaintInfo&, const LayoutPoint&) override;
 
     virtual void layout() override;
 
@@ -44,7 +44,6 @@ public:
     virtual FloatRect strokeBoundingBox() const override { return FloatRect(FloatPoint(), m_viewport.size()); }
     virtual FloatRect paintInvalidationRectInLocalCoordinates() const override { return FloatRect(FloatPoint(), m_viewport.size()); }
 
-    virtual void mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect&, const PaintInvalidationState*) const override;
     virtual bool nodeAtFloatPoint(const HitTestRequest&, HitTestResult&, const FloatPoint& pointInParent, HitTestAction) override;
     virtual bool isOfType(RenderObjectType type) const override { return type == RenderObjectSVGForeignObject || RenderSVGBlock::isOfType(type); }
 

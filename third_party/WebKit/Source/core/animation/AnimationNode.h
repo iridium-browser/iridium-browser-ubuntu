@@ -43,6 +43,7 @@ namespace blink {
 class AnimationPlayer;
 class AnimationNode;
 class AnimationNodeTiming;
+class ComputedTimingProperties;
 
 enum TimingUpdateReason {
     TimingUpdateOnDemand,
@@ -74,7 +75,8 @@ public:
     class EventDelegate : public NoBaseWillBeGarbageCollectedFinalized<EventDelegate> {
     public:
         virtual ~EventDelegate() { }
-        virtual void onEventCondition(const AnimationNode*) = 0;
+        virtual bool requiresIterationEvents(const AnimationNode&) = 0;
+        virtual void onEventCondition(const AnimationNode&) = 0;
         virtual void trace(Visitor*) { }
     };
 
@@ -86,22 +88,15 @@ public:
     bool isCurrent() const { return ensureCalculated().isCurrent; }
     bool isInEffect() const { return ensureCalculated().isInEffect; }
     bool isInPlay() const { return ensureCalculated().isInPlay; }
+    double currentIteration() const { return ensureCalculated().currentIteration; }
+    double timeFraction() const { return ensureCalculated().timeFraction; }
     double timeToForwardsEffectChange() const { return ensureCalculated().timeToForwardsEffectChange; }
     double timeToReverseEffectChange() const { return ensureCalculated().timeToReverseEffectChange; }
 
-    double currentIteration() const { return ensureCalculated().currentIteration; }
     double iterationDuration() const;
-
-    // This method returns time in ms as it is unused except via the API.
-    double duration() const { return iterationDuration() * 1000; }
-
-    double activeDuration() const { return activeDurationInternal() * 1000; }
     double activeDurationInternal() const;
-    double timeFraction() const { return ensureCalculated().timeFraction; }
-    double startTime() const { return m_startTime * 1000; }
     double startTimeInternal() const { return m_startTime; }
-    double endTime() const { return endTimeInternal() * 1000; }
-    double endTimeInternal() const { return startTime() + specifiedTiming().startDelay + activeDurationInternal() + specifiedTiming().endDelay; }
+    double endTimeInternal() const { return startTimeInternal() + specifiedTiming().startDelay + activeDurationInternal() + specifiedTiming().endDelay; }
 
     const AnimationPlayer* player() const { return m_player; }
     AnimationPlayer* player() { return m_player; }
@@ -109,9 +104,8 @@ public:
     PassRefPtrWillBeRawPtr<AnimationNodeTiming> timing();
     void updateSpecifiedTiming(const Timing&);
 
-    // This method returns time in ms as it is unused except via the API.
-    double localTime(bool& isNull) const { isNull = !m_player; return ensureCalculated().localTime * 1000; }
-    double currentIteration(bool& isNull) const { isNull = !ensureCalculated().isInEffect; return ensureCalculated().currentIteration; }
+    void computedTiming(ComputedTimingProperties&);
+    ComputedTimingProperties computedTiming();
 
     void setName(const String& name) { m_name = name; }
     const String& name() const { return m_name; }
@@ -126,7 +120,7 @@ protected:
     // updateChildrenAndEffects.
     void updateInheritedTime(double inheritedTime, TimingUpdateReason) const;
     void invalidate() const { m_needsUpdate = true; };
-    bool hasEvents() const { return m_eventDelegate; }
+    bool requiresIterationEvents() const { return m_eventDelegate && m_eventDelegate->requiresIterationEvents(*this); }
     void clearEventDelegate() { m_eventDelegate = nullptr; }
 
     virtual void attach(AnimationPlayer* player)
@@ -174,4 +168,4 @@ protected:
 
 } // namespace blink
 
-#endif
+#endif // AnimationNode_h

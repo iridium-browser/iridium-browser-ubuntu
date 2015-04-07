@@ -8,6 +8,13 @@
 #include <string>
 
 #include "content/common/content_export.h"
+#include "ipc/ipc_message.h"
+
+namespace v8 {
+class Isolate;
+class Object;
+template<typename T> class Local;
+}  // namespace v8
 
 namespace content {
 
@@ -33,6 +40,13 @@ class CONTENT_EXPORT BrowserPluginDelegate {
   // Sets the instance ID that idenfies the plugin within current render
   // process.
   virtual void SetElementInstanceID(int element_instance_id) {}
+
+  // Called when a message is received.  Returns true iff the message was
+  // handled.
+  virtual bool OnMessageReceived(const IPC::Message& message);
+
+  // Return a scriptable object for the plugin.
+  virtual v8::Local<v8::Object> V8ScriptableObject(v8::Isolate* isolate);
 };
 
 }  // namespace content

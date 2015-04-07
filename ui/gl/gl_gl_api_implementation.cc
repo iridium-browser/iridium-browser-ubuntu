@@ -48,6 +48,42 @@ static inline GLenum GetTexInternalFormat(GLenum internal_format,
 
   // g_version_info must be initialized when this function is bound.
   DCHECK(gfx::g_version_info);
+  if (gfx::g_version_info->is_es3) {
+    if (format == GL_RED_EXT) {
+      switch (type) {
+        case GL_UNSIGNED_BYTE:
+          gl_internal_format = GL_R8_EXT;
+          break;
+        case GL_HALF_FLOAT_OES:
+          gl_internal_format = GL_R16F_EXT;
+          break;
+        case GL_FLOAT:
+          gl_internal_format = GL_R32F_EXT;
+          break;
+        default:
+          NOTREACHED();
+          break;
+      }
+      return gl_internal_format;
+    } else if (format == GL_RG_EXT) {
+      switch (type) {
+        case GL_UNSIGNED_BYTE:
+          gl_internal_format = GL_RG8_EXT;
+          break;
+        case GL_HALF_FLOAT_OES:
+          gl_internal_format = GL_RG16F_EXT;
+          break;
+        case GL_FLOAT:
+          gl_internal_format = GL_RG32F_EXT;
+          break;
+        default:
+          NOTREACHED();
+          break;
+      }
+      return gl_internal_format;
+    }
+  }
+
   if (type == GL_FLOAT && gfx::g_version_info->is_angle &&
       gfx::g_version_info->is_es2) {
     // It's possible that the texture is using a sized internal format, and
@@ -265,8 +301,8 @@ void InitializeStaticGLBindingsGL() {
   }
   g_real_gl->Initialize(&g_driver_gl);
   g_gl = g_real_gl;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableGPUServiceTracing)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableGPUServiceTracing)) {
     g_gl = g_trace_gl;
   }
   SetGLToRealGLApi();
@@ -442,7 +478,7 @@ bool VirtualGLApi::MakeCurrent(GLContext* virtual_context, GLSurface* surface) {
   DCHECK(virtual_context->IsCurrent(surface));
 
   if (switched_contexts || virtual_context != current_context_) {
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
     GLenum error = glGetErrorFn();
     // Accepting a context loss error here enables using debug mode to work on
     // context loss handling in virtual context mode.

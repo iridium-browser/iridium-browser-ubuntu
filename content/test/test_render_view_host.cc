@@ -22,7 +22,7 @@
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_web_contents.h"
 #include "media/base/video_frame.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace content {
 
@@ -113,9 +113,9 @@ gfx::Rect TestRenderWidgetHostView::GetViewBounds() const {
 void TestRenderWidgetHostView::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
-    CopyFromCompositingSurfaceCallback& callback,
+    ReadbackRequestCallback& callback,
     const SkColorType color_type) {
-  callback.Run(false, SkBitmap());
+  callback.Run(SkBitmap(), content::READBACK_NOT_SUPPORTED);
 }
 
 void TestRenderWidgetHostView::CopyFromCompositingSurfaceToVideoFrame(

@@ -25,8 +25,10 @@ from chromite.lib.cros_build_lib import Error, Warning, Info, Debug
 # Need to do this before Servo import
 cros_build_lib.AssertInsideChroot()
 
+# pylint: disable=import-error
 from servo import client
 from servo import multiservo
+# pylint: enable=import-error
 
 _SRC_ROOT = os.path.join(constants.CHROOT_SOURCE_ROOT, 'src')
 _SRC_DC = os.path.join(_SRC_ROOT, 'platform/depthcharge')
@@ -46,7 +48,8 @@ class TerminalFreezer(object):
     self._processes = None
 
   def __enter__(self):
-    lsof = cros_build_lib.RunCommand(['lsof', '-FR', self._tty],
+    lsof = cros_build_lib.RunCommand(
+        ['lsof', '-FR', self._tty],
         capture_output=True, log_output=True, error_code_ok=True)
     self._processes = re.findall(r'^(?:R|p)(\d+)$', lsof.output, re.MULTILINE)
 
@@ -226,8 +229,9 @@ def main(argv):
 
       # Throw away old data to avoid confusion from messages before the reboot
       data = ''
-      with timeout_util.Timeout(10, 'Could not reboot into developer mode! '
-          '(Confirm that you have GBB_FLAG_FORCE_DEV_SWITCH_ON (0x8) set.)'):
+      msg = ('Could not reboot into developer mode! '
+             '(Confirm that you have GBB_FLAG_FORCE_DEV_SWITCH_ON (0x8) set.)')
+      with timeout_util.Timeout(10, msg):
         while _PTRN_DEVMODE not in data:
           data += ReadAll(fd)
 
@@ -235,8 +239,9 @@ def main(argv):
       Info('Developer mode detected, pressing CTRL+G...')
       os.write(fd, chr(ord('G') & 0x1f))
 
-      with timeout_util.Timeout(1, 'Could not enter GDB mode with CTRL+G! '
-          '(Confirm that you flashed an "image.dev.bin" image to this DUT.)'):
+      msg = ('Could not enter GDB mode with CTRL+G! '
+             '(Confirm that you flashed an "image.dev.bin" image to this DUT.)')
+      with timeout_util.Timeout(1, msg):
         while _PTRN_GDB not in data:
           data += ReadAll(fd)
 
@@ -260,9 +265,10 @@ def main(argv):
 
     chost, use = ParsePortage(opts.board)
     Info('Launching GDB...')
-    cros_build_lib.RunCommand([chost + '-gdb',
-        '--symbols', FindSymbols(opts.symbols, opts.board, use),
-        '--directory', _SRC_DC,
-        '--directory', _SRC_VB,
-        '--directory', _SRC_LP] + ex_args,
+    cros_build_lib.RunCommand(
+        [chost + '-gdb',
+         '--symbols', FindSymbols(opts.symbols, opts.board, use),
+         '--directory', _SRC_DC,
+         '--directory', _SRC_VB,
+         '--directory', _SRC_LP] + ex_args,
         ignore_sigint=True, debug_level=logging.WARNING)

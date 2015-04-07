@@ -78,13 +78,13 @@ public:
     virtual const char* CurrentDeviceName() const;
 
     // Module handling
-    virtual int32_t TimeUntilNextProcess();
+    virtual int64_t TimeUntilNextProcess();
     virtual int32_t Process();
 
     // Implement VideoCaptureExternal
     // |capture_time| must be specified in the NTP time format in milliseconds.
     virtual int32_t IncomingFrame(uint8_t* videoFrame,
-                                  int32_t videoFrameLength,
+                                  size_t videoFrameLength,
                                   const VideoCaptureCapability& frameInfo,
                                   int64_t captureTime = 0);
 

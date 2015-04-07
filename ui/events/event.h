@@ -17,8 +17,8 @@
 #include "ui/events/gestures/gesture_types.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/events/latency_info.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/point_conversions.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/point_conversions.h"
 
 namespace gfx {
 class Transform;
@@ -26,6 +26,8 @@ class Transform;
 
 namespace ui {
 class EventTarget;
+enum class DomCode;
+enum class DomKey;
 
 class EVENTS_EXPORT Event {
  public:
@@ -210,7 +212,7 @@ class EVENTS_EXPORT Event {
   void StopPropagation();
   bool stopped_propagation() const { return !!(result_ & ER_CONSUMED); }
 
-  // Marks the event as having been handled. A handled event does not reach the
+
   // next event phase. For example, if an event is handled during the pre-target
   // phase, then the event is dispatched to all pre-target handlers, but not to
   // the target or post-target handlers.
@@ -488,11 +490,12 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
   TouchEvent(const TouchEvent& model, T* source, T* target)
       : LocatedEvent(model, source, target),
         touch_id_(model.touch_id_),
+        unique_event_id_(model.unique_event_id_),
         radius_x_(model.radius_x_),
         radius_y_(model.radius_y_),
         rotation_angle_(model.rotation_angle_),
-        force_(model.force_) {
-  }
+        force_(model.force_),
+        may_cause_scrolling_(model.may_cause_scrolling_) {}
 
   TouchEvent(EventType type,
              const gfx::PointF& location,
@@ -511,11 +514,17 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
 
   ~TouchEvent() override;
 
+  // The id of the pointer this event modifies.
   int touch_id() const { return touch_id_; }
+  // A unique identifier for this event.
+  uint64 unique_event_id() const { return unique_event_id_; }
   float radius_x() const { return radius_x_; }
   float radius_y() const { return radius_y_; }
   float rotation_angle() const { return rotation_angle_; }
   float force() const { return force_; }
+
+  void set_may_cause_scrolling(bool causes) { may_cause_scrolling_ = causes; }
+  bool may_cause_scrolling() const { return may_cause_scrolling_; }
 
   // Used for unit tests.
   void set_radius_x(const float r) { radius_x_ = r; }
@@ -524,6 +533,12 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
   // Overridden from LocatedEvent.
   void UpdateForRootTransform(
       const gfx::Transform& inverted_root_transform) override;
+
+  // Marks the event as not participating in synchronous gesture recognition.
+  void DisableSynchronousHandling();
+  bool synchronous_handling_disabled() const {
+    return !!(result() & ER_DISABLE_SYNC_HANDLING);
+  }
 
  protected:
   void set_radius(float radius_x, float radius_y) {
@@ -542,6 +557,9 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
   // for each separable additional touch that the hardware can detect.
   const int touch_id_;
 
+  // A unique identifier for the touch event.
+  const uint64 unique_event_id_;
+
   // Radius of the X (major) axis of the touch ellipse. 0.0 if unknown.
   float radius_x_;
 
@@ -553,6 +571,11 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
 
   // Force (pressure) of the touch. Normalized to be [0, 1]. Default to be 0.0.
   float force_;
+
+  // Whether the (unhandled) touch event will produce a scroll event (e.g., a
+  // touchmove that exceeds the platform slop region, or a touchend that
+  // causes a fling). Defaults to false.
+  bool may_cause_scrolling_;
 };
 
 // An interface that individual platforms can use to store additional data on
@@ -572,25 +595,38 @@ class EVENTS_EXPORT ExtendedKeyEventData {
 //
 // For a keystroke event,
 // -- is_char_ is false.
-// -- type() can be any one of ET_KEY_PRESSED, ET_KEY_RELEASED,
+// -- Event::type() can be any one of ET_KEY_PRESSED, ET_KEY_RELEASED,
 //    ET_TRANSLATED_KEY_PRESS, or ET_TRANSLATED_KEY_RELEASE.
-// -- character_ functions as a bypass or cache for GetCharacter().
-// -- key_code_ is a VKEY_ value associated with the key. For printable
-//    characters, this may or may not be a mapped value, imitating MS Windows:
+// -- code_ and Event::flags() represent the physical key event.
+//    - code_ is a platform-independent representation of the physical key,
+//      based on DOM KeyboardEvent |code| values. It does not vary depending
+//      on key layout.
+//    - Event::flags() provides the active modifiers for the physical key
+//      press. Its value reflects the state after the event; that is, for
+//      a modifier key, a press includes the corresponding flag and a release
+//      does not.
+// -- key_ and character_ provide the meaning of the key event, in the context
+//    of the active layout and modifiers. Together they correspond to DOM
+//    KeyboardEvent |key| values.
+//    - key_ is an enumeration of non-Unicode meanings, plus sentinels
+//      (specifically DomKey::CHARACTER for Unicode meanings).
+//    - character_ is the code point for Unicode meanings.
+// -- key_code_ is a KeyboardCode value associated with the key. This supports
+//    the legacy web event |keyCode| field, and the VKEY_ values are chosen
+//    to match Windows/IE for compatibility. For printable characters, this
+//    may or may not be a layout-mapped value, imitating MS Windows:
 //    if the mapped key generates a character that has an associated VKEY_
 //    code, then key_code_ is that code; if not, then key_code_ is the unmapped
 //    VKEY_ code. For example, US, Greek, Cyrillic, Japanese, etc. all use
 //    VKEY_Q for the key beside Tab, while French uses VKEY_A.
-// -- code_ is in one-to-one correspondence with a physical keyboard
-//    location, and does not vary depending on key layout.
 //
 // For a character event,
 // -- is_char_ is true.
 // -- type() is ET_KEY_PRESSED.
-// -- character_ is a UTF-16 character value.
+// -- code_ is DomCode::NONE.
+// -- key_ is DomKey::CHARACTER and character_ is a UTF-16 code point.
 // -- key_code_ is conflated with character_ by some code, because both
 //    arrive in the wParam field of a Windows event.
-// -- code_ is the empty string.
 //
 class EVENTS_EXPORT KeyEvent : public Event {
  public:
@@ -602,14 +638,22 @@ class EVENTS_EXPORT KeyEvent : public Event {
   // Create a keystroke event.
   KeyEvent(EventType type, KeyboardCode key_code, int flags);
 
+  // Create a fully defined keystroke event.
+  KeyEvent(EventType type,
+           KeyboardCode key_code,
+           DomCode code,
+           int flags,
+           DomKey key,
+           base::char16 character);
+
   // Create a character event.
   KeyEvent(base::char16 character, KeyboardCode key_code, int flags);
 
   // Used for synthetic events with code of DOM KeyboardEvent (e.g. 'KeyA')
-  // See also: ui/events/keycodes/dom4/keycode_converter_data.h
+  // See also: ui/events/keycodes/dom3/dom_values.txt
   KeyEvent(EventType type,
            KeyboardCode key_code,
-           const std::string& code,
+           DomCode code,
            int flags);
 
   KeyEvent(const KeyEvent& rhs);
@@ -681,7 +725,12 @@ class EVENTS_EXPORT KeyEvent : public Event {
   // TODO(msw): Additional work may be needed for analogues on other platforms.
   bool IsUnicodeKeyCode() const;
 
-  std::string code() const { return code_; }
+  // Returns the DOM .code (physical key identifier) for a keystroke event.
+  DomCode code() const { return code_; };
+  std::string GetCodeString() const;
+
+  // Returns the DOM .key (layout meaning) for a keystroke event.
+  DomKey GetDomKey() const;
 
   // Normalizes flags_ so that it describes the state after the event.
   // (Native X11 event flags describe the state before the event.)
@@ -703,21 +752,39 @@ class EVENTS_EXPORT KeyEvent : public Event {
   // True if the key press originated from a 'right' key (VKEY_RSHIFT, etc.).
   bool IsRightSideKey() const;
 
+  // Determine key_ and character_ on a keystroke event from code_ and flags().
+  void ApplyLayout() const;
+
   KeyboardCode key_code_;
 
-  // String of 'code' defined in DOM KeyboardEvent (e.g. 'KeyA', 'Space')
-  // http://www.w3.org/TR/uievents/#keyboard-key-codes.
+  // DOM KeyboardEvent |code| (e.g. DomCode::KEY_A, DomCode::SPACE).
+  // http://www.w3.org/TR/DOM-Level-3-Events-code/
   //
   // This value represents the physical position in the keyboard and can be
   // converted from / to keyboard scan code like XKB.
-  std::string code_;
+  DomCode code_;
 
   // True if this is a character event, false if this is a keystroke event.
   bool is_char_;
 
   // The platform related keycode value. For XKB, it's keysym value.
   // For now, this is used for CharacterComposer in ChromeOS.
-  uint32 platform_keycode_;
+  mutable uint32 platform_keycode_;
+
+  // TODO(kpschoedel): refactor so that key_ and character_ are not mutable.
+  // This requires defining the KeyEvent completely at construction rather
+  // than lazily under GetCharacter(), which likely also means removing
+  // the two 'incomplete' constructors.
+  //
+  // DOM KeyboardEvent |key|
+  // http://www.w3.org/TR/DOM-Level-3-Events-key/
+  //
+  // This value, together with character_, represents the meaning of a key.
+  // The value is DomKey::CHARACTER when the interpretation is a character.
+  // This, along with character_, is not necessarily initialized when the
+  // event is constructed; it may be set only if and when GetCharacter()
+  // or GetDomKey() is called.
+  mutable DomKey key_;
 
   // String of 'key' defined in DOM KeyboardEvent (e.g. 'a', 'â')
   // http://www.w3.org/TR/uievents/#keyboard-key-codes.

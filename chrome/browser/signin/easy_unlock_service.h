@@ -83,10 +83,9 @@ class EasyUnlockService : public KeyedService {
   virtual void SetPermitAccess(const base::DictionaryValue& permit) = 0;
   virtual void ClearPermitAccess() = 0;
 
-  // Gets/Sets/Clears the remote devices list.
+  // Gets/Sets the remote devices list.
   virtual const base::ListValue* GetRemoteDevices() const = 0;
   virtual void SetRemoteDevices(const base::ListValue& devices) = 0;
-  virtual void ClearRemoteDevices() = 0;
 
   // Runs the flow for turning Easy unlock off.
   virtual void RunTurnOffFlow() = 0;
@@ -255,6 +254,8 @@ class EasyUnlockService : public KeyedService {
   // Updates the service to state for handling system suspend.
   void PrepareForSuspend();
 
+  void EnsureTpmKeyPresentIfNeeded();
+
   Profile* profile_;
 
   // Created lazily in |GetScreenlockStateHandler|.
@@ -274,6 +275,8 @@ class EasyUnlockService : public KeyedService {
 
   // Whether the service has been shut down.
   bool shut_down_;
+
+  bool tpm_key_checked_;
 
   ObserverList<EasyUnlockServiceObserver> observers_;
 

@@ -14,7 +14,7 @@ namespace blink {
 
 const int buttonShadowHeight = 2;
 
-void FileUploadControlPainter::paintObject(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void FileUploadControlPainter::paintObject(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     if (m_renderFileUploadControl.style()->visibility() != VISIBLE)
         return;
@@ -22,9 +22,9 @@ void FileUploadControlPainter::paintObject(PaintInfo& paintInfo, const LayoutPoi
     // Push a clip.
     GraphicsContextStateSaver stateSaver(*paintInfo.context, false);
     if (paintInfo.phase == PaintPhaseForeground || paintInfo.phase == PaintPhaseChildBlockBackgrounds) {
-        IntRect clipRect = enclosingIntRect(LayoutRect(paintOffset.x() + m_renderFileUploadControl.borderLeft(), paintOffset.y() + m_renderFileUploadControl.borderTop(),
-            m_renderFileUploadControl.width() - m_renderFileUploadControl.borderLeft() - m_renderFileUploadControl.borderRight(),
-            m_renderFileUploadControl.height() - m_renderFileUploadControl.borderBottom() - m_renderFileUploadControl.borderTop() + buttonShadowHeight));
+        IntRect clipRect = enclosingIntRect(LayoutRect(
+            LayoutPoint(paintOffset.x() + m_renderFileUploadControl.borderLeft(), paintOffset.y() + m_renderFileUploadControl.borderTop()),
+            m_renderFileUploadControl.size() + LayoutSize(0, -m_renderFileUploadControl.borderWidth() + buttonShadowHeight)));
         if (clipRect.isEmpty())
             return;
         stateSaver.save();
@@ -66,7 +66,7 @@ void FileUploadControlPainter::paintObject(PaintInfo& paintInfo, const LayoutPoi
         paintInfo.context->setFillColor(m_renderFileUploadControl.resolveColor(CSSPropertyColor));
 
         // Draw the filename
-        paintInfo.context->drawBidiText(font, textRunPaintInfo, IntPoint(roundToInt(textX), roundToInt(textY)));
+        paintInfo.context->drawBidiText(font, textRunPaintInfo, FloatPoint(roundToInt(textX), roundToInt(textY)));
     }
 
     // Paint the children.

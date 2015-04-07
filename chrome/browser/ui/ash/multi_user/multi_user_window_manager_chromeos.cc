@@ -214,20 +214,6 @@ MultiUserWindowManagerChromeOS::MultiUserWindowManagerChromeOS(
           message_center::MessageCenter::Get(), current_user_id)),
       suppress_visibility_changes_(false),
       animation_speed_(ANIMATION_SPEED_NORMAL) {
-  // Add a session state observer to be able to monitor session changes.
-  if (ash::Shell::HasInstance())
-    ash::Shell::GetInstance()->session_state_delegate()->
-        AddSessionStateObserver(this);
-
-  // The BrowserListObserver would have been better to use then the old
-  // notification system, but that observer fires before the window got created.
-  registrar_.Add(this, NOTIFICATION_BROWSER_WINDOW_READY,
-                 content::NotificationService::AllSources());
-
-  // Add an app window observer & all already running apps.
-  Profile* profile = multi_user_util::GetProfileFromUserID(current_user_id);
-  if (profile)
-    AddUser(profile);
 }
 
 MultiUserWindowManagerChromeOS::~MultiUserWindowManagerChromeOS() {
@@ -261,6 +247,29 @@ MultiUserWindowManagerChromeOS::~MultiUserWindowManagerChromeOS() {
   if (ash::Shell::HasInstance())
     ash::Shell::GetInstance()->session_state_delegate()->
         RemoveSessionStateObserver(this);
+}
+
+void MultiUserWindowManagerChromeOS::Init() {
+  // Since we are setting the SessionStateObserver and adding the user, this
+  // function should get called only once.
+  DCHECK(user_id_to_app_observer_.find(current_user_id_) ==
+             user_id_to_app_observer_.end());
+
+  // Add a session state observer to be able to monitor session changes.
+  if (ash::Shell::HasInstance()) {
+    ash::Shell::GetInstance()->session_state_delegate()->
+        AddSessionStateObserver(this);
+  }
+
+  // The BrowserListObserver would have been better to use then the old
+  // notification system, but that observer fires before the window got created.
+  registrar_.Add(this, NOTIFICATION_BROWSER_WINDOW_READY,
+                 content::NotificationService::AllSources());
+
+  // Add an app window observer & all already running apps.
+  Profile* profile = multi_user_util::GetProfileFromUserID(current_user_id_);
+  if (profile)
+    AddUser(profile);
 }
 
 void MultiUserWindowManagerChromeOS::SetWindowOwner(
@@ -382,6 +391,14 @@ void MultiUserWindowManagerChromeOS::AddUser(content::BrowserContext* context) {
     if ((*browser_it)->profile()->GetOriginalProfile() == profile)
       AddBrowserWindow(*browser_it);
   }
+  // When adding another user to the session, we auto switch users.
+  if (user_id_to_app_observer_.size() == 1)
+    return;
+
+  // Immediately hide the windows of the current user.
+  base::AutoReset<AnimationSpeed> animation_speed(&animation_speed_,
+                                                  ANIMATION_SPEED_DISABLED);
+  ActiveUserChanged(user_id);
 }
 
 void MultiUserWindowManagerChromeOS::AddObserver(Observer* observer) {
@@ -394,7 +411,6 @@ void MultiUserWindowManagerChromeOS::RemoveObserver(Observer* observer) {
 
 void MultiUserWindowManagerChromeOS::ActiveUserChanged(
     const std::string& user_id) {
-  DCHECK(user_id != current_user_id_);
   // This needs to be set before the animation starts.
   current_user_id_ = user_id;
 

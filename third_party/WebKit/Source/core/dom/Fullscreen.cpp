@@ -161,7 +161,6 @@ bool Fullscreen::isFullScreen(Document& document)
 
 Fullscreen::Fullscreen(Document& document)
     : DocumentLifecycleObserver(&document)
-    , m_areKeysEnabledInFullScreen(false)
     , m_fullScreenRenderer(nullptr)
     , m_eventQueueTimer(this, &Fullscreen::eventQueueTimerFired)
 {
@@ -284,7 +283,6 @@ void Fullscreen::requestFullscreen(Element& element, RequestType requestType)
 
         // 5. Return, and run the remaining steps asynchronously.
         // 6. Optionally, perform some animation.
-        m_areKeysEnabledInFullScreen = requestType != PrefixedMozillaRequest && requestType != PrefixedVideoRequest;
         document()->frameHost()->chrome().client().enterFullScreenForElement(&element);
 
         // 7. Optionally, display a message indicating how the user can exit displaying the context object fullscreen.
@@ -391,7 +389,14 @@ void Fullscreen::exitFullscreen()
     // Only exit out of full screen window mode if there are no remaining elements in the
     // full screen stack.
     if (!newTop) {
-        host->chrome().client().exitFullScreenForElement(m_fullScreenElement.get());
+        // FIXME: if the frame exiting fullscreen is not the frame that entered
+        // fullscreen (but a parent frame for example), m_fullScreenElement
+        // might be null. We want to pass an element that is part of the
+        // document so we will pass the documentElement in that case.
+        // This should be fix by exiting fullscreen for a frame instead of an
+        // element, see https://crbug.com/441259
+        host->chrome().client().exitFullScreenForElement(
+            m_fullScreenElement ? m_fullScreenElement.get() : document()->documentElement());
         return;
     }
 
@@ -458,8 +463,6 @@ void Fullscreen::didExitFullScreenForElement(Element*)
     m_fullScreenElement->willStopBeingFullscreenElement();
 
     m_fullScreenElement->setContainsFullScreenElementOnAncestorsCrossingFrameBoundaries(false);
-
-    m_areKeysEnabledInFullScreen = false;
 
     if (m_fullScreenRenderer)
         m_fullScreenRenderer->unwrapRenderer();
@@ -605,6 +608,7 @@ void Fullscreen::trace(Visitor* visitor)
     visitor->trace(m_fullScreenRenderer);
     visitor->trace(m_eventQueue);
     DocumentSupplement::trace(visitor);
+    DocumentLifecycleObserver::trace(visitor);
 }
 
 } // namespace blink

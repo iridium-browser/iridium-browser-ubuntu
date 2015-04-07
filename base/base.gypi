@@ -122,6 +122,8 @@
           'callback_internal.h',
           'callback_list.h',
           'cancelable_callback.h',
+          'chromeos/memory_pressure_observer_chromeos.cc',
+          'chromeos/memory_pressure_observer_chromeos.h',
           'command_line.cc',
           'command_line.h',
           'compiler_specific.h',
@@ -244,12 +246,15 @@
           'hash.cc',
           'hash.h',
           'id_map.h',
+          'ios/block_types.h',
           'ios/device_util.h',
           'ios/device_util.mm',
           'ios/ios_util.h',
           'ios/ios_util.mm',
           'ios/scoped_critical_action.h',
           'ios/scoped_critical_action.mm',
+          'ios/weak_nsobject.h',
+          'ios/weak_nsobject.mm',
           'json/json_file_value_serializer.cc',
           'json/json_file_value_serializer.h',
           'json/json_parser.cc',
@@ -258,6 +263,7 @@
           'json/json_reader.h',
           'json/json_string_value_serializer.cc',
           'json/json_string_value_serializer.h',
+          'json/json_value_converter.cc',
           'json/json_value_converter.h',
           'json/json_writer.cc',
           'json/json_writer.h',
@@ -393,6 +399,7 @@
           'metrics/histogram_delta_serialization.cc',
           'metrics/histogram_delta_serialization.h',
           'metrics/histogram_flattener.h',
+          'metrics/histogram_macros.h',
           'metrics/histogram_samples.cc',
           'metrics/histogram_samples.h',
           'metrics/histogram_snapshot_manager.cc',
@@ -976,6 +983,11 @@
           # command-line-string limitation when building NaCl on Windows.
           ['OS == "win" and >(nacl_untrusted_build)==1', {
               'sources/': [ ['exclude', '\\.h$'] ],
+          }],
+          # Enable more direct string conversions on platforms with native utf8
+          # strings
+          ['OS=="mac" or OS=="ios" or <(chromeos)==1 or <(chromecast)==1', {
+            'defines': ['SYSTEM_NATIVE_UTF8'],
           }],
         ],
       }],

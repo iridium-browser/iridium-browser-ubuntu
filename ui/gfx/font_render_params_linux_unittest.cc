@@ -33,7 +33,7 @@ class TestFontDelegate : public LinuxFontDelegate {
   scoped_ptr<ScopedPangoFontDescription> GetDefaultPangoFontDescription()
       const override {
     NOTIMPLEMENTED();
-    return scoped_ptr<ScopedPangoFontDescription>();
+    return nullptr;
   }
   double GetFontDPI() const override {
     NOTIMPLEMENTED();
@@ -108,6 +108,18 @@ TEST_F(FontRenderParamsTest, Default) {
       CreateFontconfigEditStanza("hinting", "bool", "true") +
       CreateFontconfigEditStanza("hintstyle", "const", "hintfull") +
       CreateFontconfigEditStanza("rgba", "const", "none") +
+      kFontconfigMatchFooter +
+      // Add font matches for fonts between 10 and 20 points or pixels. Since
+      // they specify sizes, they also should not affect the defaults.
+      kFontconfigMatchFontHeader +
+      CreateFontconfigTestStanza("size", "more_eq", "double", "10.0") +
+      CreateFontconfigTestStanza("size", "less_eq", "double", "20.0") +
+      CreateFontconfigEditStanza("antialias", "bool", "false") +
+      kFontconfigMatchFooter +
+      kFontconfigMatchFontHeader +
+      CreateFontconfigTestStanza("pixel_size", "more_eq", "double", "10.0") +
+      CreateFontconfigTestStanza("pixel_size", "less_eq", "double", "20.0") +
+      CreateFontconfigEditStanza("antialias", "bool", "false") +
       kFontconfigMatchFooter +
       kFontconfigFileFooter));
 

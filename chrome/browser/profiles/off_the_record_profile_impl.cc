@@ -23,7 +23,6 @@
 #include "chrome/browser/net/chrome_url_request_context_getter.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_configurator.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -32,6 +31,7 @@
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate_factory.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
+#include "chrome/browser/ui/zoom/chrome_zoom_level_otr_delegate.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -39,6 +39,7 @@
 #include "chrome/common/render_messages.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/ui/zoom/zoom_event_manager.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/host_zoom_map.h"
@@ -131,9 +132,6 @@ void OffTheRecordProfileImpl::Init() {
          IncognitoModePrefs::GetAvailability(profile_->GetPrefs()) !=
              IncognitoModePrefs::DISABLED);
 
-  // Clear the proxy pref if and only if the data reduction proxy is specified.
-  DataReductionProxyChromeConfigurator::DisableInProxyConfigPref(prefs_);
-
   // TODO(oshima): Remove the need to eagerly initialize the request context
   // getter. chromeos::OnlineAttempt is illegally trying to access this
   // Profile member from a thread other than the UI thread, so we need to
@@ -142,7 +140,7 @@ void OffTheRecordProfileImpl::Init() {
   GetRequestContext();
 #endif  // defined(OS_CHROMEOS)
 
-  InitHostZoomMap();
+  TrackZoomLevelsFromParent();
 
 #if defined(ENABLE_PLUGINS)
   ChromePluginServiceFilter::GetInstance()->RegisterResourceContext(
@@ -198,16 +196,29 @@ void OffTheRecordProfileImpl::InitIoData() {
   io_data_.reset(new OffTheRecordProfileIOData::Handle(this));
 }
 
-void OffTheRecordProfileImpl::InitHostZoomMap() {
+void OffTheRecordProfileImpl::TrackZoomLevelsFromParent() {
+  DCHECK_NE(INCOGNITO_PROFILE, profile_->GetProfileType());
+
+  // Here we only want to use zoom levels stored in the main-context's default
+  // storage partition. We're not interested in zoom levels in special
+  // partitions, e.g. those used by WebViewGuests.
   HostZoomMap* host_zoom_map = HostZoomMap::GetDefaultForBrowserContext(this);
   HostZoomMap* parent_host_zoom_map =
       HostZoomMap::GetDefaultForBrowserContext(profile_);
   host_zoom_map->CopyFrom(parent_host_zoom_map);
-  // Observe parent's HZM change for propagating change of parent's
-  // change to this HZM.
-  zoom_subscription_ = parent_host_zoom_map->AddZoomLevelChangedCallback(
-      base::Bind(&OffTheRecordProfileImpl::OnZoomLevelChanged,
+  // Observe parent profile's HostZoomMap changes so they can also be applied
+  // to this profile's HostZoomMap.
+  track_zoom_subscription_ = parent_host_zoom_map->AddZoomLevelChangedCallback(
+      base::Bind(&OffTheRecordProfileImpl::OnParentZoomLevelChanged,
                  base::Unretained(this)));
+  if (!profile_->GetZoomLevelPrefs())
+    return;
+
+  // Also track changes to the parent profile's default zoom level.
+  parent_default_zoom_level_subscription_ =
+      profile_->GetZoomLevelPrefs()->RegisterDefaultZoomLevelCallback(
+          base::Bind(&OffTheRecordProfileImpl::UpdateDefaultZoomLevel,
+                     base::Unretained(this)));
 }
 
 std::string OffTheRecordProfileImpl::GetProfileName() {
@@ -225,6 +236,13 @@ Profile::ProfileType OffTheRecordProfileImpl::GetProfileType() const {
 
 base::FilePath OffTheRecordProfileImpl::GetPath() const {
   return profile_->GetPath();
+}
+
+scoped_ptr<content::ZoomLevelDelegate>
+OffTheRecordProfileImpl::CreateZoomLevelDelegate(
+    const base::FilePath& partition_path) {
+  return make_scoped_ptr(new chrome::ChromeZoomLevelOTRDelegate(
+      ui_zoom::ZoomEventManager::GetForBrowserContext(this)->GetWeakPtr()));
 }
 
 scoped_refptr<base::SequencedTaskRunner>
@@ -260,6 +278,16 @@ ExtensionSpecialStoragePolicy*
 
 bool OffTheRecordProfileImpl::IsSupervised() {
   return GetOriginalProfile()->IsSupervised();
+}
+
+bool OffTheRecordProfileImpl::IsChild() {
+  // TODO(treib): If we ever allow incognito for child accounts, evaluate
+  // whether we want to just return false here.
+  return GetOriginalProfile()->IsChild();
+}
+
+bool OffTheRecordProfileImpl::IsLegacySupervised() {
+  return GetOriginalProfile()->IsLegacySupervised();
 }
 
 PrefService* OffTheRecordProfileImpl::GetPrefs() {
@@ -513,7 +541,7 @@ Profile* Profile::CreateOffTheRecordProfile() {
   return profile;
 }
 
-void OffTheRecordProfileImpl::OnZoomLevelChanged(
+void OffTheRecordProfileImpl::OnParentZoomLevelChanged(
     const HostZoomMap::ZoomLevelChange& change) {
   HostZoomMap* host_zoom_map = HostZoomMap::GetDefaultForBrowserContext(this);
   switch (change.mode) {
@@ -528,6 +556,13 @@ void OffTheRecordProfileImpl::OnZoomLevelChanged(
            change.zoom_level);
        return;
   }
+}
+
+void OffTheRecordProfileImpl::UpdateDefaultZoomLevel() {
+  HostZoomMap* host_zoom_map = HostZoomMap::GetDefaultForBrowserContext(this);
+  double default_zoom_level =
+      profile_->GetZoomLevelPrefs()->GetDefaultZoomLevelPref();
+  host_zoom_map->SetDefaultZoomLevel(default_zoom_level);
 }
 
 PrefProxyConfigTracker* OffTheRecordProfileImpl::CreateProxyConfigTracker() {

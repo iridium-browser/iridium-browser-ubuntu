@@ -4,6 +4,7 @@
 import os
 import unittest
 
+from telemetry import page as page_module
 from telemetry import value
 from telemetry.page import page_set
 from telemetry.value import list_of_string_values
@@ -12,10 +13,11 @@ from telemetry.value import none_values
 
 class TestBase(unittest.TestCase):
   def setUp(self):
-    self.page_set = page_set.PageSet(file_path=os.path.dirname(__file__))
-    self.page_set.AddPageWithDefaultRunNavigate("http://www.bar.com/")
-    self.page_set.AddPageWithDefaultRunNavigate("http://www.baz.com/")
-    self.page_set.AddPageWithDefaultRunNavigate("http://www.foo.com/")
+    ps = page_set.PageSet(file_path=os.path.dirname(__file__))
+    ps.AddUserStory(page_module.Page('http://www.bar.com/', ps, ps.base_dir))
+    ps.AddUserStory(page_module.Page('http://www.baz.com/', ps, ps.base_dir))
+    ps.AddUserStory(page_module.Page('http://www.foo.com/', ps, ps.base_dir))
+    self.page_set = ps
 
   @property
   def pages(self):
@@ -26,10 +28,10 @@ class ListOfStringValuesTest(TestBase):
     page0 = self.pages[0]
     v0 = list_of_string_values.ListOfStringValues(
         page0, 'x', 'label',
-        ['L1','L2'], same_page_merge_policy=value.CONCATENATE)
+        ['L1', 'L2'], same_page_merge_policy=value.CONCATENATE)
     v1 = list_of_string_values.ListOfStringValues(
         page0, 'x', 'label',
-        ['L3','L4'], same_page_merge_policy=value.CONCATENATE)
+        ['L3', 'L4'], same_page_merge_policy=value.CONCATENATE)
     self.assertTrue(v1.IsMergableWith(v0))
 
     vM = (list_of_string_values.ListOfStringValues.
@@ -45,10 +47,10 @@ class ListOfStringValuesTest(TestBase):
     page0 = self.pages[0]
     v0 = list_of_string_values.ListOfStringValues(
         page0, 'x', 'label',
-        ['L1','L2'], same_page_merge_policy=value.PICK_FIRST)
+        ['L1', 'L2'], same_page_merge_policy=value.PICK_FIRST)
     v1 = list_of_string_values.ListOfStringValues(
         page0, 'x', 'label',
-        ['L3','L4'], same_page_merge_policy=value.PICK_FIRST)
+        ['L3', 'L4'], same_page_merge_policy=value.PICK_FIRST)
     self.assertTrue(v1.IsMergableWith(v0))
 
     vM = (list_of_string_values.ListOfStringValues.

@@ -94,7 +94,7 @@ void ReleaseHandlesInMessage(const IPC::Message& message) {
   if (message.type() == ResourceMsg_SetDataBuffer::ID) {
     PickleIterator iter(message);
     int request_id;
-    CHECK(message.ReadInt(&iter, &request_id));
+    CHECK(iter.ReadInt(&request_id));
     base::SharedMemoryHandle shm_handle;
     if (IPC::ParamTraits<base::SharedMemoryHandle>::Read(&message,
                                                          &iter,
@@ -139,6 +139,7 @@ static ResourceHostMsg_Request CreateResourceRequest(const char* method,
   request.request_context = 0;
   request.appcache_host_id = kAppCacheNoHostId;
   request.download_to_file = false;
+  request.should_reset_appcache = false;
   request.is_main_frame = true;
   request.parent_is_main_frame = false;
   request.parent_render_frame_id = -1;
@@ -210,7 +211,7 @@ class TestFilter : public ResourceMessageFilter {
   explicit TestFilter(ResourceContext* resource_context)
       : ResourceMessageFilter(
             ChildProcessHostImpl::GenerateChildProcessUniqueId(),
-            PROCESS_TYPE_RENDERER, NULL, NULL, NULL, NULL,
+            PROCESS_TYPE_RENDERER, NULL, NULL, NULL, NULL, NULL,
             base::Bind(&TestFilter::GetContexts, base::Unretained(this))),
         resource_context_(resource_context),
         canceled_(false),

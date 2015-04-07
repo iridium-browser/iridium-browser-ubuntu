@@ -94,6 +94,12 @@ OPENSSL_EXPORT void EVP_PKEY_free(EVP_PKEY *pkey);
  * an error to attempt to duplicate, export, or compare an opaque key. */
 OPENSSL_EXPORT int EVP_PKEY_is_opaque(const EVP_PKEY *pkey);
 
+/* EVP_PKEY_supports_digest returns one if |pkey| supports digests of
+ * type |md|. This is intended for use with EVP_PKEYs backing custom
+ * implementations which can't sign all digests. */
+OPENSSL_EXPORT int EVP_PKEY_supports_digest(const EVP_PKEY *pkey,
+                                            const EVP_MD *md);
+
 /* EVP_PKEY_cmp compares |a| and |b| and returns one if they are equal, zero if
  * not and a negative number on error.
  *
@@ -712,17 +718,6 @@ OPENSSL_EXPORT int EVP_PKEY_CTX_get0_rsa_oaep_label(EVP_PKEY_CTX *ctx,
 #define EVP_PKEY_ECDH_KDF_X9_62 2
 
 
-/* PKEY ctrl commands.
- *
- * These values are passed as the |op| argument to
- * EVP_PKEY_ASN1_METHOD.pkey_ctrl. */
-
-/* ASN1_PKEY_CTRL_DEFAULT_MD_NID expects |arg2| to be an |int*| and sets the
- * pointed at int to be the NID of the default hash function used in
- * signing. */
-#define ASN1_PKEY_CTRL_DEFAULT_MD_NID 0x3
-
-
 /* Private functions */
 
 /* OpenSSL_add_all_algorithms does nothing. */
@@ -834,6 +829,7 @@ struct evp_pkey_st {
 #define EVP_F_EVP_DigestVerifyInitFromAlgorithm 155
 #define EVP_F_EVP_DigestSignAlgorithm 156
 #define EVP_F_rsa_digest_verify_init_from_algorithm 157
+#define EVP_F_EVP_PKEY_CTX_dup 158
 #define EVP_R_UNSUPPORTED_PUBLIC_KEY_TYPE 100
 #define EVP_R_UNSUPPORTED_SIGNATURE_TYPE 101
 #define EVP_R_INVALID_DIGEST_TYPE 102

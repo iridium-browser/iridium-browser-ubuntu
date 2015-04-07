@@ -223,6 +223,9 @@ bool TOutputGLSLBase::visitBinary(Visit visit, TIntermBinary *node)
       case EOpDivAssign:
         writeTriplet(visit, "(", " /= ", ")");
         break;
+      case EOpModAssign:
+        writeTriplet(visit, "(", " %= ", ")");
+        break;
       // Notice the fall-through.
       case EOpMulAssign:
       case EOpVectorTimesMatrixAssign:
@@ -341,7 +344,7 @@ bool TOutputGLSLBase::visitBinary(Visit visit, TIntermBinary *node)
         writeTriplet(visit, "(", " / ", ")");
         break;
       case EOpMod:
-        UNIMPLEMENTED();
+        writeTriplet(visit, "(", " % ", ")");
         break;
       case EOpEqual:
         writeTriplet(visit, "(", " == ", ")");
@@ -464,6 +467,19 @@ bool TOutputGLSLBase::visitUnary(Visit visit, TIntermUnary *node)
         preString = "fract(";
         break;
 
+      case EOpFloatBitsToInt:
+        preString = "floatBitsToInt(";
+        break;
+      case EOpFloatBitsToUint:
+        preString = "floatBitsToUint(";
+        break;
+      case EOpIntBitsToFloat:
+        preString = "intBitsToFloat(";
+        break;
+      case EOpUintBitsToFloat:
+        preString = "uintBitsToFloat(";
+        break;
+
       case EOpLength:
         preString = "length(";
         break;
@@ -575,7 +591,7 @@ bool TOutputGLSLBase::visitAggregate(Visit visit, TIntermAggregate *node)
         // Function declaration.
         ASSERT(visit == PreVisit);
         writeVariableType(node->getType());
-        out << " " << hashName(node->getName());
+        out << " " << hashFunctionName(node->getName());
 
         out << "(";
         writeFunctionParameters(*(node->getSequence()));
@@ -617,6 +633,15 @@ bool TOutputGLSLBase::visitAggregate(Visit visit, TIntermAggregate *node)
         // Function call.
         if (visit == PreVisit)
             out << hashFunctionName(node->getName()) << "(";
+        else if (visit == InVisit)
+            out << ", ";
+        else
+            out << ")";
+        break;
+      case EOpInternalFunctionCall:
+        // Function call to an internal helper function.
+        if (visit == PreVisit)
+            out << node->getName() << "(";
         else if (visit == InVisit)
             out << ", ";
         else

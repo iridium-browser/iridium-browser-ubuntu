@@ -33,21 +33,17 @@ WebInspector.ApplicationCacheItemsView = function(model, frameId)
 
     this._model = model;
 
-    this.element.classList.add("storage-view");
-    this.element.classList.add("table");
+    this.element.classList.add("storage-view", "table");
 
     // FIXME: Needs better tooltip. (Localized)
-    this.deleteButton = new WebInspector.StatusBarButton(WebInspector.UIString("Delete"), "delete-storage-status-bar-item");
-    this.deleteButton.visible = false;
+    this.deleteButton = new WebInspector.StatusBarButton(WebInspector.UIString("Delete"), "delete-status-bar-item");
+    this.deleteButton.setVisible(false);
     this.deleteButton.addEventListener("click", this._deleteButtonClicked, this);
 
     this.connectivityIcon = createElement("div");
     this.connectivityMessage = createElement("span");
     this.connectivityMessage.className = "storage-application-cache-connectivity";
     this.connectivityMessage.textContent = "";
-
-    this.divider = createElement("span");
-    this.divider.className = "status-bar-item status-bar-divider";
 
     this.statusIcon = createElement("div");
     this.statusMessage = createElement("span");
@@ -72,12 +68,17 @@ WebInspector.ApplicationCacheItemsView = function(model, frameId)
 }
 
 WebInspector.ApplicationCacheItemsView.prototype = {
-    get statusBarItems()
+    /**
+     * @return {!Array.<!WebInspector.StatusBarItem>}
+     */
+    statusBarItems: function()
     {
         return [
-            this.deleteButton.element,
-            this.connectivityIcon, this.connectivityMessage, this.divider,
-            this.statusIcon, this.statusMessage
+            this.deleteButton,
+            new WebInspector.StatusBarItemWrapper(this.connectivityIcon),
+            new WebInspector.StatusBarItemWrapper(this.connectivityMessage),
+            new WebInspector.StatusBarItemWrapper(this.statusIcon),
+            new WebInspector.StatusBarItemWrapper(this.statusMessage)
         ];
     },
 
@@ -88,7 +89,7 @@ WebInspector.ApplicationCacheItemsView.prototype = {
 
     willHide: function()
     {
-        this.deleteButton.visible = false;
+        this.deleteButton.setVisible(false);
     },
 
     _maybeUpdate: function()
@@ -164,7 +165,7 @@ WebInspector.ApplicationCacheItemsView.prototype = {
             delete this._resources;
 
             this._emptyView.show(this.element);
-            this.deleteButton.visible = false;
+            this.deleteButton.setVisible(false);
             if (this._dataGrid)
                 this._dataGrid.element.classList.add("hidden");
             return;
@@ -183,7 +184,7 @@ WebInspector.ApplicationCacheItemsView.prototype = {
         this._dataGrid.autoSizeColumns(20, 80);
         this._dataGrid.element.classList.remove("hidden");
         this._emptyView.detach();
-        this.deleteButton.visible = true;
+        this.deleteButton.setVisible(true);
 
         // FIXME: For Chrome, put creationTime and updateTime somewhere.
         // NOTE: localizedString has not yet been added.
@@ -213,7 +214,7 @@ WebInspector.ApplicationCacheItemsView.prototype = {
         }
         function localeCompare(field, resource1, resource2)
         {
-             return sortDirection * (resource1[field] + "").localeCompare(resource2[field] + "")
+             return sortDirection * (resource1[field] + "").localeCompare(resource2[field] + "");
         }
 
         var comparator;

@@ -21,6 +21,7 @@
 #ifndef RootInlineBox_h
 #define RootInlineBox_h
 
+#include "core/rendering/FloatToLayoutUnit.h"
 #include "core/rendering/InlineFlowBox.h"
 #include "platform/text/BidiContext.h"
 
@@ -46,7 +47,7 @@ public:
     RootInlineBox* nextRootBox() const { return static_cast<RootInlineBox*>(m_nextLineBox); }
     RootInlineBox* prevRootBox() const { return static_cast<RootInlineBox*>(m_prevLineBox); }
 
-    virtual void adjustPosition(float dx, float dy) override final;
+    virtual void adjustPosition(FloatWillBeLayoutUnit dx, FloatWillBeLayoutUnit dy) override final;
 
     LayoutUnit lineTop() const { return m_lineTop; }
     LayoutUnit lineBottom() const { return m_lineBottom; }
@@ -54,13 +55,8 @@ public:
     LayoutUnit lineTopWithLeading() const { return m_lineTopWithLeading; }
     LayoutUnit lineBottomWithLeading() const { return m_lineBottomWithLeading; }
 
-    LayoutUnit paginationStrut() const { return m_fragmentationData ? m_fragmentationData->m_paginationStrut : LayoutUnit(0); }
-    void setPaginationStrut(LayoutUnit strut) { ensureLineFragmentationData()->m_paginationStrut = strut; }
-
-    bool isFirstAfterPageBreak() const { return m_fragmentationData ? m_fragmentationData->m_isFirstAfterPageBreak : false; }
-    void setIsFirstAfterPageBreak(bool isFirstAfterPageBreak) { ensureLineFragmentationData()->m_isFirstAfterPageBreak = isFirstAfterPageBreak; }
-
-    void setPaginatedLineWidth(LayoutUnit width) { ensureLineFragmentationData()->m_paginatedLineWidth = width; }
+    LayoutUnit paginationStrut() const { return m_paginationStrut; }
+    void setPaginationStrut(LayoutUnit strut) { m_paginationStrut = strut; }
 
     LayoutUnit selectionTop() const;
     LayoutUnit selectionBottom() const;
@@ -97,9 +93,9 @@ public:
 
     bool lineCanAccommodateEllipsis(bool ltr, int blockEdge, int lineBoxEdge, int ellipsisWidth);
     // Return the truncatedWidth, the width of the truncated text + ellipsis.
-    float placeEllipsis(const AtomicString& ellipsisStr, bool ltr, float blockLeftEdge, float blockRightEdge, float ellipsisWidth, InlineBox* markupBox = 0);
+    FloatWillBeLayoutUnit placeEllipsis(const AtomicString& ellipsisStr, bool ltr, FloatWillBeLayoutUnit blockLeftEdge, FloatWillBeLayoutUnit blockRightEdge, FloatWillBeLayoutUnit ellipsisWidth, InlineBox* markupBox = 0);
     // Return the position of the EllipsisBox or -1.
-    virtual float placeEllipsisBox(bool ltr, float blockLeftEdge, float blockRightEdge, float ellipsisWidth, float &truncatedWidth, bool& foundBox) override final;
+    virtual FloatWillBeLayoutUnit placeEllipsisBox(bool ltr, FloatWillBeLayoutUnit blockLeftEdge, FloatWillBeLayoutUnit blockRightEdge, FloatWillBeLayoutUnit ellipsisWidth, FloatWillBeLayoutUnit &truncatedWidth, bool& foundBox) override final;
 
     using InlineBox::hasEllipsisBox;
     EllipsisBox* ellipsisBox() const;
@@ -109,7 +105,7 @@ public:
     virtual int baselinePosition(FontBaseline baselineType) const override final;
     virtual LayoutUnit lineHeight() const override final;
 
-    virtual void paint(PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom) override;
+    virtual void paint(const PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom) override;
     virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom) override final;
 
     using InlineBox::hasSelectedChildren;
@@ -175,7 +171,7 @@ public:
     }
 
     // Used to calculate the underline offset for TextUnderlinePositionUnder.
-    float maxLogicalTop() const;
+    FloatWillBeLayoutUnit maxLogicalTop() const;
 
     Node* getLogicalStartBoxWithNode(InlineBox*&) const;
     Node* getLogicalEndBoxWithNode(InlineBox*&) const;
@@ -186,15 +182,6 @@ public:
 private:
     LayoutUnit beforeAnnotationsAdjustment() const;
 
-    struct LineFragmentationData;
-    LineFragmentationData* ensureLineFragmentationData()
-    {
-        if (!m_fragmentationData)
-            m_fragmentationData = adoptPtr(new LineFragmentationData());
-
-        return m_fragmentationData.get();
-    }
-
     // This folds into the padding at the end of InlineFlowBox on 64-bit.
     unsigned m_lineBreakPos;
 
@@ -202,24 +189,6 @@ private:
     // we can create an InlineIterator beginning just after the end of this line.
     RenderObject* m_lineBreakObj;
     RefPtr<BidiContext> m_lineBreakContext;
-
-    struct LineFragmentationData {
-        WTF_MAKE_NONCOPYABLE(LineFragmentationData); WTF_MAKE_FAST_ALLOCATED;
-    public:
-        LineFragmentationData()
-            : m_paginationStrut(0)
-            , m_paginatedLineWidth(0)
-            , m_isFirstAfterPageBreak(false)
-        {
-
-        }
-
-        LayoutUnit m_paginationStrut;
-        LayoutUnit m_paginatedLineWidth;
-        bool m_isFirstAfterPageBreak;
-    };
-
-    OwnPtr<LineFragmentationData> m_fragmentationData;
 
     // Floats hanging off the line are pushed into this vector during layout. It is only
     // good for as long as the line has not been marked dirty.
@@ -230,6 +199,7 @@ private:
     LayoutUnit m_lineTopWithLeading;
     LayoutUnit m_lineBottomWithLeading;
     LayoutUnit m_selectionBottom;
+    LayoutUnit m_paginationStrut;
 };
 
 } // namespace blink

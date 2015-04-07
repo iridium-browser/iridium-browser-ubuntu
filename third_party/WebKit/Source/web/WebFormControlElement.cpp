@@ -62,11 +62,6 @@ WebString WebFormControlElement::formControlType() const
     return constUnwrap<HTMLFormControlElement>()->type();
 }
 
-void WebFormControlElement::dispatchFormControlChangeEvent()
-{
-    unwrap<HTMLFormControlElement>()->dispatchFormControlChangeEvent();
-}
-
 bool WebFormControlElement::isAutofilled() const
 {
     return constUnwrap<HTMLFormControlElement>()->isAutofilled();
@@ -145,9 +140,9 @@ WebString WebFormControlElement::editingValue() const
 void WebFormControlElement::setSelectionRange(int start, int end)
 {
     if (isHTMLInputElement(*m_private))
-        unwrap<HTMLInputElement>()->setSelectionRange(start, end);
+        unwrap<HTMLInputElement>()->setSelectionRange(start, end, SelectionHasNoDirection, NotDispatchSelectEvent);
     else if (isHTMLTextAreaElement(*m_private))
-        unwrap<HTMLTextAreaElement>()->setSelectionRange(start, end);
+        unwrap<HTMLTextAreaElement>()->setSelectionRange(start, end, SelectionHasNoDirection, NotDispatchSelectEvent);
 }
 
 int WebFormControlElement::selectionStart() const

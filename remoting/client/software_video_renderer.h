@@ -42,7 +42,7 @@ class SoftwareVideoRenderer : public VideoRenderer,
   ~SoftwareVideoRenderer() override;
 
   // VideoRenderer implementation.
-  void Initialize(const protocol::SessionConfig& config) override;
+  void OnSessionConfig(const protocol::SessionConfig& config) override;
   ChromotingStats* GetStats() override;
   void ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
                           const base::Closure& done) override;
@@ -72,8 +72,8 @@ class SoftwareVideoRenderer : public VideoRenderer,
 
   ChromotingStats stats_;
 
-  // Keep track of the most recent sequence number bounced back from the host.
-  int64 latest_sequence_number_;
+  // Keep track of the latest event timestamp bounced back from the host.
+  int64 latest_event_timestamp_;
 
   base::WeakPtrFactory<SoftwareVideoRenderer> weak_factory_;
 

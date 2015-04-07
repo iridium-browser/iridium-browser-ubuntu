@@ -8,10 +8,15 @@
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "ipc/message_filter.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/ozone/public/gpu_platform_support.h"
 
 class SkBitmap;
+
+namespace base {
+class FilePath;
+}
 
 namespace gfx {
 class Point;
@@ -23,6 +28,7 @@ namespace ui {
 class DriSurfaceFactory;
 class DriWindowDelegate;
 class DriWindowDelegateManager;
+class DriWrapper;
 class NativeDisplayDelegateDri;
 class ScreenManager;
 
@@ -31,7 +37,7 @@ struct DisplaySnapshot_Params;
 
 class DriGpuPlatformSupport : public GpuPlatformSupport {
  public:
-  DriGpuPlatformSupport(DriSurfaceFactory* dri,
+  DriGpuPlatformSupport(DriWrapper* drm,
                         DriWindowDelegateManager* window_manager,
                         ScreenManager* screen_manager,
                         scoped_ptr<NativeDisplayDelegateDri> ndd);
@@ -41,6 +47,8 @@ class DriGpuPlatformSupport : public GpuPlatformSupport {
 
   // GpuPlatformSupport:
   void OnChannelEstablished(IPC::Sender* sender) override;
+  void RelinquishGpuResources(const base::Closure& callback) override;
+  IPC::MessageFilter* GetMessageFilter() override;
 
   // IPC::Listener:
   bool OnMessageReceived(const IPC::Message& message) override;
@@ -57,23 +65,24 @@ class DriGpuPlatformSupport : public GpuPlatformSupport {
   void OnCursorMove(gfx::AcceleratedWidget widget, const gfx::Point& location);
 
   // Display related IPC handlers.
-  void OnForceDPMSOn();
-  void OnRefreshNativeDisplays(
-      const std::vector<DisplaySnapshot_Params>& cached_displays);
+  void OnRefreshNativeDisplays();
   void OnConfigureNativeDisplay(int64_t id,
                                 const DisplayMode_Params& mode,
                                 const gfx::Point& origin);
   void OnDisableNativeDisplay(int64_t id);
   void OnTakeDisplayControl();
   void OnRelinquishDisplayControl();
+  void OnAddGraphicsDevice(const base::FilePath& path);
+  void OnRemoveGraphicsDevice(const base::FilePath& path);
 
   IPC::Sender* sender_;                       // Not owned.
-  DriSurfaceFactory* dri_;                    // Not owned.
+  DriWrapper* drm_;                           // Not owned.
   DriWindowDelegateManager* window_manager_;  // Not owned.
   ScreenManager* screen_manager_;             // Not owned.
 
   scoped_ptr<NativeDisplayDelegateDri> ndd_;
   ScopedVector<GpuPlatformSupport> handlers_;
+  scoped_refptr<IPC::MessageFilter> filter_;
 };
 
 }  // namespace ui

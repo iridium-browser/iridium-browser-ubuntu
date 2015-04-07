@@ -12,6 +12,7 @@
 #include "content/child/blink_platform_impl.h"
 #include "content/common/content_export.h"
 #include "content/renderer/webpublicsuffixlist_impl.h"
+#include "device/vibration/vibration_manager.mojom.h"
 #include "third_party/WebKit/public/platform/WebGraphicsContext3D.h"
 #include "third_party/WebKit/public/platform/WebIDBFactory.h"
 #include "third_party/WebKit/public/platform/WebScreenOrientationType.h"
@@ -42,11 +43,10 @@ class DeviceMotionEventPump;
 class DeviceOrientationEventPump;
 class PlatformEventObserverBase;
 class QuotaMessageFilter;
-class RendererClipboardClient;
+class RendererClipboardDelegate;
 class RendererScheduler;
 class RenderView;
 class ThreadSafeSender;
-class WebBluetoothImpl;
 class WebClipboardImpl;
 class WebDatabaseObserverImpl;
 class WebFileSystemImpl;
@@ -54,14 +54,13 @@ class WebSchedulerImpl;
 
 class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
  public:
-  RendererBlinkPlatformImpl(RendererScheduler* renderer_scheduler);
+  explicit RendererBlinkPlatformImpl(RendererScheduler* renderer_scheduler);
   virtual ~RendererBlinkPlatformImpl();
 
   void set_plugin_refresh_allowed(bool plugin_refresh_allowed) {
     plugin_refresh_allowed_ = plugin_refresh_allowed;
   }
   // Platform methods:
-  virtual void callOnMainThread(void (*func)(void*), void* context);
   virtual blink::WebClipboard* clipboard();
   virtual blink::WebMimeRegistry* mimeRegistry();
   virtual blink::WebFileUtilities* fileUtilities();
@@ -151,7 +150,6 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
       const blink::WebURL& storage_partition,
       blink::WebStorageQuotaType,
       blink::WebStorageQuotaCallbacks);
-  virtual blink::WebBluetooth* bluetooth();
   virtual void vibrate(unsigned int milliseconds);
   virtual void cancelVibration();
   virtual blink::WebScheduler* scheduler();
@@ -191,8 +189,6 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
     return web_database_observer_impl_.get();
   }
 
-  WebBluetoothImpl* BluetoothImplForTesting() { return bluetooth_.get(); }
-
  private:
   bool CheckPreparsedJsCachingEnabled() const;
 
@@ -204,10 +200,11 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
   // Use the data previously set via SetMockDevice...DataForTesting() and send
   // them to the registered listener.
   void SendFakeDeviceEventDataForTesting(blink::WebPlatformEventType type);
+  device::VibrationManagerPtr& GetConnectedVibrationManagerService();
 
   scoped_ptr<WebSchedulerImpl> web_scheduler_;
 
-  scoped_ptr<RendererClipboardClient> clipboard_client_;
+  scoped_ptr<RendererClipboardDelegate> clipboard_delegate_;
   scoped_ptr<WebClipboardImpl> clipboard_;
 
   class FileUtilities;
@@ -239,7 +236,6 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
   scoped_ptr<DeviceOrientationEventPump> device_orientation_event_pump_;
 
   scoped_refptr<base::SingleThreadTaskRunner> default_task_runner_;
-  scoped_refptr<base::MessageLoopProxy> child_thread_loop_;
   scoped_refptr<IPC::SyncMessageFilter> sync_message_filter_;
   scoped_refptr<ThreadSafeSender> thread_safe_sender_;
   scoped_refptr<QuotaMessageFilter> quota_message_filter_;
@@ -252,7 +248,8 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
 
   scoped_ptr<BatteryStatusDispatcher> battery_status_dispatcher_;
 
-  scoped_ptr<WebBluetoothImpl> bluetooth_;
+  // Handle to the Vibration mojo service.
+  device::VibrationManagerPtr vibration_manager_;
 
   IDMap<PlatformEventObserverBase, IDMapOwnPointer> platform_event_observers_;
 

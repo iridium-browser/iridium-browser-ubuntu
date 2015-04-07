@@ -20,7 +20,7 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host_observer.h"
 #include "ui/gfx/display_observer.h"
-#include "ui/gfx/point.h"
+#include "ui/gfx/geometry/point.h"
 
 namespace aura {
 class Display;
@@ -153,8 +153,8 @@ class ASH_EXPORT DisplayController : public gfx::DisplayObserver,
   void OnHostResized(const aura::WindowTreeHost* host) override;
 
   // aura::DisplayManager::Delegate overrides:
-  void CreateOrUpdateNonDesktopDisplay(const DisplayInfo& info) override;
-  void CloseNonDesktopDisplay() override;
+  void CreateOrUpdateMirroringDisplay(const DisplayInfo& info) override;
+  void CloseMirroringDisplay() override;
   void PreDisplayConfigurationChange(bool clear_focus) override;
   void PostDisplayConfigurationChange() override;
 

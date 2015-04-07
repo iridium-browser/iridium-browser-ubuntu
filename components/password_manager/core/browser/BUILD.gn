@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//third_party/protobuf/proto_library.gni")
+
 if (is_android) {
   import("//build/config/android/config.gni")
 }
@@ -15,6 +17,11 @@ config("password_manager_config") {
 
 static_library("browser") {
   sources = [
+    "affiliation_fetcher_delegate.h",
+    "affiliation_fetcher.cc",
+    "affiliation_fetcher.h",
+    "affiliation_utils.cc",
+    "affiliation_utils.h",
     "browser_save_password_progress_logger.cc",
     "browser_save_password_progress_logger.h",
     "credential_manager_dispatcher.h",
@@ -42,6 +49,8 @@ static_library("browser") {
     "password_manager_internals_service.h",
     "password_manager_metrics_util.cc",
     "password_manager_metrics_util.h",
+    "password_manager_url_collection_experiment.cc",
+    "password_manager_url_collection_experiment.h",
     "password_store.cc",
     "password_store.h",
     "password_store_change.h",
@@ -61,13 +70,16 @@ static_library("browser") {
   ]
 
   deps = [
+    ":proto",
     "//base",
     "//components/autofill/core/common",
     "//components/keyed_service/core",
     "//components/os_crypt",
     "//components/password_manager/core/common",
+    "//components/strings",
     "//net",
     "//sql",
+    "//third_party/protobuf:protobuf_lite",
     "//url",
   ]
 
@@ -90,6 +102,12 @@ static_library("browser") {
     ]
     deps += [ "//sync" ]
   }
+}
+
+proto_library("proto") {
+  sources = [
+    "affiliation_api.proto",
+  ]
 }
 
 source_set("test_support") {

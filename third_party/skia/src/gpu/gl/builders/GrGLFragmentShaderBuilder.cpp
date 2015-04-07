@@ -8,33 +8,29 @@
 #include "GrGLFragmentShaderBuilder.h"
 #include "GrGLShaderStringBuilder.h"
 #include "GrGLProgramBuilder.h"
-#include "../GrGpuGL.h"
+#include "../GrGLGpu.h"
 
 #define GL_CALL(X) GR_GL_CALL(fProgramBuilder->gpu()->glInterface(), X)
 #define GL_CALL_RET(R, X) GR_GL_CALL_RET(fProgramBuilder->gpu()->glInterface(), R, X)
 
-// ES2 FS only guarantees mediump and lowp support
-static const GrGLShaderVar::Precision kDefaultFragmentPrecision = GrGLShaderVar::kMedium_Precision;
 const char* GrGLFragmentShaderBuilder::kDstCopyColorName = "_dstColor";
 static const char* declared_color_output_name() { return "fsColorOut"; }
 static const char* dual_source_output_name() { return "dualSourceOut"; }
-static void append_default_precision_qualifier(GrGLShaderVar::Precision p,
+static void append_default_precision_qualifier(GrSLPrecision p,
                                                GrGLStandard standard,
                                                SkString* str) {
     // Desktop GLSL has added precision qualifiers but they don't do anything.
     if (kGLES_GrGLStandard == standard) {
         switch (p) {
-            case GrGLShaderVar::kHigh_Precision:
+            case kHigh_GrSLPrecision:
                 str->append("precision highp float;\n");
                 break;
-            case GrGLShaderVar::kMedium_Precision:
+            case kMedium_GrSLPrecision:
                 str->append("precision mediump float;\n");
                 break;
-            case GrGLShaderVar::kLow_Precision:
+            case kLow_GrSLPrecision:
                 str->append("precision lowp float;\n");
                 break;
-            case GrGLShaderVar::kDefault_Precision:
-                SkFAIL("Default precision now allowed.");
             default:
                 SkFAIL("Unknown precision value.");
         }
@@ -83,7 +79,7 @@ GrGLFragmentShaderBuilder::GrGLFragmentShaderBuilder(GrGLProgramBuilder* program
 bool GrGLFragmentShaderBuilder::enableFeature(GLSLFeature feature) {
     switch (feature) {
         case kStandardDerivatives_GLSLFeature: {
-            GrGpuGL* gpu = fProgramBuilder->gpu();
+            GrGLGpu* gpu = fProgramBuilder->gpu();
             if (!gpu->glCaps().shaderDerivativeSupport()) {
                 return false;
             }
@@ -119,7 +115,7 @@ SkString GrGLFragmentShaderBuilder::ensureFSCoords2D(
 const char* GrGLFragmentShaderBuilder::fragmentPosition() {
     fHasReadFragmentPosition = true;
 
-    GrGpuGL* gpu = fProgramBuilder->gpu();
+    GrGLGpu* gpu = fProgramBuilder->gpu();
     // We only declare "gl_FragCoord" when we're in the case where we want to use layout qualifiers
     // to reverse y. Otherwise it isn't necessary and whether the "in" qualifier appears in the
     // declaration varies in earlier GLSL specs. So it is simpler to omit it.
@@ -135,7 +131,7 @@ const char* GrGLFragmentShaderBuilder::fragmentPosition() {
             fInputs.push_back().set(kVec4f_GrSLType,
                                     GrGLShaderVar::kIn_TypeModifier,
                                     "gl_FragCoord",
-                                    GrGLShaderVar::kDefault_Precision,
+                                    kDefault_GrSLPrecision,
                                     GrGLShaderVar::kUpperLeft_Origin);
             fSetupFragPosition = true;
         }
@@ -151,6 +147,7 @@ const char* GrGLFragmentShaderBuilder::fragmentPosition() {
             fProgramBuilder->fUniformHandles.fRTHeightUni =
                     fProgramBuilder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
                                                 kFloat_GrSLType,
+                                                kDefault_GrSLPrecision,
                                                 "RTHeight",
                                                 &rtHeightName);
 
@@ -169,7 +166,7 @@ const char* GrGLFragmentShaderBuilder::fragmentPosition() {
 const char* GrGLFragmentShaderBuilder::dstColor() {
     fHasReadDstColor = true;
 
-    GrGpuGL* gpu = fProgramBuilder->gpu();
+    GrGLGpu* gpu = fProgramBuilder->gpu();
     if (gpu->glCaps().fbFetchSupport()) {
         this->addFeature(1 << (GrGLFragmentShaderBuilder::kLastGLSLPrivateFeature + 1),
                          gpu->glCaps().fbFetchExtensionString());
@@ -203,16 +200,19 @@ void GrGLFragmentShaderBuilder::emitCodeToReadDstTexture() {
     fProgramBuilder->fUniformHandles.fDstCopySamplerUni =
             fProgramBuilder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
                                         kSampler2D_GrSLType,
+                                        kDefault_GrSLPrecision,
                                         "DstCopySampler",
                                         &dstCopySamplerName);
     fProgramBuilder->fUniformHandles.fDstCopyTopLeftUni =
             fProgramBuilder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
                                         kVec2f_GrSLType,
+                                        kDefault_GrSLPrecision,
                                         "DstCopyUpperLeft",
                                         &dstCopyTopLeftName);
     fProgramBuilder->fUniformHandles.fDstCopyScaleUni =
             fProgramBuilder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
                                         kVec2f_GrSLType,
+                                        kDefault_GrSLPrecision,
                                         "DstCopyCoordScale",
                                         &dstCopyCoordScaleName);
     const char* fragPos = this->fragmentPosition();
@@ -256,61 +256,12 @@ const char* GrGLFragmentShaderBuilder::getSecondaryColorOutputName() const {
     return dual_source_output_name();
 }
 
-void GrGLFragmentShaderBuilder::enableSecondaryOutput(const GrGLSLExpr4& inputColor,
-                                                      const GrGLSLExpr4& inputCoverage) {
-    this->enableSecondaryOutput();
-    const char* secondaryOutputName = this->getSecondaryColorOutputName();
-    GrGLSLExpr4 coeff(1);
-    switch (fProgramBuilder->header().fSecondaryOutputType) {
-        case GrProgramDesc::kCoverage_SecondaryOutputType:
-            break;
-        case GrProgramDesc::kCoverageISA_SecondaryOutputType:
-            // Get (1-A) into coeff
-            coeff = GrGLSLExpr4::VectorCast(GrGLSLExpr1(1) - inputColor.a());
-            break;
-        case GrProgramDesc::kCoverageISC_SecondaryOutputType:
-            // Get (1-RGBA) into coeff
-            coeff = GrGLSLExpr4(1) - inputColor;
-            break;
-        default:
-            SkFAIL("Unexpected Secondary Output");
-    }
-    // Get coeff * coverage into modulate and then write that to the dual source output.
-    this->codeAppendf("\t%s = %s;\n", secondaryOutputName, (coeff * inputCoverage).c_str());
-}
-
-void GrGLFragmentShaderBuilder::combineColorAndCoverage(const GrGLSLExpr4& inputColor,
-                                                        const GrGLSLExpr4& inputCoverage) {
-    GrGLSLExpr4 fragColor = inputColor * inputCoverage;
-    switch (fProgramBuilder->header().fPrimaryOutputType) {
-        case GrProgramDesc::kModulate_PrimaryOutputType:
-            break;
-        case GrProgramDesc::kCombineWithDst_PrimaryOutputType:
-            {
-                // Tack on "+(1-coverage)dst onto the frag color.
-                GrGLSLExpr4 dstCoeff = GrGLSLExpr4(1) - inputCoverage;
-                GrGLSLExpr4 dstContribution = dstCoeff * GrGLSLExpr4(this->dstColor());
-                fragColor = fragColor + dstContribution;
-            }
-            break;
-        default:
-            SkFAIL("Unknown Primary Output");
-    }
-
-    // On any post 1.10 GLSL supporting GPU, we declare custom output
-    if (k110_GrGLSLGeneration != fProgramBuilder->gpu()->glslGeneration()) {
-        this->enableCustomOutput();
-    }
-
-    this->codeAppendf("\t%s = %s;\n", this->getPrimaryColorOutputName(), fragColor.c_str());
-}
-
 bool GrGLFragmentShaderBuilder::compileAndAttachShaders(GrGLuint programId,
                                                         SkTDArray<GrGLuint>* shaderIds) const {
-    GrGpuGL* gpu = fProgramBuilder->gpu();
+    GrGLGpu* gpu = fProgramBuilder->gpu();
     SkString fragShaderSrc(GrGetGLSLVersionDecl(gpu->ctxInfo()));
     fragShaderSrc.append(fExtensions);
-    append_default_precision_qualifier(kDefaultFragmentPrecision,
+    append_default_precision_qualifier(kDefault_GrSLPrecision,
                                        gpu->glStandard(),
                                        &fragShaderSrc);
     fProgramBuilder->appendUniformDecls(GrGLProgramBuilder::kFragment_Visibility, &fragShaderSrc);
@@ -346,7 +297,7 @@ void GrGLFragmentShaderBuilder::bindFragmentShaderLocations(GrGLuint programID) 
     }
 }
 
-void GrGLFragmentShaderBuilder::addVarying(GrGLVarying* v, GrGLShaderVar::Precision fsPrec) {
+void GrGLFragmentShaderBuilder::addVarying(GrGLVarying* v, GrSLPrecision fsPrec) {
     v->fFsIn = v->fVsOut;
     if (v->fGsOut) {
         v->fFsIn = v->fGsOut;

@@ -29,6 +29,7 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_io_data.h"
@@ -36,7 +37,7 @@
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/signin/chrome_signin_client.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
-#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
+#include "chrome/browser/signin/signin_error_controller_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_names_io_thread.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -47,10 +48,8 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/sync/one_click_signin_histogram.h"
 #include "chrome/browser/ui/sync/one_click_signin_sync_observer.h"
 #include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
-#include "chrome/browser/ui/sync/signin_histogram.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -64,11 +63,11 @@
 #include "components/autofill/core/common/password_form.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/password_manager/core/browser/password_manager.h"
-#include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_manager_cookie_helper.h"
+#include "components/signin/core/browser/signin_metrics.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "content/public/browser/browser_thread.h"
@@ -229,16 +228,9 @@ void AddEmailToOneClickRejectedList(Profile* profile,
   updater->AppendIfNotPresent(new base::StringValue(email));
 }
 
-void LogOneClickHistogramValue(int action) {
-  UMA_HISTOGRAM_ENUMERATION("Signin.OneClickActions", action,
-                            one_click_signin::HISTOGRAM_MAX);
-  UMA_HISTOGRAM_ENUMERATION("Signin.AllAccessPointActions", action,
-                            one_click_signin::HISTOGRAM_MAX);
-}
-
 void RedirectToNtpOrAppsPageWithIds(int child_id,
                                     int route_id,
-                                    signin::Source source) {
+                                    signin_metrics::Source source) {
   content::WebContents* web_contents = tab_util::GetWebContentsByID(child_id,
                                                                     route_id);
   if (!web_contents)
@@ -251,7 +243,7 @@ void RedirectToNtpOrAppsPageWithIds(int child_id,
 void StartSync(const OneClickSigninHelper::StartSyncArgs& args,
                OneClickSigninSyncStarter::StartSyncMode start_mode) {
   if (start_mode == OneClickSigninSyncStarter::UNDO_SYNC) {
-    LogOneClickHistogramValue(one_click_signin::HISTOGRAM_UNDO);
+    OneClickSigninHelper::LogHistogramValue(signin_metrics::HISTOGRAM_UNDO);
     return;
   }
 
@@ -260,26 +252,26 @@ void StartSync(const OneClickSigninHelper::StartSyncArgs& args,
       new OneClickSigninHelper::SyncStarterWrapper(args, start_mode);
   wrapper->Start();
 
-  int action = one_click_signin::HISTOGRAM_MAX;
+  int action = signin_metrics::HISTOGRAM_MAX;
   switch (args.auto_accept) {
     case OneClickSigninHelper::AUTO_ACCEPT_EXPLICIT:
       break;
     case OneClickSigninHelper::AUTO_ACCEPT_ACCEPTED:
       action =
           start_mode == OneClickSigninSyncStarter::SYNC_WITH_DEFAULT_SETTINGS ?
-              one_click_signin::HISTOGRAM_AUTO_WITH_DEFAULTS :
-              one_click_signin::HISTOGRAM_AUTO_WITH_ADVANCED;
+              signin_metrics::HISTOGRAM_AUTO_WITH_DEFAULTS :
+              signin_metrics::HISTOGRAM_AUTO_WITH_ADVANCED;
       break;
     case OneClickSigninHelper::AUTO_ACCEPT_CONFIGURE:
       DCHECK(start_mode == OneClickSigninSyncStarter::CONFIGURE_SYNC_FIRST);
-      action = one_click_signin::HISTOGRAM_AUTO_WITH_ADVANCED;
+      action = signin_metrics::HISTOGRAM_AUTO_WITH_ADVANCED;
       break;
     default:
       NOTREACHED() << "Invalid auto_accept: " << args.auto_accept;
       break;
   }
-  if (action != one_click_signin::HISTOGRAM_MAX)
-    LogOneClickHistogramValue(action);
+  if (action != signin_metrics::HISTOGRAM_MAX)
+    OneClickSigninHelper::LogHistogramValue(action);
 }
 
 void StartExplicitSync(const OneClickSigninHelper::StartSyncArgs& args,
@@ -330,7 +322,7 @@ void ClearPendingEmailOnIOThread(content::ResourceContext* context) {
 // of the known sign-in access points (first run, NTP, Apps page, menu, or
 // settings) or it's an implicit sign in via another Google property.  In the
 // former case, "service" is also checked to make sure its "chromiumsync".
-signin::Source GetSigninSource(const GURL& url, GURL* continue_url) {
+signin_metrics::Source GetSigninSource(const GURL& url, GURL* continue_url) {
   DCHECK(url.is_valid());
   std::string value;
   net::GetValueForKeyInQuery(url, "service", &value);
@@ -357,7 +349,7 @@ signin::Source GetSigninSource(const GURL& url, GURL* continue_url) {
 
   return possibly_an_explicit_signin ?
       signin::GetSourceForPromoURL(local_continue_url) :
-      signin::SOURCE_UNKNOWN;
+      signin_metrics::SOURCE_UNKNOWN;
 }
 
 // Returns true if |url| is a valid URL that can occur during the sign in
@@ -394,7 +386,9 @@ bool IsValidGaiaSigninRedirectOrResponseURL(const GURL& url) {
 // or the one click sign in to chrome page.
 // NOTE: This should only be used for logging purposes since it relies on hard
 // coded URLs that could change.
-bool AreWeShowingSignin(GURL url, signin::Source source, std::string email) {
+bool AreWeShowingSignin(GURL url,
+                        signin_metrics::Source source,
+                        std::string email) {
   GURL::Replacements replacements;
   replacements.ClearQuery();
   GURL clean_login_url =
@@ -402,7 +396,7 @@ bool AreWeShowingSignin(GURL url, signin::Source source, std::string email) {
           replacements);
 
   return (url.ReplaceComponents(replacements) == clean_login_url &&
-          source != signin::SOURCE_UNKNOWN) ||
+          source != signin_metrics::SOURCE_UNKNOWN) ||
       (IsValidGaiaSigninRedirectOrResponseURL(url) &&
        url.spec().find("ChromeLoginPrompt") != std::string::npos &&
        !email.empty());
@@ -494,7 +488,7 @@ OneClickSigninHelper::StartSyncArgs::StartSyncArgs()
       auto_accept(AUTO_ACCEPT_NONE),
       web_contents(NULL),
       confirmation_required(OneClickSigninSyncStarter::NO_CONFIRMATION),
-      source(signin::SOURCE_UNKNOWN) {}
+      source(signin_metrics::SOURCE_UNKNOWN) {}
 
 OneClickSigninHelper::StartSyncArgs::StartSyncArgs(
     Profile* profile,
@@ -506,7 +500,7 @@ OneClickSigninHelper::StartSyncArgs::StartSyncArgs(
     const std::string& refresh_token,
     content::WebContents* web_contents,
     bool untrusted_confirmation_required,
-    signin::Source source,
+    signin_metrics::Source source,
     OneClickSigninSyncStarter::Callback callback)
     : profile(profile),
       browser(browser),
@@ -521,7 +515,7 @@ OneClickSigninHelper::StartSyncArgs::StartSyncArgs(
   DCHECK(session_index.empty() != refresh_token.empty());
   if (untrusted_confirmation_required) {
     confirmation_required = OneClickSigninSyncStarter::CONFIRM_UNTRUSTED_SIGNIN;
-  } else if (source == signin::SOURCE_SETTINGS) {
+  } else if (source == signin_metrics::SOURCE_SETTINGS) {
     // Do not display a status confirmation for re-auth.
     confirmation_required = OneClickSigninSyncStarter::NO_CONFIRMATION;
   } else {
@@ -672,22 +666,22 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(OneClickSigninHelper);
 // static
 const int OneClickSigninHelper::kMaxNavigationsSince = 10;
 
-OneClickSigninHelper::OneClickSigninHelper(
-    content::WebContents* web_contents,
-    password_manager::PasswordManager* password_manager)
+OneClickSigninHelper::OneClickSigninHelper(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       showing_signin_(false),
       auto_accept_(AUTO_ACCEPT_NONE),
-      source_(signin::SOURCE_UNKNOWN),
+      source_(signin_metrics::SOURCE_UNKNOWN),
       switched_to_advanced_(false),
       untrusted_navigations_since_signin_visit_(0),
       untrusted_confirmation_required_(false),
       do_not_clear_pending_email_(false),
       do_not_start_sync_for_testing_(false),
       weak_pointer_factory_(this) {
+  ChromePasswordManagerClient* client =
+      ChromePasswordManagerClient::FromWebContents(web_contents);
   // May be NULL during testing.
-  if (password_manager) {
-    password_manager->AddSubmissionCallback(
+  if (client) {
+    client->GetPasswordManager()->AddSubmissionCallback(
         base::Bind(&OneClickSigninHelper::PasswordSubmitted,
                    weak_pointer_factory_.GetWeakPtr()));
   }
@@ -696,76 +690,9 @@ OneClickSigninHelper::OneClickSigninHelper(
 OneClickSigninHelper::~OneClickSigninHelper() {}
 
 // static
-void OneClickSigninHelper::LogHistogramValue(
-    signin::Source source, int action) {
-  switch (source) {
-    case signin::SOURCE_START_PAGE:
-      UMA_HISTOGRAM_ENUMERATION("Signin.StartPageActions", action,
-                                one_click_signin::HISTOGRAM_MAX);
-      break;
-    case signin::SOURCE_NTP_LINK:
-      UMA_HISTOGRAM_ENUMERATION("Signin.NTPLinkActions", action,
-                                one_click_signin::HISTOGRAM_MAX);
-      break;
-    case signin::SOURCE_MENU:
-      UMA_HISTOGRAM_ENUMERATION("Signin.MenuActions", action,
-                                one_click_signin::HISTOGRAM_MAX);
-      break;
-    case signin::SOURCE_SETTINGS:
-      UMA_HISTOGRAM_ENUMERATION("Signin.SettingsActions", action,
-                                one_click_signin::HISTOGRAM_MAX);
-      break;
-    case signin::SOURCE_EXTENSION_INSTALL_BUBBLE:
-      UMA_HISTOGRAM_ENUMERATION("Signin.ExtensionInstallBubbleActions", action,
-                                one_click_signin::HISTOGRAM_MAX);
-      break;
-    case signin::SOURCE_APP_LAUNCHER:
-      UMA_HISTOGRAM_ENUMERATION("Signin.AppLauncherActions", action,
-                                one_click_signin::HISTOGRAM_MAX);
-      break;
-    case signin::SOURCE_APPS_PAGE_LINK:
-      UMA_HISTOGRAM_ENUMERATION("Signin.AppsPageLinkActions", action,
-                                one_click_signin::HISTOGRAM_MAX);
-      break;
-    case signin::SOURCE_BOOKMARK_BUBBLE:
-      UMA_HISTOGRAM_ENUMERATION("Signin.BookmarkBubbleActions", action,
-                                one_click_signin::HISTOGRAM_MAX);
-      break;
-    case signin::SOURCE_AVATAR_BUBBLE_SIGN_IN:
-      UMA_HISTOGRAM_ENUMERATION("Signin.AvatarBubbleActions", action,
-                                one_click_signin::HISTOGRAM_MAX);
-      break;
-    case signin::SOURCE_AVATAR_BUBBLE_ADD_ACCOUNT:
-      UMA_HISTOGRAM_ENUMERATION("Signin.AvatarBubbleActions", action,
-                                one_click_signin::HISTOGRAM_MAX);
-      break;
-    case signin::SOURCE_DEVICES_PAGE:
-      UMA_HISTOGRAM_ENUMERATION("Signin.DevicesPageActions", action,
-                                one_click_signin::HISTOGRAM_MAX);
-      break;
-    case signin::SOURCE_REAUTH:
-      UMA_HISTOGRAM_ENUMERATION("Signin.ReauthActions", action,
-                                one_click_signin::HISTOGRAM_MAX);
-      break;
-    default:
-      // This switch statement needs to be updated when the enum Source changes.
-      COMPILE_ASSERT(signin::SOURCE_UNKNOWN == 12,
-                     kSourceEnumHasChangedButNotThisSwitchStatement);
-      UMA_HISTOGRAM_ENUMERATION("Signin.UnknownActions", action,
-                                one_click_signin::HISTOGRAM_MAX);
-  }
+void OneClickSigninHelper::LogHistogramValue(int action) {
   UMA_HISTOGRAM_ENUMERATION("Signin.AllAccessPointActions", action,
-                            one_click_signin::HISTOGRAM_MAX);
-}
-
-// static
-void OneClickSigninHelper::CreateForWebContentsWithPasswordManager(
-    content::WebContents* contents,
-    password_manager::PasswordManager* password_manager) {
-  if (!FromWebContents(contents)) {
-    contents->SetUserData(UserDataKey(),
-                          new OneClickSigninHelper(contents, password_manager));
-  }
+                            signin_metrics::HISTOGRAM_MAX);
 }
 
 // static
@@ -823,8 +750,8 @@ bool OneClickSigninHelper::CanOffer(content::WebContents* web_contents,
       const bool same_email = gaia::AreEmailsSame(current_email, email);
       if (!current_email.empty() && !same_email) {
         UMA_HISTOGRAM_ENUMERATION("Signin.Reauth",
-                                  signin::HISTOGRAM_ACCOUNT_MISSMATCH,
-                                  signin::HISTOGRAM_MAX);
+                                  signin_metrics::HISTOGRAM_ACCOUNT_MISSMATCH,
+                                  signin_metrics::HISTOGRAM_MAX);
         if (error_message) {
           error_message->assign(
               l10n_util::GetStringFUTF8(IDS_SYNC_WRONG_EMAIL,
@@ -990,7 +917,7 @@ void OneClickSigninHelper::ShowInfoBarIfPossible(net::URLRequest* request,
 
   // Parse Google-Chrome-SignIn.
   AutoAccept auto_accept = AUTO_ACCEPT_NONE;
-  signin::Source source = signin::SOURCE_UNKNOWN;
+  signin_metrics::Source source = signin_metrics::SOURCE_UNKNOWN;
   GURL continue_url;
   std::vector<std::string> tokens;
   base::SplitString(google_chrome_signin_value, ',', &tokens);
@@ -1008,7 +935,7 @@ void OneClickSigninHelper::ShowInfoBarIfPossible(net::URLRequest* request,
   // If this is an explicit sign in (i.e., first run, NTP, Apps page, menu,
   // settings) then force the auto accept type to explicit.
   source = GetSigninSource(request->url(), &continue_url);
-  if (source != signin::SOURCE_UNKNOWN)
+  if (source != signin_metrics::SOURCE_UNKNOWN)
     auto_accept = AUTO_ACCEPT_EXPLICIT;
 
   if (auto_accept != AUTO_ACCEPT_NONE) {
@@ -1037,14 +964,14 @@ void OneClickSigninHelper::ShowInfoBarIfPossible(net::URLRequest* request,
 // static
 void OneClickSigninHelper::LogConfirmHistogramValue(int action) {
   UMA_HISTOGRAM_ENUMERATION("Signin.OneClickConfirmation", action,
-                            one_click_signin::HISTOGRAM_CONFIRM_MAX);
+                            signin_metrics::HISTOGRAM_CONFIRM_MAX);
 }
 // static
 void OneClickSigninHelper::ShowInfoBarUIThread(
     const std::string& session_index,
     const std::string& email,
     AutoAccept auto_accept,
-    signin::Source source,
+    signin_metrics::Source source,
     const GURL& continue_url,
     int child_id,
     int route_id) {
@@ -1065,8 +992,8 @@ void OneClickSigninHelper::ShowInfoBarUIThread(
   if (auto_accept != AUTO_ACCEPT_NONE)
     helper->auto_accept_ = auto_accept;
 
-  if (source != signin::SOURCE_UNKNOWN &&
-      helper->source_ == signin::SOURCE_UNKNOWN) {
+  if (source != signin_metrics::SOURCE_UNKNOWN &&
+      helper->source_ == signin_metrics::SOURCE_UNKNOWN) {
     helper->source_ = source;
   }
 
@@ -1137,7 +1064,7 @@ bool OneClickSigninHelper::HandleCrossAccountError(
     const std::string& password,
     const std::string& refresh_token,
     OneClickSigninHelper::AutoAccept auto_accept,
-    signin::Source source,
+    signin_metrics::Source source,
     OneClickSigninSyncStarter::StartSyncMode start_mode,
     OneClickSigninSyncStarter::Callback sync_callback) {
   std::string last_email =
@@ -1178,7 +1105,7 @@ bool OneClickSigninHelper::HandleCrossAccountError(
 
 // static
 void OneClickSigninHelper::RedirectToNtpOrAppsPage(
-    content::WebContents* contents, signin::Source source) {
+    content::WebContents* contents, signin_metrics::Source source) {
   // Do nothing if a navigation is pending, since this call can be triggered
   // from DidStartLoading. This avoids deleting the pending entry while we are
   // still navigating to it. See crbug/346632.
@@ -1187,7 +1114,7 @@ void OneClickSigninHelper::RedirectToNtpOrAppsPage(
 
   VLOG(1) << "RedirectToNtpOrAppsPage";
   // Redirect to NTP/Apps page and display a confirmation bubble
-  GURL url(source == signin::SOURCE_APPS_PAGE_LINK ?
+  GURL url(source == signin_metrics::SOURCE_APPS_PAGE_LINK ?
            chrome::kChromeUIAppsURL : chrome::kChromeUINewTabURL);
   content::OpenURLParams params(url,
                                 content::Referrer(),
@@ -1199,8 +1126,8 @@ void OneClickSigninHelper::RedirectToNtpOrAppsPage(
 
 // static
 void OneClickSigninHelper::RedirectToNtpOrAppsPageIfNecessary(
-    content::WebContents* contents, signin::Source source) {
-  if (source != signin::SOURCE_SETTINGS) {
+    content::WebContents* contents, signin_metrics::Source source) {
+  if (source != signin_metrics::SOURCE_SETTINGS) {
     RedirectToNtpOrAppsPage(contents, source);
   }
 }
@@ -1209,9 +1136,9 @@ void OneClickSigninHelper::RedirectToSignin() {
   VLOG(1) << "OneClickSigninHelper::RedirectToSignin";
 
   // Extract the existing sounce=X value.  Default to "2" if missing.
-  signin::Source source = signin::GetSourceForPromoURL(continue_url_);
-  if (source == signin::SOURCE_UNKNOWN)
-    source = signin::SOURCE_MENU;
+  signin_metrics::Source source = signin::GetSourceForPromoURL(continue_url_);
+  if (source == signin_metrics::SOURCE_UNKNOWN)
+    source = signin_metrics::SOURCE_MENU;
   GURL page = signin::GetPromoURL(source, false);
 
   content::WebContents* contents = web_contents();
@@ -1227,7 +1154,7 @@ void OneClickSigninHelper::CleanTransientState() {
   email_.clear();
   password_.clear();
   auto_accept_ = AUTO_ACCEPT_NONE;
-  source_ = signin::SOURCE_UNKNOWN;
+  source_ = signin_metrics::SOURCE_UNKNOWN;
   switched_to_advanced_ = false;
   continue_url_ = GURL();
   untrusted_navigations_since_signin_visit_ = 0;
@@ -1348,12 +1275,8 @@ void OneClickSigninHelper::DidStopLoading(
   }
 
   if (AreWeShowingSignin(url, source_, email_)) {
-    if (!showing_signin_) {
-      if (source_ == signin::SOURCE_UNKNOWN)
-        LogOneClickHistogramValue(one_click_signin::HISTOGRAM_SHOWN);
-      else
-        LogHistogramValue(source_, one_click_signin::HISTOGRAM_SHOWN);
-    }
+    if (!showing_signin_)
+      LogHistogramValue(signin_metrics::HISTOGRAM_SHOWN);
     showing_signin_ = true;
   }
 
@@ -1421,7 +1344,7 @@ void OneClickSigninHelper::DidStopLoading(
   // may itself lead to a redirect, which means this function will never see
   // the continue URL go by.
   if (auto_accept_ == AUTO_ACCEPT_EXPLICIT) {
-    DCHECK(source_ != signin::SOURCE_UNKNOWN);
+    DCHECK(source_ != signin_metrics::SOURCE_UNKNOWN);
     if (!continue_url_match) {
       VLOG(1) << "OneClickSigninHelper::DidStopLoading: invalid url='"
               << url.spec()
@@ -1439,10 +1362,10 @@ void OneClickSigninHelper::DidStopLoading(
     // If the source was changed to SOURCE_SETTINGS, we want
     // OneClickSigninSyncStarter to reuse the current tab to display the
     // advanced configuration.
-    signin::Source source = signin::GetSourceForPromoURL(url);
+    signin_metrics::Source source = signin::GetSourceForPromoURL(url);
     if (source != source_) {
       source_ = source;
-      switched_to_advanced_ = source == signin::SOURCE_SETTINGS;
+      switched_to_advanced_ = source == signin_metrics::SOURCE_SETTINGS;
     }
   }
 
@@ -1455,11 +1378,11 @@ void OneClickSigninHelper::DidStopLoading(
   switch (auto_accept_) {
     case AUTO_ACCEPT_NONE:
       if (showing_signin_)
-        LogOneClickHistogramValue(one_click_signin::HISTOGRAM_DISMISSED);
+        LogHistogramValue(signin_metrics::HISTOGRAM_DISMISSED);
       break;
     case AUTO_ACCEPT_ACCEPTED:
-      LogOneClickHistogramValue(one_click_signin::HISTOGRAM_ACCEPTED);
-      LogOneClickHistogramValue(one_click_signin::HISTOGRAM_WITH_DEFAULTS);
+      LogHistogramValue(signin_metrics::HISTOGRAM_ACCEPTED);
+      LogHistogramValue(signin_metrics::HISTOGRAM_WITH_DEFAULTS);
       SigninManager::DisableOneClickSignIn(profile->GetPrefs());
       // Start syncing with the default settings - prompt the user to sign in
       // first.
@@ -1474,8 +1397,8 @@ void OneClickSigninHelper::DidStopLoading(
       }
       break;
     case AUTO_ACCEPT_CONFIGURE:
-      LogOneClickHistogramValue(one_click_signin::HISTOGRAM_ACCEPTED);
-      LogOneClickHistogramValue(one_click_signin::HISTOGRAM_WITH_ADVANCED);
+      LogHistogramValue(signin_metrics::HISTOGRAM_ACCEPTED);
+      LogHistogramValue(signin_metrics::HISTOGRAM_WITH_ADVANCED);
       SigninManager::DisableOneClickSignIn(profile->GetPrefs());
       // Display the extra confirmation (even in the SAML case) in case this
       // was an untrusted renderer.
@@ -1490,16 +1413,14 @@ void OneClickSigninHelper::DidStopLoading(
       }
       break;
     case AUTO_ACCEPT_EXPLICIT: {
-      signin::Source original_source =
+      signin_metrics::Source original_source =
           signin::GetSourceForPromoURL(original_continue_url_);
       if (switched_to_advanced_) {
-        LogHistogramValue(original_source,
-                          one_click_signin::HISTOGRAM_WITH_ADVANCED);
-        LogHistogramValue(original_source,
-                          one_click_signin::HISTOGRAM_ACCEPTED);
+        LogHistogramValue(signin_metrics::HISTOGRAM_WITH_ADVANCED);
+        LogHistogramValue(signin_metrics::HISTOGRAM_ACCEPTED);
       } else {
-        LogHistogramValue(source_, one_click_signin::HISTOGRAM_ACCEPTED);
-        LogHistogramValue(source_, one_click_signin::HISTOGRAM_WITH_DEFAULTS);
+        LogHistogramValue(signin_metrics::HISTOGRAM_ACCEPTED);
+        LogHistogramValue(signin_metrics::HISTOGRAM_WITH_DEFAULTS);
       }
 
       // - If sign in was initiated from the NTP or the hotdog menu, sync with
@@ -1511,11 +1432,10 @@ void OneClickSigninHelper::DidStopLoading(
       ProfileSyncService* sync_service =
           ProfileSyncServiceFactory::GetForProfile(profile);
       SigninErrorController* error_controller =
-          ProfileOAuth2TokenServiceFactory::GetForProfile(profile)->
-              signin_error_controller();
+          SigninErrorControllerFactory::GetForProfile(profile);
 
       OneClickSigninSyncStarter::StartSyncMode start_mode =
-          source_ == signin::SOURCE_SETTINGS ?
+          source_ == signin_metrics::SOURCE_SETTINGS ?
               (error_controller->HasError() &&
                sync_service && sync_service->HasSyncSetupCompleted()) ?
                   OneClickSigninSyncStarter::SHOW_SETTINGS_WITHOUT_CONFIGURE :
@@ -1545,7 +1465,7 @@ void OneClickSigninHelper::DidStopLoading(
       // Observe the sync service if the settings tab requested a gaia sign in,
       // so that when sign in and sync setup are successful, we can redirect to
       // the correct URL, or auto-close the gaia sign in tab.
-      if (original_source == signin::SOURCE_SETTINGS) {
+      if (original_source == signin_metrics::SOURCE_SETTINGS) {
         // The observer deletes itself once it's done.
         new OneClickSigninSyncObserver(contents, original_continue_url_);
       }
@@ -1553,7 +1473,7 @@ void OneClickSigninHelper::DidStopLoading(
     }
     case AUTO_ACCEPT_REJECTED_FOR_PROFILE:
       AddEmailToOneClickRejectedList(profile, email_);
-      LogOneClickHistogramValue(one_click_signin::HISTOGRAM_REJECTED);
+      LogHistogramValue(signin_metrics::HISTOGRAM_REJECTED);
       break;
     default:
       NOTREACHED() << "Invalid auto_accept=" << auto_accept_;

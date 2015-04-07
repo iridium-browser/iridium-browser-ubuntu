@@ -46,7 +46,7 @@ NACL_TOOLS_DIR = os.path.join(NACL_DIR, 'tools')
 # (i.e. before the tests would pass on the main NaCl buildbots/trybots).
 # If you are adding a test that depends on a toolchain change, you can
 # increment this version number manually.
-FEATURE_VERSION = 9
+FEATURE_VERSION = 11
 
 # For backward compatibility, these key names match the directory names
 # previously used with gclient
@@ -109,7 +109,7 @@ TRANSLATOR_ARCHES = ('x86-32', 'x86-64', 'arm', 'mips32',
 BITCODE_BIASES = tuple(
     bias for bias in ('le32', 'i686_bc', 'x86_64_bc', 'arm_bc'))
 
-DIRECT_TO_NACL_ARCHES = ('x86_64', 'i686')
+DIRECT_TO_NACL_ARCHES = ['x86_64', 'i686']
 
 MAKE_DESTDIR_CMD = ['make', 'DESTDIR=%(abs_output)s']
 
@@ -191,6 +191,9 @@ def ConfigureHostArchFlags(host, extra_cflags, options):
       # LLVM's linux->mingw cross build needs this
       configure_args.append('CC_FOR_BUILD=gcc')
   else:
+    if TripleIsMac(host):
+      # This is required for building with recent libc++ against OSX 10.6
+      extra_cflags.append('-U__STRICT_ANSI__')
     if options.gcc:
       configure_args.extend(['CFLAGS=' + ' '.join(extra_cflags),
                              'CXXFLAGS=' + ' '.join(extra_cflags)])
@@ -381,6 +384,19 @@ def CopyHostLibcxxForLLVMBuild(host, dest, options):
           command.Copy('%(' + GSDJoin('abs_libcxx', host) +')s/lib/' + libname,
                        os.path.join(dest, libname))]
 
+def CreateSymLinksToDirectToNaClTools():
+  return (
+      [command.Command(['ln', '-f',
+                        command.path.join('%(output)s', 'bin','clang'),
+                        command.path.join('%(output)s', 'bin',
+                                          arch + '-nacl-clang')])
+       for arch in DIRECT_TO_NACL_ARCHES] +
+      [command.Command(['ln', '-f',
+                        command.path.join('%(output)s', 'bin','clang'),
+                        command.path.join('%(output)s', 'bin',
+                                          arch + '-nacl-clang++')])
+       for arch in DIRECT_TO_NACL_ARCHES])
+
 def HostLibs(host, options):
   def H(component_name):
     # Return a package name for a component name with a host triple.
@@ -503,7 +519,7 @@ def HostTools(host, options):
                   ['-DCMAKE_BUILD_TYPE=RelWithDebInfo',
                   '-DCMAKE_INSTALL_PREFIX=%(output)s',
                   '-DCMAKE_INSTALL_RPATH=$ORIGIN/../lib',
-                  '-DLLVM_ENABLE_LIBCXX=ON',
+                  '-DLLVM_ENABLE_LIBCXX=OFF',
                   '-DBUILD_SHARED_LIBS=ON',
                   '-DLLVM_TARGETS_TO_BUILD=X86;ARM;Mips',
                   '-DLLVM_ENABLE_ASSERTIONS=ON',
@@ -515,7 +531,8 @@ def HostTools(host, options):
                   '%(llvm_src)s']),
               command.Command(['ninja', '-v']),
               command.Command(['ninja', 'install']),
-        ],
+              ] +
+          CreateSymLinksToDirectToNaClTools()
       },
   }
   llvm_autoconf = {
@@ -556,16 +573,7 @@ def HostTools(host, options):
                                Exe('clang-format'), Exe('clang-check'),
                                Exe('c-index-test'), Exe('clang-tblgen'),
                                Exe('llvm-tblgen')])] +
-              [command.Command(['ln', '-f',
-                                command.path.join('%(output)s', 'bin','clang'),
-                                command.path.join('%(output)s', 'bin',
-                                                  arch + '-nacl-clang')])
-               for arch in DIRECT_TO_NACL_ARCHES] +
-              [command.Command(['ln', '-f',
-                                command.path.join('%(output)s', 'bin','clang'),
-                                command.path.join('%(output)s', 'bin',
-                                                  arch + '-nacl-clang++')])
-               for arch in DIRECT_TO_NACL_ARCHES] +
+              CreateSymLinksToDirectToNaClTools() +
               CopyWindowsHostLibs(host),
       },
   }
@@ -821,32 +829,41 @@ def GetUploadPackageTargets():
   This build can be built among many build bots, but eventually all things
   will be combined together. This package target dictionary describes the final
   output of the entire build.
+
+  For the pnacl toolchain build we want 2 versions of the toolchain:
+    1. pnacl_newlib_raw - The toolchain without core_sdk headers/libraries.
+    2. pnacl_newlib - The toolchain with all the core_sdk headers/libraries.
   """
   package_targets = {}
 
-  common_packages = ['metadata']
+  common_raw_packages = ['metadata']
+  common_complete_packages = []
 
   # Target translator libraries
   for arch in TRANSLATOR_ARCHES:
     legal_arch = pynacl.gsd_storage.LegalizeName(arch)
-    common_packages.append('libs_support_translator_%s' % legal_arch)
-    common_packages.append('compiler_rt_%s' % legal_arch)
+    common_raw_packages.append('libs_support_translator_%s' % legal_arch)
+    common_raw_packages.append('compiler_rt_%s' % legal_arch)
     if not 'nonsfi' in arch:
-      common_packages.append('libgcc_eh_%s' % legal_arch)
+      common_raw_packages.append('libgcc_eh_%s' % legal_arch)
 
   # Target libraries
   for bias in BITCODE_BIASES:
     legal_bias = pynacl.gsd_storage.LegalizeName(bias)
-    common_packages.append('newlib_%s' % legal_bias)
-    common_packages.append('libcxx_%s' % legal_bias)
-    common_packages.append('libstdcxx_%s' % legal_bias)
-    common_packages.append('libs_support_%s' % legal_bias)
+    common_raw_packages.append('newlib_%s' % legal_bias)
+    common_raw_packages.append('libcxx_%s' % legal_bias)
+    common_raw_packages.append('libstdcxx_%s' % legal_bias)
+    common_raw_packages.append('libs_support_%s' % legal_bias)
+
+  # Portable core sdk libs. For now, no biased libs.
+  common_complete_packages.append('core_sdk_libs_le32')
 
   # Direct-to-nacl target libraries
   for arch in DIRECT_TO_NACL_ARCHES:
-    common_packages.append('newlib_%s' % arch)
-    common_packages.append('libcxx_%s' % arch)
-    common_packages.append('libs_support_%s' % arch)
+    common_raw_packages.append('newlib_%s' % arch)
+    common_raw_packages.append('libcxx_%s' % arch)
+    common_raw_packages.append('libs_support_%s' % arch)
+    common_complete_packages.append('core_sdk_libs_%s' % arch)
 
   # Host components
   host_packages = {}
@@ -871,9 +888,12 @@ def GetUploadPackageTargets():
   for os_name, os_packages in host_packages.iteritems():
     package_target = '%s_x86' % pynacl.platform.GetOS(os_name)
     package_targets[package_target] = {}
-    package_name = 'pnacl_newlib'
-    combined_packages = os_packages + common_packages
-    package_targets[package_target][package_name] = combined_packages
+
+    raw_packages = os_packages + common_raw_packages
+    package_targets[package_target]['pnacl_newlib_raw'] = raw_packages
+
+    complete_packages = raw_packages + common_complete_packages
+    package_targets[package_target]['pnacl_newlib'] = complete_packages
 
   return package_targets
 
@@ -954,9 +974,13 @@ if __name__ == '__main__':
         packages.update(pnacl_targetlibs.TargetLibs(bias, is_canonical))
       for arch in DIRECT_TO_NACL_ARCHES:
         packages.update(pnacl_targetlibs.TargetLibs(arch, is_canonical))
+        packages.update(pnacl_targetlibs.SDKLibs(arch, is_canonical))
       for arch in TRANSLATOR_ARCHES:
         packages.update(pnacl_targetlibs.TranslatorLibs(arch, is_canonical))
       packages.update(Metadata(rev))
+      packages.update(pnacl_targetlibs.SDKCompiler(
+                      ['le32'] + DIRECT_TO_NACL_ARCHES))
+      packages.update(pnacl_targetlibs.SDKLibs('le32', is_canonical))
     if pynacl.platform.IsLinux() or pynacl.platform.IsMac():
       packages.update(pnacl_targetlibs.UnsandboxedIRT(
           'x86-32-%s' % pynacl.platform.GetOS()))

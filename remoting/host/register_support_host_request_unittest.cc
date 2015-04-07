@@ -13,7 +13,6 @@
 #include "remoting/base/constants.h"
 #include "remoting/base/rsa_key_pair.h"
 #include "remoting/base/test_rsa_key_pair.h"
-#include "remoting/host/in_memory_host_config.h"
 #include "remoting/signaling/iq_sender.h"
 #include "remoting/signaling/mock_signal_strategy.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -86,7 +85,7 @@ TEST_F(RegisterSupportHostRequestTest, Send) {
                                      base::Bind(&MockCallback::OnResponse,
                                                 base::Unretained(&callback_))));
 
-  XmlElement* sent_iq = NULL;
+  XmlElement* sent_iq = nullptr;
   EXPECT_CALL(signal_strategy_, GetNextId())
       .WillOnce(Return(kStanzaId));
   EXPECT_CALL(signal_strategy_, SendStanzaPtr(NotNull()))
@@ -97,7 +96,7 @@ TEST_F(RegisterSupportHostRequestTest, Send) {
 
   // Verify format of the query.
   scoped_ptr<XmlElement> stanza(sent_iq);
-  ASSERT_TRUE(stanza != NULL);
+  ASSERT_TRUE(stanza != nullptr);
 
   EXPECT_EQ(stanza->Attr(buzz::QName(std::string(), "to")),
             std::string(kTestBotJid));
@@ -108,8 +107,8 @@ TEST_F(RegisterSupportHostRequestTest, Send) {
 
   QName signature_tag(kChromotingXmlNamespace, "signature");
   XmlElement* signature = stanza->FirstElement()->FirstNamed(signature_tag);
-  ASSERT_TRUE(signature != NULL);
-  EXPECT_TRUE(stanza->NextNamed(signature_tag) == NULL);
+  ASSERT_TRUE(signature != nullptr);
+  EXPECT_TRUE(stanza->NextNamed(signature_tag) == nullptr);
 
   std::string time_str =
       signature->Attr(QName(kChromotingXmlNamespace, "time"));
@@ -153,7 +152,7 @@ TEST_F(RegisterSupportHostRequestTest, Send) {
   ObserverListBase<SignalStrategy::Listener>::Iterator it(
       signal_strategy_listeners_);
   SignalStrategy::Listener* listener;
-  while ((listener = it.GetNext()) != NULL) {
+  while ((listener = it.GetNext()) != nullptr) {
     if (listener->OnSignalStrategyIncomingStanza(response.get()))
       consumed++;
   }

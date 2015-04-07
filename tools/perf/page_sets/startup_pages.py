@@ -8,12 +8,16 @@ from telemetry.page import page_set as page_set_module
 class StartedPage(page_module.Page):
 
   def __init__(self, url, startup_url, page_set):
-    super(StartedPage, self).__init__(url=url, page_set=page_set)
+    super(StartedPage, self).__init__(
+        url=url, page_set=page_set, startup_url=startup_url)
     self.archive_data_file = 'data/startup_pages.json'
-    self.startup_url = startup_url
 
   def RunNavigateSteps(self, action_runner):
     action_runner.Wait(10)
+
+  def RunPageInteractions(self, action_runner):
+    self.RunPageInteractions(action_runner)
+
 
 class StartupPagesPageSet(page_set_module.PageSet):
 
@@ -29,8 +33,9 @@ class StartupPagesPageSet(page_set_module.PageSet):
         bucket=page_set_module.PARTNER_BUCKET)
 
     # Typical page.
-    self.AddPage(StartedPage('about:blank', 'about:blank', self))
+    self.AddUserStory(StartedPage('about:blank', 'about:blank', self))
     # Typical page.
-    self.AddPage(StartedPage('http://bbc.co.uk', 'http://bbc.co.uk', self))
+    self.AddUserStory(StartedPage('http://bbc.co.uk', 'http://bbc.co.uk', self))
     # Horribly complex page - stress test!
-    self.AddPage(StartedPage('http://kapook.com', 'http://kapook.com', self))
+    self.AddUserStory(StartedPage(
+        'http://kapook.com', 'http://kapook.com', self))

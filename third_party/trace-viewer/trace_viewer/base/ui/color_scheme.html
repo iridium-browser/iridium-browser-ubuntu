@@ -4,14 +4,14 @@ Copyright (c) 2014 The Chromium Authors. All rights reserved.
 Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
-<link rel="import" href="/base.html">
+<link rel="import" href="/base/base.html">
 <script>
 'use strict';
 
 /**
  * @fileoverview Provides color scheme related functions.
  */
-tv.exportTo('tv.ui', function() {
+tv.exportTo('tv.b.ui', function() {
 
   // The color palette is split in half, with the upper
   // half of the palette being the "highlighted" verison
@@ -163,15 +163,17 @@ tv.exportTo('tv.ui', function() {
     return stringColorIdCache[string];
   }
 
+  var paletteProperties = {
+    numRegularColorIds: numRegularColorIds,
+    highlightIdBoost: highlightIdBoost
+  };
+
   return {
     colorToRGBString: colorToRGBString,
     colorToRGBAString: colorToRGBAString,
     getRawColorPalette: getRawColorPalette,
     getColorPalette: getColorPalette,
-    paletteProperties: {
-      numRegularColorIds: numRegularColorIds,
-      highlightIdBoost: highlightIdBoost
-    },
+    paletteProperties: paletteProperties,
     getColorPaletteHighlightIdBoost: getColorPaletteHighlightIdBoost,
     getColorIdByName: getColorIdByName,
     getStringHash: getStringHash,

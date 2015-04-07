@@ -23,6 +23,7 @@
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/user_metrics.h"
 #include "extensions/browser/api/activity_log/web_request_constants.h"
+#include "extensions/browser/api/declarative/rules_registry_service.h"
 #include "extensions/browser/api/declarative_webrequest/request_stage.h"
 #include "extensions/browser/api/declarative_webrequest/webrequest_constants.h"
 #include "extensions/browser/api/declarative_webrequest/webrequest_rules_registry.h"
@@ -661,9 +662,9 @@ ExtensionWebRequestEventRouter::~ExtensionWebRequestEventRouter() {
 
 void ExtensionWebRequestEventRouter::RegisterRulesRegistry(
     void* browser_context,
-    const extensions::RulesRegistry::WebViewKey& webview_key,
+    int rules_registry_id,
     scoped_refptr<extensions::WebRequestRulesRegistry> rules_registry) {
-  RulesRegistryKey key(browser_context, webview_key);
+  RulesRegistryKey key(browser_context, rules_registry_id);
   if (rules_registry.get())
     rules_registries_[key] = rules_registry;
   else
@@ -1966,11 +1967,11 @@ bool ExtensionWebRequestEventRouter::ProcessDeclarativeRules(
     const net::HttpResponseHeaders* original_response_headers) {
   extensions::WebViewRendererState::WebViewInfo web_view_info;
   bool is_web_view_guest = GetWebViewInfo(request, &web_view_info);
+  int rules_registry_id = is_web_view_guest
+                              ? web_view_info.rules_registry_id
+                              : RulesRegistryService::kDefaultRulesRegistryID;
 
-  extensions::RulesRegistry::WebViewKey webview_key(
-      is_web_view_guest ? web_view_info.embedder_process_id : 0,
-      is_web_view_guest ? web_view_info.instance_id : 0);
-  RulesRegistryKey rules_key(browser_context, webview_key);
+  RulesRegistryKey rules_key(browser_context, rules_registry_id);
   // If this check fails, check that the active stages are up-to-date in
   // extensions/browser/api/declarative_webrequest/request_stage.h .
   DCHECK(request_stage & extensions::kActiveStages);
@@ -1992,8 +1993,8 @@ bool ExtensionWebRequestEventRouter::ProcessDeclarativeRules(
   }
 
   void* cross_browser_context = GetCrossBrowserContext(browser_context);
-  RulesRegistryKey cross_browser_context_rules_key(
-      cross_browser_context, webview_key);
+  RulesRegistryKey cross_browser_context_rules_key(cross_browser_context,
+                                                   rules_registry_id);
   if (cross_browser_context &&
       rules_registries_.find(cross_browser_context_rules_key) !=
           rules_registries_.end()) {
@@ -2217,30 +2218,31 @@ bool WebRequestInternalAddEventListenerFunction::RunSync() {
   std::string extension_name =
       extension ? extension->name() : extension_id_safe();
 
-  bool is_web_view_guest = webview_instance_id != 0;
-  // We check automatically whether the extension has the 'webRequest'
-  // permission. For blocking calls we require the additional permission
-  // 'webRequestBlocking'.
-  if ((!is_web_view_guest &&
-       extra_info_spec &
-           (ExtensionWebRequestEventRouter::ExtraInfoSpec::BLOCKING |
-            ExtensionWebRequestEventRouter::ExtraInfoSpec::ASYNC_BLOCKING)) &&
-      !extension->permissions_data()->HasAPIPermission(
-          extensions::APIPermission::kWebRequestBlocking)) {
-    error_ = keys::kBlockingPermissionRequired;
-    return false;
-  }
+  if (webview_instance_id == 0) {
+    // We check automatically whether the extension has the 'webRequest'
+    // permission. For blocking calls we require the additional permission
+    // 'webRequestBlocking'.
+    if ((extra_info_spec &
+         (ExtensionWebRequestEventRouter::ExtraInfoSpec::BLOCKING |
+          ExtensionWebRequestEventRouter::ExtraInfoSpec::ASYNC_BLOCKING)) &&
+        !extension->permissions_data()->HasAPIPermission(
+            extensions::APIPermission::kWebRequestBlocking)) {
+      error_ = keys::kBlockingPermissionRequired;
+      return false;
+    }
 
-  // We allow to subscribe to patterns that are broader than the host
-  // permissions. E.g., we could subscribe to http://www.example.com/*
-  // while having host permissions for http://www.example.com/foo/* and
-  // http://www.example.com/bar/*.
-  // For this reason we do only a coarse check here to warn the extension
-  // developer if he does something obviously wrong.
-  if (!is_web_view_guest &&
-      extension->permissions_data()->GetEffectiveHostPermissions().is_empty()) {
-    error_ = keys::kHostPermissionsRequired;
-    return false;
+    // We allow to subscribe to patterns that are broader than the host
+    // permissions. E.g., we could subscribe to http://www.example.com/*
+    // while having host permissions for http://www.example.com/foo/* and
+    // http://www.example.com/bar/*.
+    // For this reason we do only a coarse check here to warn the extension
+    // developer if he does something obviously wrong.
+    if (extension->permissions_data()
+            ->GetEffectiveHostPermissions()
+            .is_empty()) {
+      error_ = keys::kHostPermissionsRequired;
+      return false;
+    }
   }
 
   bool success =
@@ -2252,11 +2254,11 @@ bool WebRequestInternalAddEventListenerFunction::RunSync() {
 
   helpers::ClearCacheOnNavigation();
 
-  BrowserThread::PostTask(BrowserThread::UI,
-                          FROM_HERE,
-                          base::Bind(&helpers::NotifyWebRequestAPIUsed,
-                                     profile_id(),
-                                     make_scoped_refptr(extension)));
+  if (!extension_id_safe().empty()) {
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(&helpers::NotifyWebRequestAPIUsed,
+                                       profile_id(), extension_id_safe()));
+  }
 
   return true;
 }

@@ -45,6 +45,7 @@
 <translation id="568643307450491754">Otsige oma järjehoidjaid Chrome'i menüüst või järjehoidjaribalt.</translation>
 <translation id="8556340503434111824">Saadaval on uus Google Chrome'i versioon ja see on senistest kiireim.</translation>
 <translation id="8987477933582888019">Veebibrauser</translation>
+<translation id="3749644715096758981">Chrome'i ei õnnestunud uusimale versioonile värskendada, nii et te ei saa kasutada uusi funktsioone ja turvaparandusi. Peate Chrome'i värskendama.</translation>
 <translation id="4728575227883772061">Install ebaõnnestus määramata vea tõttu. Kui Google Chrome parasjagu töötab, siis palun sulgege see ja proovige uuesti.</translation>
 <translation id="3080151273017101988">Jätka taustal olevate rakenduste tööd, kui Google Chrome on suletud</translation>
 <translation id="4149882025268051530">Installijal ei õnnestunud arhiivi lahti pakkida. Palun laadige Google Chrome uuesti alla.</translation>
@@ -85,6 +86,7 @@
 <translation id="225614027745146050">Tere tulemast</translation>
 <translation id="7473891865547856676">Tänan, ei</translation>
 <translation id="3149510190863420837">Chrome'i rakendused</translation>
+<translation id="8851136666856101339">pea</translation>
 <translation id="7473136999113284234">Chrome teeb värskendused automaatselt, nii et kasutate alati uusimat versiooni.</translation>
 <translation id="7084448929020576097"><ph name="FILE_NAME"/> on pahatahtlik ja Chrome on selle blokeerinud.</translation>
 <translation id="6368958679917195344">Chrome OS on võimalik tänu <ph name="BEGIN_LINK_CROS_OSS"/>avatud lähtekoodiga lisatarkvarale<ph name="END_LINK_CROS_OSS"/>.</translation>
@@ -147,7 +149,6 @@ Kui logite siiski sisse, liidetakse Chrome'i teave, nagu järjehoidjad, ajalugu 
 <translation id="5855036575689098185">Teie arvutis töötav tarkvara ei ühildu Google Chrome'iga.</translation>
 <translation id="7164397146364144019">Saate aidata muuta Chrome'i turvalisemaks ja lihtsamalt kasutatavaks, kui teavitate Google'it automaatselt võimalike turvaintsidentide üksikasjadest.</translation>
 <translation id="8008534537613507642">Installi Chrome uuesti</translation>
-<translation id="2044287590254833138">Google Chrome'i tööriistariba</translation>
 <translation id="8862326446509486874">Teil ei ole süsteemi tasemel installimiseks sobivaid õigusi. Proovige installijat administraatorina uuesti käivitada.</translation>
 <translation id="2874156562296220396">Google Chrome'i on teinud võimalikuks avatud lähtekoodiga <ph name="BEGIN_LINK_CHROMIUM"/>Chromiumi<ph name="END_LINK_CHROMIUM"/> projekt ja muu <ph name="BEGIN_LINK_OSS"/>avatud lähtekoodiga tarkvara<ph name="END_LINK_OSS"/>.</translation>
 <translation id="7191567847629796517">Google Chrome OS ei toeta rakenduse <ph name="SCHEME"/> linkide käsitlemiseks välisrakenduste käivitamist. Taotletud link on <ph name="PROTOLINK"/>.</translation>
@@ -159,6 +160,7 @@ Kui logite siiski sisse, liidetakse Chrome'i teave, nagu järjehoidjad, ajalugu 
 <translation id="2290095356545025170">Olete kindel, et soovite Google Chrome'i desinstallida?</translation>
 <translation id="7062966102157262887">Allalaadimine on pooleli. Kas soovite Google Chrome'ist väljuda ja allalaadimise tühistada?</translation>
 <translation id="4273752058983339720">Google Chrome on seadistatud arvuti käivitamisel automaatselt avanema.</translation>
+<translation id="2316129865977710310">Ei, aitäh</translation>
 <translation id="415994390253732730">Kas Chrome käitub veidralt?</translation>
 <translation id="1104959162601287462">Teave &amp;Chrome OS-i kohta</translation>
 <translation id="5328989068199000832">Google Chrome Binaries</translation>
@@ -261,6 +263,7 @@ Kui logite siiski sisse, liidetakse Chrome'i teave, nagu järjehoidjad, ajalugu 
 <translation id="6626317981028933585">Kahjuks pole teie Mozilla Firefoxi seaded saadaval samal ajal kui brauser töötab. Nende seadete Google Chrome'i importimiseks salvestage oma töö ja sulgege kõik Firefoxi aknad. Siis klõpsake Jätka.</translation>
 <translation id="7242029209006116544">Logite sisse hallatud kontoga ja annate selle administraatorile üle oma Google Chrome'i profiili juhtimise. Teie Chrome'i andmed, näiteks rakendused, järjehoidjad, ajalugu, paroolid ja muud seaded seotakse jäädavalt kasutajaga <ph name="USER_NAME"/>. Saate need andmed Google'i kontode juhtpaneeli kaudu kustutada, kuid te ei saa neid seostada teise kontoga. Võite olemasolevate Chrome'i andmete eraldi hoidmiseks luua aga uue profiili. <ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">Lisaks juhib Chrome'i käivitamisel kuvatavat lehte või omnikastikese otsingut.</translation>
+<translation id="1553358976309200471">Värskenda Chrome'i</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Autoriõigus <ph name="YEAR"/> Google Inc. Kõik õigused on kaitstud.</translation>
 <translation id="1698376642261615901">Google Chrome on veebibrauser, mis käitab veebilehti ja rakendusi välgukiirusel. See on kiire, töökindel ja lihtsalt kasutatav. Veebi sirvimine on turvalisem tänu Google Chrome'i sisseehitatud pahavara- ja andmepüügivastasele kaitsele.</translation>

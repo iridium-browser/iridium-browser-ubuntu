@@ -11,6 +11,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "components/autofill/content/browser/wallet/gaia_account.h"
+#include "components/autofill/content/browser/wallet/wallet_service_url.h"
+#include "components/autofill/core/browser/autofill_sync_constants.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "grit/components_scaled_resources.h"
@@ -24,10 +26,6 @@ namespace autofill {
 namespace wallet {
 
 namespace {
-
-const char kLegalDocumentUrl[] =
-    "https://wallet.google.com/legaldocument?docId=";
-const char kPrivacyNoticeUrl[] = "https://wallet.google.com/files/privacy.html";
 
 // TODO(estade): move to base/.
 template<class T>
@@ -45,19 +43,19 @@ bool VectorsAreEqual(const std::vector<T*>& a, const std::vector<T*>& b) {
 
 WalletItems::MaskedInstrument::Type
     TypeFromString(const std::string& type_string) {
-  if (type_string == "VISA")
+  if (type_string == kSyncCardTypeVisa)
     return WalletItems::MaskedInstrument::VISA;
-  if (type_string == "MASTER_CARD")
+  if (type_string == kSyncCardTypeMasterCard)
     return WalletItems::MaskedInstrument::MASTER_CARD;
-  if (type_string == "AMEX")
+  if (type_string == kSyncCardTypeAmex)
     return WalletItems::MaskedInstrument::AMEX;
-  if (type_string == "DISCOVER")
+  if (type_string == kSyncCardTypeDiscover)
     return WalletItems::MaskedInstrument::DISCOVER;
-  if (type_string == "SOLO")
+  if (type_string == kSyncCardTypeSolo)
     return WalletItems::MaskedInstrument::SOLO;
-  if (type_string == "MAESTRO")
+  if (type_string == kSyncCardTypeSolo)
     return WalletItems::MaskedInstrument::MAESTRO;
-  if (type_string == "SWITCH")
+  if (type_string == kSyncCardTypeSwitch)
     return WalletItems::MaskedInstrument::SWITCH;
   return WalletItems::MaskedInstrument::UNKNOWN;
 }
@@ -374,13 +372,20 @@ scoped_ptr<WalletItems::LegalDocument>
     return scoped_ptr<LegalDocument>();
   }
 
-  return scoped_ptr<LegalDocument>(new LegalDocument(id, display_name));
+  std::string url;
+  if (!dictionary.GetString("url", &url)) {
+    DLOG(ERROR) << "Response from Google Wallet missing URL";
+    return scoped_ptr<LegalDocument>();
+  }
+
+  return scoped_ptr<LegalDocument>(
+      new LegalDocument(id, GURL(url), display_name));
 }
 
 scoped_ptr<WalletItems::LegalDocument>
     WalletItems::LegalDocument::CreatePrivacyPolicyDocument() {
   return scoped_ptr<LegalDocument>(new LegalDocument(
-      GURL(kPrivacyNoticeUrl),
+      std::string(), GetPrivacyNoticeUrl(),
       l10n_util::GetStringUTF16(IDS_AUTOFILL_DIALOG_PRIVACY_POLICY_LINK)));
 }
 
@@ -395,15 +400,10 @@ bool WalletItems::LegalDocument::operator!=(const LegalDocument& other) const {
 }
 
 WalletItems::LegalDocument::LegalDocument(const std::string& id,
+                                          const GURL& url,
                                           const base::string16& display_name)
-    : id_(id),
-      url_(kLegalDocumentUrl + id),
-      display_name_(display_name) {}
-
-WalletItems::LegalDocument::LegalDocument(const GURL& url,
-                                          const base::string16& display_name)
-    : url_(url),
-      display_name_(display_name) {}
+    : id_(id), url_(url), display_name_(display_name) {
+}
 
 WalletItems::WalletItems(const std::vector<RequiredAction>& required_actions,
                          const std::string& google_transaction_id,

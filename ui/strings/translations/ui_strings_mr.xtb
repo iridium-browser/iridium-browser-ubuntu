@@ -18,6 +18,7 @@
 <translation id="7121570032414343252"><ph name="NUMBER_TWO"/> से</translation>
 <translation id="7511635910912978956"><ph name="NUMBER_FEW"/> तास बाकी</translation>
 <translation id="5948410903763073882">Alt+<ph name="KEY_COMBO_NAME"/></translation>
+<translation id="598033046487663418">सर्व अ‍ॅप्स</translation>
 <translation id="7658239707568436148">रद्द करा</translation>
 <translation id="7222373446505536781">F11</translation>
 <translation id="1761785978543082658"><ph name="QUANTITY"/> B</translation>
@@ -46,7 +47,6 @@
 <translation id="4999762576397546063">Ctrl+<ph name="KEY_COMBO_NAME"/></translation>
 <translation id="7770995925463083016"><ph name="NUMBER_TWO"/> mins ago</translation>
 <translation id="3234408098842461169">Down Arrow</translation>
-<translation id="5901398892005759450">सर्व अ‍ॅप्स</translation>
 <translation id="3087734570205094154">तळाकडील</translation>
 <translation id="8828991073132329143"><ph name="NUMBER_MANY"/> सेकंद शिल्लक</translation>
 <translation id="5935630983280450497"><ph name="NUMBER_ONE"/> मि बाकी</translation>
@@ -123,6 +123,7 @@
 <translation id="8677655579646609597"><ph name="QUANTITY"/> KB/s</translation>
 <translation id="8394908167088220973">मीडिया प्ले करा/विराम द्या</translation>
 <translation id="2148716181193084225">आज</translation>
+<translation id="5120799197269191491">शोध+<ph name="KEY_COMBO_NAME"/></translation>
 <translation id="7960078400008666149">एक तास व्यत्यय आणू नका</translation>
 <translation id="4373894838514502496"><ph name="NUMBER_FEW"/> mins ago</translation>
 <translation id="4115153316875436289"><ph name="NUMBER_TWO"/> दिवस</translation>
@@ -208,6 +209,7 @@
 <translation id="6907759265145635167"><ph name="QUANTITY"/> PB/s</translation>
 <translation id="2743387203779672305">क्लिपबोर्डवर कॉपी करा</translation>
 <translation id="8371695176452482769">आता बोला</translation>
+<translation id="6129953537138746214">जागा</translation>
 <translation id="1167268268675672572">ओळीच्या सुरुवातीवर हलवा आणि निवड सुधारित करा</translation>
 <translation id="6965382102122355670">ठिक आहे</translation>
 <translation id="7850320739366109486">व्यत्यय आणू नका</translation>

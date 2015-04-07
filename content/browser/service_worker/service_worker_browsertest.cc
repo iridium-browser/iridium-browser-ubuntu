@@ -25,10 +25,12 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/referrer.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "content/shell/browser/shell_content_browser_client.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
@@ -376,7 +378,7 @@ class EmbeddedWorkerBrowserTest : public ServiceWorkerBrowserTest,
     last_worker_status_ = worker_->status();
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, done_closure_);
   }
-  void OnStopped() override {
+  void OnStopped(EmbeddedWorkerInstance::Status old_status) override {
     ASSERT_TRUE(worker_ != NULL);
     ASSERT_FALSE(done_closure_.is_null());
     last_worker_status_ = worker_->status();
@@ -546,7 +548,7 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
         embedded_test_server()->GetURL("/service_worker/empty.html"),
         "GET",
         ServiceWorkerHeaderMap(),
-        GURL(""),
+        Referrer(),
         false);
     version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
     version_->DispatchFetchEvent(
@@ -945,6 +947,33 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerBlackBoxBrowserTest, MAYBE_Registration) {
                    &status));
     EXPECT_EQ(SERVICE_WORKER_ERROR_NOT_FOUND, status);
   }
+}
+
+IN_PROC_BROWSER_TEST_F(ServiceWorkerBrowserTest, CrossSiteTransfer) {
+  // The first page registers a service worker.
+  const std::string kRegisterPageUrl = "/service_worker/cross_site_xfer.html";
+  const base::string16 kOKTitle1(base::ASCIIToUTF16("OK_1"));
+  const base::string16 kFailTitle1(base::ASCIIToUTF16("FAIL_1"));
+  content::TitleWatcher title_watcher1(shell()->web_contents(), kOKTitle1);
+  title_watcher1.AlsoWaitForTitle(kFailTitle1);
+
+  NavigateToURL(shell(), embedded_test_server()->GetURL(kRegisterPageUrl));
+  ASSERT_EQ(kOKTitle1, title_watcher1.WaitAndGetTitle());
+
+  // Force process swapping behavior.
+  ShellContentBrowserClient::SetSwapProcessesForRedirect(true);
+
+  // The second pages loads via the serviceworker including a subresource.
+  const std::string kConfirmPageUrl =
+      "/service_worker/cross_site_xfer_scope/"
+      "cross_site_xfer_confirm_via_serviceworker.html";
+  const base::string16 kOKTitle2(base::ASCIIToUTF16("OK_2"));
+  const base::string16 kFailTitle2(base::ASCIIToUTF16("FAIL_2"));
+  content::TitleWatcher title_watcher2(shell()->web_contents(), kOKTitle2);
+  title_watcher2.AlsoWaitForTitle(kFailTitle2);
+
+  NavigateToURL(shell(), embedded_test_server()->GetURL(kConfirmPageUrl));
+  EXPECT_EQ(kOKTitle2, title_watcher2.WaitAndGetTitle());
 }
 
 }  // namespace content

@@ -8,6 +8,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using std::min;
+using std::vector;
 
 namespace net {
 namespace test {
@@ -23,16 +24,26 @@ class QuicUnackedPacketMapTest : public ::testing::Test {
       : now_(QuicTime::Zero().Add(QuicTime::Delta::FromMilliseconds(1000))) {
   }
 
+  ~QuicUnackedPacketMapTest() override {
+    STLDeleteElements(&packets_);
+  }
+
   SerializedPacket CreateRetransmittablePacket(
       QuicPacketSequenceNumber sequence_number) {
+    packets_.push_back(QuicPacket::NewDataPacket(
+        nullptr, kDefaultLength, false, PACKET_8BYTE_CONNECTION_ID, false,
+        PACKET_1BYTE_SEQUENCE_NUMBER));
     return SerializedPacket(sequence_number, PACKET_1BYTE_SEQUENCE_NUMBER,
-                            nullptr, 0, new RetransmittableFrames());
+                            packets_.back(), 0, new RetransmittableFrames());
   }
 
   SerializedPacket CreateNonRetransmittablePacket(
       QuicPacketSequenceNumber sequence_number) {
+    packets_.push_back(QuicPacket::NewDataPacket(
+        nullptr, kDefaultLength, false, PACKET_8BYTE_CONNECTION_ID, false,
+        PACKET_1BYTE_SEQUENCE_NUMBER));
     return SerializedPacket(sequence_number, PACKET_1BYTE_SEQUENCE_NUMBER,
-                            nullptr, 0, nullptr);
+                            packets_.back(), 0, nullptr);
   }
 
   void VerifyInFlightPackets(QuicPacketSequenceNumber* packets,
@@ -94,7 +105,7 @@ class QuicUnackedPacketMapTest : public ::testing::Test {
           << " packets[" << i << "]:" << packets[i];
     }
   }
-
+  vector<QuicPacket*> packets_;
   QuicUnackedPacketMap unacked_packets_;
   QuicTime now_;
 };
@@ -185,8 +196,8 @@ TEST_F(QuicUnackedPacketMapTest, RetransmittedPacket) {
 
   unacked_packets_.RemoveFromInFlight(2);
   QuicPacketSequenceNumber unacked2[] = { 1 };
-  VerifyUnackedPackets(unacked, arraysize(unacked2));
-  VerifyInFlightPackets(unacked, arraysize(unacked2));
+  VerifyUnackedPackets(unacked2, arraysize(unacked2));
+  VerifyInFlightPackets(unacked2, arraysize(unacked2));
   VerifyRetransmittablePackets(nullptr, 0);
 
   unacked_packets_.RemoveFromInFlight(1);

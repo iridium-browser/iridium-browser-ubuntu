@@ -9,8 +9,8 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace aura {
 class RootWindow;
@@ -53,10 +53,23 @@ class ASH_EXPORT MagnificationController {
 
   virtual void SetScrollDirection(ScrollDirection direction) = 0;
 
+  // Returns the view port(i.e. the current visible window)'s Rect in root
+  // window coordinates.
+  virtual gfx::Rect GetViewportRect() const = 0;
+
+  // Follows the focus on web page for non-editable controls.
+  virtual void HandleFocusedNodeChanged(
+      bool is_editable_node,
+      const gfx::Rect& node_bounds_in_screen) = 0;
+
   // Returns |point_of_interest_| in MagnificationControllerImpl. This is
   // the internal variable to stores the last mouse cursor (or last touched)
   // location. This method is only for test purpose.
   virtual gfx::Point GetPointOfInterestForTesting() = 0;
+
+  // Returns true if magnifier is still on animation for moving viewport.
+  // This is only used for testing purpose.
+  virtual bool IsOnAnimationForTesting() const = 0;
 
  protected:
   MagnificationController() {}

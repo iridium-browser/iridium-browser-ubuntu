@@ -23,7 +23,7 @@ import os
 import sys
 
 from pylint.checkers import BaseChecker
-from pylint.interfaces import IASTNGChecker
+from pylint.interfaces import IAstroidChecker
 
 
 class DocStringChecker(BaseChecker):
@@ -36,42 +36,63 @@ class DocStringChecker(BaseChecker):
   # TODO: See about merging with the pep257 project:
   # https://github.com/GreenSteam/pep257
 
-  __implements__ = IASTNGChecker
+  __implements__ = IAstroidChecker
+
+  # pylint: disable=too-few-public-methods,multiple-statements
+  # pylint: disable=class-missing-docstring
+  class _MessageCP001(object): pass
+  class _MessageCP002(object): pass
+  class _MessageCP003(object): pass
+  class _MessageCP004(object): pass
+  class _MessageCP005(object): pass
+  class _MessageCP006(object): pass
+  class _MessageCP007(object): pass
+  class _MessageCP008(object): pass
+  class _MessageCP009(object): pass
+  class _MessageCP010(object): pass
+  class _MessageCP011(object): pass
+  class _MessageCP012(object): pass
+  class _MessageCP013(object): pass
+  class _MessageCP014(object): pass
+  # pylint: enable=too-few-public-methods,multiple-statements
+  # pylint: enable=class-missing-docstring
 
   name = 'doc_string_checker'
   priority = -1
   MSG_ARGS = 'offset:%(offset)i: {%(line)s}'
   msgs = {
       'C9001': ('Modules should have docstrings (even a one liner)',
-                ('Used when a module lacks a docstring entirely')),
+                ('module-missing-docstring'), _MessageCP001),
       'C9002': ('Classes should have docstrings (even a one liner)',
-                ('Used when a class lacks a docstring entirely')),
+                ('class-missing-docstring'), _MessageCP002),
       'C9003': ('Trailing whitespace in docstring'
                 ': %s' % MSG_ARGS,
-                ('Used whenever we find trailing whitespace')),
+                ('docstring-trailing-whitespace'), _MessageCP003),
       'C9004': ('Leading whitespace in docstring (excess or missing)'
                 ': %s' % MSG_ARGS,
-                ('Used whenever we find incorrect leading whitespace')),
+                ('docstring-leading-whitespace'), _MessageCP004),
       'C9005': ('Closing triple quotes should not be cuddled',
-                ('Used when the closing quotes are not by themselves')),
+                ('docstring-cuddled-quotes'), _MessageCP005),
       'C9006': ('Section names should be preceded by one blank line'
                 ': %s' % MSG_ARGS,
-                ('Used when we detect misbehavior around sections')),
+                ('docstring-section-newline'), _MessageCP006),
       'C9007': ('Section names should be "Args:", "Returns:", "Yields:", '
                 'and "Raises:": %s' % MSG_ARGS,
-                ('Used when we detect misbehavior around sections')),
+                ('docstring-section-name'), _MessageCP007),
       'C9008': ('Sections should be in the order: Args, Returns/Yields, Raises',
-                ('Used when the various sections are misordered')),
+                ('docstring-section-order'), _MessageCP008),
       'C9009': ('First line should be a short summary',
-                ('Used when a short doc string is on multiple lines')),
+                ('docstring-first-line'), _MessageCP009),
       'C9010': ('Not all args mentioned in doc string: |%(arg)s|',
-                ('Used when not all arguments are in the doc string')),
+                ('docstring-missing-args'), _MessageCP010),
       'C9011': ('Variable args/keywords are named *args/**kwargs, not %(arg)s',
-                ('Used when funcs use different names for varargs')),
+                ('docstring-misnamed-args'), _MessageCP011),
       'C9012': ('Incorrectly formatted Args section: %(arg)s',
-                ('Used when spacing is incorrect after colon in Args')),
+                ('docstring-arg-spacing'), _MessageCP012),
       'C9013': ('Too many blank lines in a row: %s' % MSG_ARGS,
-                ('Used when more than one blank line is found')),
+                ('docstring-too-many-newlines'), _MessageCP013),
+      'C9014': ('Second line should be blank',
+                ('docstring-second-line-blank'), _MessageCP014),
   }
   options = ()
 
@@ -115,6 +136,7 @@ class DocStringChecker(BaseChecker):
 
     funcs = (
         self._check_first_line,
+        self._check_second_line_blank,
         self._check_whitespace,
         self._check_last_line,
     )
@@ -125,6 +147,11 @@ class DocStringChecker(BaseChecker):
     """Make sure first line is a short summary by itself"""
     if lines[0] == '':
       self.add_message('C9009', node=node, line=node.fromlineno)
+
+  def _check_second_line_blank(self, node, lines):
+    """Make sure the second line is blank"""
+    if len(lines) > 1 and lines[1] != '':
+      self.add_message('C9014', node=node, line=node.fromlineno)
 
   def _check_whitespace(self, node, lines):
     """Verify whitespace is sane"""
@@ -279,14 +306,20 @@ class DocStringChecker(BaseChecker):
 class Py3kCompatChecker(BaseChecker):
   """Make sure we enforce py3k compatible features"""
 
-  __implements__ = IASTNGChecker
+  __implements__ = IAstroidChecker
+
+  # pylint: disable=too-few-public-methods,multiple-statements
+  # pylint: disable=class-missing-docstring
+  class _MessageR9100(object): pass
+  # pylint: enable=too-few-public-methods,multiple-statements
+  # pylint: enable=class-missing-docstring
 
   name = 'py3k_compat_checker'
   priority = -1
   MSG_ARGS = 'offset:%(offset)i: {%(line)s}'
   msgs = {
-      'W9100': ('Missing "from __future__ import print_function" line',
-                ('Used when a module misses print function import for py3k')),
+      'R9100': ('Missing "from __future__ import print_function" line',
+                ('missing-print-function'), _MessageR9100),
   }
   options = ()
 
@@ -301,7 +334,7 @@ class Py3kCompatChecker(BaseChecker):
       # Do not warn if moduler doesn't import anything at all (like
       # empty __init__.py files).
       if self.saw_imports:
-        self.add_message('W9100')
+        self.add_message('R9100')
 
   def _check_print_function(self, node):
     """Verify print_function is imported"""
@@ -326,7 +359,7 @@ def register(linter):
   this_module = sys.modules[__name__]
   for member in dir(this_module):
     if (not member.endswith('Checker') or
-        member in ('BaseChecker', 'IASTNGChecker')):
+        member in ('BaseChecker', 'IAstroidChecker')):
       continue
     cls = getattr(this_module, member)
     linter.register_checker(cls(linter))

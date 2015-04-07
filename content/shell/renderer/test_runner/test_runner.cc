@@ -11,9 +11,7 @@
 #include "content/shell/common/test_runner/test_preferences.h"
 #include "content/shell/renderer/binding_helpers.h"
 #include "content/shell/renderer/test_runner/mock_credential_manager_client.h"
-#include "content/shell/renderer/test_runner/mock_web_push_client.h"
 #include "content/shell/renderer/test_runner/mock_web_speech_recognizer.h"
-#include "content/shell/renderer/test_runner/notification_presenter.h"
 #include "content/shell/renderer/test_runner/test_interfaces.h"
 #include "content/shell/renderer/test_runner/web_permissions.h"
 #include "content/shell/renderer/test_runner/web_test_delegate.h"
@@ -23,7 +21,6 @@
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "gin/wrappable.h"
-#include "third_party/WebKit/public/platform/WebArrayBuffer.h"
 #include "third_party/WebKit/public/platform/WebBatteryStatus.h"
 #include "third_party/WebKit/public/platform/WebCanvas.h"
 #include "third_party/WebKit/public/platform/WebData.h"
@@ -31,7 +28,9 @@
 #include "third_party/WebKit/public/platform/WebDeviceOrientationData.h"
 #include "third_party/WebKit/public/platform/WebLocalCredential.h"
 #include "third_party/WebKit/public/platform/WebPoint.h"
+#include "third_party/WebKit/public/platform/WebServiceWorkerRegistration.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
+#include "third_party/WebKit/public/web/WebArrayBuffer.h"
 #include "third_party/WebKit/public/web/WebArrayBufferConverter.h"
 #include "third_party/WebKit/public/web/WebBindings.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
@@ -294,10 +293,12 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
                                             v8::Handle<v8::Function> callback);
   void SetCustomTextOutput(std::string output);
   void SetViewSourceForFrame(const std::string& name, bool enabled);
-  void SetMockPushClientSuccess(const std::string& endpoint,
-                                const std::string& registration_id);
-  void SetMockPushClientError(const std::string& message);
+  void SetPushMessagingPermission(const std::string& origin, bool allowed);
+  void ClearPushMessagingPermissions();
   void SetBluetoothMockDataSet(const std::string& dataset_name);
+  void SetGeofencingMockProvider(bool service_available);
+  void ClearGeofencingMockProvider();
+  void SetGeofencingMockPosition(double latitude, double longitude);
 
   std::string PlatformName();
   std::string TooltipText();
@@ -307,6 +308,8 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetInterceptPostMessage(bool value);
 
   void NotImplemented(const gin::Arguments& args);
+
+  void ForceNextWebGLContextCreationToFail();
 
   base::WeakPtr<TestRunner> runner_;
 
@@ -538,12 +541,20 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
                  &TestRunnerBindings::SetCustomTextOutput)
       .SetMethod("setViewSourceForFrame",
                  &TestRunnerBindings::SetViewSourceForFrame)
-      .SetMethod("setMockPushClientSuccess",
-                 &TestRunnerBindings::SetMockPushClientSuccess)
-      .SetMethod("setMockPushClientError",
-                 &TestRunnerBindings::SetMockPushClientError)
+      .SetMethod("setPushMessagingPermission",
+                 &TestRunnerBindings::SetPushMessagingPermission)
+      .SetMethod("clearPushMessagingPermissions",
+                 &TestRunnerBindings::ClearPushMessagingPermissions)
       .SetMethod("setBluetoothMockDataSet",
                  &TestRunnerBindings::SetBluetoothMockDataSet)
+      .SetMethod("forceNextWebGLContextCreationToFail",
+                 &TestRunnerBindings::ForceNextWebGLContextCreationToFail)
+      .SetMethod("setGeofencingMockProvider",
+                 &TestRunnerBindings::SetGeofencingMockProvider)
+      .SetMethod("clearGeofencingMockProvider",
+                 &TestRunnerBindings::ClearGeofencingMockProvider)
+      .SetMethod("setGeofencingMockPosition",
+                 &TestRunnerBindings::SetGeofencingMockPosition)
 
       // Properties.
       .SetProperty("platformName", &TestRunnerBindings::PlatformName)
@@ -1399,18 +1410,31 @@ void TestRunnerBindings::SetViewSourceForFrame(const std::string& name,
   }
 }
 
-void TestRunnerBindings::SetMockPushClientSuccess(
-    const std::string& endpoint,
-    const std::string& registration_id) {
-  if (!runner_)
-    return;
-  runner_->SetMockPushClientSuccess(endpoint, registration_id);
+void TestRunnerBindings::SetPushMessagingPermission(const std::string& origin,
+                                                    bool allowed) {
+  if (runner_)
+    runner_->SetPushMessagingPermission(GURL(origin), allowed);
 }
 
-void TestRunnerBindings::SetMockPushClientError(const std::string& message) {
-  if (!runner_)
-    return;
-  runner_->SetMockPushClientError(message);
+void TestRunnerBindings::ClearPushMessagingPermissions() {
+  if (runner_)
+    runner_->ClearPushMessagingPermissions();
+}
+
+void TestRunnerBindings::SetGeofencingMockProvider(bool service_available) {
+  if (runner_)
+    runner_->SetGeofencingMockProvider(service_available);
+}
+
+void TestRunnerBindings::ClearGeofencingMockProvider() {
+  if (runner_)
+    runner_->ClearGeofencingMockProvider();
+}
+
+void TestRunnerBindings::SetGeofencingMockPosition(double latitude,
+                                                   double longitude) {
+  if (runner_)
+    runner_->SetGeofencingMockPosition(latitude, longitude);
 }
 
 std::string TestRunnerBindings::PlatformName() {
@@ -1446,6 +1470,11 @@ bool TestRunnerBindings::InterceptPostMessage() {
 void TestRunnerBindings::SetInterceptPostMessage(bool value) {
   if (runner_)
     runner_->intercept_post_message_ = value;
+}
+
+void TestRunnerBindings::ForceNextWebGLContextCreationToFail() {
+  if (runner_)
+    runner_->ForceNextWebGLContextCreationToFail();
 }
 
 void TestRunnerBindings::NotImplemented(const gin::Arguments& args) {
@@ -1538,7 +1567,6 @@ TestRunner::TestRunner(TestInterfaces* interfaces)
       web_view_(nullptr),
       page_overlay_(nullptr),
       web_permissions_(new WebPermissions()),
-      notification_presenter_(new NotificationPresenter()),
       weak_factory_(this) {}
 
 TestRunner::~TestRunner() {}
@@ -1550,7 +1578,6 @@ void TestRunner::Install(WebFrame* frame) {
 void TestRunner::SetDelegate(WebTestDelegate* delegate) {
   delegate_ = delegate;
   web_permissions_->SetDelegate(delegate);
-  notification_presenter_->set_delegate(delegate);
 }
 
 void TestRunner::SetWebView(WebView* webView, WebTestProxyBase* proxy) {
@@ -1604,6 +1631,7 @@ void TestRunner::Reset() {
     delegate_->DeleteAllCookies();
     delegate_->ResetScreenOrientation();
     delegate_->SetBluetoothMockDataSet("");
+    delegate_->ClearGeofencingMockProvider();
     ResetBatteryStatus();
     ResetDeviceLight();
   }
@@ -1650,7 +1678,6 @@ void TestRunner::Reset() {
 
   web_permissions_->Reset();
 
-  notification_presenter_->Reset();
   use_mock_theme_ = true;
   pointer_locked_ = false;
   pointer_lock_planned_result_ = PointerLockWillSucceed;
@@ -1868,10 +1895,6 @@ bool TestRunner::shouldInterceptPostMessage() const {
 
 bool TestRunner::shouldDumpResourcePriorities() const {
   return should_dump_resource_priorities_;
-}
-
-WebNotificationPresenter* TestRunner::notification_presenter() const {
-  return notification_presenter_.get();
 }
 
 bool TestRunner::RequestPointerLock() {
@@ -2159,7 +2182,7 @@ void TestRunner::SetIsolatedWorldSecurityOrigin(int world_id,
   WebSecurityOrigin web_origin;
   if (origin->IsString()) {
     web_origin = WebSecurityOrigin::createFromString(
-        V8StringToWebString(origin->ToString()));
+        V8StringToWebString(origin.As<v8::String>()));
   }
   web_view_->focusedFrame()->setIsolatedWorldSecurityOrigin(world_id,
                                                             web_origin);
@@ -2478,7 +2501,9 @@ void TestRunner::OverridePreference(const std::string key,
   } else if (key == "WebKitMinimumFontSize") {
     prefs->minimum_font_size = value->Int32Value();
   } else if (key == "WebKitDefaultTextEncodingName") {
-    prefs->default_text_encoding_name = V8StringToWebString(value->ToString());
+    v8::Isolate* isolate = blink::mainThreadIsolate();
+    prefs->default_text_encoding_name =
+        V8StringToWebString(value->ToString(isolate));
   } else if (key == "WebKitJavaScriptEnabled") {
     prefs->java_script_enabled = value->BooleanValue();
   } else if (key == "WebKitSupportsMultipleWindows") {
@@ -2507,6 +2532,8 @@ void TestRunner::OverridePreference(const std::string key,
     prefs->allow_display_of_insecure_content = value->BooleanValue();
   } else if (key == "WebKitAllowRunningInsecureContent") {
     prefs->allow_running_of_insecure_content = value->BooleanValue();
+  } else if (key == "WebKitStrictMixedContentChecking") {
+    prefs->strict_mixed_content_checking = value->BooleanValue();
   } else if (key == "WebKitShouldRespectImageOrientation") {
     prefs->should_respect_image_orientation = value->BooleanValue();
   } else if (key == "WebKitWebAudioEnabled") {
@@ -2743,6 +2770,18 @@ void TestRunner::SetBluetoothMockDataSet(const std::string& name) {
   delegate_->SetBluetoothMockDataSet(name);
 }
 
+void TestRunner::SetGeofencingMockProvider(bool service_available) {
+  delegate_->SetGeofencingMockProvider(service_available);
+}
+
+void TestRunner::ClearGeofencingMockProvider() {
+  delegate_->ClearGeofencingMockProvider();
+}
+
+void TestRunner::SetGeofencingMockPosition(double latitude, double longitude) {
+  delegate_->SetGeofencingMockPosition(latitude, longitude);
+}
+
 void TestRunner::SetPOSIXLocale(const std::string& locale) {
   delegate_->SetLocale(locale);
 }
@@ -2767,10 +2806,6 @@ void TestRunner::ClearWebNotificationPermissions() {
 
 void TestRunner::SimulateWebNotificationClick(const std::string& title) {
   delegate_->SimulateWebNotificationClick(title);
-
-  // TODO(peter): Remove this call once Web Notifications switch away from the
-  // WebFrame-based code path.
-  notification_presenter_->SimulateClick(title);
 }
 
 void TestRunner::AddMockSpeechRecognitionResult(const std::string& transcript,
@@ -2845,6 +2880,11 @@ void TestRunner::CapturePixelsAsyncThen(v8::Handle<v8::Function> callback) {
                                         base::Passed(&task)));
 }
 
+void TestRunner::ForceNextWebGLContextCreationToFail() {
+  if (web_view_)
+    web_view_->forceNextWebGLContextCreationToFail();
+}
+
 void TestRunner::CopyImageAtAndCapturePixelsAsyncThen(
     int x, int y, v8::Handle<v8::Function> callback) {
   scoped_ptr<InvokeCallbackTask> task(
@@ -2905,13 +2945,12 @@ void TestRunner::CapturePixelsCallback(scoped_ptr<InvokeCallbackTask> task,
   InvokeCallback(task.Pass());
 }
 
-void TestRunner::SetMockPushClientSuccess(const std::string& endpoint,
-                                          const std::string& registration_id) {
-  proxy_->GetPushClientMock()->SetMockSuccessValues(endpoint, registration_id);
+void TestRunner::SetPushMessagingPermission(const GURL& origin, bool allowed) {
+  delegate_->SetPushMessagingPermission(origin, allowed);
 }
 
-void TestRunner::SetMockPushClientError(const std::string& message) {
-  proxy_->GetPushClientMock()->SetMockErrorValues(message);
+void TestRunner::ClearPushMessagingPermissions() {
+  delegate_->ClearPushMessagingPermissions();
 }
 
 void TestRunner::LocationChangeDone() {

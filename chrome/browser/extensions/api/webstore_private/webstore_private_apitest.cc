@@ -30,6 +30,7 @@
 #include "gpu/config/gpu_feature_type.h"
 #include "gpu/config/gpu_info.h"
 #include "net/dns/mock_host_resolver.h"
+#include "ui/app_list/app_list_switches.h"
 #include "ui/gl/gl_switches.h"
 
 using gpu::GpuFeatureType;
@@ -95,7 +96,7 @@ class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
   ExtensionWebstorePrivateApiTest() {}
   ~ExtensionWebstorePrivateApiTest() override {}
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(
         switches::kAppsGalleryURL,
@@ -154,7 +155,7 @@ class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
     return true;
 #else
     GURL crx_url = GetTestServerURL(crx_file);
-    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
         switches::kAppsGalleryUpdateURL, crx_url.spec());
 
     GURL page_url = GetTestServerURL(page);
@@ -406,7 +407,7 @@ class EphemeralAppWebstorePrivateApiTest
         "http://www.example.com:%d/files/extensions/platform_apps/"
         "ephemeral_launcher",
         host_port.port());
-    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
         switches::kAppsGalleryURL, test_gallery_url);
   }
 
@@ -420,13 +421,17 @@ class EphemeralAppWebstorePrivateApiTest
 // Run tests when the --enable-ephemeral-apps switch is not enabled.
 IN_PROC_BROWSER_TEST_F(EphemeralAppWebstorePrivateApiTest,
                        EphemeralAppsFeatureDisabled) {
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      app_list::switches::kDisableExperimentalAppList);
   ASSERT_TRUE(RunInstallTest("webstore_launch_disabled.html", "app.crx"));
 }
 
 // Run tests when the --enable-ephemeral-apps switch is enabled.
 IN_PROC_BROWSER_TEST_F(EphemeralAppWebstorePrivateApiTest, LaunchEphemeralApp) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableEphemeralApps);
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableEphemeralAppsInWebstore);
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      app_list::switches::kEnableExperimentalAppList);
   ASSERT_TRUE(RunInstallTest("webstore_launch_app.html", "app.crx"));
 }
 

@@ -309,11 +309,24 @@ void TurnPort::OnSocketConnect(rtc::AsyncPacketSocket* socket) {
   // the one we asked for. This is seen in Chrome, where TCP sockets cannot be
   // given a binding address, and the platform is expected to pick the
   // correct local address.
+
+  // Further, to workaround issue 3927 in which a proxy is forcing TCP bound to
+  // localhost only, we're allowing Loopback IP even if it's not the same as the
+  // local Turn port.
   if (socket->GetLocalAddress().ipaddr() != ip()) {
-    LOG(LS_WARNING) << "Socket is bound to a different address then the "
-                    << "local port. Discarding TURN port.";
-    OnAllocateError();
-    return;
+    if (socket->GetLocalAddress().IsLoopbackIP()) {
+      LOG(LS_WARNING) << "Socket is bound to a different address:"
+                      << socket->GetLocalAddress().ipaddr().ToString()
+                      << ", rather then the local port:" << ip().ToString()
+                      << ". Still allowing it since it's localhost.";
+    } else {
+      LOG(LS_WARNING) << "Socket is bound to a different address:"
+                      << socket->GetLocalAddress().ipaddr().ToString()
+                      << ", rather then the local port:" << ip().ToString()
+                      << ". Discarding TURN port.";
+      OnAllocateError();
+      return;
+    }
   }
 
   if (server_address_.address.IsUnresolved()) {
@@ -442,7 +455,17 @@ void TurnPort::OnReadPacket(
     const rtc::SocketAddress& remote_addr,
     const rtc::PacketTime& packet_time) {
   ASSERT(socket == socket_);
-  ASSERT(remote_addr == server_address_.address);
+
+  // This is to guard against a STUN response from previous server after
+  // alternative server redirection. TODO(guoweis): add a unit test for this
+  // race condition.
+  if (remote_addr != server_address_.address) {
+    LOG_J(LS_WARNING, this) << "Discarding TURN message from unknown address:"
+                            << remote_addr.ToString()
+                            << ", server_address_:"
+                            << server_address_.address.ToString();
+    return;
+  }
 
   // The message must be at least the size of a channel header.
   if (size < TURN_CHANNEL_HEADER_SIZE) {
@@ -459,6 +482,14 @@ void TurnPort::OnReadPacket(
   } else if (msg_type == TURN_DATA_INDICATION) {
     HandleDataIndication(data, size, packet_time);
   } else {
+    if (SharedSocket() &&
+        (msg_type == STUN_BINDING_RESPONSE ||
+         msg_type == STUN_BINDING_ERROR_RESPONSE)) {
+      LOG_J(LS_VERBOSE, this) <<
+          "Ignoring STUN binding response message on shared socket.";
+      return;
+    }
+
     // This must be a response for one of our requests.
     // Check success responses, but not errors, for MESSAGE-INTEGRITY.
     if (IsStunSuccessResponseType(msg_type) &&

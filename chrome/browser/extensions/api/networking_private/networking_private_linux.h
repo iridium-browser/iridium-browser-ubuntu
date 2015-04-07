@@ -5,6 +5,9 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_NETWORKING_PRIVATE_NETWORKING_PRIVATE_LINUX_H_
 #define CHROME_BROWSER_EXTENSIONS_API_NETWORKING_PRIVATE_NETWORKING_PRIVATE_LINUX_H_
 
+#include <string>
+#include <vector>
+
 #include "base/memory/linked_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/threading/thread.h"
@@ -25,13 +28,15 @@ class Response;
 namespace extensions {
 
 // Linux NetworkingPrivateDelegate implementation.
-class NetworkingPrivateLinux : public KeyedService,
-                               public NetworkingPrivateDelegate {
+class NetworkingPrivateLinux : public NetworkingPrivateDelegate {
  public:
   typedef std::map<base::string16, linked_ptr<base::DictionaryValue>>
       NetworkMap;
 
-  explicit NetworkingPrivateLinux(content::BrowserContext* browser_context);
+  typedef std::vector<std::string> GuidList;
+
+  NetworkingPrivateLinux(content::BrowserContext* browser_context,
+                         scoped_ptr<VerifyDelegate> verify_delegate);
 
   // NetworkingPrivateDelegate
   void GetProperties(const std::string& guid,
@@ -63,19 +68,6 @@ class NetworkingPrivateLinux : public KeyedService,
   void StartDisconnect(const std::string& guid,
                        const VoidCallback& success_callback,
                        const FailureCallback& failure_callback) override;
-  void VerifyDestination(const VerificationProperties& verification_properties,
-                         const BoolCallback& success_callback,
-                         const FailureCallback& failure_callback) override;
-  void VerifyAndEncryptCredentials(
-      const std::string& guid,
-      const VerificationProperties& verification_properties,
-      const StringCallback& success_callback,
-      const FailureCallback& failure_callback) override;
-  void VerifyAndEncryptData(
-      const VerificationProperties& verification_properties,
-      const std::string& data,
-      const StringCallback& success_callback,
-      const FailureCallback& failure_callback) override;
   void SetWifiTDLSEnabledState(
       const std::string& ip_or_mac_address,
       bool enabled,
@@ -91,6 +83,8 @@ class NetworkingPrivateLinux : public KeyedService,
   bool EnableNetworkType(const std::string& type) override;
   bool DisableNetworkType(const std::string& type) override;
   bool RequestScan() override;
+  void AddObserver(NetworkingPrivateDelegateObserver* observer) override;
+  void RemoveObserver(NetworkingPrivateDelegateObserver* observer) override;
 
  private:
   ~NetworkingPrivateLinux() override;
@@ -132,6 +126,10 @@ class NetworkingPrivateLinux : public KeyedService,
   // Initiates the connection to the network.
   // Must be called on |dbus_thread_|.
   void ConnectToNetwork(const std::string& guid, std::string* error);
+
+  // Initiates disconnection from the specified network.
+  // Must be called on |dbus_thread_|
+  void DisconnectFromNetwork(const std::string& guid, std::string* error);
 
   // Checks whether the current thread is the DBus thread. If not, DCHECK will
   // fail.
@@ -206,6 +204,28 @@ class NetworkingPrivateLinux : public KeyedService,
   bool GetAccessPointForConnection(dbus::ObjectPath connection_path,
                                    dbus::ObjectPath* access_point_path);
 
+  // Helper method to set the connection state in the |network_map_| and post
+  // a change event.
+  bool SetConnectionStateAndPostEvent(const std::string& guid,
+                                      const std::string& ssid,
+                                      const std::string& connection_state);
+
+  // Helper method to post an OnNetworkChanged event to the UI thread from the
+  // dbus thread. Used for connection status progress during |StartConnect|.
+  void PostOnNetworksChangedToUIThread(scoped_ptr<GuidList> guid_list);
+
+  // Helper method to be called from the UI thread and manage ownership of the
+  // passed vector from the |dbus_thread_|.
+  void OnNetworksChangedEventTask(scoped_ptr<GuidList> guid_list);
+
+  void GetCachedNetworkProperties(const std::string& guid,
+                                  base::DictionaryValue* properties,
+                                  std::string* error);
+
+  void OnNetworksChangedEventOnUIThread(const GuidList& network_guids);
+
+  void OnNetworkListChangedEventOnUIThread(const GuidList& network_guids);
+
   // Browser context.
   content::BrowserContext* browser_context_;
   // Thread used for DBus actions.
@@ -216,6 +236,10 @@ class NetworkingPrivateLinux : public KeyedService,
   scoped_refptr<base::SequencedTaskRunner> dbus_task_runner_;
   // This is owned by |dbus_| object. Only access on |dbus_thread_|.
   dbus::ObjectProxy* network_manager_proxy_;
+  // Holds the current mapping of known networks. Only access on |dbus_thread_|.
+  scoped_ptr<NetworkMap> network_map_;
+  // Observers to Network Events.
+  ObserverList<NetworkingPrivateDelegateObserver> network_events_observers_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateLinux);
 };

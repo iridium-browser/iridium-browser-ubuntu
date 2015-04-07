@@ -51,9 +51,7 @@ ScriptedAnimationController::ScriptedAnimationController(Document* document)
 {
 }
 
-ScriptedAnimationController::~ScriptedAnimationController()
-{
-}
+DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(ScriptedAnimationController);
 
 void ScriptedAnimationController::trace(Visitor* visitor)
 {
@@ -96,7 +94,6 @@ ScriptedAnimationController::CallbackId ScriptedAnimationController::registerCal
     scheduleAnimationIfNeeded();
 
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "RequestAnimationFrame", "data", InspectorAnimationFrameEvent::data(m_document, id));
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.stack"), "CallStack", "stack", InspectorCallStackEvent::currentCallStack());
     // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
     InspectorInstrumentation::didRequestAnimationFrame(m_document, id);
 
@@ -108,7 +105,6 @@ void ScriptedAnimationController::cancelCallback(CallbackId id)
     for (size_t i = 0; i < m_callbacks.size(); ++i) {
         if (m_callbacks[i]->m_id == id) {
             TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "CancelAnimationFrame", "data", InspectorAnimationFrameEvent::data(m_document, id));
-            TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.stack"), "CallStack", "stack", InspectorCallStackEvent::currentCallStack());
             // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
             InspectorInstrumentation::didCancelAnimationFrame(m_document, id);
             m_callbacks.remove(i);
@@ -118,7 +114,6 @@ void ScriptedAnimationController::cancelCallback(CallbackId id)
     for (size_t i = 0; i < m_callbacksToInvoke.size(); ++i) {
         if (m_callbacksToInvoke[i]->m_id == id) {
             TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "CancelAnimationFrame", "data", InspectorAnimationFrameEvent::data(m_document, id));
-            TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.stack"), "CallStack", "stack", InspectorCallStackEvent::currentCallStack());
             // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
             InspectorInstrumentation::didCancelAnimationFrame(m_document, id);
             m_callbacksToInvoke[i]->m_cancelled = true;

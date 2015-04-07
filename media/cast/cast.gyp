@@ -115,8 +115,6 @@
         'net/rtp/framer.h',
         'net/rtp/receiver_stats.cc',
         'net/rtp/receiver_stats.h',
-        'net/rtp/rtp_parser.cc',
-        'net/rtp/rtp_parser.h',
         'net/rtp/rtp_receiver_defines.cc',
         'net/rtp/rtp_receiver_defines.h',
       ], # source
@@ -165,8 +163,10 @@
         'sender/frame_sender.h',
         'sender/software_video_encoder.h',
         'sender/video_encoder.h',
+        'sender/video_encoder.cc',
         'sender/video_encoder_impl.h',
         'sender/video_encoder_impl.cc',
+        'sender/video_frame_factory.h',
         'sender/video_sender.h',
         'sender/video_sender.cc',
         'sender/vp8_encoder.cc',
@@ -190,6 +190,13 @@
             'sender/vp8_encoder.h',
           ],
         }], # OS=="ios"
+        # iOS and OS X encoders
+        ['OS=="ios" or OS=="mac"', {
+          'sources': [
+            'sender/h264_vt_encoder.cc',
+            'sender/h264_vt_encoder.h',
+          ],
+        }],  # OS=="ios" or OS=="mac"
       ], # conditions
     },
     {
@@ -226,6 +233,8 @@
         'net/rtp/packet_storage.h',
         'net/rtp/rtp_packetizer.cc',
         'net/rtp/rtp_packetizer.h',
+        'net/rtp/rtp_parser.cc',
+        'net/rtp/rtp_parser.h',
         'net/rtp/rtp_sender.cc',
         'net/rtp/rtp_sender.h',
         'net/udp_transport.cc',

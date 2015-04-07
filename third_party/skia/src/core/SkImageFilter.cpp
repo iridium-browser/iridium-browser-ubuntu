@@ -100,11 +100,7 @@ bool SkImageFilter::Common::unflatten(SkReadBuffer& buffer, int expectedCount) {
 
     uint32_t flags = buffer.readUInt();
     fCropRect = CropRect(rect, flags);
-    if (buffer.isVersionLT(SkReadBuffer::kImageFilterUniqueID_Version)) {
-        fUniqueID = next_image_filter_unique_id();
-    } else {
-        fUniqueID = buffer.readUInt();
-    }
+    fUniqueID = buffer.readUInt();
     return buffer.isValid();
 }
 
@@ -260,8 +256,6 @@ bool SkImageFilter::filterImageGPU(Proxy* proxy, const SkBitmap& src, const Cont
     if (!dst) {
         return false;
     }
-    GrContext::AutoMatrix am;
-    am.setIdentity(context);
     GrContext::AutoRenderTarget art(context, dst->asRenderTarget());
     GrContext::AutoClip acs(context, dstRect);
     GrFragmentProcessor* fp;
@@ -274,7 +268,7 @@ bool SkImageFilter::filterImageGPU(Proxy* proxy, const SkBitmap& src, const Cont
         SkASSERT(fp);
         GrPaint paint;
         paint.addColorProcessor(fp)->unref();
-        context->drawRectToRect(paint, dstRect, srcRect);
+        context->drawNonAARectToRect(paint, SkMatrix::I(), dstRect, srcRect);
 
         WrapTexture(dst, bounds.width(), bounds.height(), result);
         return true;
@@ -290,8 +284,7 @@ bool SkImageFilter::applyCropRect(const Context& ctx, const SkBitmap& src,
     srcBounds.offset(srcOffset);
     SkRect cropRect;
     ctx.ctm().mapRect(&cropRect, fCropRect.rect());
-    SkIRect cropRectI;
-    cropRect.roundOut(&cropRectI);
+    const SkIRect cropRectI = cropRect.roundOut();
     uint32_t flags = fCropRect.flags();
     if (flags & CropRect::kHasLeft_CropEdge) srcBounds.fLeft = cropRectI.fLeft;
     if (flags & CropRect::kHasTop_CropEdge) srcBounds.fTop = cropRectI.fTop;
@@ -311,8 +304,7 @@ bool SkImageFilter::applyCropRect(const Context& ctx, Proxy* proxy, const SkBitm
     srcBounds.offset(*srcOffset);
     SkRect cropRect;
     ctx.ctm().mapRect(&cropRect, fCropRect.rect());
-    SkIRect cropRectI;
-    cropRect.roundOut(&cropRectI);
+    const SkIRect cropRectI = cropRect.roundOut();
     uint32_t flags = fCropRect.flags();
     *bounds = srcBounds;
     if (flags & CropRect::kHasLeft_CropEdge) bounds->fLeft = cropRectI.fLeft;
@@ -440,7 +432,7 @@ public:
         }
         SK_DECLARE_INTERNAL_LLIST_INTERFACE(Value);
     };
-    virtual bool get(const Key& key, SkBitmap* result, SkIPoint* offset) const {
+    virtual bool get(const Key& key, SkBitmap* result, SkIPoint* offset) const SK_OVERRIDE {
         SkAutoMutexAcquire mutex(fMutex);
         if (Value* v = fLookup.find(key)) {
             *result = v->fBitmap;
@@ -453,7 +445,7 @@ public:
         }
         return false;
     }
-    virtual void set(const Key& key, const SkBitmap& result, const SkIPoint& offset) {
+    virtual void set(const Key& key, const SkBitmap& result, const SkIPoint& offset) SK_OVERRIDE {
         SkAutoMutexAcquire mutex(fMutex);
         if (Value* v = fLookup.find(key)) {
             removeInternal(v);

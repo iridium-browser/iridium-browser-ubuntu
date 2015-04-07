@@ -17,6 +17,7 @@ from pylib import constants
 from pylib import pexpect
 from pylib.device import device_errors
 from pylib.device import intent
+from pylib.gtest import gtest_test_instance
 from pylib.gtest.test_package import TestPackage
 
 
@@ -40,13 +41,8 @@ class TestPackageApk(TestPackage):
       self._package_info = constants.PACKAGE_INFO['gtest']
 
   def _CreateCommandLineFileOnDevice(self, device, options):
-    command_line_file = tempfile.NamedTemporaryFile()
-    # GTest expects argv[0] to be the executable path.
-    command_line_file.write(self.suite_name + ' ' + options)
-    command_line_file.flush()
-    device.PushChangedFiles([(
-        command_line_file.name,
-        self._package_info.cmdline_file)])
+    device.WriteFile(self._package_info.cmdline_file,
+                     self.suite_name + ' ' + options)
 
   def _GetFifo(self):
     # The test.fifo path is determined by:
@@ -116,7 +112,7 @@ class TestPackageApk(TestPackage):
       self.tool.CleanUpEnvironment()
     # We need to strip the trailing newline.
     content = [line.rstrip() for line in p.before.splitlines()]
-    return self._ParseGTestListTests(content)
+    return gtest_test_instance.ParseGTestListTests(content)
 
   #override
   def SpawnTestProcess(self, device):

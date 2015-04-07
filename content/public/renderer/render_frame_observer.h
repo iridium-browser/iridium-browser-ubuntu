@@ -14,6 +14,7 @@
 #include "v8/include/v8.h"
 
 namespace blink {
+class WebFormElement;
 class WebFrame;
 struct WebURLError;
 }
@@ -54,9 +55,19 @@ class CONTENT_EXPORT RenderFrameObserver : public IPC::Listener,
   virtual void DidClearWindowObject() {}
   virtual void DidChangeName(const base::string16& name) {}
   virtual void DidChangeManifest() {}
+  virtual void DidChangeScrollOffset() {}
+  virtual void WillSendSubmitEvent(const blink::WebFormElement& form) {}
+  virtual void WillSubmitForm(const blink::WebFormElement& form) {}
+
+  // Called before FrameWillClose, when this frame has been detached from the
+  // view, but has not been closed yet. This *will* be called when parent frames
+  // are closing. NB: IPCs to the browser will fail silently by the time this
+  // notification is sent.
+  virtual void FrameDetached() {}
 
   // Called when the frame will soon be closed. This is the last opportunity to
-  // send messages to the host (e.g., for clean-up, shutdown, etc.).
+  // send messages to the host (e.g., for clean-up, shutdown, etc.). This is
+  // *not* called on child frames when parent frames are being closed.
   virtual void FrameWillClose() {}
 
   // Called when we receive a console message from Blink for which we requested

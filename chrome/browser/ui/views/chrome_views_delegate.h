@@ -34,6 +34,7 @@ class ChromeViewsDelegate : public views::ViewsDelegate {
                              bool has_submenu) override;
 #if defined(OS_WIN)
   virtual HICON GetDefaultWindowIcon() const override;
+  virtual HICON GetSmallWindowIcon() const override;
   virtual bool IsWindowInMetro(gfx::NativeWindow window) const override;
 #elif defined(OS_LINUX) && !defined(OS_CHROMEOS)
   gfx::ImageSkia* GetDefaultWindowIcon() const override;
@@ -51,9 +52,7 @@ class ChromeViewsDelegate : public views::ViewsDelegate {
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   bool WindowManagerProvidesTitleBar(bool maximized) override;
 #endif
-#if defined(USE_AURA)
   ui::ContextFactory* GetContextFactory() override;
-#endif
 #if defined(OS_WIN)
   virtual int GetAppbarAutohideEdges(HMONITOR monitor,
                                      const base::Closure& callback) override;

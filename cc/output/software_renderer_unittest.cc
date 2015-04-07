@@ -86,7 +86,7 @@ class SoftwareRendererTest : public testing::Test, public RendererClient {
   }
 
  protected:
-  LayerTreeSettings settings_;
+  RendererSettings settings_;
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<FakeOutputSurface> output_surface_;
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
@@ -211,6 +211,7 @@ TEST_F(SoftwareRendererTest, TileQuad) {
                      resource_cyan,
                      gfx::RectF(inner_size),
                      inner_size,
+                     false,
                      false);
   TileDrawQuad* outer_quad =
       root_render_pass->CreateAndAppendDrawQuad<TileDrawQuad>();
@@ -221,6 +222,7 @@ TEST_F(SoftwareRendererTest, TileQuad) {
                      resource_yellow,
                      gfx::RectF(outer_size),
                      outer_size,
+                     false,
                      false);
 
   RenderPassList list;
@@ -294,6 +296,7 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
                resource_cyan,
                gfx::RectF(tile_size),
                tile_size,
+               false,
                false);
   quad->visible_rect = visible_rect;
 

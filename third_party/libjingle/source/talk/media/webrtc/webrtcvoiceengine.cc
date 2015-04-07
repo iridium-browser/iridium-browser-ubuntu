@@ -74,6 +74,7 @@ static const CodecPref kCodecPrefs[] = {
   { "ISAC",   32000,  1, 104, true },
   { "CELT",   32000,  1, 109, true },
   { "CELT",   32000,  2, 110, true },
+  // G722 should be advertised as 8000 Hz because of the RFC "bug".
   { "G722",   8000,   1, 9,   false },
   { "ILBC",   8000,   1, 102, false },
   { "PCMU",   8000,   1, 0,   false },
@@ -503,7 +504,7 @@ void WebRtcVoiceEngine::ConstructCodecs() {
   int ncodecs = voe_wrapper_->codec()->NumOfCodecs();
   for (int i = 0; i < ncodecs; ++i) {
     webrtc::CodecInst voe_codec;
-    if (GetVoeCodec(i, voe_codec)) {
+    if (GetVoeCodec(i, &voe_codec)) {
       // Skip uncompressed formats.
       if (_stricmp(voe_codec.plname, kL16CodecName) == 0) {
         continue;
@@ -540,7 +541,9 @@ void WebRtcVoiceEngine::ConstructCodecs() {
             codec.params[kCodecParamMaxPTime] =
                 rtc::ToString(kPreferredMaxPTime);
           }
-          // TODO(hellner): Add ptime, sprop-stereo, stereo and useinbandfec
+          codec.SetParam(kCodecParamUseInbandFec, "1");
+
+          // TODO(hellner): Add ptime, sprop-stereo, and stereo
           // when they can be set to values other than the default.
         }
         codecs_.push_back(codec);
@@ -553,13 +556,13 @@ void WebRtcVoiceEngine::ConstructCodecs() {
   std::sort(codecs_.begin(), codecs_.end(), &AudioCodec::Preferable);
 }
 
-bool WebRtcVoiceEngine::GetVoeCodec(int index, webrtc::CodecInst& codec) {
-  if (voe_wrapper_->codec()->GetCodec(index, codec) != -1) {
-    // Change the sample rate of G722 to 8000 to match SDP.
-    MaybeFixupG722(&codec, 8000);
-    return true;
+bool WebRtcVoiceEngine::GetVoeCodec(int index, webrtc::CodecInst* codec) {
+  if (voe_wrapper_->codec()->GetCodec(index, *codec) == -1) {
+    return false;
   }
-  return false;
+  // Change the sample rate of G722 to 8000 to match SDP.
+  MaybeFixupG722(codec, 8000);
+  return true;
 }
 
 WebRtcVoiceEngine::~WebRtcVoiceEngine() {
@@ -808,8 +811,23 @@ bool WebRtcVoiceEngine::ApplyOptions(const AudioOptions& options_in) {
 
   webrtc::VoEAudioProcessing* voep = voe_wrapper_->processing();
 
-  bool echo_cancellation;
+  bool echo_cancellation = false;
   if (options.echo_cancellation.Get(&echo_cancellation)) {
+    // Check if platform supports built-in EC. Currently only supported on
+    // Android and in combination with Java based audio layer.
+    // TODO(henrika): investigate possibility to support built-in EC also
+    // in combination with Open SL ES audio.
+    const bool built_in_aec = voe_wrapper_->hw()->BuiltInAECIsAvailable();
+    if (built_in_aec) {
+      // Set mode of built-in EC according to the audio options.
+      voe_wrapper_->hw()->EnableBuiltInAEC(echo_cancellation);
+      if (echo_cancellation) {
+        // Disable internal software EC if device has its own built-in EC,
+        // i.e., replace the software EC with the built-in EC.
+        options.echo_cancellation.Set(false);
+        LOG(LS_INFO) << "Disabling EC since built-in EC will be used instead";
+      }
+    }
     if (voep->SetEcStatus(echo_cancellation, ec_mode) == -1) {
       LOG_RTCERR2(SetEcStatus, echo_cancellation, ec_mode);
       return false;
@@ -1246,7 +1264,7 @@ bool WebRtcVoiceEngine::FindWebRtcCodec(const AudioCodec& in,
   int ncodecs = voe_wrapper_->codec()->NumOfCodecs();
   for (int i = 0; i < ncodecs; ++i) {
     webrtc::CodecInst voe_codec;
-    if (GetVoeCodec(i, voe_codec)) {
+    if (GetVoeCodec(i, &voe_codec)) {
       AudioCodec codec(voe_codec.pltype, voe_codec.plname, voe_codec.plfreq,
                        voe_codec.rate, voe_codec.channels, 0);
       bool multi_rate = IsCodecMultiRate(voe_codec);
@@ -3151,7 +3169,7 @@ void WebRtcVoiceMediaChannel::OnPacketReceived(
   engine()->voe()->network()->ReceivedRTPPacket(
       which_channel,
       packet->data(),
-      static_cast<unsigned int>(packet->length()),
+      packet->length(),
       webrtc::PacketTime(packet_time.timestamp, packet_time.not_before));
 }
 
@@ -3176,7 +3194,7 @@ void WebRtcVoiceMediaChannel::OnRtcpReceived(
       engine()->voe()->network()->ReceivedRTCPPacket(
           which_channel,
           packet->data(),
-          static_cast<unsigned int>(packet->length()));
+          packet->length());
 
       if (IsDefaultChannel(which_channel))
         has_sent_to_default_channel = true;
@@ -3196,7 +3214,7 @@ void WebRtcVoiceMediaChannel::OnRtcpReceived(
     engine()->voe()->network()->ReceivedRTCPPacket(
         iter->second->channel(),
         packet->data(),
-        static_cast<unsigned int>(packet->length()));
+        packet->length());
   }
 }
 
@@ -3727,7 +3745,7 @@ bool WebRtcVoiceMediaChannel::SetupSharedBweOnChannel(int voe_channel) {
   return true;
 }
 
-int WebRtcSoundclipStream::Read(void *buf, int len) {
+int WebRtcSoundclipStream::Read(void *buf, size_t len) {
   size_t res = 0;
   mem_.Read(buf, len, &res, NULL);
   return static_cast<int>(res);

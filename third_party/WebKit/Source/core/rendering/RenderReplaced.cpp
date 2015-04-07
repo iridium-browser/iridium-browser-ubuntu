@@ -26,13 +26,11 @@
 
 #include "core/editing/PositionWithAffinity.h"
 #include "core/paint/ReplacedPainter.h"
-#include "core/rendering/GraphicsContextAnnotator.h"
 #include "core/rendering/RenderBlock.h"
 #include "core/rendering/RenderImage.h"
 #include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderView.h"
 #include "platform/LengthFunctions.h"
-#include "platform/graphics/GraphicsContext.h"
 
 namespace blink {
 
@@ -101,16 +99,16 @@ void RenderReplaced::intrinsicSizeChanged()
 {
     int scaledWidth = static_cast<int>(defaultWidth * style()->effectiveZoom());
     int scaledHeight = static_cast<int>(defaultHeight * style()->effectiveZoom());
-    m_intrinsicSize = IntSize(scaledWidth, scaledHeight);
+    m_intrinsicSize = LayoutSize(scaledWidth, scaledHeight);
     setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
 }
 
-void RenderReplaced::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void RenderReplaced::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     ReplacedPainter(*this).paint(paintInfo, paintOffset);
 }
 
-bool RenderReplaced::shouldPaint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+bool RenderReplaced::shouldPaint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset) const
 {
     if (paintInfo.phase != PaintPhaseForeground && paintInfo.phase != PaintPhaseOutline && paintInfo.phase != PaintPhaseSelfOutline
         && paintInfo.phase != PaintPhaseSelection && paintInfo.phase != PaintPhaseMask && paintInfo.phase != PaintPhaseClippingMask)
@@ -311,7 +309,7 @@ LayoutUnit RenderReplaced::computeReplacedLogicalWidth(ShouldComputePreferred sh
                 // This solves above equation for 'width' (== logicalWidth).
                 LayoutUnit marginStart = minimumValueForLength(style()->marginStart(), logicalWidth);
                 LayoutUnit marginEnd = minimumValueForLength(style()->marginEnd(), logicalWidth);
-                logicalWidth = std::max<LayoutUnit>(0, logicalWidth - (marginStart + marginEnd + (width() - clientWidth())));
+                logicalWidth = std::max<LayoutUnit>(0, logicalWidth - (marginStart + marginEnd + (size().width() - clientWidth())));
                 return computeReplacedLogicalWidthRespectingMinMaxWidth(logicalWidth, shouldComputePreferred);
             }
         }
@@ -410,8 +408,8 @@ PositionWithAffinity RenderReplaced::positionForPoint(const LayoutPoint& point)
     LayoutUnit top = rootBox ? rootBox->selectionTop() : logicalTop();
     LayoutUnit bottom = rootBox ? rootBox->selectionBottom() : logicalBottom();
 
-    LayoutUnit blockDirectionPosition = isHorizontalWritingMode() ? point.y() + y() : point.x() + x();
-    LayoutUnit lineDirectionPosition = isHorizontalWritingMode() ? point.x() + x() : point.y() + y();
+    LayoutUnit blockDirectionPosition = isHorizontalWritingMode() ? point.y() + location().y() : point.x() + location().x();
+    LayoutUnit lineDirectionPosition = isHorizontalWritingMode() ? point.x() + location().x() : point.y() + location().y();
 
     if (blockDirectionPosition < top)
         return createPositionWithAffinity(caretMinOffset(), DOWNSTREAM); // coordinates are above
@@ -437,6 +435,9 @@ LayoutRect RenderReplaced::selectionRectForPaintInvalidation(const RenderLayerMo
 
     LayoutRect rect = localSelectionRect();
     mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, 0);
+    // FIXME: groupedMapping() leaks the squashing abstraction.
+    if (paintInvalidationContainer->layer()->groupedMapping())
+        RenderLayer::mapRectToPaintBackingCoordinates(paintInvalidationContainer, rect);
     return rect;
 }
 
@@ -450,10 +451,10 @@ LayoutRect RenderReplaced::localSelectionRect(bool checkWhetherSelected) const
         return LayoutRect(LayoutPoint(), size());
 
     RootInlineBox& root = inlineBoxWrapper()->root();
-    LayoutUnit newLogicalTop = root.block().style()->slowIsFlippedBlocksWritingMode() ? inlineBoxWrapper()->logicalBottom() - root.selectionBottom() : root.selectionTop() - inlineBoxWrapper()->logicalTop();
+    LayoutUnit newLogicalTop = root.block().style()->isFlippedBlocksWritingMode() ? inlineBoxWrapper()->logicalBottom() - root.selectionBottom() : root.selectionTop() - inlineBoxWrapper()->logicalTop();
     if (root.block().style()->isHorizontalWritingMode())
-        return LayoutRect(0, newLogicalTop, width(), root.selectionHeight());
-    return LayoutRect(newLogicalTop, 0, root.selectionHeight(), height());
+        return LayoutRect(0, newLogicalTop, size().width(), root.selectionHeight());
+    return LayoutRect(newLogicalTop, 0, root.selectionHeight(), size().height());
 }
 
 void RenderReplaced::setSelectionState(SelectionState state)

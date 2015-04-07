@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
@@ -25,9 +26,12 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/app_modal/javascript_app_modal_dialog.h"
+#include "components/app_modal/native_app_modal_dialog.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "components/omnibox/autocomplete_result.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
@@ -88,6 +92,41 @@ class CloseObserver : public content::WebContentsObserver {
   DISALLOW_COPY_AND_ASSIGN(CloseObserver);
 };
 
+class BrowserActivationObserver : public chrome::BrowserListObserver {
+ public:
+  explicit BrowserActivationObserver(chrome::HostDesktopType desktop_type)
+      : browser_(chrome::FindLastActiveWithHostDesktopType(desktop_type)),
+        observed_(false) {
+    BrowserList::AddObserver(this);
+  }
+  ~BrowserActivationObserver() override { BrowserList::RemoveObserver(this); }
+
+  void WaitForActivation() {
+    if (observed_)
+      return;
+    message_loop_runner_ = new content::MessageLoopRunner;
+    message_loop_runner_->Run();
+  }
+
+ private:
+  // chrome::BrowserListObserver:
+  void OnBrowserSetLastActive(Browser* browser) override {
+    if (browser == browser_)
+      return;
+    if (browser->host_desktop_type() != browser_->host_desktop_type())
+      return;
+    observed_ = true;
+    if (message_loop_runner_.get() && message_loop_runner_->loop_running())
+      message_loop_runner_->Quit();
+  }
+
+  Browser* browser_;
+  bool observed_;
+  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
+
+  DISALLOW_COPY_AND_ASSIGN(BrowserActivationObserver);
+};
+
 class PopupBlockerBrowserTest : public InProcessBrowserTest {
  public:
   PopupBlockerBrowserTest() {}
@@ -137,6 +176,9 @@ class PopupBlockerBrowserTest : public InProcessBrowserTest {
                 chrome::GetBrowserCount(browser()->profile(),
                                         browser()->host_desktop_type()));
       ASSERT_EQ(2, browser()->tab_strip_model()->count());
+
+      // Check that we always create foreground tabs.
+      ASSERT_EQ(1, browser()->tab_strip_model()->active_index());
     }
 
     ASSERT_EQ(0, GetBlockedContentsCount());
@@ -201,6 +243,8 @@ class PopupBlockerBrowserTest : public InProcessBrowserTest {
     } else {
       new_browser = browser;
       EXPECT_EQ(2, browser->tab_strip_model()->count());
+      // Check that we always create foreground tabs.
+      EXPECT_EQ(1, browser->tab_strip_model()->active_index());
       web_contents = browser->tab_strip_model()->GetWebContentsAt(1);
     }
 
@@ -222,14 +266,15 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
                        BlockWebContentsCreation) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
   RunCheckTest(
       browser(),
       "/popup_blocker/popup-blocked-to-post-blank.html",
-      ExpectPopup,
+      ExpectTab,
       DontCheckTitle);
 }
 
@@ -237,14 +282,15 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
                        BlockWebContentsCreationIncognito) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
   RunCheckTest(
       CreateIncognitoBrowser(),
       "/popup_blocker/popup-blocked-to-post-blank.html",
-      ExpectPopup,
+      ExpectTab,
       DontCheckTitle);
 }
 
@@ -252,7 +298,8 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
                        PopupBlockedFakeClickOnAnchor) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -267,7 +314,8 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
                        PopupBlockedFakeClickOnAnchorNoTarget) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -337,7 +385,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
                        PopupsLaunchWhenTabIsClosed) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kDisablePopupBlocking);
   GURL url(
       embedded_test_server()->GetURL("/popup_blocker/popup-on-unload.html"));
@@ -350,7 +398,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
 // Verify that when you unblock popup, the popup shows in history and omnibox.
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
                        UnblockedPopupShowsInHistoryAndOmnibox) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kDisablePopupBlocking);
   GURL url(embedded_test_server()->GetURL(
       "/popup_blocker/popup-blocked-to-post-blank.html"));
@@ -402,7 +450,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, MAYBE_WindowFeatures) {
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, CorrectReferrer) {
   RunCheckTest(browser(),
                "/popup_blocker/popup-referrer.html",
-               ExpectPopup,
+               ExpectTab,
                CheckTitle);
 }
 
@@ -416,14 +464,14 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, WindowFeaturesBarProps) {
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, SessionStorage) {
   RunCheckTest(browser(),
                "/popup_blocker/popup-sessionstorage.html",
-               ExpectPopup,
+               ExpectTab,
                CheckTitle);
 }
 
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, Opener) {
   RunCheckTest(browser(),
                "/popup_blocker/popup-opener.html",
-               ExpectPopup,
+               ExpectTab,
                CheckTitle);
 }
 
@@ -434,7 +482,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, ClosableAfterNavigation) {
   WebContents* popup =
       RunCheckTest(browser(),
                    "/popup_blocker/popup-opener.html",
-                   ExpectPopup,
+                   ExpectTab,
                    CheckTitle);
 
   // Navigate it elsewhere.
@@ -469,7 +517,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, WebUI) {
   WebContents* popup =
       RunCheckTest(browser(),
                    "/popup_blocker/popup-webui.html",
-                   ExpectPopup,
+                   ExpectTab,
                    DontCheckTitle);
 
   // Check that the new popup displays about:blank.
@@ -482,6 +530,63 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, DenialOfService) {
   GURL url(embedded_test_server()->GetURL("/popup_blocker/popup-dos.html"));
   ui_test_utils::NavigateToURL(browser(), url);
   ASSERT_EQ(25, GetBlockedContentsCount());
+}
+
+// Verify that an onunload popup does not show up for about:blank.
+IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, Regress427477) {
+  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUINewTabURL));
+  ui_test_utils::NavigateToURL(browser(), GURL(url::kAboutBlankURL));
+
+  GURL url(
+      embedded_test_server()->GetURL("/popup_blocker/popup-on-unload.html"));
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+
+  tab->GetController().GoBack();
+  content::WaitForLoadStop(tab);
+
+  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile(),
+                                        browser()->host_desktop_type()));
+  ASSERT_EQ(1, browser()->tab_strip_model()->count());
+
+  // The popup from the unload event handler should not show up for about:blank.
+  ASSERT_EQ(0, GetBlockedContentsCount());
+}
+
+// Verify that app modal prompts can't be used to create pop unders.
+IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, ModalPopUnder) {
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+  GURL url(
+      embedded_test_server()->GetURL("/popup_blocker/popup-window-open.html"));
+  browser()->profile()->GetHostContentSettingsMap()->SetContentSetting(
+      ContentSettingsPattern::FromURL(url), ContentSettingsPattern::Wildcard(),
+      CONTENT_SETTINGS_TYPE_POPUPS, std::string(), CONTENT_SETTING_ALLOW);
+
+  NavigateAndCheckPopupShown(url, ExpectPopup);
+
+  Browser* popup_browser =
+      chrome::FindLastActiveWithHostDesktopType(browser()->host_desktop_type());
+  ASSERT_NE(popup_browser, browser());
+
+  // Showing an alert will raise the tab over the popup.
+  tab->GetMainFrame()->ExecuteJavaScript(base::UTF8ToUTF16("alert()"));
+  app_modal::AppModalDialog* dialog = ui_test_utils::WaitForAppModalDialog();
+
+  // Verify that after the dialog was closed, the popup is in front again.
+  ASSERT_TRUE(dialog->IsJavaScriptModalDialog());
+  app_modal::JavaScriptAppModalDialog* js_dialog =
+      static_cast<app_modal::JavaScriptAppModalDialog*>(dialog);
+
+  BrowserActivationObserver activation_observer(browser()->host_desktop_type());
+  js_dialog->native_dialog()->AcceptAppModalDialog();
+
+  if (popup_browser != chrome::FindLastActiveWithHostDesktopType(
+                           popup_browser->host_desktop_type())) {
+    activation_observer.WaitForActivation();
+  }
+  ASSERT_EQ(popup_browser, chrome::FindLastActiveWithHostDesktopType(
+                               popup_browser->host_desktop_type()));
 }
 
 }  // namespace

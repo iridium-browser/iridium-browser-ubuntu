@@ -5,6 +5,7 @@
 #include "config.h"
 #include "modules/serviceworkers/ServiceWorkerClient.h"
 
+#include "bindings/core/v8/CallbackPromiseAdapter.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/SerializedScriptValue.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
@@ -13,13 +14,18 @@
 
 namespace blink {
 
-ServiceWorkerClient* ServiceWorkerClient::create(unsigned id)
+ServiceWorkerClient* ServiceWorkerClient::create(const WebServiceWorkerClientInfo& info)
 {
-    return new ServiceWorkerClient(id);
+    return new ServiceWorkerClient(info);
 }
 
-ServiceWorkerClient::ServiceWorkerClient(unsigned id)
-    : m_id(id)
+ServiceWorkerClient::ServiceWorkerClient(const WebServiceWorkerClientInfo& info)
+    : m_id(info.clientID)
+    , m_url(info.url.string())
+{
+}
+
+ServiceWorkerClient::~ServiceWorkerClient()
 {
 }
 

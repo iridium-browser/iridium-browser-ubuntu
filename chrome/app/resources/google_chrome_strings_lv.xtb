@@ -45,6 +45,7 @@
 <translation id="568643307450491754">Skatiet savas grāmatzīmes Chrome izvēlnē vai grāmatzīmju joslā.</translation>
 <translation id="8556340503434111824">Ir pieejama jauna Google Chrome versija, un tā ir ātrāka nekā jebkad agrāk.</translation>
 <translation id="8987477933582888019">Tīmekļa pārlūks</translation>
+<translation id="3749644715096758981">Nevarēja atjaunināt uz jaunāko Chrome versiju, tādēļ jūs nevarēsiet piekļūt jaunākajām funkcijām un drošības labojumiem. Jums jāatjaunina pārlūks Chrome.</translation>
 <translation id="4728575227883772061">Instalācija neizdevās nenoteiktas kļūdas dēļ. Ja Google Chrome pašlaik darbojas, lūdzu, aizveriet to un mēģiniet vēlreiz.</translation>
 <translation id="3080151273017101988">Turpināt lietotņu izpildi fonā, kad Google Chrome ir aizvērts</translation>
 <translation id="4149882025268051530">Instalētājam neizdevās atarhivēt arhīvu. Lūdzu, vēlreiz lejupielādējiet Google Chrome.</translation>
@@ -85,6 +86,7 @@
 <translation id="225614027745146050">Laipni lūdzam!</translation>
 <translation id="7473891865547856676">Nē, paldies!</translation>
 <translation id="3149510190863420837">Chrome lietotnes</translation>
+<translation id="8851136666856101339">galvenais</translation>
 <translation id="7473136999113284234">Pārlūks Chrome tiek atjaunināts automātiski, tādēļ jums vienmēr būs pieejama visjaunākā versija.</translation>
 <translation id="7084448929020576097">Fails <ph name="FILE_NAME"/> ir ļaunprātīgs, un Chrome to bloķēja.</translation>
 <translation id="6368958679917195344">Chrome OS ir kļuvusi iespējama, pateicoties papildu <ph name="BEGIN_LINK_CROS_OSS"/>atklātā pirmkoda programmatūrai<ph name="END_LINK_CROS_OSS"/>.</translation>
@@ -146,7 +148,6 @@ Ja pierakstīsieties tik un tā, Chrome informācija, piemēram, grāmatzīmes, 
 <translation id="5855036575689098185">Programmatūra, kas darbojas jūsu datorā, nav saderīga ar pārlūku Google Chrome.</translation>
 <translation id="7164397146364144019">Varat palīdzēt uzlabot Chrome drošību un lietošanas ērtumu, automātiski nosūtot Google serveriem informāciju par iespējamām drošības problēmām.</translation>
 <translation id="8008534537613507642">Pārinstalēt Chrome</translation>
-<translation id="2044287590254833138">Google Chrome rīkjosla</translation>
 <translation id="8862326446509486874">Jums nav vajadzīgo tiesību, lai instalētu sistēmas līmenī. Mēģiniet vēlreiz palaist instalēšanas programmu kā administrators.</translation>
 <translation id="2874156562296220396">Pakalpojumu Google Chrome nodrošina <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> atklātā pirmkoda projekts un <ph name="BEGIN_LINK_OSS"/>atklātā pirmkoda programmatūra<ph name="END_LINK_OSS"/>.</translation>
 <translation id="7191567847629796517">Operētājsistēmā Google Chrome OS netiek atbalstīta ārējas lietojumprogrammas palaišana, lai apstrādātu <ph name="SCHEME"/> saites. Pieprasītā saite: <ph name="PROTOLINK"/>.</translation>
@@ -158,6 +159,7 @@ Ja pierakstīsieties tik un tā, Chrome informācija, piemēram, grāmatzīmes, 
 <translation id="2290095356545025170">Vai tiešām vēlaties atinstalēt Google Chrome?</translation>
 <translation id="7062966102157262887">Lejupielāde vēl nav pabeigta. Vai vēlaties iziet no pārlūkprogrammas Google Chrome un atcelt lejupielādi?</translation>
 <translation id="4273752058983339720">Pārlūks Google Chrome ir konfigurēts automātiskai palaišanai, kad jūs startējat savu datoru.</translation>
+<translation id="2316129865977710310">Nē, paldies</translation>
 <translation id="415994390253732730">Vai Chrome darbība ir neparasta?</translation>
 <translation id="1104959162601287462">Par &amp;Chrome OS</translation>
 <translation id="5328989068199000832">Google Chrome binārie faili</translation>
@@ -260,6 +262,7 @@ Ja pierakstīsieties tik un tā, Chrome informācija, piemēram, grāmatzīmes, 
 <translation id="6626317981028933585">Diemžēl, kamēr darbojas šī pārlūkprogramma, jūsu Mozilla Firefox iestatījumi nav pieejami. Lai importētu šos iestatījumus uz Google Chrome, saglabājiet savu darbu un aizveriet visus Firefox logus. Tad klikšķiniet uz Turpināt.</translation>
 <translation id="7242029209006116544">Jūs pierakstāties ar pārvaldītu kontu un nodrošināt, ka tā administrators var pārvaldīt jūsu Google Chrome profilu. Jūsu Chrome dati, piemēram, lietotnes, grāmatzīmes, vēsture, paroles un citi iestatījumi tiks neatgriezeniski saistīti ar lietotāju <ph name="USER_NAME"/>. Varēsiet dzēst šos datus, izmantojot Google kontu informācijas paneli, taču nevarēsiet saistīt šos datus ar citu kontu. Ja vēlaties, varat izveidot jaunu profilu, lai atsevišķi glabātu Chrome datus. <ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">Tas nosaka arī to, kāda lapa tiks rādīta, kad atvērsiet pārlūku Chrome vai meklēsiet, izmantojot universālo lodziņu.</translation>
+<translation id="1553358976309200471">Atjaunināt Chrome</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Autortiesības <ph name="YEAR"/> Google Inc. Visas tiesības paturētas.</translation>
 <translation id="1698376642261615901">Google Chrome ir tīmekļa pārlūks, kas zibenīgi atver tīmekļa lapas un izpilda lietojumprogrammas. Tas ir ātrs, stabils un ērti lietojams. Google Chrome iebūvētā aizsardzība pret ļaunprātīgu programmatūru un pikšķerēšanu nodrošina daudz drošāku tīmekļa pārlūkošanu.</translation>

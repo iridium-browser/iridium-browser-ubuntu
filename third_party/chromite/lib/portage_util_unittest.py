@@ -5,6 +5,8 @@
 
 """Unit tests for portage_util.py."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import fileinput
@@ -57,8 +59,8 @@ class EBuildTest(cros_test_lib.MoxTestCase):
     fake_ebuild_path = '/path/to/test_package/test_package-0.0.1-r1.ebuild'
     fake_ebuild = self._makeFakeEbuild(fake_ebuild_path)
 
-    self.assertEquals(fake_ebuild._category, 'to')
-    self.assertEquals(fake_ebuild._pkgname, 'test_package')
+    self.assertEquals(fake_ebuild.category, 'to')
+    self.assertEquals(fake_ebuild.pkgname, 'test_package')
     self.assertEquals(fake_ebuild.version_no_rev, '0.0.1')
     self.assertEquals(fake_ebuild.current_revision, 1)
     self.assertEquals(fake_ebuild.version, '0.0.1-r1')
@@ -76,8 +78,8 @@ class EBuildTest(cros_test_lib.MoxTestCase):
     fake_ebuild_path = '/path/to/test_package/test_package-9999.ebuild'
     fake_ebuild = self._makeFakeEbuild(fake_ebuild_path)
 
-    self.assertEquals(fake_ebuild._category, 'to')
-    self.assertEquals(fake_ebuild._pkgname, 'test_package')
+    self.assertEquals(fake_ebuild.category, 'to')
+    self.assertEquals(fake_ebuild.pkgname, 'test_package')
     self.assertEquals(fake_ebuild.version_no_rev, '9999')
     self.assertEquals(fake_ebuild.current_revision, 0)
     self.assertEquals(fake_ebuild.version, '9999')
@@ -159,7 +161,7 @@ class ProjectAndPathTest(cros_test_lib.MoxTempDirTestCase):
       os.path.isdir(mox.IgnoreArg()).AndReturn(False)
     for p in fake_projects:
       os.path.isdir(mox.IgnoreArg()).AndReturn(True)
-      MANIFEST.FindCheckoutFromPath(mox.IgnoreArg()).AndReturn({ 'name': p })
+      MANIFEST.FindCheckoutFromPath(mox.IgnoreArg()).AndReturn({'name': p})
     self.mox.ReplayAll()
 
     ebuild = portage_util.EBuild(ebuild_path)
@@ -203,8 +205,8 @@ CROS_WORKON_SUBDIR=%s
     self.assertEquals(project, fake_projects)
     fake_path = ['%s/%s' % (fake_localname[i], fake_subdir[i])
                  for i in range(0, len(fake_projects))]
-    fake_path = map(lambda x: os.path.realpath(
-        os.path.join(self.tempdir, 'platform', x)), fake_path)
+    fake_path = [os.path.realpath(os.path.join(self.tempdir, 'platform', x))
+                 for x in fake_path]
     self.assertEquals(subdir, fake_path)
 
 
@@ -220,9 +222,9 @@ class StubEBuild(portage_util.EBuild):
 
   def GetCommitId(self, srcpath):
     id_map = {
-      'p1_path' : 'my_id',
-      'p1_path1' : 'my_id1',
-      'p1_path2' : 'my_id2'
+        'p1_path': 'my_id',
+        'p1_path1': 'my_id1',
+        'p1_path2': 'my_id2'
     }
     if srcpath in id_map:
       return id_map[srcpath]
@@ -269,7 +271,7 @@ class EBuildRevWorkonTest(cros_test_lib.MoxTempDirTestCase):
 
     if multi:
       portage_util.EBuild.GetSourcePath('/sources', MANIFEST).AndReturn(
-          (['fake_project1','fake_project2'], ['p1_path1','p1_path2']))
+          (['fake_project1', 'fake_project2'], ['p1_path1', 'p1_path2']))
     else:
       portage_util.EBuild.GetSourcePath('/sources', MANIFEST).AndReturn(
           (['fake_project1'], ['p1_path']))
@@ -414,12 +416,21 @@ class EBuildRevWorkonTest(cros_test_lib.MoxTempDirTestCase):
     self.assertTrue(portage_util.EBuild.GitRepoHasChanges(self.tempdir))
 
 
+class ListOverlaysTest(cros_test_lib.MockTempDirTestCase):
+  """Tests related to listing overlays."""
+  def testMissingOverlays(self):
+    """Tests that exceptions are raised when an overlay is missing."""
+    self.assertRaises(portage_util.MissingOverlayException,
+                      portage_util._ListOverlays,
+                      board='foo', buildroot=self.tempdir)
+
+
 class FindOverlaysTest(cros_test_lib.MockTempDirTestCase):
   """Tests related to finding overlays."""
 
-  FAKE, PUB_PRIV, PUB_ONLY, PUB2_ONLY, PRIV_ONLY = (
-      'fake!board', 'pub-priv-board', 'pub-only-board', 'pub2-only-board',
-      'priv-only-board',
+  FAKE, PUB_PRIV, PUB_PRIV_VARIANT, PUB_ONLY, PUB2_ONLY, PRIV_ONLY = (
+      'fake!board', 'pub-priv-board', 'pub-priv-board_variant',
+      'pub-only-board', 'pub2-only-board', 'priv-only-board',
   )
   PRIVATE = constants.PRIVATE_OVERLAYS
   PUBLIC = constants.PUBLIC_OVERLAYS
@@ -440,9 +451,11 @@ class FindOverlaysTest(cros_test_lib.MockTempDirTestCase):
                 D('overlay-%s' % self.PUB_ONLY, board_overlay_files),
                 D('overlay-%s' % self.PUB2_ONLY, board_overlay_files),
                 D('overlay-%s' % self.PUB_PRIV, board_overlay_files),
+                D('overlay-%s' % self.PUB_PRIV_VARIANT, board_overlay_files),
             )),
             D('private-overlays', (
                 D('overlay-%s' % self.PUB_PRIV, board_overlay_files),
+                D('overlay-%s' % self.PUB_PRIV_VARIANT, board_overlay_files),
                 D('overlay-%s' % self.PRIV_ONLY, board_overlay_files),
             )),
             D('third_party', (
@@ -458,7 +471,8 @@ class FindOverlaysTest(cros_test_lib.MockTempDirTestCase):
     conf_path = os.path.join(self.tempdir, 'src', '%(private)soverlays',
                              'overlay-%(board)s', 'metadata', 'layout.conf')
 
-    for board in (self.PUB_PRIV, self.PUB_ONLY, self.PUB2_ONLY):
+    for board in (self.PUB_PRIV, self.PUB_PRIV_VARIANT, self.PUB_ONLY,
+                  self.PUB2_ONLY):
       settings = {
           'board': board,
           'private': '',
@@ -467,7 +481,7 @@ class FindOverlaysTest(cros_test_lib.MockTempDirTestCase):
       osutils.WriteFile(conf_path % settings,
                         conf_data % settings)
 
-    for board in (self.PUB_PRIV, self.PRIV_ONLY):
+    for board in (self.PUB_PRIV, self.PUB_PRIV_VARIANT, self.PRIV_ONLY):
       settings = {
           'board': board,
           'private': 'private-',
@@ -486,8 +500,8 @@ class FindOverlaysTest(cros_test_lib.MockTempDirTestCase):
 
     # Now build up the list of overlays that we'll use in tests below.
     self.overlays = {}
-    for b in (None, self.FAKE, self.PUB_PRIV, self.PUB_ONLY, self.PUB2_ONLY,
-              self.PRIV_ONLY):
+    for b in (None, self.FAKE, self.PUB_PRIV, self.PUB_PRIV_VARIANT,
+              self.PUB_ONLY, self.PUB2_ONLY, self.PRIV_ONLY):
       self.overlays[b] = d = {}
       for o in (self.PRIVATE, self.PUBLIC, self.BOTH, None):
         try:
@@ -543,7 +557,7 @@ class FindOverlaysTest(cros_test_lib.MockTempDirTestCase):
     """
     for o in (self.PUBLIC, self.BOTH):
       self.assertLess(set(self.overlays[self.FAKE][o]),
-                          set(self.overlays[self.PUB_PRIV][o]))
+                      set(self.overlays[self.PUB_PRIV][o]))
 
   def testAllBoards(self):
     """If we specify board=None, all overlays should be returned."""
@@ -567,29 +581,52 @@ class FindOverlaysTest(cros_test_lib.MockTempDirTestCase):
     self.assertNotEqual(self.overlays[self.PUB_ONLY][self.PUBLIC][-1],
                         self.overlays[self.PUB2_ONLY][self.PUBLIC][-1])
 
-  def testReadOverlayFile(self):
-    """Verify that the boards are examined in the right order"""
-    m = self.PatchObject(osutils, 'ReadFile',
-                         side_effect=IOError(os.errno.ENOENT, 'ENOENT'))
+  def testReadOverlayFileOrder(self):
+    """Verify that the boards are examined in the right order."""
+    m = self.PatchObject(os.path, 'isfile', return_value=False)
     portage_util.ReadOverlayFile('test', self.PUBLIC, self.PUB_PRIV,
                                  self.tempdir)
     read_overlays = [x[0][0][:-5] for x in m.call_args_list]
     overlays = [x for x in reversed(self.overlays[self.PUB_PRIV][self.PUBLIC])]
     self.assertEqual(read_overlays, overlays)
 
+  def testFindOverlayFile(self):
+    """Verify that the first file found is returned."""
+    file_to_find = 'something_special'
+    full_path = os.path.join(self.tempdir,
+                             'src', 'private-overlays',
+                             'overlay-%s' % self.PUB_PRIV,
+                             file_to_find)
+    osutils.Touch(full_path)
+    self.assertEqual(full_path,
+                     portage_util.FindOverlayFile(file_to_find, self.BOTH,
+                                                  self.PUB_PRIV_VARIANT,
+                                                  self.tempdir))
+
   def testFoundPrivateOverlays(self):
     """Verify that private boards had their overlays located."""
-    for b in (self.PUB_PRIV, self.PRIV_ONLY):
+    for b in (self.PUB_PRIV, self.PUB_PRIV_VARIANT, self.PRIV_ONLY):
       self.assertNotEqual(self.overlays[b][self.PRIVATE], [])
     self.assertNotEqual(self.overlays[self.PUB_PRIV][self.BOTH],
                         self.overlays[self.PUB_PRIV][self.PRIVATE])
+    self.assertNotEqual(self.overlays[self.PUB_PRIV_VARIANT][self.BOTH],
+                        self.overlays[self.PUB_PRIV_VARIANT][self.PRIVATE])
 
   def testFoundPublicOverlays(self):
     """Verify that public boards had their overlays located."""
-    for b in (self.PUB_PRIV, self.PUB_ONLY, self.PUB2_ONLY):
+    for b in (self.PUB_PRIV, self.PUB_PRIV_VARIANT, self.PUB_ONLY,
+              self.PUB2_ONLY):
       self.assertNotEqual(self.overlays[b][self.PUBLIC], [])
     self.assertNotEqual(self.overlays[self.PUB_PRIV][self.BOTH],
                         self.overlays[self.PUB_PRIV][self.PUBLIC])
+    self.assertNotEqual(self.overlays[self.PUB_PRIV_VARIANT][self.BOTH],
+                        self.overlays[self.PUB_PRIV_VARIANT][self.PUBLIC])
+
+  def testFoundParentOverlays(self):
+    """Verify that the overlays for a parent board are found."""
+    for d in self.PUBLIC, self.PRIVATE:
+      self.assertLess(set(self.overlays[self.PUB_PRIV][d]),
+                      set(self.overlays[self.PUB_PRIV_VARIANT][d]))
 
 
 class UtilFuncsTest(cros_test_lib.TempDirTestCase):
@@ -712,16 +749,30 @@ class ProjectMappingTest(cros_test_lib.TestCase):
                           portage_util.FindWorkonProjects(packages))
 
 
-class PackageDBTest(cros_test_lib.MoxTempDirTestCase):
-  """Package Database related tests."""
+class PortageDBTest(cros_test_lib.MoxTempDirTestCase):
+  """Portage package Database related tests."""
 
-  fake_pkgdb = { 'category1' : [ 'package-1', 'package-2' ],
-                 'category2' : [ 'package-3', 'package-4' ],
-                 'category3' : [ 'invalid', 'semi-invalid' ],
-                 'invalid' : [], }
+  fake_pkgdb = {'category1': ['package-1', 'package-2'],
+                'category2': ['package-3', 'package-4'],
+                'category3': ['invalid', 'semi-invalid'],
+                'with': ['files-1'],
+                'dash-category': ['package-5',],
+                '-invalid': ['package-6'],
+                'invalid': [], }
   fake_packages = []
   build_root = None
   fake_chroot = None
+
+  fake_files = [
+      ('dir', '/lib64'),
+      ('obj', '/lib64/libext2fs.so.2.4', 'a6723f44cf82f1979e9731043f820d8c',
+       '1390848093'),
+      ('dir', '/dir with spaces'),
+      ('obj', '/dir with spaces/file with spaces',
+       'cd4865bbf122da11fca97a04dfcac258', '1390848093'),
+      ('sym', '/lib64/libe2p.so.2', '->', 'libe2p.so.2.3', '1390850489'),
+      ('foo'),
+  ]
 
   def setUp(self):
     self.build_root = self.tempdir
@@ -748,11 +799,19 @@ class PackageDBTest(cros_test_lib.MoxTempDirTestCase):
           # Invalid package does not meet existence of "%s/%s.ebuild" file.
           osutils.Touch(os.path.join(pkgpath, 'whatever'))
           continue
-        # Correct pkg.
+        # Create the package.
         osutils.Touch(os.path.join(pkgpath, pkg + '.ebuild'))
+        if cat.startswith('-'):
+          # Invalid category.
+          continue
+        # Correct pkg.
         pv = portage_util.SplitPV(pkg)
         key = '%s/%s' % (cat, pv.package)
         self.fake_packages.append((key, pv.version))
+    # Add contents to with/files-1.
+    osutils.WriteFile(
+        os.path.join(fake_pkgdb_path, 'with', 'files-1', 'CONTENTS'),
+        ''.join(' '.join(entry) + '\n' for entry in self.fake_files))
 
   def testListInstalledPackages(self):
     """Test if listing packages installed into a root works."""
@@ -770,6 +829,51 @@ class PackageDBTest(cros_test_lib.MoxTempDirTestCase):
     self.assertFalse(portage_util.IsPackageInstalled(
         'category1/foo',
         sysroot=self.fake_chroot))
+
+  def testListContents(self):
+    """Test if the list of installed files is properly parsed."""
+    pdb = portage_util.PortageDB(self.fake_chroot)
+    pkg = pdb.GetInstalledPackage('with', 'files-1')
+    self.assertTrue(pkg)
+    lst = pkg.ListContents()
+
+    # Check ListContents filters out the garbage we added to the list of files.
+    fake_files = [f for f in self.fake_files if f[0] in ('sym', 'obj', 'dir')]
+    self.assertEquals(len(fake_files), len(lst))
+
+    # Check the paths are all relative.
+    self.assertTrue(all(not f[1].startswith('/') for f in lst))
+
+    # Check all the files are present. We only consider file type and path, and
+    # convert the path to a relative path.
+    fake_files = [(f[0], f[1].lstrip('/')) for f in fake_files]
+    self.assertEquals(fake_files, lst)
+
+
+class InstalledPackageTest(cros_test_lib.MoxTempDirTestCase):
+  """InstalledPackage class tests outside a PortageDB."""
+
+  def setUp(self):
+    osutils.WriteFile(os.path.join(self.tempdir, 'package-1.ebuild'), 'EAPI=1')
+    osutils.WriteFile(os.path.join(self.tempdir, 'PF'), 'package-1')
+    osutils.WriteFile(os.path.join(self.tempdir, 'CATEGORY'), 'category-1')
+
+  def testOutOfDBPackage(self):
+    """Tests an InstalledPackage instance can be created without a PortageDB."""
+    pkg = portage_util.InstalledPackage(None, self.tempdir)
+    self.assertEquals('package-1', pkg.pf)
+    self.assertEquals('category-1', pkg.category)
+
+  def testIncompletePackage(self):
+    """Tests an incomplete or otherwise invalid package raises an exception."""
+    # No package name is provided.
+    os.unlink(os.path.join(self.tempdir, 'PF'))
+    self.assertRaises(portage_util.PortageDBException,
+        portage_util.InstalledPackage, None, self.tempdir)
+
+    # Check that doesn't fail when the package name is provided.
+    pkg = portage_util.InstalledPackage(None, self.tempdir, pf='package-1')
+    self.assertEquals('package-1', pkg.pf)
 
 
 if __name__ == '__main__':

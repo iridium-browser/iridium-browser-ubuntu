@@ -397,7 +397,6 @@ input, textarea, keygen, select, button, meter, progress {
 input, textarea, keygen, select, button {
     margin: 0__qem;
     font: -webkit-small-control;
-    text-rendering: auto; /* FIXME: Remove when tabs work with optimizeLegibility. */
     color: initial;
     letter-spacing: normal;
     word-spacing: normal;
@@ -763,6 +762,10 @@ select {
     cursor: default;
 }
 
+select:not(:-internal-list-box) {
+    overflow: visible !important;
+}
+
 select:-internal-list-box {
     -webkit-appearance: listbox;
     align-items: flex-start;
@@ -788,6 +791,10 @@ option {
     min-height: 1.2em;
 }
 
+select:-internal-list-box optgroup option:before {
+    content: "\00a0\00a0\00a0\00a0";;
+}
+
 select:-internal-list-box option,
 select:-internal-list-box optgroup {
     line-height: initial !important;
@@ -808,6 +815,9 @@ select:-internal-list-box option:checked:disabled {
     color: gray !important;
 }
 
+select:-internal-list-box hr {
+    border-style: none;
+}
 
 output {
     display: inline;

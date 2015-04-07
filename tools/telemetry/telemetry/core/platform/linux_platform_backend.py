@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 from telemetry import decorators
+from telemetry.core import util
 from telemetry.core.platform import linux_based_platform_backend
 from telemetry.core.platform import platform_backend
 from telemetry.core.platform import posix_platform_backend
@@ -30,14 +31,9 @@ class LinuxPlatformBackend(
     super(LinuxPlatformBackend, self).__init__()
     self._power_monitor = msr_power_monitor.MsrPowerMonitor(self)
 
-  def StartRawDisplayFrameRateMeasurement(self):
-    raise NotImplementedError()
-
-  def StopRawDisplayFrameRateMeasurement(self):
-    raise NotImplementedError()
-
-  def GetRawDisplayFrameRateMeasurements(self):
-    raise NotImplementedError()
+  @classmethod
+  def IsPlatformBackendForHost(cls):
+    return sys.platform.startswith('linux') and not util.IsRunningOnCrosDevice()
 
   def IsThermallyThrottled(self):
     raise NotImplementedError()

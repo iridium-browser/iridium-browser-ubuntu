@@ -23,7 +23,6 @@ class ServiceWorkerMicroBenchmarkPageSet(page_set.PageSet):
   def __init__(self):
     super(ServiceWorkerMicroBenchmarkPageSet, self).__init__(
         archive_data_file=archive_data_file_path,
-        make_javascript_deterministic=False,
         bucket=page_set.PUBLIC_BUCKET)
 
     # pylint: disable=C0301
@@ -35,8 +34,6 @@ class ServiceWorkerMicroBenchmarkPageSet(page_set.PageSet):
     # This will be merged into the main repository.
     # pylint: enable=C0301
     # Why: to measure performance of many concurrent fetches
-    self.AddPage(ServiceWorkerBenchmarkPage(
-        'http://localhost:8091/index.html', self))
-    # Why: to measure performance of registrations
-    self.AddPage(ServiceWorkerBenchmarkPage(
-        'http://localhost:8091/many-registration.html', self))
+    self.AddUserStory(ServiceWorkerBenchmarkPage(
+        'http://localhost:8091/index.html', self,
+        make_javascript_deterministic=False))

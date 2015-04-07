@@ -12,7 +12,7 @@ class IntlArFaHePage(page_module.Page):
     self.user_agent_type = 'desktop'
     self.archive_data_file = 'data/intl_ar_fa_he.json'
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'ScrollAction', is_smooth=True)
     action_runner.ScrollPage()
@@ -41,4 +41,4 @@ class IntlArFaHePageSet(page_set_module.PageSet):
     ]
 
     for url in urls_list:
-      self.AddPage(IntlArFaHePage(url, self))
+      self.AddUserStory(IntlArFaHePage(url, self))

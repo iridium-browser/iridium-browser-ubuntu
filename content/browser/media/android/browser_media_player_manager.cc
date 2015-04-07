@@ -135,39 +135,6 @@ BrowserMediaPlayerManager::~BrowserMediaPlayerManager() {
   // |players_| will be destroyed here because |player_| is a ScopedVector.
 }
 
-void BrowserMediaPlayerManager::FullscreenPlayerPlay() {
-  MediaPlayerAndroid* player = GetFullscreenPlayer();
-  if (player) {
-    if (fullscreen_player_is_released_) {
-      video_view_->OpenVideo();
-      fullscreen_player_is_released_ = false;
-    }
-    player->Start();
-    Send(new MediaPlayerMsg_DidMediaPlayerPlay(RoutingID(),
-                                               fullscreen_player_id_));
-  }
-}
-
-void BrowserMediaPlayerManager::FullscreenPlayerPause() {
-  MediaPlayerAndroid* player = GetFullscreenPlayer();
-  if (player) {
-    player->Pause(true);
-    Send(new MediaPlayerMsg_DidMediaPlayerPause(RoutingID(),
-                                                fullscreen_player_id_));
-  }
-}
-
-void BrowserMediaPlayerManager::FullscreenPlayerSeek(int msec) {
-  MediaPlayerAndroid* player = GetFullscreenPlayer();
-  if (player) {
-    // TODO(kbalazs): if |fullscreen_player_is_released_| is true
-    // at this point, player->GetCurrentTime() will be wrong until
-    // FullscreenPlayerPlay (http://crbug.com/322798).
-    OnSeekRequest(fullscreen_player_id_,
-                  base::TimeDelta::FromMilliseconds(msec));
-  }
-}
-
 void BrowserMediaPlayerManager::ExitFullscreen(bool release_media_player) {
   if (WebContentsDelegate* delegate = web_contents_->GetDelegate())
     delegate->ToggleFullscreenModeForTab(web_contents_, false);
@@ -209,7 +176,6 @@ void BrowserMediaPlayerManager::SetVideoSurface(
   if (empty_surface)
     return;
 
-  Send(new MediaPlayerMsg_DidEnterFullscreen(RoutingID(), player->player_id()));
   if (RenderWidgetHostViewAndroid* view_android =
       static_cast<RenderWidgetHostViewAndroid*>(
           web_contents_->GetRenderWidgetHostView())) {
@@ -372,6 +338,20 @@ void BrowserMediaPlayerManager::OnNotifyExternalSurface(
   }
 }
 
+void BrowserMediaPlayerManager::ReleasePlayerOfExternalVideoSurfaceIfNeeded(
+    int future_player) {
+  int current_player = ExternalVideoSurfaceContainer::kInvalidPlayerId;
+
+  if (external_video_surface_container_)
+    current_player = external_video_surface_container_->GetCurrentPlayerId();
+
+  if (current_player == ExternalVideoSurfaceContainer::kInvalidPlayerId)
+    return;
+
+  if (current_player != future_player)
+    OnMediaInterrupted(current_player);
+}
+
 void BrowserMediaPlayerManager::OnRequestExternalSurface(
     int player_id, const gfx::RectF& rect) {
   if (!external_video_surface_container_) {
@@ -382,6 +362,8 @@ void BrowserMediaPlayerManager::OnRequestExternalSurface(
   // It's safe to use base::Unretained(this), because the callbacks will not
   // be called after running ReleaseExternalVideoSurface().
   if (external_video_surface_container_) {
+    // In case we're stealing the external surface from another player.
+    ReleasePlayerOfExternalVideoSurfaceIfNeeded(player_id);
     external_video_surface_container_->RequestExternalVideoSurface(
         player_id,
         base::Bind(&BrowserMediaPlayerManager::AttachExternalVideoSurface,
@@ -395,6 +377,9 @@ void BrowserMediaPlayerManager::OnRequestExternalSurface(
 void BrowserMediaPlayerManager::OnEnterFullscreen(int player_id) {
   DCHECK_EQ(fullscreen_player_id_, -1);
 #if defined(VIDEO_HOLE)
+  // If this fullscreen player is started when another player
+  // uses the external surface, release that other player.
+  ReleasePlayerOfExternalVideoSurfaceIfNeeded(player_id);
   if (external_video_surface_container_)
     external_video_surface_container_->ReleaseExternalVideoSurface(player_id);
 #endif  // defined(VIDEO_HOLE)
@@ -415,10 +400,6 @@ void BrowserMediaPlayerManager::OnEnterFullscreen(int player_id) {
   }
 
   // Force the second video to exit fullscreen.
-  // TODO(qinmin): There is no need to send DidEnterFullscreen message.
-  // However, if we don't send the message, page layers will not be
-  // correctly restored. http:crbug.com/367346.
-  Send(new MediaPlayerMsg_DidEnterFullscreen(RoutingID(), player_id));
   Send(new MediaPlayerMsg_DidExitFullscreen(RoutingID(), player_id));
   video_view_.reset();
 }

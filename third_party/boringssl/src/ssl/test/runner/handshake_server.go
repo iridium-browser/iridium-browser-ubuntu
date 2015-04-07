@@ -120,6 +120,9 @@ func (hs *serverHandshakeState) readClientHello() (isResume bool, err error) {
 		c.sendAlert(alertUnexpectedMessage)
 		return false, unexpectedMessageError(hs.clientHello, msg)
 	}
+	if config.Bugs.RequireFastradioPadding && len(hs.clientHello.raw) < 1000 {
+		return false, errors.New("tls: ClientHello record size should be larger than 1000 bytes when padding enabled.")
+	}
 
 	if c.isDTLS && !config.Bugs.SkipHelloVerifyRequest {
 		// Per RFC 6347, the version field in HelloVerifyRequest SHOULD
@@ -160,6 +163,18 @@ func (hs *serverHandshakeState) readClientHello() (isResume bool, err error) {
 			return false, errors.New("dtls: retransmitted ClientHello does not match")
 		}
 		hs.clientHello = newClientHello
+	}
+
+	if config.Bugs.RequireSameRenegoClientVersion && c.clientVersion != 0 {
+		if c.clientVersion != hs.clientHello.vers {
+			return false, fmt.Errorf("tls: client offered different version on renego")
+		}
+	}
+	c.clientVersion = hs.clientHello.vers
+
+	// Reject < 1.2 ClientHellos with signature_algorithms.
+	if c.clientVersion < VersionTLS12 && len(hs.clientHello.signatureAndHashes) > 0 {
+		return false, fmt.Errorf("tls: client included signature_algorithms before TLS 1.2")
 	}
 
 	c.vers, ok = config.mutualVersion(hs.clientHello.vers)
@@ -270,6 +285,23 @@ Curves:
 		hs.hello.channelIDRequested = true
 	}
 
+	if hs.clientHello.srtpProtectionProfiles != nil {
+	SRTPLoop:
+		for _, p1 := range c.config.SRTPProtectionProfiles {
+			for _, p2 := range hs.clientHello.srtpProtectionProfiles {
+				if p1 == p2 {
+					hs.hello.srtpProtectionProfile = p1
+					c.srtpProtectionProfile = p1
+					break SRTPLoop
+				}
+			}
+		}
+	}
+
+	if c.config.Bugs.SendSRTPProtectionProfile != 0 {
+		hs.hello.srtpProtectionProfile = c.config.Bugs.SendSRTPProtectionProfile
+	}
+
 	_, hs.ecdsaOk = hs.cert.PrivateKey.(*ecdsa.PrivateKey)
 
 	if hs.checkForResumption() {
@@ -318,22 +350,30 @@ Curves:
 func (hs *serverHandshakeState) checkForResumption() bool {
 	c := hs.c
 
-	if c.config.SessionTicketsDisabled {
-		return false
-	}
-
-	var ok bool
-	if hs.sessionState, ok = c.decryptTicket(hs.clientHello.sessionTicket); !ok {
-		return false
-	}
-
-	if !c.config.Bugs.AllowSessionVersionMismatch {
-		if hs.sessionState.vers > hs.clientHello.vers {
+	if len(hs.clientHello.sessionTicket) > 0 {
+		if c.config.SessionTicketsDisabled {
 			return false
 		}
-		if vers, ok := c.config.mutualVersion(hs.sessionState.vers); !ok || vers != hs.sessionState.vers {
+
+		var ok bool
+		if hs.sessionState, ok = c.decryptTicket(hs.clientHello.sessionTicket); !ok {
 			return false
 		}
+	} else {
+		if c.config.ServerSessionCache == nil {
+			return false
+		}
+
+		var ok bool
+		sessionId := string(hs.clientHello.sessionId)
+		if hs.sessionState, ok = c.config.ServerSessionCache.Get(sessionId); !ok {
+			return false
+		}
+	}
+
+	// Never resume a session for a different SSL version.
+	if !c.config.Bugs.AllowSessionVersionMismatch && c.vers != hs.sessionState.vers {
+		return false
 	}
 
 	cipherSuiteOk := false
@@ -403,9 +443,22 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		hs.hello.ocspStapling = true
 	}
 
-	hs.hello.ticketSupported = hs.clientHello.ticketSupported && !config.SessionTicketsDisabled
+	if hs.clientHello.sctListSupported && len(hs.cert.SignedCertificateTimestampList) > 0 {
+		hs.hello.sctList = hs.cert.SignedCertificateTimestampList
+	}
+
+	hs.hello.ticketSupported = hs.clientHello.ticketSupported && !config.SessionTicketsDisabled && c.vers > VersionSSL30
 	hs.hello.cipherSuite = hs.suite.id
 	c.extendedMasterSecret = hs.hello.extendedMasterSecret
+
+	// Generate a session ID if we're to save the session.
+	if !hs.hello.ticketSupported && config.ServerSessionCache != nil {
+		hs.hello.sessionId = make([]byte, 32)
+		if _, err := io.ReadFull(config.rand(), hs.hello.sessionId); err != nil {
+			c.sendAlert(alertInternalError)
+			return errors.New("tls: short read from Rand: " + err.Error())
+		}
+	}
 
 	hs.finishedHash = newFinishedHash(c.vers, hs.suite)
 	hs.writeClientHash(hs.clientHello.marshal())
@@ -454,7 +507,9 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		}
 		if c.vers >= VersionTLS12 {
 			certReq.hasSignatureAndHash = true
-			certReq.signatureAndHashes = supportedClientCertSignatureAlgorithms
+			if !config.Bugs.NoSignatureAndHashes {
+				certReq.signatureAndHashes = config.signatureAndHashesForServer()
+			}
 		}
 
 		// An empty list of certificateAuthorities signals to
@@ -554,6 +609,9 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		var signatureAndHash signatureAndHash
 		if certVerify.hasSignatureAndHash {
 			signatureAndHash = certVerify.signatureAndHash
+			if !isSupportedSignatureAndHash(signatureAndHash, config.signatureAndHashesForServer()) {
+				return errors.New("tls: unsupported hash function for client certificate")
+			}
 		} else {
 			// Before TLS 1.2 the signature algorithm was implicit
 			// from the key type, and only one hash per signature
@@ -715,14 +773,7 @@ func (hs *serverHandshakeState) readFinished(isResume bool) error {
 }
 
 func (hs *serverHandshakeState) sendSessionTicket() error {
-	if !hs.hello.ticketSupported || hs.c.config.Bugs.SkipNewSessionTicket {
-		return nil
-	}
-
 	c := hs.c
-	m := new(newSessionTicketMsg)
-
-	var err error
 	state := sessionState{
 		vers:          c.vers,
 		cipherSuite:   hs.suite.id,
@@ -730,6 +781,17 @@ func (hs *serverHandshakeState) sendSessionTicket() error {
 		certificates:  hs.certsFromClient,
 		handshakeHash: hs.finishedHash.server.Sum(nil),
 	}
+
+	if !hs.hello.ticketSupported || hs.c.config.Bugs.SkipNewSessionTicket {
+		if c.config.ServerSessionCache != nil && len(hs.hello.sessionId) != 0 {
+			c.config.ServerSessionCache.Put(string(hs.hello.sessionId), &state)
+		}
+		return nil
+	}
+
+	m := new(newSessionTicketMsg)
+
+	var err error
 	m.ticket, err = c.encryptTicket(&state)
 	if err != nil {
 		return err

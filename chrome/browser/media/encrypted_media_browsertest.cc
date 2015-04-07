@@ -237,7 +237,7 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
     title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kEmeKeyError));
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
 #if defined(OS_ANDROID)
     command_line->AppendSwitch(
         switches::kDisableGestureRequirementForMediaPlayback);
@@ -245,7 +245,7 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
   }
 
   void SetUpCommandLineForKeySystem(const std::string& key_system,
-                                    CommandLine* command_line) {
+                                    base::CommandLine* command_line) {
     if (GetServerConfig(key_system))
       // Since the web and license servers listen on different ports, we need to
       // disable web-security to send license requests to the license server.
@@ -257,7 +257,7 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
       RegisterPepperCdm(command_line, kClearKeyCdmAdapterFileName, key_system);
     }
 #if defined(WIDEVINE_CDM_AVAILABLE) && defined(WIDEVINE_CDM_IS_COMPONENT)
-    else if (IsWidevine(key_system)) {
+    else if (IsWidevine(key_system)) {  // NOLINT
       RegisterPepperCdm(command_line, kWidevineCdmAdapterFileName, key_system);
     }
 #endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(WIDEVINE_CDM_IS_COMPONENT)
@@ -266,7 +266,7 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
 
  private:
 #if defined(ENABLE_PEPPER_CDMS)
-  void RegisterPepperCdm(CommandLine* command_line,
+  void RegisterPepperCdm(base::CommandLine* command_line,
                          const std::string& adapter_name,
                          const std::string& key_system) {
     DCHECK(!is_pepper_cdm_registered_)
@@ -281,7 +281,7 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
     base::FilePath::StringType pepper_plugin = plugin_lib.value();
     pepper_plugin.append(FILE_PATH_LITERAL("#CDM#0.1.0.0;"));
 #if defined(OS_WIN)
-    pepper_plugin.append(base::ASCIIToWide(GetPepperType(key_system)));
+    pepper_plugin.append(base::ASCIIToUTF16(GetPepperType(key_system)));
 #else
     pepper_plugin.append(GetPepperType(key_system));
 #endif
@@ -329,7 +329,7 @@ class ECKEncryptedMediaTest : public EncryptedMediaTestBase {
   }
 
  protected:
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     EncryptedMediaTestBase::SetUpCommandLine(command_line);
     SetUpCommandLineForKeySystem(kExternalClearKeyKeySystem, command_line);
   }
@@ -341,7 +341,7 @@ class ECKEncryptedMediaTest : public EncryptedMediaTestBase {
 // enabled by default.
 class ECKUnprefixedEncryptedMediaTest : public EncryptedMediaTestBase {
  protected:
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     EncryptedMediaTestBase::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableEncryptedMedia);
     SetUpCommandLineForKeySystem(kExternalClearKeyKeySystem, command_line);
@@ -352,7 +352,7 @@ class ECKUnprefixedEncryptedMediaTest : public EncryptedMediaTestBase {
 // Tests encrypted media playback using Widevine key system.
 class WVEncryptedMediaTest : public EncryptedMediaTestBase {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     EncryptedMediaTestBase::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableEncryptedMedia);
     SetUpCommandLineForKeySystem(kWidevineKeySystem, command_line);
@@ -434,7 +434,7 @@ class EncryptedMediaTest
   }
 
  protected:
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     EncryptedMediaTestBase::SetUpCommandLine(command_line);
     SetUpCommandLineForKeySystem(CurrentKeySystem(), command_line);
 
@@ -553,6 +553,18 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoClearAudio_WebM) {
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VP9Video_WebM) {
   TestSimplePlayback("bear-320x240-v-vp9_enc-v.webm", kWebMVP9VideoOnly);
+}
+
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_AudioOnly_WebM_Opus) {
+  TestSimplePlayback("bear-320x240-opus-a_enc-a.webm", kWebMAudioOnly);
+}
+
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoAudio_WebM_Opus) {
+  TestSimplePlayback("bear-320x240-opus-av_enc-av.webm", kWebMAudioVideo);
+}
+
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoClearAudio_WebM_Opus) {
+  TestSimplePlayback("bear-320x240-opus-av_enc-v.webm", kWebMAudioVideo);
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, InvalidResponseKeyError) {

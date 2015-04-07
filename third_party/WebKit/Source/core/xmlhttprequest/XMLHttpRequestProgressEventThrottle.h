@@ -31,14 +31,12 @@
 #include "platform/heap/Handle.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
-#include "wtf/Vector.h"
 #include "wtf/text/AtomicString.h"
 
 namespace blink {
 
 class Event;
 class EventTarget;
-class XMLHttpRequestProgressEvent;
 
 // This class implements the XHR2 ProgressEvent dispatching:
 //   "dispatch a progress event named progress about every 50ms or for every

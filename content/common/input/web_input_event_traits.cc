@@ -76,7 +76,7 @@ void ApppendEventDetails(const WebMouseWheelEvent& event, std::string* result) {
 void ApppendEventDetails(const WebGestureEvent& event, std::string* result) {
   StringAppendF(result,
                 "{\n Pos: (%d, %d)\n GlobalPos: (%d, %d)\n SourceDevice: %d\n"
-                " RawData: (%f, %f, %f, %f)\n}",
+                " RawData: (%f, %f, %f, %f, %d)\n}",
                 event.x,
                 event.y,
                 event.globalX,
@@ -85,7 +85,8 @@ void ApppendEventDetails(const WebGestureEvent& event, std::string* result) {
                 event.data.scrollUpdate.deltaX,
                 event.data.scrollUpdate.deltaY,
                 event.data.scrollUpdate.velocityX,
-                event.data.scrollUpdate.velocityY);
+                event.data.scrollUpdate.velocityY,
+                event.data.scrollUpdate.previousUpdateInSequencePrevented);
 }
 
 void ApppendTouchPointDetails(const WebTouchPoint& point, std::string* result) {
@@ -106,9 +107,10 @@ void ApppendTouchPointDetails(const WebTouchPoint& point, std::string* result) {
 
 void ApppendEventDetails(const WebTouchEvent& event, std::string* result) {
   StringAppendF(result,
-                "{\n Touches: %u, Cancelable: %d,\n[\n",
+                "{\n Touches: %u, Cancelable: %d, CausesScrolling: %d\n[\n",
                 event.touchesLength,
-                event.cancelable);
+                event.cancelable,
+                event.causesScrollingIfUncanceled);
   for (unsigned i = 0; i < event.touchesLength; ++i)
     ApppendTouchPointDetails(event.touches[i], result);
   result->append(" ]\n}");
@@ -235,6 +237,7 @@ void Coalesce(const WebTouchEvent& event_to_coalesce, WebTouchEvent* event) {
     if (old_event.touches[i_old].state == blink::WebTouchPoint::StateMoved)
       event->touches[i].state = blink::WebTouchPoint::StateMoved;
   }
+  event->causesScrollingIfUncanceled |= old_event.causesScrollingIfUncanceled;
 }
 
 bool CanCoalesce(const WebGestureEvent& event_to_coalesce,
@@ -265,6 +268,9 @@ void Coalesce(const WebGestureEvent& event_to_coalesce,
         event_to_coalesce.data.scrollUpdate.deltaX;
     event->data.scrollUpdate.deltaY +=
         event_to_coalesce.data.scrollUpdate.deltaY;
+    DCHECK_EQ(
+        event->data.scrollUpdate.previousUpdateInSequencePrevented,
+        event_to_coalesce.data.scrollUpdate.previousUpdateInSequencePrevented);
   } else if (event->type == WebInputEvent::GesturePinchUpdate) {
     event->data.pinchUpdate.scale *= event_to_coalesce.data.pinchUpdate.scale;
     // Ensure the scale remains bounded above 0 and below Infinity so that

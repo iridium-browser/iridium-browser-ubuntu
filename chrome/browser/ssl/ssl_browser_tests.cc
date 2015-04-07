@@ -31,6 +31,7 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -186,7 +187,7 @@ class SSLUITest : public InProcessBrowserTest {
                             SSLOptions(SSLOptions::CERT_EXPIRED),
                             net::GetWebSocketTestDataDirectory()) {}
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     // Browser will both run and display insecure content.
     command_line->AppendSwitch(switches::kAllowRunningInsecureContent);
     // Use process-per-site so that navigating to a same-site page in a
@@ -364,7 +365,7 @@ class SSLUITestBlock : public SSLUITest {
   SSLUITestBlock() : SSLUITest() {}
 
   // Browser will neither run nor display insecure content.
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kNoDisplayingInsecureContent);
   }
 };
@@ -373,7 +374,7 @@ class SSLUITestIgnoreCertErrors : public SSLUITest {
  public:
   SSLUITestIgnoreCertErrors() : SSLUITest() {}
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     // Browser will ignore certificate errors.
     command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
   }
@@ -1805,7 +1806,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestInterstitialJavaScriptProceeds) {
       content::Source<NavigationController>(&tab->GetController()));
   InterstitialPage* interstitial_page = tab->GetInterstitialPage();
   content::RenderViewHost* interstitial_rvh =
-      interstitial_page->GetRenderViewHostForTesting();
+      interstitial_page->GetMainFrame()->GetRenderViewHost();
   int result = -1;
   std::string javascript = base::StringPrintf(
       "window.domAutomationController.send(%d);",
@@ -1837,7 +1838,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestInterstitialJavaScriptGoesBack) {
       content::NotificationService::AllSources());
   InterstitialPage* interstitial_page = tab->GetInterstitialPage();
   content::RenderViewHost* interstitial_rvh =
-      interstitial_page->GetRenderViewHostForTesting();
+      interstitial_page->GetMainFrame()->GetRenderViewHost();
   int result = -1;
   std::string javascript = base::StringPrintf(
       "window.domAutomationController.send(%d);",

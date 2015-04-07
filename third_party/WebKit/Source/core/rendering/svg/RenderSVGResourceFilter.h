@@ -31,21 +31,29 @@
 
 namespace blink {
 
-struct FilterData {
-    WTF_MAKE_FAST_ALLOCATED;
+class FilterData final : public NoBaseWillBeGarbageCollected<FilterData> {
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
     enum FilterDataState { PaintingSource, Built, CycleDetected };
 
+    static PassOwnPtrWillBeRawPtr<FilterData> create()
+    {
+        return adoptPtrWillBeNoop(new FilterData());
+    }
+
+    void trace(Visitor*);
+
+    RefPtrWillBeMember<SVGFilter> filter;
+    RefPtrWillBeMember<SVGFilterBuilder> builder;
+    FloatRect boundaries;
+    FilterDataState state;
+
+private:
     FilterData()
         : state(PaintingSource)
     {
     }
 
-    RefPtr<SVGFilter> filter;
-    RefPtr<SVGFilterBuilder> builder;
-    FloatRect boundaries;
-    FloatRect drawingRegion;
-    FilterDataState state;
 };
 
 class GraphicsContext;
@@ -53,7 +61,9 @@ class GraphicsContext;
 class RenderSVGResourceFilter final : public RenderSVGResourceContainer {
 public:
     explicit RenderSVGResourceFilter(SVGFilterElement*);
+
     virtual ~RenderSVGResourceFilter();
+    virtual void trace(Visitor*) override;
     virtual void destroy() override;
 
     virtual bool isChildAllowed(RenderObject*, RenderStyle*) const override;
@@ -69,7 +79,7 @@ public:
 
     FloatRect resourceBoundingBox(const RenderObject*);
 
-    PassRefPtr<SVGFilterBuilder> buildPrimitives(SVGFilter*);
+    PassRefPtrWillBeRawPtr<SVGFilterBuilder> buildPrimitives(SVGFilter*);
 
     SVGUnitTypes::SVGUnitType filterUnits() const { return toSVGFilterElement(element())->filterUnits()->currentValue()->enumValue(); }
     SVGUnitTypes::SVGUnitType primitiveUnits() const { return toSVGFilterElement(element())->primitiveUnits()->currentValue()->enumValue(); }
@@ -79,9 +89,8 @@ public:
     static const RenderSVGResourceType s_resourceType = FilterResourceType;
     virtual RenderSVGResourceType resourceType() const override { return s_resourceType; }
 
-    FloatRect drawingRegion(RenderObject*) const;
 private:
-    typedef HashMap<RenderObject*, OwnPtr<FilterData> > FilterMap;
+    typedef WillBeHeapHashMap<RawPtrWillBeMember<RenderObject>, OwnPtrWillBeMember<FilterData> > FilterMap;
     FilterMap m_filter;
 };
 

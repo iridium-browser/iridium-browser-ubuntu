@@ -11,7 +11,7 @@
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/base_window.h"
-#include "ui/gfx/insets.h"
+#include "ui/gfx/geometry/insets.h"
 
 namespace content {
 struct NativeWebKeyboardEvent;
@@ -53,6 +53,10 @@ class NativeAppWindow : public ui::BaseWindow,
   // Called when the window shape is changed. If |region| is NULL then the
   // window is restored to the default shape.
   virtual void UpdateShape(scoped_ptr<SkRegion> region) = 0;
+
+  // Set whether the window should receive all keyboard events including task
+  // switching keys.
+  virtual void SetInterceptAllKeys(bool want_all_keys) = 0;
 
   // Allows the window to handle unhandled keyboard messages coming back from
   // the renderer.

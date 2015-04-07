@@ -21,6 +21,7 @@
 
 namespace syncer {
 
+class AttachmentService;
 class SyncErrorFactory;
 
 // TODO(zea): remove SupportsWeakPtr in favor of having all SyncableService
@@ -62,9 +63,8 @@ class SYNC_EXPORT SyncableService
   // Returns: A default SyncError (IsSet() == false) if no errors were
   //          encountered, and a filled SyncError (IsSet() == true)
   //          otherwise.
-  virtual SyncError ProcessSyncChanges(
-      const tracked_objects::Location& from_here,
-      const SyncChangeList& change_list) override = 0;
+  SyncError ProcessSyncChanges(const tracked_objects::Location& from_here,
+                               const SyncChangeList& change_list) override = 0;
 
   // Returns AttachmentStore used by datatype. Attachment store is used by sync
   // when uploading or downloading attachments.
@@ -75,6 +75,16 @@ class SYNC_EXPORT SyncableService
   // attachemnts should create attachment store and implement GetAttachmentStore
   // to return pointer to it.
   virtual scoped_refptr<AttachmentStore> GetAttachmentStore();
+
+  // Called by sync to provide AttachmentService to be used to download
+  // attachments.
+  // SetAttachmentService is called after GetAttachmentStore and right before
+  // MergeDataAndStartSyncing and only if GetAttachmentStore has returned a
+  // non-NULL store instance. Default implementation does nothing.
+  // Datatype that uses attachments must take ownerhip of the provided
+  // AttachmentService instance.
+  virtual void SetAttachmentService(
+      scoped_ptr<AttachmentService> attachment_service);
 
  protected:
   ~SyncableService() override;

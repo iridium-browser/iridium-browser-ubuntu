@@ -35,17 +35,23 @@
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/SerializedScriptValue.h"
+#include "bindings/core/v8/SerializedScriptValueFactory.h"
 #include "core/dom/DOMException.h"
+#include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/MessagePort.h"
 #include "core/events/MessageEvent.h"
+#include "core/frame/LocalDOMWindow.h"
+#include "modules/EventTargetModules.h"
 #include "modules/serviceworkers/ServiceWorker.h"
 #include "modules/serviceworkers/ServiceWorkerContainerClient.h"
 #include "modules/serviceworkers/ServiceWorkerError.h"
 #include "modules/serviceworkers/ServiceWorkerRegistration.h"
 #include "platform/RuntimeEnabledFeatures.h"
+#include "public/platform/WebPageVisibilityState.h"
 #include "public/platform/WebServiceWorker.h"
+#include "public/platform/WebServiceWorkerClientsInfo.h"
 #include "public/platform/WebServiceWorkerProvider.h"
 #include "public/platform/WebServiceWorkerRegistration.h"
 #include "public/platform/WebString.h"
@@ -57,7 +63,7 @@ namespace blink {
 // when nullptr is given to onSuccess.
 class GetRegistrationCallback : public WebServiceWorkerProvider::WebServiceWorkerGetRegistrationCallbacks {
 public:
-    explicit GetRegistrationCallback(PassRefPtr<ScriptPromiseResolver> resolver)
+    explicit GetRegistrationCallback(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
         : m_resolver(resolver)
         , m_adapter(m_resolver) { }
     virtual ~GetRegistrationCallback() { }
@@ -70,7 +76,7 @@ public:
     }
     virtual void onError(WebServiceWorkerError* error) override { m_adapter.onError(error); }
 private:
-    RefPtr<ScriptPromiseResolver> m_resolver;
+    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
     CallbackPromiseAdapter<ServiceWorkerRegistration, ServiceWorkerError> m_adapter;
     WTF_MAKE_NONCOPYABLE(GetRegistrationCallback);
 };
@@ -98,16 +104,18 @@ void ServiceWorkerContainer::trace(Visitor* visitor)
     visitor->trace(m_controller);
     visitor->trace(m_readyRegistration);
     visitor->trace(m_ready);
+    RefCountedGarbageCollectedEventTargetWithInlineData<ServiceWorkerContainer>::trace(visitor);
+    ContextLifecycleObserver::trace(visitor);
 }
 
 ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptState, const String& url, const RegistrationOptions& options)
 {
     ASSERT(RuntimeEnabledFeatures::serviceWorkerEnabled());
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
     if (!m_provider) {
-        resolver->reject(DOMException::create(InvalidStateError, "No associated provider is available"));
+        resolver->reject(DOMException::create(InvalidStateError, "The document is in an invalid state."));
         return promise;
     }
 
@@ -127,17 +135,22 @@ ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptS
         return promise;
     }
 
-    KURL patternURL = executionContext->completeURL(options.scope());
-    patternURL.removeFragmentIdentifier();
-    if (!documentOrigin->canRequest(patternURL)) {
-        resolver->reject(DOMException::create(SecurityError, "The scope must match the current origin."));
-        return promise;
-    }
-
     KURL scriptURL = executionContext->completeURL(url);
     scriptURL.removeFragmentIdentifier();
     if (!documentOrigin->canRequest(scriptURL)) {
         resolver->reject(DOMException::create(SecurityError, "The origin of the script must match the current origin."));
+        return promise;
+    }
+
+    KURL patternURL;
+    if (options.scope().isNull())
+        patternURL = KURL(scriptURL, "./");
+    else
+        patternURL = executionContext->completeURL(options.scope());
+    patternURL.removeFragmentIdentifier();
+
+    if (!documentOrigin->canRequest(patternURL)) {
+        resolver->reject(DOMException::create(SecurityError, "The scope must match the current origin."));
         return promise;
     }
 
@@ -162,8 +175,13 @@ private:
 ScriptPromise ServiceWorkerContainer::getRegistration(ScriptState* scriptState, const String& documentURL)
 {
     ASSERT(RuntimeEnabledFeatures::serviceWorkerEnabled());
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
+
+    if (!m_provider) {
+        resolver->reject(DOMException::create(InvalidStateError, "The document is in an invalid state."));
+        return promise;
+    }
 
     // FIXME: This should use the container's execution context, not
     // the callers.
@@ -220,13 +238,15 @@ static void deleteIfNoExistingOwner(WebServiceWorker* serviceWorker)
         delete serviceWorker;
 }
 
-void ServiceWorkerContainer::setController(WebServiceWorker* serviceWorker)
+void ServiceWorkerContainer::setController(WebServiceWorker* serviceWorker, bool shouldNotifyControllerChange)
 {
     if (!executionContext()) {
         deleteIfNoExistingOwner(serviceWorker);
         return;
     }
     m_controller = ServiceWorker::from(executionContext(), serviceWorker);
+    if (shouldNotifyControllerChange)
+        dispatchEvent(Event::create(EventTypeNames::controllerchange));
 }
 
 void ServiceWorkerContainer::setReadyRegistration(WebServiceWorkerRegistration* registration)
@@ -255,8 +275,34 @@ void ServiceWorkerContainer::dispatchMessageEvent(const WebString& message, cons
         return;
 
     OwnPtrWillBeRawPtr<MessagePortArray> ports = MessagePort::toMessagePortArray(executionContext(), webChannels);
-    RefPtr<SerializedScriptValue> value = SerializedScriptValue::createFromWire(message);
+    RefPtr<SerializedScriptValue> value = SerializedScriptValueFactory::instance().createFromWire(message);
     executionContext()->executingWindow()->dispatchEvent(MessageEvent::create(ports.release(), value));
+}
+
+const AtomicString& ServiceWorkerContainer::interfaceName() const
+{
+    return EventTargetNames::ServiceWorkerContainer;
+}
+
+bool ServiceWorkerContainer::getClientInfo(WebServiceWorkerClientInfo* info)
+{
+    ExecutionContext* context = executionContext();
+    // FIXME: Make this work for non-document context (e.g. shared workers).
+    if (!context || !context->isDocument())
+        return false;
+    Document* document = toDocument(context);
+    // FIXME: remove info->visibilityState when Chromium is updated.
+    info->visibilityState = document->visibilityState();
+    info->pageVisibilityState = static_cast<WebPageVisibilityState>(document->pageVisibilityState());
+    info->isFocused = document->hasFocus();
+    info->url = document->url();
+    if (!document->frame())
+        info->frameType = WebURLRequest::FrameTypeNone;
+    else if (document->frame()->isMainFrame())
+        info->frameType = WebURLRequest::FrameTypeTopLevel;
+    else
+        info->frameType = WebURLRequest::FrameTypeNested;
+    return true;
 }
 
 ServiceWorkerContainer::ServiceWorkerContainer(ExecutionContext* executionContext)

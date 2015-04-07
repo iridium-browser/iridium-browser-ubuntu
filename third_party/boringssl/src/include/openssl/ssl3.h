@@ -125,7 +125,7 @@
 extern "C" {
 #endif
 
-/* Signalling cipher suite value: from draft-ietf-tls-renegotiation-03.txt */
+/* Signalling cipher suite value: from RFC5746 */
 #define SSL3_CK_SCSV				0x030000FF
 /* Fallback signalling cipher suite value: not IANA assigned.
  * See https://tools.ietf.org/html/draft-bmoeller-tls-downgrade-scsv-01 */
@@ -338,8 +338,6 @@ typedef struct ssl3_buffer_st
 #define SSL3_CT_FORTEZZA_DMS			20
 
 
-#define SSL3_FLAGS_NO_RENEGOTIATE_CIPHERS	0x0001
-#define SSL3_FLAGS_POP_BUFFER			0x0004
 /* TODO(davidben): This flag can probably be merged into s3->change_cipher_spec
  * to something tri-state. (Normal / Expect CCS / Between CCS and Finished). */
 #define SSL3_FLAGS_EXPECT_CCS			0x0080
@@ -349,7 +347,6 @@ typedef struct ssl3_buffer_st
 typedef struct ssl3_state_st
 	{
 	long flags;
-	int delay_buf_pop_ret;
 
 	unsigned char read_sequence[8];
 	int read_mac_secret_size;
@@ -368,16 +365,24 @@ typedef struct ssl3_state_st
 	/* The value of 'extra' when the buffers were initialized */
 	int init_extra;
 
+	/* have_version is true if the connection's final version is
+	 * known. Otherwise the version has not been negotiated yet. */
+	char have_version;
+
+	/* sniff_buffer is used by the server in the initial handshake
+	 * to read a V2ClientHello before the record layer is
+	 * initialized. */
+	BUF_MEM *sniff_buffer;
+	size_t sniff_buffer_len;
+
 	SSL3_BUFFER rbuf;	/* read IO goes into here */
 	SSL3_BUFFER wbuf;	/* write IO goes into here */
 
 	SSL3_RECORD rrec;	/* each decoded record goes in here */
 	SSL3_RECORD wrec;	/* goes out from here */
 
-	/* storage for Alert/Handshake protocol data received but not
+	/* storage for Handshake protocol data received but not
 	 * yet processed by ssl3_read_bytes: */
-	unsigned char alert_fragment[2];
-	unsigned int alert_fragment_len;
 	unsigned char handshake_fragment[4];
 	unsigned int handshake_fragment_len;
 
@@ -494,6 +499,10 @@ typedef struct ssl3_state_st
 		 * doesn't matter if the session that's being resumed didn't
 		 * use it to create the master secret initially. */
 		char extended_master_secret;
+
+		/* Client-only: peer_psk_identity_hint is the psk_identity_hint
+		 * sent by the server when using a PSK key exchange. */
+		char *peer_psk_identity_hint;
 		} tmp;
 
         /* Connection binding to prevent renegotiation attacks */
@@ -586,6 +595,8 @@ typedef struct ssl3_state_st
 /* extra state */
 #define SSL3_ST_SW_FLUSH		(0x100|SSL_ST_ACCEPT)
 /* read from client */
+#define SSL3_ST_SR_INITIAL_BYTES	(0x240|SSL_ST_ACCEPT)
+#define SSL3_ST_SR_V2_CLIENT_HELLO	(0x241|SSL_ST_ACCEPT)
 /* Do not change the number values, they do matter */
 #define SSL3_ST_SR_CLNT_HELLO_A		(0x110|SSL_ST_ACCEPT)
 #define SSL3_ST_SR_CLNT_HELLO_B		(0x111|SSL_ST_ACCEPT)
@@ -621,6 +632,7 @@ typedef struct ssl3_state_st
 #define SSL3_ST_SR_CHANNEL_ID_B		(0x231|SSL_ST_ACCEPT)
 #define SSL3_ST_SR_FINISHED_A		(0x1C0|SSL_ST_ACCEPT)
 #define SSL3_ST_SR_FINISHED_B		(0x1C1|SSL_ST_ACCEPT)
+
 /* write to client */
 #define SSL3_ST_SW_CHANGE_A		(0x1D0|SSL_ST_ACCEPT)
 #define SSL3_ST_SW_CHANGE_B		(0x1D1|SSL_ST_ACCEPT)

@@ -14,12 +14,14 @@ WebInspector.TimelineLayersView = function()
     this.element.classList.add("timeline-layers-view");
     this._rightSplitView = new WebInspector.SplitView(true, true, "timelineLayersViewDetails");
     this._rightSplitView.element.classList.add("timeline-layers-view-properties");
-    this._rightSplitView.show(this.mainElement());
+    this.setMainView(this._rightSplitView);
 
     this._paintTiles = [];
 
-    this.sidebarElement().classList.add("outline-disclosure", "layer-tree");
-    var sidebarTreeElement = this.sidebarElement().createChild("ol");
+    var vbox = new WebInspector.VBox();
+    vbox.element.classList.add("outline-disclosure", "layer-tree");
+    var sidebarTreeElement = vbox.element.createChild("ol");
+    this.setSidebarView(vbox);
 
     var treeOutline = new TreeOutline(sidebarTreeElement);
     this._layerTreeOutline = new WebInspector.LayerTreeOutline(treeOutline);
@@ -30,10 +32,12 @@ WebInspector.TimelineLayersView = function()
     this._layers3DView.addEventListener(WebInspector.Layers3DView.Events.ObjectSelected, this._onObjectSelected, this);
     this._layers3DView.addEventListener(WebInspector.Layers3DView.Events.ObjectHovered, this._onObjectHovered, this);
     this._layers3DView.addEventListener(WebInspector.Layers3DView.Events.PaintProfilerRequested, this._jumpToPaintEvent, this);
-    this._layers3DView.show(this._rightSplitView.mainElement());
+    this._rightSplitView.setMainView(this._layers3DView);
 
     this._layerDetailsView = new WebInspector.LayerDetailsView();
-    this._layerDetailsView.show(this._rightSplitView.sidebarElement());
+    this._rightSplitView.setSidebarView(this._layerDetailsView);
+    this._layerDetailsView.addEventListener(WebInspector.LayerDetailsView.Events.PaintProfilerRequested, this._jumpToPaintEvent, this);
+    this._layerDetailsView.addEventListener(WebInspector.LayerDetailsView.Events.ObjectSelected, this._onObjectSelected, this);
 }
 
 WebInspector.TimelineLayersView.prototype = {
@@ -105,7 +109,7 @@ WebInspector.TimelineLayersView.prototype = {
         var tilesReadyBarrier = new CallbackBarrier();
         this._deferredLayerTree.resolve(tilesReadyBarrier.createCallback(onLayersReady));
         for (var i = 0; this._paints && i < this._paints.length; ++i)
-            this._paints[i].loadPicture(tilesReadyBarrier.createCallback(onSnapshotLoaded.bind(this, this._paints[i])));
+            this._paints[i].loadSnapshot(tilesReadyBarrier.createCallback(onSnapshotLoaded.bind(this, this._paints[i])));
         tilesReadyBarrier.callWhenDone(onLayersAndTilesReady.bind(this));
 
         /**
@@ -146,32 +150,32 @@ WebInspector.TimelineLayersView.prototype = {
     },
 
     /**
-     * @param {?WebInspector.Layers3DView.ActiveObject} activeObject
+     * @param {?WebInspector.Layers3DView.Selection} selection
      */
-    _selectObject: function(activeObject)
+    _selectObject: function(selection)
     {
-        var layer = activeObject && activeObject.layer;
-        if (this._currentlySelectedLayer === activeObject)
+        var layer = selection && selection.layer;
+        if (this._currentlySelectedLayer === selection)
             return;
-        this._currentlySelectedLayer = activeObject;
+        this._currentlySelectedLayer = selection;
         this._toggleNodeHighlight(layer ? layer.nodeForSelfOrAncestor() : null);
         this._layerTreeOutline.selectLayer(layer);
-        this._layers3DView.selectObject(activeObject);
-        this._layerDetailsView.setObject(activeObject);
+        this._layers3DView.selectObject(selection);
+        this._layerDetailsView.setObject(selection);
     },
 
     /**
-     * @param {?WebInspector.Layers3DView.ActiveObject} activeObject
+     * @param {?WebInspector.Layers3DView.Selection} selection
      */
-    _hoverObject: function(activeObject)
+    _hoverObject: function(selection)
     {
-        var layer = activeObject && activeObject.layer;
-        if (this._currentlyHoveredLayer === activeObject)
+        var layer = selection && selection.layer;
+        if (this._currentlyHoveredLayer === selection)
             return;
-        this._currentlyHoveredLayer = activeObject;
+        this._currentlyHoveredLayer = selection;
         this._toggleNodeHighlight(layer ? layer.nodeForSelfOrAncestor() : null);
         this._layerTreeOutline.hoverLayer(layer);
-        this._layers3DView.hoverObject(activeObject);
+        this._layers3DView.hoverObject(selection);
     },
 
     /**
@@ -193,8 +197,8 @@ WebInspector.TimelineLayersView.prototype = {
      */
     _onObjectSelected: function(event)
     {
-        var activeObject = /** @type {!WebInspector.Layers3DView.ActiveObject} */ (event.data);
-        this._selectObject(activeObject);
+        var selection = /** @type {!WebInspector.Layers3DView.Selection} */ (event.data);
+        this._selectObject(selection);
     },
 
     /**
@@ -202,8 +206,8 @@ WebInspector.TimelineLayersView.prototype = {
      */
     _onObjectHovered: function(event)
     {
-        var activeObject = /** @type {!WebInspector.Layers3DView.ActiveObject} */ (event.data);
-        this._hoverObject(activeObject);
+        var selection = /** @type {!WebInspector.Layers3DView.Selection} */ (event.data);
+        this._hoverObject(selection);
     },
 
     _disposeTiles: function()

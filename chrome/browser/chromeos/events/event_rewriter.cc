@@ -20,9 +20,9 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
-#include "chromeos/ime/ime_keyboard.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "components/user_manager/user_manager.h"
+#include "ui/base/ime/chromeos/ime_keyboard.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
@@ -103,7 +103,7 @@ const ModifierRemapping* GetRemappedKey(const std::string& pref_name,
 }
 
 bool HasDiamondKey() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
       chromeos::switches::kHasChromeOSDiamondKey);
 }
 
@@ -689,11 +689,14 @@ void EventRewriter::RewriteModifierKeys(const ui::KeyEvent& key_event,
   else
     state->flags &= ~characteristic_flag;
 
-  // Toggle Caps Lock if the remapped key is ui::VKEY_CAPITAL, but do nothing if
-  // the original key is ui::VKEY_CAPITAL (i.e. a Caps Lock key on an external
-  // keyboard is pressed) since X can handle that case.
+  // Toggle Caps Lock if the remapped key is ui::VKEY_CAPITAL.
   if (key_event.type() == ui::ET_KEY_PRESSED &&
+#if defined(USE_X11)
+      // ... but for X11, do nothing if the original key is ui::VKEY_CAPITAL
+      // (i.e. a Caps Lock key on an external keyboard is pressed) since X
+      // handles that itself.
       incoming.key_code != ui::VKEY_CAPITAL &&
+#endif
       state->key_code == ui::VKEY_CAPITAL) {
     chromeos::input_method::ImeKeyboard* ime_keyboard =
         ime_keyboard_for_testing_

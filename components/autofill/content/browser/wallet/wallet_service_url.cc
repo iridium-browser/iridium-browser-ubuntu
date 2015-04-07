@@ -33,7 +33,8 @@ const char kSandboxWalletSecureServiceUrl[] =
 
 bool IsWalletProductionEnabled() {
   // If the command line flag exists, it takes precedence.
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
   std::string sandbox_enabled(
       command_line->GetSwitchValueASCII(switches::kWalletServiceUseSandbox));
   if (!sandbox_enabled.empty())
@@ -52,7 +53,8 @@ bool IsWalletProductionEnabled() {
 }
 
 GURL GetWalletHostUrl() {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   std::string wallet_service_hostname =
       command_line.GetSwitchValueASCII(switches::kWalletServiceUrl);
   if (!wallet_service_hostname.empty())
@@ -72,7 +74,8 @@ GURL GetBaseAutocheckoutUrl(size_t user_index) {
 }
 
 GURL GetBaseSecureUrl() {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   std::string wallet_secure_url =
       command_line.GetSwitchValueASCII(switches::kWalletSecureServiceUrl);
   if (!wallet_secure_url.empty())
@@ -83,7 +86,8 @@ GURL GetBaseSecureUrl() {
 }
 
 GURL GetBaseEncryptedFrontendUrl(size_t user_index) {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   GURL base_url = IsWalletProductionEnabled() ||
       command_line.HasSwitch(switches::kWalletServiceUrl) ?
           GetWalletHostUrl() : GetBaseSecureUrl();
@@ -116,6 +120,10 @@ GURL GetManageAddressesUrl(size_t user_index) {
   std::string path =
       base::StringPrintf("manage/w/%" PRIuS "/settings/addresses", user_index);
   return GetBaseSecureUrl().Resolve(path);
+}
+
+GURL GetPrivacyNoticeUrl() {
+  return GetWalletHostUrl().Resolve("legaldocument?family=0.privacynotice");
 }
 
 GURL GetAcceptLegalDocumentsUrl(size_t user_index) {

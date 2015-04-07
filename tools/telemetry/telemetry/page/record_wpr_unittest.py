@@ -13,7 +13,7 @@ from telemetry.page import page as page_module
 from telemetry.page import page_set as page_set_module
 from telemetry.page import page_test
 from telemetry.page import record_wpr
-from telemetry.unittest import tab_test_case
+from telemetry.unittest_util import tab_test_case
 
 
 class MockPage(page_module.Page):
@@ -27,31 +27,24 @@ class MockPage(page_module.Page):
     self.func_calls.append('RunNavigateSteps')
     super(MockPage, self).RunNavigateSteps(action_runner)
 
-  def RunFoo(self, _):
-    self.func_calls.append('RunFoo')
+  def RunPageInteractions(self, _):
+    self.func_calls.append('RunPageInteractions')
 
-  def RunBar(self, _):
-    self.func_calls.append('RunBar')
-
-  def RunBaz(self, _):
-    self.func_calls.append('RunBaz')
-
+  def RunSmoothness(self, _):
+    self.func_calls.append('RunSmoothness')
 
 class MockPageSet(page_set_module.PageSet):
   def __init__(self, url=''):
-    super(MockPageSet, self).__init__(archive_data_file='data/test.json')
-    self.AddPage(MockPage(self, url))
+    super(MockPageSet, self).__init__(
+        archive_data_file='data/archive_files/test.json')
+    self.AddUserStory(MockPage(self, url))
 
 
 class MockPageTest(page_test.PageTest):
   def __init__(self):
     super(MockPageTest, self).__init__()
-    self._action_name_to_run = "RunBaz"
+    self._action_name_to_run = "RunPageInteractions"
     self.func_calls = []
-
-  @classmethod
-  def AddCommandLineArgs(cls, parser):
-    parser.add_option('--mock-page-test-option', action="store_true")
 
   def WillNavigateToPage(self, page, tab):
     self.func_calls.append('WillNavigateToPage')
@@ -65,8 +58,8 @@ class MockPageTest(page_test.PageTest):
   def DidRunActions(self, page, tab):
     self.func_calls.append('DidRunActions')
 
-  def ValidatePage(self, page, tab, results):
-    self.func_calls.append('ValidatePage')
+  def ValidateAndMeasurePage(self, page, tab, results):
+    self.func_calls.append('ValidateAndMeasurePage')
 
   def WillStartBrowser(self, platform):
     self.func_calls.append('WillStartBrowser')
@@ -79,12 +72,12 @@ class MockBenchmark(benchmark.Benchmark):
   mock_page_set = None
 
   @classmethod
-  def AddTestCommandLineArgs(cls, group):
+  def AddBenchmarkCommandLineArgs(cls, group):
     group.add_option('', '--mock-benchmark-url', action='store', type='string')
 
   def CreatePageSet(self, options):
     kwargs = {}
-    if (options.mock_benchmark_url):
+    if options.mock_benchmark_url:
       kwargs['url'] = options.mock_benchmark_url
     self.mock_page_set = MockPageSet(**kwargs)
     return self.mock_page_set
@@ -104,44 +97,32 @@ class RecordWprUnitTests(tab_test_case.TabTestCase):
   # When the RecorderPageTest is created from a PageSet, we do not have a
   # PageTest to use. In this case, we will record every available action.
   def testRunPage_AllActions(self):
-    record_page_test = record_wpr.RecorderPageTest(["RunFoo", "RunBar"])
+    record_page_test = record_wpr.RecorderPageTest()
     page = MockPage(page_set=MockPageSet(url=self._url), url=self._url)
     record_page_test.RunPage(page, self._tab, results=None)
-    self.assertTrue('RunFoo' in page.func_calls)
-    self.assertTrue('RunBar' in page.func_calls)
-    self.assertFalse('RunBaz' in page.func_calls)
-
-  def testRunPage_DontReloadSingleActions(self):
-    record_page_test = record_wpr.RecorderPageTest(["RunFoo"])
-    page = MockPage(page_set=MockPageSet(url=self._url), url=self._url)
-    record_page_test.RunPage(page, self._tab, results=None)
-    self.assertFalse('RunNavigateSteps' in page.func_calls)
-
-  def testRunPage_ReloadPageBetweenActions(self):
-    record_page_test = record_wpr.RecorderPageTest(["RunFoo", "RunBar"])
-    page = MockPage(page_set=MockPageSet(url=self._url), url=self._url)
-    record_page_test.RunPage(page, self._tab, results=None)
+    self.assertTrue('RunPageInteractions' in page.func_calls)
     self.assertTrue('RunNavigateSteps' in page.func_calls)
 
   # When the RecorderPageTest is created from a Benchmark, the benchmark will
   # have a PageTest, specified by its test attribute.
   def testRunPage_OnlyRunBenchmarkAction(self):
-    record_page_test = record_wpr.RecorderPageTest(["RunFoo"])
+    record_page_test = record_wpr.RecorderPageTest()
     record_page_test.page_test = MockBenchmark().test()
     page = MockPage(page_set=MockPageSet(url=self._url), url=self._url)
     record_page_test.RunPage(page, self._tab, results=None)
-    self.assertFalse('RunFoo' in page.func_calls)
-    self.assertTrue('RunBaz' in page.func_calls)
+    self.assertTrue('RunPageInteractions' in page.func_calls)
+    self.assertFalse('RunSmoothness' in page.func_calls)
 
   def testRunPage_CallBenchmarksPageTestsFunctions(self):
-    record_page_test = record_wpr.RecorderPageTest([])
+    record_page_test = record_wpr.RecorderPageTest()
     record_page_test.page_test = MockBenchmark().test()
     page = MockPage(page_set=MockPageSet(url=self._url), url=self._url)
     record_page_test.RunPage(page, self._tab, results=None)
     self.assertEqual(3, len(record_page_test.page_test.func_calls))
     self.assertEqual('WillRunActions', record_page_test.page_test.func_calls[0])
     self.assertEqual('DidRunActions', record_page_test.page_test.func_calls[1])
-    self.assertEqual('ValidatePage', record_page_test.page_test.func_calls[2])
+    self.assertEqual('ValidateAndMeasurePage',
+                     record_page_test.page_test.func_calls[2])
 
   @decorators.Disabled('chromeos') # crbug.com/404868.
   def testWprRecorderWithPageSet(self):
@@ -182,7 +163,7 @@ class RecordWprUnitTests(tab_test_case.TabTestCase):
     flags = [
         '--page-repeat', '2',
         '--mock-benchmark-url', self._url,
-        '--mock-page-test-option',
+        '--upload',
     ]
     wpr_recorder = record_wpr.WprRecorder(self._test_data_dir, MockBenchmark(),
                                           flags)
@@ -190,8 +171,8 @@ class RecordWprUnitTests(tab_test_case.TabTestCase):
     self.assertEquals(2, wpr_recorder.options.page_repeat)
     # benchmark command-line args
     self.assertEquals(self._url, wpr_recorder.options.mock_benchmark_url)
-    # benchmark's page_test command-line args
-    self.assertTrue(wpr_recorder.options.mock_page_test_option)
+    # record_wpr command-line arg to upload to cloud-storage.
+    self.assertTrue(wpr_recorder.options.upload)
     # invalid command-line args
     self.assertFalse(hasattr(wpr_recorder.options, 'not_a_real_option'))
 
@@ -202,19 +183,10 @@ class RecordWprUnitTests(tab_test_case.TabTestCase):
     self.assertEqual(wpr_modes.WPR_RECORD,
                      wpr_recorder.options.browser_options.wpr_mode)
 
-  def testFindAllActionNames(self):
-    # The src/tools/telemetry/unittest_data/page_tests/ has been
-    # populated with three simple Page Measurement classes, the first two of
-    # which have action_name_to_run defined.
-    action_names_to_run = record_wpr.FindAllActionNames(self._test_data_dir)
-    self.assertTrue('RunFoo' in action_names_to_run)
-    self.assertTrue('RunBar' in action_names_to_run)
-    self.assertFalse('RunBaz' in action_names_to_run)
-
   # When the RecorderPageTest WillStartBrowser/DidStartBrowser function is
   # called, it forwards the call to the PageTest
   def testRecorderPageTest_BrowserMethods(self):
-    record_page_test = record_wpr.RecorderPageTest([])
+    record_page_test = record_wpr.RecorderPageTest()
     record_page_test.page_test = MockBenchmark().test()
     record_page_test.WillStartBrowser(self._tab.browser.platform)
     record_page_test.DidStartBrowser(self._tab.browser)

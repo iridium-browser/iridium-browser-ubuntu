@@ -971,7 +971,7 @@ CFX_ByteString CFX_ByteString::FromUnicode(FX_LPCWSTR str, FX_STRSIZE len)
 }
 CFX_ByteString CFX_ByteString::FromUnicode(const CFX_WideString& str)
 {
-    return FromUnicode((FX_LPCWSTR)str, str.GetLength());
+    return FromUnicode(str.c_str(), str.GetLength());
 }
 void CFX_ByteString::ConvertFrom(const CFX_WideString& str, CFX_CharMap* pCharMap)
 {
@@ -1082,7 +1082,7 @@ FX_DWORD CFX_ByteStringC::GetID(FX_STRSIZE start_pos) const
     if (m_Length == 0) {
         return 0;
     }
-    if (start_pos >= m_Length) {
+    if (start_pos < 0 || start_pos >= m_Length) {
         return 0;
     }
     FX_DWORD strid = 0;

@@ -21,6 +21,7 @@
 #include "ui/base/x/x11_foreign_window_manager.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/events/event.h"
+#include "ui/events/event_utils.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/screen.h"
@@ -74,6 +75,33 @@ const char* kAtomsToCache[] = {
   ui::Clipboard::kMimeTypeText,
   NULL
 };
+
+int XGetModifiers() {
+  XDisplay* display = gfx::GetXDisplay();
+
+  XID root, child;
+  int root_x, root_y, win_x, win_y;
+  unsigned int mask;
+  XQueryPointer(display,
+                DefaultRootWindow(display),
+                &root,
+                &child,
+                &root_x,
+                &root_y,
+                &win_x,
+                &win_y,
+                &mask);
+  int modifiers = ui::EF_NONE;
+  if (mask & ShiftMask)
+    modifiers |= ui::EF_SHIFT_DOWN;
+  if (mask & ControlMask)
+    modifiers |= ui::EF_CONTROL_DOWN;
+  if (mask & Mod1Mask)
+    modifiers |= ui::EF_ALT_DOWN;
+  if (mask & Mod4Mask)
+    modifiers |= ui::EF_COMMAND_DOWN;
+  return modifiers;
+}
 
 // The time to wait for the target to respond after the user has released the
 // mouse button before ending the move loop.
@@ -137,6 +165,8 @@ class DesktopDragDropClientAuraX11::X11DragContext
   // Creates a ui::DragDropTypes::DragOperation representation of the current
   // action list.
   int GetDragOperation() const;
+
+  DesktopDragDropClientAuraX11* source_client() { return source_client_; }
 
  private:
   // Masks the X11 atom |xdnd_operation|'s views representation onto
@@ -204,24 +234,24 @@ DesktopDragDropClientAuraX11::X11DragContext::X11DragContext(
       drag_drop_client_(NULL),
       waiting_to_handle_position_(false),
       suggested_action_(None) {
-  bool get_types = ((event.data.l[1] & 1) != 0);
+  if (!source_client_) {
+    bool get_types = ((event.data.l[1] & 1) != 0);
 
-  if (get_types) {
-    if (!ui::GetAtomArrayProperty(source_window_,
-                                  "XdndTypeList",
-                                  &unfetched_targets_)) {
-      return;
-    }
-  } else {
-    // data.l[2,3,4] contain the first three types. Unused slots can be None.
-    for (int i = 0; i < 3; ++i) {
-      if (event.data.l[2+i] != None) {
-        unfetched_targets_.push_back(event.data.l[2+i]);
+    if (get_types) {
+      if (!ui::GetAtomArrayProperty(source_window_,
+                                    "XdndTypeList",
+                                    &unfetched_targets_)) {
+        return;
+      }
+    } else {
+      // data.l[2,3,4] contain the first three types. Unused slots can be None.
+      for (int i = 0; i < 3; ++i) {
+        if (event.data.l[2+i] != None) {
+          unfetched_targets_.push_back(event.data.l[2+i]);
+        }
       }
     }
-  }
 
-  if (!source_client_) {
     // The window doesn't have a DesktopDragDropClientAuraX11, that means it's
     // created by some other process. Listen for messages on it.
     ui::PlatformEventSource::GetInstance()->AddPlatformEventDispatcher(this);
@@ -237,7 +267,6 @@ DesktopDragDropClientAuraX11::X11DragContext::X11DragContext(
     // that we can shortcut the X11 server and ask the owning SelectionOwner
     // for the data it's offering.
     fetched_targets_ = source_client_->GetFormatMap();
-    unfetched_targets_.clear();
   }
 
   ReadActions();
@@ -376,9 +405,11 @@ DesktopDragDropClientAuraX11::DesktopDragDropClientAuraX11(
     Display* xdisplay,
     ::Window xwindow)
     : root_window_(root_window),
+      cursor_manager_(cursor_manager),
       xdisplay_(xdisplay),
       xwindow_(xwindow),
       atom_cache_(xdisplay_, kAtomsToCache),
+      current_modifier_state_(ui::EF_NONE),
       target_window_(NULL),
       waiting_on_status_(false),
       status_received_since_enter_(false),
@@ -387,9 +418,6 @@ DesktopDragDropClientAuraX11::DesktopDragDropClientAuraX11(
       source_state_(SOURCE_STATE_OTHER),
       drag_operation_(0),
       negotiated_operation_(ui::DragDropTypes::DRAG_NONE),
-      grab_cursor_(cursor_manager->GetInitializedCursor(ui::kCursorGrabbing)),
-      copy_grab_cursor_(cursor_manager->GetInitializedCursor(ui::kCursorCopy)),
-      move_grab_cursor_(cursor_manager->GetInitializedCursor(ui::kCursorMove)),
       weak_ptr_factory_(this) {
   // Some tests change the DesktopDragDropClientAuraX11 associated with an
   // |xwindow|.
@@ -509,17 +537,19 @@ void DesktopDragDropClientAuraX11::OnXdndStatus(
     return;
   }
 
+  int cursor_type = ui::kCursorNull;
   switch (negotiated_operation_) {
     case ui::DragDropTypes::DRAG_COPY:
-      move_loop_->UpdateCursor(copy_grab_cursor_);
+      cursor_type = ui::kCursorCopy;
       break;
     case ui::DragDropTypes::DRAG_MOVE:
-      move_loop_->UpdateCursor(move_grab_cursor_);
+      cursor_type = ui::kCursorMove;
       break;
     default:
-      move_loop_->UpdateCursor(grab_cursor_);
+      cursor_type = ui::kCursorGrabbing;
       break;
   }
+  move_loop_->UpdateCursor(cursor_manager_->GetInitializedCursor(cursor_type));
 
   // Note: event.data.[2,3] specify a rectangle. It is a request by the other
   // window to not send further XdndPosition messages while the cursor is
@@ -573,6 +603,13 @@ void DesktopDragDropClientAuraX11::OnXdndDrop(
                                 target_window_location_,
                                 target_window_root_location_,
                                 target_current_context_->GetDragOperation());
+      if (target_current_context_->source_client()) {
+        event.set_flags(target_current_context_->source_client()
+                            ->current_modifier_state());
+      } else {
+        event.set_flags(XGetModifiers());
+      }
+
       drag_operation = delegate->OnPerformDrop(event);
     }
 
@@ -657,7 +694,9 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
   // Windows has a specific method, DoDragDrop(), which performs the entire
   // drag. We have to emulate this, so we spin off a nested runloop which will
   // track all cursor movement and reroute events to a specific handler.
-  move_loop_->RunMoveLoop(source_window, grab_cursor_);
+  move_loop_->RunMoveLoop(
+      source_window,
+      cursor_manager_->GetInitializedCursor(ui::kCursorGrabbing));
 
   if (alive) {
     drag_widget_.reset();
@@ -696,8 +735,10 @@ void DesktopDragDropClientAuraX11::OnWindowDestroyed(aura::Window* window) {
   target_window_ = NULL;
 }
 
-void DesktopDragDropClientAuraX11::OnMouseMovement(XMotionEvent* event) {
-  gfx::Point screen_point(event->x_root, event->y_root);
+void DesktopDragDropClientAuraX11::OnMouseMovement(
+    const gfx::Point& screen_point,
+    int flags,
+    base::TimeDelta event_time) {
   if (drag_widget_.get()) {
     drag_widget_->SetBounds(
         gfx::Rect(screen_point - drag_widget_offset_,
@@ -705,8 +746,12 @@ void DesktopDragDropClientAuraX11::OnMouseMovement(XMotionEvent* event) {
     drag_widget_->StackAtTop();
   }
 
+  const int kModifiers = ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN |
+                         ui::EF_ALT_DOWN | ui::EF_COMMAND_DOWN;
+  current_modifier_state_ = flags & kModifiers;
+
   repeat_mouse_move_timer_.Stop();
-  ProcessMouseMove(screen_point, event->time);
+  ProcessMouseMove(screen_point, event_time.InMilliseconds());
 }
 
 void DesktopDragDropClientAuraX11::OnMouseReleased() {
@@ -766,7 +811,7 @@ void DesktopDragDropClientAuraX11::OnMoveLoopEnded() {
 
 scoped_ptr<X11MoveLoop> DesktopDragDropClientAuraX11::CreateMoveLoop(
     X11MoveLoopDelegate* delegate) {
-  return scoped_ptr<X11MoveLoop>(new X11WholeScreenMoveLoop(this));
+  return make_scoped_ptr(new X11WholeScreenMoveLoop(this));
 }
 
 XID DesktopDragDropClientAuraX11::FindWindowFor(
@@ -926,6 +971,12 @@ void DesktopDragDropClientAuraX11::DragTranslate(
       location,
       root_location,
       drag_op));
+  if (target_current_context_->source_client()) {
+    (*event)->set_flags(
+        target_current_context_->source_client()->current_modifier_state());
+  } else {
+    (*event)->set_flags(XGetModifiers());
+  }
   if (target_window_changed)
     (*delegate)->OnDragEntered(*event->get());
 }

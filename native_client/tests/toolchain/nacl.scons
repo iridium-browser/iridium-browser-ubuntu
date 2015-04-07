@@ -80,13 +80,18 @@ def AddIntrinsicTest(test_env, src, exit_status,
 AddIntrinsicTest(env, 'intrinsics.cc', '55'),
 AddIntrinsicTest(env, 'float2.c', '0', golden_file=env.File('float2.stdout'))
 AddIntrinsicTest(env, 'synchronization_sync.c', '0',
+                 is_broken=(
+                 # TODO(jfb) Broken after the LLVM 3.5 merge because of:
+                 #           http://llvm.org/bugs/show_bug.cgi?id=20376
+                     env.Bit('bitcode') or env.Bit('nacl_clang') or
                  # TODO(jfb) Blocked on bugs 3579 and 2981. This should
                  # work on PNaCl because it avoids the broken 16-bit
                  # instructions on x86-32 by using 32-bit instructions.
+                     (env.Bit('build_x86_32') and
+                      not env.Bit('bitcode')) or
                  # The test also exercises instructions that confuse valgrind.
-                 is_broken=((env.Bit('target_x86_32') and
-                             not env.Bit('bitcode')) or
-                            env.IsRunningUnderValgrind()))
+                     env.IsRunningUnderValgrind())
+               )
 AddIntrinsicTest(env, 'synchronization_volatile.c', '0')
 if env.Bit('bitcode') or env.Bit('nacl_clang'):
   # The following tests were only made to work on LLVM for
@@ -183,7 +188,7 @@ env.AddNodeToTestSuite(
     # __attribute__((destructor)) is broken in nacl-glibc on x86-64.
     # See http://code.google.com/p/nativeclient/issues/detail?id=3056
     # TODO(mseaborn): Enable this test there when this is fixed.
-    is_broken=env.Bit('nacl_glibc') and env.Bit('target_x86_64'))
+    is_broken=env.Bit('nacl_glibc') and env.Bit('build_x86_64'))
 
 
 nexe = env.ComponentProgram('pthread_cleanup', 'pthread_cleanup.c',
@@ -211,7 +216,7 @@ env.AddNodeToTestSuite(node, ['toolchain_tests', 'small_tests'],
                        'run_cpp_threadsafe_static_init_test',
                        is_broken=(not env.Bit('bitcode') and
                                   not env.Bit('nacl_glibc') and
-                                  not env.Bit('target_x86_32')))
+                                  not env.Bit('build_x86_32')))
 
 
 # NOTE: the tests below break easily under valgrid and since
@@ -251,7 +256,7 @@ EH_ENVIRONMENTS_TO_TRY = []
 
 base_eh_env = env.Clone()
 
-supports_cxx11 = env.Bit('bitcode') or env.Bit('target_arm')
+supports_cxx11 = env.Bit('bitcode') or env.Bit('build_arm')
 base_eh_env.Append(CPPDEFINES=[['SUPPORTS_CXX11', str(int(supports_cxx11))]])
 if supports_cxx11:
   # This flag is necessary for testing std::rethrow_exception(), at
@@ -348,6 +353,18 @@ for tag, env_to_try in EH_ENVIRONMENTS_TO_TRY:
 # Test that Exception Handling works with the calling conventions that
 # match the PPAPI PNaCl IRT shim's calling conventions.
 exc_env = env.Clone()
+# Clear the --target= flags from CFLAGS because zerocost EH is the one nonpexe
+# feature that is really intended to work with portable bitcode. This means
+# that the test code bitcode has a different target triple than the other
+# scons-built code (e.g. libnacl) so the test should be careful in its use of
+# external calls.
+exc_env['BASE_CFLAGS'] = ''
+exc_env['BASE_CXXFLAGS'] = ''
+exc_env['BASE_LINKFLAGS'] = ''
+# Clearing NACL_SDK_LIB means that the crt files, newlib, and libcxx will be
+# le32 instead of biased.
+exc_env['NACL_SDK_LIB'] = ''
+
 if exc_env.Bit('bitcode') and exc_env.AllowNonStableBitcode():
   # Test what happens when all objects are bitcode w/ bitcode linking.
   exc_env.Append(LINKFLAGS=['--pnacl-allow-exceptions'])
@@ -364,6 +381,17 @@ if exc_env.Bit('bitcode') and exc_env.AllowNonStableBitcode():
                                        exit_status='55')
   env.AddNodeToTestSuite(node, ['toolchain_tests', 'small_tests'],
                          'run_eh_separate_files_bc_test')
+
+  # Test that vararg functions which get double arguments work in
+  # allow-exceptions mode.
+  if exc_env['TOOLCHAIN_FEATURE_VERSION'] >= 10:
+    nexe = exc_env.ComponentProgram('vaarg_allow_exceptions',
+                                    'vaarg_allow_exceptions.cc',
+                                    EXTRA_LIBS=['${NONIRT_LIBS}'])
+    node = exc_env.CommandSelLdrTestNacl('vaarg_allow_exceptions.out', nexe)
+    env.AddNodeToTestSuite(node, ['toolchain_tests', 'small_tests'],
+                           'run_vaarg_allow_exceptions_test')
+
   # Also test ahead of time translation, which may be used when debugging.
   if not env.Bit('pnacl_generate_pexe'):
     native_env = exc_env.Clone()
@@ -504,7 +532,7 @@ c99_env = env.Clone()
 c99_env.Append(CFLAGS=['-std=c99'])
 # VLA test is broken on nacl-gcc x86-64 (segfaults in test_two_recursion()).
 # http://code.google.com/p/nativeclient/issues/detail?id=3527
-vla_is_broken = not env.Bit('bitcode') and env.Bit('target_x86_64')
+vla_is_broken = not env.Bit('bitcode') and env.Bit('build_x86_64')
 nexe = c99_env.ComponentProgram('vla', 'vla.c',
                                 EXTRA_LIBS=['${NONIRT_LIBS}'])
 node = env.CommandSelLdrTestNacl('vla.out', nexe,
@@ -541,7 +569,7 @@ if not env.Bit('pnacl_generate_pexe'):
   if not env.Bit('bitcode'):
     pic_env = asm_env.Clone()
     pic_env.Append(CFLAGS=['-fPIC'])
-    if pic_env.Bit('target_arm'):
+    if pic_env.Bit('build_arm'):
       pic_env.Append(LINKFLAGS=['-Wl,--pic-veneer'])
     nexe = pic_env.ComponentProgram('far_call_pic',
                                     FarCallObjects(pic_env, '_pic'),
@@ -581,7 +609,7 @@ node = env.CommandSelLdrTestNacl('wrap.out', nexe,
                                  stdout_golden=env.File('wrap.stdout'))
 env.AddNodeToTestSuite(node, ['toolchain_tests','small_tests'], 'run_wrap_test')
 
-if (env.Bit('target_x86_32') and env.Bit('bitcode') and
+if (env.Bit('build_x86_32') and env.Bit('bitcode') and
     not env.Bit('pnacl_generate_pexe') and
     env['TOOLCHAIN_FEATURE_VERSION'] >= 8):
   # This test compiles a file that will need to generate a call to a compiler-rt

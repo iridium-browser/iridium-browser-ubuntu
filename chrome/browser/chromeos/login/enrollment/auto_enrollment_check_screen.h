@@ -83,9 +83,6 @@ class AutoEnrollmentCheckScreen
   // task, in which this function was called.
   void SignalCompletion();
 
-  // Terminates the screen.
-  void CallOnExit();
-
   // Returns whether enrollment check was completed and decision was made.
   bool IsCompleted() const;
 

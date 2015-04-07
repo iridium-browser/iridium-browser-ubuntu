@@ -339,10 +339,6 @@ enum TextAlignLast {
     TextAlignLastAuto, TextAlignLastStart, TextAlignLastEnd, TextAlignLastLeft, TextAlignLastRight, TextAlignLastCenter, TextAlignLastJustify
 };
 
-enum TextJustify {
-    TextJustifyAuto, TextJustifyNone, TextJustifyInterWord, TextJustifyDistribute
-};
-
 enum TextUnderlinePosition {
     // FIXME: Implement support for 'under left' and 'under right' values.
     TextUnderlinePositionAuto,
@@ -435,6 +431,8 @@ enum ETransformStyle3D {
     TransformStyle3DFlat, TransformStyle3DPreserve3D
 };
 
+enum MotionRotationType { MotionRotationAuto, MotionRotationFixed };
+
 enum EBackfaceVisibility {
     BackfaceVisibilityVisible, BackfaceVisibilityHidden
 };
@@ -507,7 +505,16 @@ inline TouchAction& operator&= (TouchAction& a, TouchAction b) { return a = a & 
 
 enum EIsolation { IsolationAuto, IsolationIsolate };
 
-enum TouchActionDelay { TouchActionDelayNone, TouchActionDelayScript };
+enum ScrollBlocksOn {
+    ScrollBlocksOnNone = 0x0,
+    ScrollBlocksOnStartTouch = 0x1,
+    ScrollBlocksOnWheelEvent = 0x2,
+    ScrollBlocksOnScrollEvent = 0x4,
+};
+inline ScrollBlocksOn operator| (ScrollBlocksOn a, ScrollBlocksOn b) { return ScrollBlocksOn(int(a) | int(b)); }
+inline ScrollBlocksOn& operator|= (ScrollBlocksOn& a, ScrollBlocksOn b) { return a = a | b; }
+inline ScrollBlocksOn operator& (ScrollBlocksOn a, ScrollBlocksOn b) { return ScrollBlocksOn(int(a) & int(b)); }
+inline ScrollBlocksOn& operator&= (ScrollBlocksOn& a, ScrollBlocksOn b) { return a = a & b; }
 
 enum ItemPosition {
     ItemPositionAuto,

@@ -5,15 +5,16 @@
 #include "config.h"
 #include "core/paint/ReplicaPainter.h"
 
+#include "core/paint/GraphicsContextAnnotator.h"
 #include "core/paint/LayerPainter.h"
-#include "core/rendering/GraphicsContextAnnotator.h"
+#include "core/paint/RenderDrawingRecorder.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderReplica.h"
 
 namespace blink {
 
-void ReplicaPainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void ReplicaPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     ANNOTATE_GRAPHICS_CONTEXT(paintInfo, &m_renderReplica);
 
@@ -30,6 +31,8 @@ void ReplicaPainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
         PaintLayerFlags flags = PaintLayerHaveTransparency | PaintLayerAppliedTransform | PaintLayerUncachedClipRects | PaintLayerPaintingReflection;
         LayerPainter(*m_renderReplica.layer()->parent()).paintLayer(paintInfo.context, paintingInfo, flags);
     } else if (paintInfo.phase == PaintPhaseMask) {
+        LayoutRect paintRect(adjustedPaintOffset, m_renderReplica.size());
+        RenderDrawingRecorder renderDrawingRecorder(paintInfo.context, m_renderReplica, paintInfo.phase, paintRect);
         m_renderReplica.paintMask(paintInfo, adjustedPaintOffset);
     }
 }

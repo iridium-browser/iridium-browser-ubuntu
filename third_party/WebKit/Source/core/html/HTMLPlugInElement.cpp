@@ -39,6 +39,7 @@
 #include "core/html/HTMLImageLoader.h"
 #include "core/html/PluginDocument.h"
 #include "core/loader/FrameLoaderClient.h"
+#include "core/loader/MixedContentChecker.h"
 #include "core/page/EventHandler.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
@@ -53,6 +54,7 @@
 #include "platform/MIMETypeRegistry.h"
 #include "platform/Widget.h"
 #include "platform/plugins/PluginData.h"
+#include "public/platform/WebURLRequest.h"
 
 namespace blink {
 
@@ -129,7 +131,9 @@ void HTMLPlugInElement::setPersistedPluginWidget(Widget* widget)
 
 bool HTMLPlugInElement::canProcessDrag() const
 {
-    return pluginWidget() && pluginWidget()->isPluginView() && toPluginView(pluginWidget())->canProcessDrag();
+    if (Widget* widget = existingPluginWidget())
+        return widget->isPluginView() && toPluginView(widget)->canProcessDrag();
+    return false;
 }
 
 bool HTMLPlugInElement::willRespondToMouseClickEvents()
@@ -310,7 +314,7 @@ SharedPersistent<v8::Object>* HTMLPlugInElement::pluginWrapper()
         if (m_persistedPluginWidget)
             plugin = m_persistedPluginWidget.get();
         else
-            plugin = pluginWidget();
+            plugin = pluginWidgetForJSBindings();
 
         if (plugin)
             m_pluginWrapper = frame->script().createPluginWrapper(plugin);
@@ -318,7 +322,14 @@ SharedPersistent<v8::Object>* HTMLPlugInElement::pluginWrapper()
     return m_pluginWrapper.get();
 }
 
-Widget* HTMLPlugInElement::pluginWidget() const
+Widget* HTMLPlugInElement::existingPluginWidget() const
+{
+    if (RenderPart* renderPart = existingRenderPart())
+        return renderPart->widget();
+    return nullptr;
+}
+
+Widget* HTMLPlugInElement::pluginWidgetForJSBindings()
 {
     if (RenderPart* renderPart = renderPartForJSBindings())
         return renderPart->widget();
@@ -390,14 +401,21 @@ RenderPart* HTMLPlugInElement::renderPartForJSBindings() const
 
 bool HTMLPlugInElement::isKeyboardFocusable() const
 {
+    if (useFallbackContent() || usePlaceholderContent())
+        return HTMLElement::isKeyboardFocusable();
+
     if (!document().isActive())
         return false;
-    return pluginWidget() && pluginWidget()->isPluginView() && toPluginView(pluginWidget())->supportsKeyboardFocus();
+
+    if (Widget* widget = existingPluginWidget())
+        return widget->isPluginView() && toPluginView(widget)->supportsKeyboardFocus();
+
+    return false;
 }
 
 bool HTMLPlugInElement::hasCustomFocusLogic() const
 {
-    return !hasAuthorShadowRoot();
+    return !useFallbackContent() && !usePlaceholderContent();
 }
 
 bool HTMLPlugInElement::isPluginElement() const
@@ -494,7 +512,7 @@ bool HTMLPlugInElement::requestObject(const String& url, const String& mimeType,
     // loadOrRedirectSubframe will re-use it. Otherwise, it will create a new
     // frame and set it as the RenderPart's widget, causing what was previously
     // in the widget to be torn down.
-    return loadOrRedirectSubframe(completedURL, getNameAttribute(), true);
+    return loadOrRedirectSubframe(completedURL, getNameAttribute(), true, CheckContentSecurityPolicy);
 }
 
 bool HTMLPlugInElement::loadPlugin(const KURL& url, const String& mimeType, const Vector<String>& paramNames, const Vector<String>& paramValues, bool useFallback, bool requireRenderer)
@@ -623,7 +641,7 @@ bool HTMLPlugInElement::pluginIsLoadable(const KURL& url, const String& mimeType
         return false;
     }
 
-    return frame->loader().mixedContentChecker()->canRunInsecureContent(document().securityOrigin(), url);
+    return !MixedContentChecker::shouldBlockFetch(frame, WebURLRequest::RequestContextObject, WebURLRequest::FrameTypeNone, url);
 }
 
 void HTMLPlugInElement::didAddUserAgentShadowRoot(ShadowRoot&)

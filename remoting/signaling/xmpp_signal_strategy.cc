@@ -38,6 +38,9 @@ const int kKeepAliveIntervalSeconds = 50;
 const size_t kReadBufferSize = 64 * 1024;
 const size_t kWriteBufferSize = 64 * 1024;
 
+const int kDefaultXmppPort = 5222;
+const int kDefaultHttpsPort = 443;
+
 namespace remoting {
 
 XmppSignalStrategy::XmppServerConfig::XmppServerConfig() {}
@@ -50,7 +53,7 @@ XmppSignalStrategy::XmppSignalStrategy(
     : socket_factory_(socket_factory),
       request_context_getter_(request_context_getter),
       resource_name_(kDefaultResourceName),
-      xmpp_client_(NULL),
+      xmpp_client_(nullptr),
       xmpp_server_config_(xmpp_server_config),
       state_(DISCONNECTED),
       error_(OK) {
@@ -83,16 +86,37 @@ void XmppSignalStrategy::Connect() {
   settings.set_token_service(xmpp_server_config_.auth_service);
   settings.set_auth_token(buzz::AUTH_MECHANISM_GOOGLE_TOKEN,
                           xmpp_server_config_.auth_token);
-  settings.set_server(rtc::SocketAddress(
-      xmpp_server_config_.host, xmpp_server_config_.port));
+
+  int port = xmpp_server_config_.port;
+
+  // Port 5222 may be blocked by firewall. talk.google.com allows connections on
+  // port 443 which can be used instead of 5222. The webapp still requests to
+  // use port 5222 for backwards compatibility with older versions of the host
+  // that do not pass correct |use_fake_ssl_client_socket| value to
+  // XmppClientSocketFactory (and so cannot connect to port 443). In case we are
+  // connecting to talk.google.com try to use port 443 anyway.
+  //
+  // TODO(sergeyu): Once all hosts support connections on port 443
+  // the webapp needs to be updated to request port 443 and these 2 lines can be
+  // removed. crbug.com/443384
+  if (xmpp_server_config_.host == "talk.google.com" && port == kDefaultXmppPort)
+    port = kDefaultHttpsPort;
+
+  settings.set_server(
+      rtc::SocketAddress(xmpp_server_config_.host, port));
   settings.set_use_tls(
       xmpp_server_config_.use_tls ? buzz::TLS_ENABLED : buzz::TLS_DISABLED);
 
+  // Enable fake SSL handshake when connecting over HTTPS port.
+  bool use_fake_ssl_client_socket = (port == kDefaultHttpsPort);
+
   scoped_ptr<jingle_glue::XmppClientSocketFactory> xmpp_socket_factory(
-      new jingle_glue::XmppClientSocketFactory(
-          socket_factory_, net::SSLConfig(), request_context_getter_, false));
+      new jingle_glue::XmppClientSocketFactory(socket_factory_,
+                                               net::SSLConfig(),
+                                               request_context_getter_,
+                                               use_fake_ssl_client_socket));
   buzz::AsyncSocket* socket = new jingle_glue::ChromeAsyncSocket(
-    xmpp_socket_factory.release(), kReadBufferSize, kWriteBufferSize);
+      xmpp_socket_factory.release(), kReadBufferSize, kWriteBufferSize);
 
   task_runner_.reset(new jingle_glue::TaskPump());
   xmpp_client_ = new buzz::XmppClient(task_runner_.get());
@@ -114,9 +138,9 @@ void XmppSignalStrategy::Disconnect() {
 
     xmpp_client_->Disconnect();
 
-    // |xmpp_client_| should be set to NULL in OnConnectionStateChanged()
+    // |xmpp_client_| should be set to nullptr in OnConnectionStateChanged()
     // in response to Disconnect() call above.
-    DCHECK(xmpp_client_ == NULL);
+    DCHECK(xmpp_client_ == nullptr);
   }
 }
 
@@ -171,7 +195,7 @@ bool XmppSignalStrategy::HandleStanza(const buzz::XmlElement* stanza) {
   DCHECK(CalledOnValidThread());
   ObserverListBase<Listener>::Iterator it(listeners_);
   Listener* listener;
-  while ((listener = it.GetNext()) != NULL) {
+  while ((listener = it.GetNext()) != nullptr) {
     if (listener->OnSignalStrategyIncomingStanza(stanza))
       return true;
   }
@@ -212,7 +236,7 @@ void XmppSignalStrategy::OnConnectionStateChanged(
 
     // Client is destroyed by the TaskRunner after the client is
     // closed. Reset the pointer so we don't try to use it later.
-    xmpp_client_ = NULL;
+    xmpp_client_ = nullptr;
 
     switch (error) {
       case buzz::XmppEngine::ERROR_UNAUTHORIZED:

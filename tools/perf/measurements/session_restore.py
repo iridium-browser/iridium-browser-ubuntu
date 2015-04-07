@@ -15,12 +15,13 @@ class SessionRestore(startup.Startup):
   """Performs a measurement of Chromium's Session restore performance.
 
   This test is meant to be run against a generated profile.
-  This test inherits support for the --warm or --cold command line options -
+  This test inherits support for the 'cold' option -
   see startup.py for details.
   """
 
-  def __init__(self, action_name_to_run = ''):
-    super(SessionRestore, self).__init__(action_name_to_run=action_name_to_run)
+  def __init__(self, cold=False, action_name_to_run = ''):
+    super(SessionRestore, self).__init__(cold=cold,
+                                         action_name_to_run=action_name_to_run)
     self.close_tabs_before_run = False
     self._cpu_metric = None
 
@@ -55,7 +56,7 @@ class SessionRestore(startup.Startup):
     for page in page_set:
       if page.is_local:
         continue
-      wpr_archive_name = page_set.WprFilePathForPage(page)
+      wpr_archive_name = page_set.WprFilePathForUserStory(page)
       wpr_archive_names_to_page_urls[wpr_archive_name].append(page.url)
 
     # Reject any pageset that contains more than one WPR archive.

@@ -119,7 +119,7 @@
         ['target_arch=="ia32" or target_arch=="x64"', {
           'dependencies': ['common_audio_sse2',],
         }],
-        ['target_arch=="arm" or target_arch=="armv7"', {
+        ['target_arch=="arm"', {
           'sources': [
             'signal_processing/complex_bit_reverse_arm.S',
             'signal_processing/spl_sqrt_floor_arm.S',
@@ -129,7 +129,7 @@
             'signal_processing/spl_sqrt_floor.c',
           ],
           'conditions': [
-            ['arm_version==7', {
+            ['arm_version>=7', {
               'dependencies': ['common_audio_neon',],
               'sources': [
                 'signal_processing/filter_ar_fast_q12_armv7.S',
@@ -188,7 +188,7 @@
         },
       ],  # targets
     }],
-    ['(target_arch=="arm" and arm_version==7) or target_arch=="armv7"', {
+    ['target_arch=="arm" and arm_version>=7', {
       'targets': [
         {
           'target_name': 'common_audio_neon',
@@ -200,7 +200,6 @@
             'signal_processing/cross_correlation_neon.S',
             'signal_processing/downsample_fast_neon.S',
             'signal_processing/min_max_operations_neon.S',
-            'signal_processing/vector_scaling_operations_neon.S',
           ],
           'conditions': [
             # Disable LTO in common_audio_neon target due to compiler bug

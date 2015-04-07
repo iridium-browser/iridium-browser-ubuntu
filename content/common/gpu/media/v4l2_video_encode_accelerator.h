@@ -5,8 +5,8 @@
 #ifndef CONTENT_COMMON_GPU_MEDIA_V4L2_VIDEO_ENCODE_ACCELERATOR_H_
 #define CONTENT_COMMON_GPU_MEDIA_V4L2_VIDEO_ENCODE_ACCELERATOR_H_
 
-#include <list>
 #include <linux/videodev2.h>
+#include <list>
 #include <vector>
 
 #include "base/memory/linked_ptr.h"
@@ -16,7 +16,7 @@
 #include "content/common/gpu/media/v4l2_image_processor.h"
 #include "content/common/gpu/media/v4l2_video_device.h"
 #include "media/video/video_encode_accelerator.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace base {
 
@@ -42,7 +42,7 @@ namespace content {
 class CONTENT_EXPORT V4L2VideoEncodeAccelerator
     : public media::VideoEncodeAccelerator {
  public:
-  explicit V4L2VideoEncodeAccelerator(scoped_ptr<V4L2Device> device);
+  explicit V4L2VideoEncodeAccelerator(const scoped_refptr<V4L2Device>& device);
   virtual ~V4L2VideoEncodeAccelerator();
 
   // media::VideoEncodeAccelerator implementation.
@@ -69,6 +69,7 @@ class CONTENT_EXPORT V4L2VideoEncodeAccelerator
   // Record for codec input buffers.
   struct InputRecord {
     InputRecord();
+    ~InputRecord();
     bool at_device;
     scoped_refptr<media::VideoFrame> frame;
   };
@@ -76,6 +77,7 @@ class CONTENT_EXPORT V4L2VideoEncodeAccelerator
   // Record for output buffers.
   struct OutputRecord {
     OutputRecord();
+    ~OutputRecord();
     bool at_device;
     linked_ptr<BitstreamBufferRef> buffer_ref;
     void* address;
@@ -152,9 +154,8 @@ class CONTENT_EXPORT V4L2VideoEncodeAccelerator
   // Error notification (using PostTask() to child thread, if necessary).
   void NotifyError(Error error);
 
-  // Set the encoder_thread_ state (using PostTask to encoder thread, if
-  // necessary).
-  void SetEncoderState(State state);
+  // Set the encoder_state_ to kError and notify the client (if necessary).
+  void SetErrorState(Error error);
 
   //
   // Other utility functions.  Called on encoder_thread_, unless
@@ -188,6 +189,9 @@ class CONTENT_EXPORT V4L2VideoEncodeAccelerator
   void DestroyInputBuffers();
   void DestroyOutputBuffers();
 
+  // Set controls in |ctrls| and return true if successful.
+  bool SetExtCtrls(std::vector<struct v4l2_ext_control> ctrls);
+
   // Our original calling message loop for the child thread.
   const scoped_refptr<base::MessageLoopProxy> child_message_loop_proxy_;
 
@@ -220,7 +224,7 @@ class CONTENT_EXPORT V4L2VideoEncodeAccelerator
   std::list<scoped_refptr<media::VideoFrame> > encoder_input_queue_;
 
   // Encoder device.
-  scoped_ptr<V4L2Device> device_;
+  scoped_refptr<V4L2Device> device_;
 
   // Input queue state.
   bool input_streamon_;

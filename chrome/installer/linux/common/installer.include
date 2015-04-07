@@ -136,6 +136,13 @@ stage_install_common() {
   # in build/common.gypi.
   install -m 644 "${BUILDDIR}/icudtl.dat" "${STAGEDIR}/${INSTALLDIR}/"
 
+  # V8 snapshot files; only necessary when v8_use_external_startup_data is
+  # set to 1 in build/common.gypi.
+  if [ -f "${BUILDDIR}/natives_blob.bin" ]; then
+    install -m 644 "${BUILDDIR}/natives_blob.bin" "${STAGEDIR}/${INSTALLDIR}/"
+    install -m 644 "${BUILDDIR}/snapshot_blob.bin" "${STAGEDIR}/${INSTALLDIR}/"
+  fi
+
   # sandbox
   # Rename sandbox binary with hyphen instead of underscore because that's what
   # the code looks for, but the build targets can't use hyphens (scons bug?)
@@ -176,6 +183,14 @@ stage_install_common() {
 
     install -m 644 -s "${BUILDDIR}/lib/libpeerconnection.so" "${STAGEDIR}/${INSTALLDIR}/lib/"
   fi
+
+  # libc++
+  if [ -f "${BUILDDIR}/lib/libc++.so" ]; then
+    install -m 755 -d "${STAGEDIR}/${INSTALLDIR}/lib/"
+
+    install -m 644 -s "${BUILDDIR}/lib/libc++.so" "${STAGEDIR}/${INSTALLDIR}/lib/"
+  fi
+
 
   # nacl_helper and nacl_helper_bootstrap
   # Don't use "-s" (strip) because this runs binutils "strip", which

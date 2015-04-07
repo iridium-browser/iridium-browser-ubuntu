@@ -24,10 +24,10 @@
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.h"
 #include "chrome/browser/ui/views/toolbar/extension_toolbar_menu_view.h"
 #include "chrome/browser/ui/views/toolbar/wrench_menu_observer.h"
-#include "chrome/browser/ui/zoom/zoom_controller.h"
-#include "chrome/browser/ui/zoom/zoom_event_manager.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/ui/zoom/zoom_controller.h"
+#include "components/ui/zoom/zoom_event_manager.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -62,7 +62,6 @@
 #include "ui/views/widget/widget.h"
 
 using base::UserMetricsAction;
-using content::HostZoomMap;
 using content::WebContents;
 using ui::MenuModel;
 using views::CustomButton;
@@ -495,15 +494,12 @@ class WrenchMenu::ZoomView : public WrenchMenuView {
         decrement_button_(NULL),
         fullscreen_button_(NULL),
         zoom_label_width_(0) {
-    content_zoom_subscription_ = HostZoomMap::GetDefaultForBrowserContext(
-        menu->browser_->profile())->AddZoomLevelChangedCallback(
-            base::Bind(&WrenchMenu::ZoomView::OnZoomLevelChanged,
-                       base::Unretained(this)));
-
-    browser_zoom_subscription_ = ZoomEventManager::GetForBrowserContext(
-        menu->browser_->profile())->AddZoomLevelChangedCallback(
-            base::Bind(&WrenchMenu::ZoomView::OnZoomLevelChanged,
-                       base::Unretained(this)));
+    browser_zoom_subscription_ =
+        ui_zoom::ZoomEventManager::GetForBrowserContext(
+            menu->browser_->profile())
+            ->AddZoomLevelChangedCallback(
+                base::Bind(&WrenchMenu::ZoomView::OnZoomLevelChanged,
+                           base::Unretained(this)));
 
     decrement_button_ = CreateButtonWithAccName(
         IDS_ZOOM_MINUS2, InMenuButtonBackground::LEFT_BUTTON,
@@ -635,7 +631,7 @@ class WrenchMenu::ZoomView : public WrenchMenuView {
   void WrenchMenuDestroyed() override { WrenchMenuView::WrenchMenuDestroyed(); }
 
  private:
-  void OnZoomLevelChanged(const HostZoomMap::ZoomLevelChange& change) {
+  void OnZoomLevelChanged(const content::HostZoomMap::ZoomLevelChange& change) {
     UpdateZoomControls();
   }
 
@@ -644,7 +640,8 @@ class WrenchMenu::ZoomView : public WrenchMenuView {
         menu()->browser_->tab_strip_model()->GetActiveWebContents();
     int zoom = 100;
     if (selected_tab)
-      zoom = ZoomController::FromWebContents(selected_tab)->GetZoomPercent();
+      zoom = ui_zoom::ZoomController::FromWebContents(selected_tab)
+                 ->GetZoomPercent();
     increment_button_->SetEnabled(zoom < selected_tab->GetMaximumZoomPercent());
     decrement_button_->SetEnabled(zoom > selected_tab->GetMinimumZoomPercent());
     zoom_label_->SetText(
@@ -684,7 +681,6 @@ class WrenchMenu::ZoomView : public WrenchMenuView {
   // Index of the fullscreen menu item in the model.
   const int fullscreen_index_;
 
-  scoped_ptr<content::HostZoomMap::Subscription> content_zoom_subscription_;
   scoped_ptr<content::HostZoomMap::Subscription> browser_zoom_subscription_;
   content::NotificationRegistrar registrar_;
 

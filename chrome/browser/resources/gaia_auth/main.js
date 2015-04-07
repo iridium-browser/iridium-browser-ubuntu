@@ -82,6 +82,14 @@ Authenticator.prototype = {
     var params = getUrlSearchParams(location.search);
     this.parentPage_ = params.parentPage || this.PARENT_PAGE;
     this.gaiaUrl_ = params.gaiaUrl || this.GAIA_URL;
+
+    // Sanitize Gaia url before continuing.
+    var scheme = extractProtocol(this.gaiaUrl_);
+    if (scheme != 'https:' && scheme != 'http:') {
+      console.error('Bad Gaia URL, url=' + this.gaiaURL_);
+      return;
+    }
+
     this.gaiaPath_ = params.gaiaPath || this.GAIA_PAGE_PATH;
     this.inputLang_ = params.hl;
     this.inputEmail_ = params.email;
@@ -132,10 +140,8 @@ Authenticator.prototype = {
     window.addEventListener('message', this.onMessage.bind(this), false);
     this.initSupportChannel_();
 
-    var gaiaFrame = $('gaia-frame');
-    gaiaFrame.src = this.initialFrameUrl_;
-
     if (this.assumeLoadedOnLoadEvent_) {
+      var gaiaFrame = $('gaia-frame');
       var handler = function() {
         gaiaFrame.removeEventListener('load', handler);
         if (!this.gaiaLoaded_) {
@@ -152,6 +158,11 @@ Authenticator.prototype = {
     supportChannel.connect('authMain');
 
     supportChannel.registerMessage('channelConnected', function() {
+      // Load the gaia frame after the background page indicates that it is
+      // ready, so that the webRequest handlers are all setup first.
+      var gaiaFrame = $('gaia-frame');
+      gaiaFrame.src = this.initialFrameUrl_;
+
       if (this.supportChannel_) {
         console.error('Support channel is already initialized.');
         return;
@@ -163,14 +174,17 @@ Authenticator.prototype = {
           name: 'initDesktopFlow',
           gaiaUrl: this.gaiaUrl_,
           continueUrl: stripParams(this.continueUrl_),
-          isConstrainedWindow: this.isConstrainedWindow_
+          isConstrainedWindow: this.isConstrainedWindow_,
+          initialFrameUrlWithoutParams: this.initialFrameUrlWithoutParams_
         });
+
         this.supportChannel_.registerMessage(
             'switchToFullTab', this.switchToFullTab_.bind(this));
       }
       this.supportChannel_.registerMessage(
           'completeLogin', this.onCompleteLogin_.bind(this));
       this.initSAML_();
+      this.supportChannel_.send({name: 'resetAuth'});
       this.maybeInitialized_();
     }.bind(this));
 
@@ -452,8 +466,14 @@ Authenticator.prototype = {
       this.isSAMLFlow_ = false;
       this.skipForNow_ = false;
       this.chooseWhatToSync_ = false;
-      if (this.supportChannel_)
+      if (this.supportChannel_) {
         this.supportChannel_.send({name: 'resetAuth'});
+        // This message is for clearing saml properties in gaia_auth_host and
+        // oobe_screen_oauth_enrollment.
+        window.parent.postMessage({
+          'method': 'resetAuthFlow',
+        }, this.parentPage_);
+      }
     } else if (msg.method == 'verifyConfirmedPassword' &&
                this.isParentMessage_(e)) {
       this.onVerifyConfirmedPassword_(msg.password);

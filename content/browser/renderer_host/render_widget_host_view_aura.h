@@ -29,9 +29,12 @@
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_tree_host_observer.h"
 #include "ui/base/ime/text_input_client.h"
+#include "ui/base/touch/selection_bound.h"
+#include "ui/base/touch/touch_editing_controller.h"
+#include "ui/events/gestures/motion_event_aura.h"
 #include "ui/gfx/display_observer.h"
-#include "ui/gfx/insets.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/wm/public/activation_change_observer.h"
 #include "ui/wm/public/activation_delegate.h"
 
@@ -85,8 +88,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
       public aura::client::ActivationDelegate,
       public aura::client::ActivationChangeObserver,
       public aura::client::FocusChangeObserver,
-      public aura::client::CursorClientObserver,
-      public base::SupportsWeakPtr<RenderWidgetHostViewAura> {
+      public aura::client::CursorClientObserver {
  public:
   // Displays and controls touch editing elements such as selection handles.
   class TouchEditingClient {
@@ -101,8 +103,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
     virtual void EndTouchEditing(bool quick) = 0;
 
     // Notifies the client that the selection bounds need to be updated.
-    virtual void OnSelectionOrCursorChanged(const gfx::Rect& anchor,
-                                            const gfx::Rect& focus) = 0;
+    virtual void OnSelectionOrCursorChanged(
+        const ui::SelectionBound& anchor,
+        const ui::SelectionBound& focus) = 0;
 
     // Notifies the client that the current text input type as changed.
     virtual void OnTextInputTypeChanged(ui::TextInputType type) = 0;
@@ -189,7 +192,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
       const ViewHostMsg_SelectionBounds_Params& params) override;
   void CopyFromCompositingSurface(const gfx::Rect& src_subrect,
                                   const gfx::Size& dst_size,
-                                  CopyFromCompositingSurfaceCallback& callback,
+                                  ReadbackRequestCallback& callback,
                                   const SkColorType color_type) override;
   void CopyFromCompositingSurfaceToVideoFrame(
       const gfx::Rect& src_subrect,
@@ -330,7 +333,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   void OnLegacyWindowDestroyed();
 #endif
 
-  void DisambiguationPopupRendered(bool success, const SkBitmap& result);
+  void DisambiguationPopupRendered(const SkBitmap& result,
+                                   ReadbackResponse response);
 
   void HideDisambiguationPopup();
 
@@ -359,6 +363,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   aura::Window* window() { return window_; }
   SkColorType PreferredReadbackFormat() override;
   DelegatedFrameHost* GetDelegatedFrameHost() const override;
+  const ui::MotionEventAura& pointer_state() const { return pointer_state_; }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest,
@@ -515,10 +520,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // The cursor for the page. This is passed up from the renderer.
   WebCursor current_cursor_;
 
-  // The touch-event. Its touch-points are updated as necessary. A new
-  // touch-point is added from an ET_TOUCH_PRESSED event, and a touch-point is
-  // removed from the list on an ET_TOUCH_RELEASED event.
-  blink::WebTouchEvent touch_event_;
+  // Stores the current state of the active pointers targeting this
+  // object.
+  ui::MotionEventAura pointer_state_;
 
   // The current text input type.
   ui::TextInputType text_input_type_;
@@ -528,9 +532,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   int text_input_flags_;
   bool can_compose_inline_;
 
-  // Rectangles for the selection anchor and focus.
-  gfx::Rect selection_anchor_rect_;
-  gfx::Rect selection_focus_rect_;
+  // Bounds for the selection.
+  ui::SelectionBound selection_anchor_;
+  ui::SelectionBound selection_focus_;
 
   // The current composition character bounds.
   std::vector<gfx::Rect> composition_character_bounds_;
@@ -627,8 +631,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // RenderWidgetHostViewGuest.
   bool is_guest_view_hack_;
 
-  base::WeakPtrFactory<RenderWidgetHostViewAura> weak_ptr_factory_;
-
   gfx::Rect disambiguation_target_rect_;
 
   // The last scroll offset when we start to render the link disambiguation
@@ -636,6 +638,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAura
   // compositing surface and showing the disambiguation popup.
   gfx::Vector2dF disambiguation_scroll_offset_;
 
+  base::WeakPtrFactory<RenderWidgetHostViewAura> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewAura);
 };
 

@@ -14,9 +14,11 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "net/base/host_port_pair.h"
 #include "net/http/http_response_headers.h"
+#include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_retry_info.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
+#include "url/url_constants.h"
 
 namespace data_reduction_proxy {
 
@@ -291,25 +293,24 @@ class DailyDataSavingUpdate {
 }  // namespace
 
 DataReductionProxyRequestType GetDataReductionProxyRequestType(
-    const net::URLRequest* request) {
-  if (request->url().SchemeIs("https"))
+    const net::URLRequest& request,
+    const net::ProxyConfig& data_reduction_proxy_config,
+    const DataReductionProxyParams& params) {
+  if (request.url().SchemeIs(url::kHttpsScheme))
     return HTTPS;
-  if (!request->url().SchemeIs("http")) {
+  if (!request.url().SchemeIs(url::kHttpScheme)) {
     NOTREACHED();
     return UNKNOWN_TYPE;
   }
-  DataReductionProxyParams params(
-        DataReductionProxyParams::kAllowed |
-        DataReductionProxyParams::kFallbackAllowed |
-        DataReductionProxyParams::kPromoAllowed);
   base::TimeDelta bypass_delay;
-  if (params.AreDataReductionProxiesBypassed(*request, &bypass_delay)) {
+  if (params.AreDataReductionProxiesBypassed(
+          request, data_reduction_proxy_config, &bypass_delay)) {
     if (bypass_delay > base::TimeDelta::FromSeconds(kLongBypassDelayInSeconds))
       return LONG_BYPASS;
     return SHORT_BYPASS;
   }
-  if (request->response_info().headers.get() &&
-      HasDataReductionProxyViaHeader(request->response_info().headers.get(),
+  if (request.response_info().headers.get() &&
+      HasDataReductionProxyViaHeader(request.response_info().headers.get(),
                                      NULL)) {
     return VIA_DATA_REDUCTION_PROXY;
   }
@@ -463,36 +464,6 @@ void UpdateContentLengthPrefsForDataReductionProxy(
           unknown.GetListPrefValue(kNumDaysInHistory - 2));
     }
   }
-}
-
-void UpdateContentLengthPrefs(int received_content_length,
-                              int original_content_length,
-                              PrefService* profile_prefs,
-                              DataReductionProxyRequestType request_type,
-                              DataReductionProxyStatisticsPrefs* prefs) {
-  int64 total_received = prefs->GetInt64(
-      data_reduction_proxy::prefs::kHttpReceivedContentLength);
-  int64 total_original = prefs->GetInt64(
-      data_reduction_proxy::prefs::kHttpOriginalContentLength);
-  total_received += received_content_length;
-  total_original += original_content_length;
-  prefs->SetInt64(
-      data_reduction_proxy::prefs::kHttpReceivedContentLength,
-      total_received);
-  prefs->SetInt64(
-      data_reduction_proxy::prefs::kHttpOriginalContentLength,
-      total_original);
-
-  bool with_data_reduction_proxy_enabled =
-      profile_prefs->GetBoolean(
-          data_reduction_proxy::prefs::kDataReductionProxyEnabled);
-  UpdateContentLengthPrefsForDataReductionProxy(
-      received_content_length,
-      original_content_length,
-      with_data_reduction_proxy_enabled,
-      request_type,
-      base::Time::Now(),
-      prefs);
 }
 
 }  // namespace data_reduction_proxy

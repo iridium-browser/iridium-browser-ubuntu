@@ -50,6 +50,9 @@ class MockComponentAction : public ToolbarActionViewController {
   bool IsEnabled(content::WebContents* web_contents) const override {
     return true;
   }
+  bool WantsToRun(content::WebContents* web_contents) const override {
+    return false;
+  }
   bool HasPopup(content::WebContents* web_contents) const override {
     return true;
   }
@@ -61,6 +64,7 @@ class MockComponentAction : public ToolbarActionViewController {
     ++click_count_;
     return false;
   }
+  void UpdateState() override {}
 
   size_t click_count() const { return click_count_; }
 

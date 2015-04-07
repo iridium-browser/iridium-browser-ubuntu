@@ -62,8 +62,9 @@ class DelegateExecuteModule
         instance_.ReceiveVoid());
     if (FAILED(hr))
       return hr;
-    hr = ::CoRegisterClassObject(clsid, instance_, CLSCTX_LOCAL_SERVER,
-        REGCLS_MULTIPLEUSE | REGCLS_SUSPENDED, &registration_token_);
+    hr = ::CoRegisterClassObject(clsid, instance_.get(), CLSCTX_LOCAL_SERVER,
+                                 REGCLS_MULTIPLEUSE | REGCLS_SUSPENDED,
+                                 &registration_token_);
     if (FAILED(hr))
       return hr;
 
@@ -145,7 +146,7 @@ int RelaunchChrome(const DelegateExecuteOperation& operation) {
     bool found_exe = CommandExecuteImpl::FindChromeExe(&chrome_exe_path);
     DCHECK(found_exe);
     if (found_exe) {
-      bool launch_ash = CommandLine::ForCurrentProcess()->HasSwitch(
+      bool launch_ash = base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kForceImmersive);
       if (launch_ash) {
         AtlTrace(L"Relaunching Chrome into Windows ASH on Windows 7\n");
@@ -181,10 +182,10 @@ extern "C" int WINAPI _tWinMain(HINSTANCE , HINSTANCE, LPTSTR, int nShowCmd) {
   base::AtExitManager exit_manager;
   AtlTrace("delegate_execute enter\n");
 
-  CommandLine::Init(0, NULL);
+  base::CommandLine::Init(0, NULL);
   HRESULT ret_code = E_UNEXPECTED;
   DelegateExecuteOperation operation;
-  if (operation.Init(CommandLine::ForCurrentProcess())) {
+  if (operation.Init(base::CommandLine::ForCurrentProcess())) {
     switch (operation.operation_type()) {
       case DelegateExecuteOperation::DELEGATE_EXECUTE:
         ret_code = _AtlModule.WinMain(nShowCmd);

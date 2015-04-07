@@ -106,31 +106,31 @@ class MockQuicServerInfo : public QuicServerInfo {
  public:
   MockQuicServerInfo(const QuicServerId& server_id)
       : QuicServerInfo(server_id) {}
-  virtual ~MockQuicServerInfo() {}
+  ~MockQuicServerInfo() override {}
 
-  virtual void Start() override {};
+  void Start() override {}
 
-  virtual int WaitForDataReady(const CompletionCallback& callback) override {
+  int WaitForDataReady(const CompletionCallback& callback) override {
     return ERR_IO_PENDING;
   }
 
-  virtual void CancelWaitForDataReadyCallback() override {}
+  void CancelWaitForDataReadyCallback() override {}
 
-  virtual bool IsDataReady() override { return false; }
+  bool IsDataReady() override { return false; }
 
-  virtual bool IsReadyToPersist() override { return false; }
+  bool IsReadyToPersist() override { return false; }
 
-  virtual void Persist() override {};
+  void Persist() override {}
 
-  virtual void OnExternalCacheHit() override {};
+  void OnExternalCacheHit() override {}
 };
 
 class MockQuicServerInfoFactory : public QuicServerInfoFactory {
  public:
   MockQuicServerInfoFactory() {}
-  virtual ~MockQuicServerInfoFactory() {}
+  ~MockQuicServerInfoFactory() override {}
 
-  virtual QuicServerInfo* GetForServer(const QuicServerId& server_id) override {
+  QuicServerInfo* GetForServer(const QuicServerId& server_id) override {
     return new MockQuicServerInfo(server_id);
   }
 };
@@ -163,6 +163,9 @@ class QuicStreamFactoryTest : public ::testing::TestWithParam<QuicVersion> {
                  /*always_require_handshake_confirmation=*/false,
                  /*disable_connection_pooling=*/false,
                  /*load_server_info_timeout=*/0u,
+                 /*disable_loading_server_info_for_new_servers=*/false,
+                 /*load_server_info_timeout_srtt_multiplier=*/0.0f,
+                 /*enable_truncated_connection_ids=*/true,
                  QuicTagVector()),
         host_port_pair_(kDefaultServerHostName, kDefaultServerPort),
         is_https_(false),
@@ -1091,8 +1094,8 @@ TEST_P(QuicStreamFactoryTest, MaxOpenStream) {
   HttpRequestInfo request_info;
   std::vector<QuicHttpStream*> streams;
   // The MockCryptoClientStream sets max_open_streams to be
-  // 2 * kDefaultMaxStreamsPerConnection.
-  for (size_t i = 0; i < 2 * kDefaultMaxStreamsPerConnection; i++) {
+  // kDefaultMaxStreamsPerConnection / 2.
+  for (size_t i = 0; i < kDefaultMaxStreamsPerConnection / 2; i++) {
     QuicStreamRequest request(&factory_);
     int rv = request.Request(host_port_pair_,
                              is_https_,

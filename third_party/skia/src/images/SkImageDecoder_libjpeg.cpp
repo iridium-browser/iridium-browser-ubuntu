@@ -229,7 +229,7 @@ public:
     }
 #endif
 
-    virtual Format getFormat() const {
+    virtual Format getFormat() const SK_OVERRIDE {
         return kJPEG_Format;
     }
 
@@ -640,13 +640,6 @@ SkImageDecoder::Result SkJPEGImageDecoder::onDecode(SkStream* stream, SkBitmap* 
     }
     sampleSize = recompute_sampleSize(sampleSize, cinfo);
 
-#ifdef SK_SUPPORT_LEGACY_IMAGEDECODER_CHOOSER
-    // should we allow the Chooser (if present) to pick a colortype for us???
-    if (!this->chooseFromOneChoice(colorType, cinfo.output_width, cinfo.output_height)) {
-        return return_failure(cinfo, *bm, "chooseFromOneChoice");
-    }
-#endif
-
     SkScaledBitmapSampler sampler(cinfo.output_width, cinfo.output_height, sampleSize);
     // Assume an A8 bitmap is not opaque to avoid the check of each
     // individual pixel. It is very unlikely to be opaque, since
@@ -724,7 +717,7 @@ SkImageDecoder::Result SkJPEGImageDecoder::onDecode(SkStream* stream, SkBitmap* 
             fill_below_level(y, bm);
             cinfo.output_scanline = cinfo.output_height;
             jpeg_finish_decompress(&cinfo);
-            return kSuccess;
+            return kPartialSuccess;
         }
         if (this->shouldCancelDecode()) {
             return return_failure(cinfo, *bm, "shouldCancelDecode");
@@ -1355,7 +1348,6 @@ protected:
 
         // allocate these before set call setjmp
         SkAutoMalloc    oneRow;
-        SkAutoLockColors ctLocker;
 
         cinfo.err = jpeg_std_error(&sk_err);
         sk_err.error_exit = skjpeg_error_exit;
@@ -1392,7 +1384,7 @@ protected:
         const int       width = bm.width();
         uint8_t*        oneRowP = (uint8_t*)oneRow.reset(width * 3);
 
-        const SkPMColor* colors = ctLocker.lockColors(bm);
+        const SkPMColor* colors = bm.getColorTable() ? bm.getColorTable()->readColors() : NULL;
         const void*      srcRow = bm.getPixels();
 
         while (cinfo.next_scanline < cinfo.image_height) {

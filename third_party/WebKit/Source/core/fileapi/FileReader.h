@@ -44,10 +44,11 @@
 namespace blink {
 
 class Blob;
+class DOMArrayBuffer;
 class ExceptionState;
 class ExecutionContext;
 
-class FileReader final : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<FileReader>, public ActiveDOMObject, public FileReaderLoaderClient, public EventTargetWithInlineData {
+class FileReader final : public RefCountedGarbageCollectedEventTargetWithInlineData<FileReader>, public ActiveDOMObject, public FileReaderLoaderClient {
     DEFINE_WRAPPERTYPEINFO();
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<FileReader>);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(FileReader);
@@ -74,7 +75,7 @@ public:
     ReadyState readyState() const { return m_state; }
     FileError* error() { return m_error; }
     FileReaderLoader::ReadType readType() const { return m_readType; }
-    PassRefPtr<ArrayBuffer> arrayBufferResult() const;
+    PassRefPtr<DOMArrayBuffer> arrayBufferResult() const;
     String stringResult();
 
     // ActiveDOMObject

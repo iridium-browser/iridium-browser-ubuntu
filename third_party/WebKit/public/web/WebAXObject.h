@@ -76,12 +76,8 @@ public:
     // Update layout on the underlying tree, and return true if this object is
     // still valid (not detached). Note that calling this method
     // can cause other WebAXObjects to become invalid, too,
-    // so always call isDetached if updateBackingStoreAndCheckValidity
-    // has been called on any object, or if any other WebCore code has run.
+    // so always call isDetached if any other WebCore code has run.
     BLINK_EXPORT bool updateLayoutAndCheckValidity();
-
-    // FIXME: Deprecated - remove once callers use updateLayoutAndCheckValidity, instead.
-    BLINK_EXPORT bool updateBackingStoreAndCheckValidity();
 
     BLINK_EXPORT WebString accessibilityDescription() const;
     BLINK_EXPORT unsigned childCount() const;
@@ -90,6 +86,7 @@ public:
     BLINK_EXPORT WebAXObject parentObject() const;
 
     BLINK_EXPORT bool isAnchor() const;
+    BLINK_EXPORT WebAXOptionalBool isAriaGrabbed() const;
     BLINK_EXPORT bool isAriaReadOnly() const;
     BLINK_EXPORT bool isButtonStateMixed() const;
     BLINK_EXPORT bool isChecked() const;
@@ -98,6 +95,7 @@ public:
     BLINK_EXPORT bool isControl() const;
     BLINK_EXPORT bool isEnabled() const;
     BLINK_EXPORT WebAXExpanded isExpanded() const;
+    BLINK_EXPORT WebAXOrientation orientation() const;
     BLINK_EXPORT bool isFocused() const;
     BLINK_EXPORT bool isHovered() const;
     BLINK_EXPORT bool isIndeterminate() const;
@@ -111,12 +109,12 @@ public:
     BLINK_EXPORT bool isRequired() const;
     BLINK_EXPORT bool isSelected() const;
     BLINK_EXPORT bool isSelectedOptionActive() const;
-    BLINK_EXPORT bool isVertical() const;
     BLINK_EXPORT bool isVisible() const;
     BLINK_EXPORT bool isVisited() const;
 
     BLINK_EXPORT WebString accessKey() const;
     BLINK_EXPORT WebAXObject ariaActiveDescendant() const;
+    BLINK_EXPORT WebString ariaAutoComplete() const;
     BLINK_EXPORT bool ariaControls(WebVector<WebAXObject>& controlsElements) const;
     BLINK_EXPORT bool ariaDescribedby(WebVector<WebAXObject>& describedbyElements) const;
     BLINK_EXPORT bool ariaFlowTo(WebVector<WebAXObject>& flowToElements) const;
@@ -127,12 +125,16 @@ public:
     BLINK_EXPORT bool canvasHasFallbackContent() const;
     BLINK_EXPORT WebPoint clickPoint() const;
     BLINK_EXPORT void colorValue(int& r, int& g, int& b) const;
+    BLINK_EXPORT WebAXInvalidState invalidState() const;
+    // Only used when invalidState() returns WebAXInvalidStateOther.
+    BLINK_EXPORT WebString ariaInvalidValue() const;
     BLINK_EXPORT double estimatedLoadingProgress() const;
     BLINK_EXPORT WebString helpText() const;
     BLINK_EXPORT int headingLevel() const;
     BLINK_EXPORT int hierarchicalLevel() const;
     BLINK_EXPORT WebAXObject hitTest(const WebPoint&) const;
     BLINK_EXPORT WebString keyboardShortcut() const;
+    BLINK_EXPORT WebString placeholder() const;
     BLINK_EXPORT WebAXRole role() const;
     BLINK_EXPORT unsigned selectionEnd() const;
     BLINK_EXPORT unsigned selectionEndLineNumber() const;
@@ -140,6 +142,7 @@ public:
     BLINK_EXPORT unsigned selectionStartLineNumber() const;
     BLINK_EXPORT WebString stringValue() const;
     BLINK_EXPORT WebString title() const;
+    BLINK_EXPORT WebString language() const;
     BLINK_EXPORT WebAXObject titleUIElement() const;
     BLINK_EXPORT WebURL url() const;
 
@@ -191,6 +194,8 @@ public:
     BLINK_EXPORT WebAXObject headerContainerObject() const;
     BLINK_EXPORT WebAXObject rowAtIndex(unsigned rowIndex) const;
     BLINK_EXPORT WebAXObject columnAtIndex(unsigned columnIndex) const;
+    BLINK_EXPORT void rowHeaders(WebVector<WebAXObject>&) const;
+    BLINK_EXPORT void columnHeaders(WebVector<WebAXObject>&) const;
 
     // For a table row
     BLINK_EXPORT unsigned rowIndex() const;

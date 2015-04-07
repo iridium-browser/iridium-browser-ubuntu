@@ -245,6 +245,19 @@ scoped_ptr<WDTypedResult> AutofillWebDataBackendImpl::GetAutofillProfiles(
               base::Unretained(this))));
 }
 
+scoped_ptr<WDTypedResult> AutofillWebDataBackendImpl::GetAutofillServerProfiles(
+    WebDatabase* db) {
+  DCHECK(db_thread_->BelongsToCurrentThread());
+  std::vector<AutofillProfile*> profiles;
+  AutofillTable::FromWebDatabase(db)->GetAutofillServerProfiles(&profiles);
+  return scoped_ptr<WDTypedResult>(
+      new WDDestroyableResult<std::vector<AutofillProfile*> >(
+          AUTOFILL_PROFILES_RESULT,
+          profiles,
+          base::Bind(&AutofillWebDataBackendImpl::DestroyAutofillProfileResult,
+              base::Unretained(this))));
+}
+
 WebDatabase::State AutofillWebDataBackendImpl::UpdateAutofillEntries(
     const std::vector<autofill::AutofillEntry>& autofill_entries,
     WebDatabase* db) {
@@ -307,6 +320,40 @@ scoped_ptr<WDTypedResult> AutofillWebDataBackendImpl::GetCreditCards(
           credit_cards,
         base::Bind(&AutofillWebDataBackendImpl::DestroyAutofillCreditCardResult,
               base::Unretained(this))));
+}
+
+scoped_ptr<WDTypedResult> AutofillWebDataBackendImpl::GetServerCreditCards(
+    WebDatabase* db) {
+  DCHECK(db_thread_->BelongsToCurrentThread());
+  std::vector<CreditCard*> credit_cards;
+  AutofillTable::FromWebDatabase(db)->GetServerCreditCards(&credit_cards);
+  return scoped_ptr<WDTypedResult>(
+      new WDDestroyableResult<std::vector<CreditCard*> >(
+          AUTOFILL_CREDITCARDS_RESULT,
+          credit_cards,
+        base::Bind(&AutofillWebDataBackendImpl::DestroyAutofillCreditCardResult,
+              base::Unretained(this))));
+}
+
+WebDatabase::State AutofillWebDataBackendImpl::UnmaskServerCreditCard(
+    const std::string& id,
+    const base::string16& full_number,
+    WebDatabase* db) {
+  DCHECK(db_thread_->BelongsToCurrentThread());
+  if (AutofillTable::FromWebDatabase(db)->UnmaskServerCreditCard(
+          id, full_number))
+    return WebDatabase::COMMIT_NEEDED;
+  return WebDatabase::COMMIT_NOT_NEEDED;
+}
+
+WebDatabase::State
+    AutofillWebDataBackendImpl::MaskServerCreditCard(
+        const std::string& id,
+        WebDatabase* db) {
+  DCHECK(db_thread_->BelongsToCurrentThread());
+  if (AutofillTable::FromWebDatabase(db)->MaskServerCreditCard(id))
+    return WebDatabase::COMMIT_NEEDED;
+  return WebDatabase::COMMIT_NOT_NEEDED;
 }
 
 WebDatabase::State

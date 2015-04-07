@@ -7,7 +7,9 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/bind.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "jni/UploadTestServer_jni.h"
 #include "net/http/http_status_code.h"
@@ -22,6 +24,7 @@ namespace {
 
 const char echo_body_path[] = "/echo_body";
 const char echo_header_path[] = "/echo_header";
+const char echo_all_headers_path[] = "/echo_all_headers";
 const char echo_method_path[] = "/echo_method";
 const char redirect_to_echo_body_path[] = "/redirect_to_echo_body";
 
@@ -54,6 +57,11 @@ scoped_ptr<net::test_server::HttpResponse> UploadServerRequestHandler(
     return response.Pass();
   }
 
+  if (request.relative_url == echo_all_headers_path) {
+    response->set_content(request.all_headers);
+    return response.Pass();
+  }
+
   if (request.relative_url == echo_method_path) {
     response->set_content(request.method_string);
     return response.Pass();
@@ -71,13 +79,20 @@ scoped_ptr<net::test_server::HttpResponse> UploadServerRequestHandler(
 
 }  // namespace
 
-jboolean StartUploadTestServer(JNIEnv* env, jclass jcaller) {
+jboolean StartUploadTestServer(JNIEnv* env,
+                               jclass jcaller,
+                               jstring jtest_files_root) {
   // Shouldn't happen.
   if (g_test_server)
     return false;
   g_test_server = new net::test_server::EmbeddedTestServer();
   g_test_server->RegisterRequestHandler(
       base::Bind(&UploadServerRequestHandler));
+  // Add a second handler for paths that UploadServerRequestHandler does not
+  // handle.
+  base::FilePath test_files_root(
+      base::android::ConvertJavaStringToUTF8(env, jtest_files_root));
+  g_test_server->ServeFilesFromDirectory(test_files_root);
   return g_test_server->InitializeAndWaitUntilReady();
 }
 
@@ -104,6 +119,12 @@ jstring GetEchoHeaderURL(JNIEnv* env, jclass jcaller, jstring jheader) {
   return base::android::ConvertUTF8ToJavaString(env, url.spec()).Release();
 }
 
+jstring GetEchoAllHeadersURL(JNIEnv* env, jclass jcaller) {
+  DCHECK(g_test_server);
+  GURL url = g_test_server->GetURL(echo_all_headers_path);
+  return base::android::ConvertUTF8ToJavaString(env, url.spec()).Release();
+}
+
 jstring GetEchoMethodURL(JNIEnv* env, jclass jcaller) {
   DCHECK(g_test_server);
   GURL url = g_test_server->GetURL(echo_method_path);
@@ -113,6 +134,13 @@ jstring GetEchoMethodURL(JNIEnv* env, jclass jcaller) {
 jstring GetRedirectToEchoBody(JNIEnv* env, jclass jcaller) {
   DCHECK(g_test_server);
   GURL url = g_test_server->GetURL(redirect_to_echo_body_path);
+  return base::android::ConvertUTF8ToJavaString(env, url.spec()).Release();
+}
+
+jstring GetFileURL(JNIEnv* env, jclass jcaller, jstring jfile_path) {
+  DCHECK(g_test_server);
+  std::string file = base::android::ConvertJavaStringToUTF8(env, jfile_path);
+  GURL url = g_test_server->GetURL(file);
   return base::android::ConvertUTF8ToJavaString(env, url.spec()).Release();
 }
 

@@ -608,6 +608,29 @@ TEST_F(SocketTestUDP, Sockopt_BUFSIZE) {
     << "failed with: " << strerror(errno);
 }
 
+TEST_F(SocketTestTCP, AcceptNoParams) {
+  sockaddr_in addr;
+  socklen_t addrlen = sizeof(addr);
+  int server_sock = sock1_;
+
+  // Bind and Listen
+  ASSERT_EQ(0, Bind(server_sock, LOCAL_HOST, PORT1));
+  ASSERT_EQ(0, ki_listen(server_sock, 10));
+
+  // Connect to listening socket
+  int client_sock = sock2_;
+  IP4ToSockAddr(LOCAL_HOST, PORT1, &addr);
+  addrlen = sizeof(addr);
+  ASSERT_EQ(0, ki_connect(client_sock, (sockaddr*)&addr, addrlen))
+    << "Failed with " << errno << ": " << strerror(errno);
+
+  // Accept without addr and len should succeed
+  int new_socket = ki_accept(server_sock, NULL, NULL);
+  ASSERT_GT(new_socket, -1);
+
+  ASSERT_EQ(0, ki_close(new_socket));
+}
+
 TEST_F(SocketTestTCP, Listen) {
   sockaddr_in addr;
   socklen_t addrlen = sizeof(addr);
@@ -790,11 +813,12 @@ TEST_F(SocketTestTCP, SendRecvAfterRemoteShutdown) {
   int bytes_remaining = strlen(send_buf) - 10;
   ASSERT_EQ(bytes_remaining, ki_recv(client_sock, buf, 256, 0));
 
-  // Attempt to read/write after remote shutdown, with no bytes remainging
+  // Attempt to read/write after remote shutdown, with no bytes remaining
   ASSERT_EQ(0, ki_recv(client_sock, buf, 10, 0));
   ASSERT_EQ(0, ki_recv(client_sock, buf, 10, 0));
-  ASSERT_EQ(-1, ki_send(client_sock, buf, 10, 0));
-  ASSERT_EQ(errno, EPIPE);
+
+  // It is still legal to send to the remote socket, even after it is closed.
+  ASSERT_EQ(10, ki_send(client_sock, buf, 10, 0));
 }
 
 TEST_F(SocketTestTCP, SendRecvAfterLocalShutdown) {

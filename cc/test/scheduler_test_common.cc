@@ -74,17 +74,7 @@ TestSchedulerFrameSourcesConstructor::~TestSchedulerFrameSourcesConstructor() {
 BeginFrameSource*
 TestSchedulerFrameSourcesConstructor::ConstructPrimaryFrameSource(
     Scheduler* scheduler) {
-  if (!scheduler->settings_.throttle_frame_production) {
-    TRACE_EVENT1(
-        "cc",
-        "TestSchedulerFrameSourcesConstructor::ConstructPrimaryFrameSource",
-        "source",
-        "TestBackToBackBeginFrameSource");
-    DCHECK(!scheduler->primary_frame_source_internal_);
-    scheduler->primary_frame_source_internal_ =
-        TestBackToBackBeginFrameSource::Create(now_src_, test_task_runner_);
-    return scheduler->primary_frame_source_internal_.get();
-  } else if (scheduler->settings_.begin_frame_scheduling_enabled) {
+  if (scheduler->settings_.use_external_begin_frame_source) {
     return SchedulerFrameSourcesConstructor::ConstructPrimaryFrameSource(
         scheduler);
   } else {
@@ -121,6 +111,19 @@ TestSchedulerFrameSourcesConstructor::ConstructBackgroundFrameSource(
   return scheduler->background_frame_source_internal_.get();
 }
 
+BeginFrameSource*
+TestSchedulerFrameSourcesConstructor::ConstructUnthrottledFrameSource(
+    Scheduler* scheduler) {
+  TRACE_EVENT1(
+      "cc",
+      "TestSchedulerFrameSourcesConstructor::ConstructUnthrottledFrameSource",
+      "source", "TestBackToBackBeginFrameSource");
+  DCHECK(!scheduler->unthrottled_frame_source_internal_);
+  scheduler->unthrottled_frame_source_internal_ =
+      TestBackToBackBeginFrameSource::Create(now_src_, test_task_runner_);
+  return scheduler->unthrottled_frame_source_internal_.get();
+}
+
 TestScheduler::TestScheduler(
     scoped_refptr<TestNowSource> now_src,
     SchedulerClient* client,
@@ -128,12 +131,14 @@ TestScheduler::TestScheduler(
     int layer_tree_host_id,
     const scoped_refptr<OrderedSimpleTaskRunner>& test_task_runner,
     base::PowerMonitor* power_monitor,
-    TestSchedulerFrameSourcesConstructor* frame_sources_constructor)
+    TestSchedulerFrameSourcesConstructor* frame_sources_constructor,
+    scoped_ptr<BeginFrameSource> external_begin_frame_source)
     : Scheduler(client,
                 scheduler_settings,
                 layer_tree_host_id,
                 test_task_runner,
                 power_monitor,
+                external_begin_frame_source.Pass(),
                 frame_sources_constructor),
       now_src_(now_src) {
 }

@@ -20,7 +20,7 @@
 #include "ui/compositor/test/in_process_context_factory.h"
 #include "ui/events/event.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gl/gl_surface.h"
 
 #if defined(USE_X11)
@@ -119,6 +119,7 @@ int DemoMain() {
   // The ContextFactory must exist before any Compositors are created.
   scoped_ptr<ui::InProcessContextFactory> context_factory(
       new ui::InProcessContextFactory());
+  context_factory->set_use_test_surface(false);
 
   // Create the message-loop here before creating the root window.
   base::MessageLoopForUI message_loop;
@@ -169,7 +170,7 @@ int DemoMain() {
 }  // namespace
 
 int main(int argc, char** argv) {
-  CommandLine::Init(argc, argv);
+  base::CommandLine::Init(argc, argv);
 
   // The exit manager is in charge of calling the dtors of singleton objects.
   base::AtExitManager exit_manager;

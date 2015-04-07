@@ -53,6 +53,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/focused_node_details.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -87,10 +88,6 @@
 
 #if defined(OS_WIN)
 #include "base/win/win_util.h"
-#endif
-
-#if defined(ENABLE_BROWSER_CDMS)
-#include "content/browser/media/media_web_contents_observer.h"
 #endif
 
 using base::TimeDelta;
@@ -216,9 +213,6 @@ RenderViewHostImpl::RenderViewHostImpl(
                    !is_hidden(),
                    has_active_audio));
   }
-#if defined(ENABLE_BROWSER_CDMS)
-  media_web_contents_observer_.reset(new MediaWebContentsObserver(this));
-#endif
 }
 
 RenderViewHostImpl::~RenderViewHostImpl() {
@@ -293,6 +287,11 @@ bool RenderViewHostImpl::CreateRenderView(
   params.min_size = min_size_for_auto_resize();
   params.max_size = max_size_for_auto_resize();
   GetResizeParams(&params.initial_size);
+  if (!is_active_) {
+    params.replicated_frame_state =
+        static_cast<RenderFrameHostImpl*>(GetMainFrame())->frame_tree_node()
+            ->current_replication_state();
+  }
 
   if (!Send(new ViewMsg_New(params)))
     return false;
@@ -339,8 +338,6 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs(const GURL& url) {
       !command_line.HasSwitch(switches::kDisableRemoteFonts);
   prefs.xslt_enabled =
       !command_line.HasSwitch(switches::kDisableXSLT);
-  prefs.xss_auditor_enabled =
-      !command_line.HasSwitch(switches::kDisableXSSAuditor);
   prefs.application_cache_enabled =
       !command_line.HasSwitch(switches::kDisableApplicationCache);
 
@@ -375,12 +372,6 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs(const GURL& url) {
   prefs.allow_file_access_from_file_urls =
       command_line.HasSwitch(switches::kAllowFileAccessFromFiles);
 
-  prefs.layer_squashing_enabled = true;
-  if (command_line.HasSwitch(switches::kEnableLayerSquashing))
-      prefs.layer_squashing_enabled = true;
-  if (command_line.HasSwitch(switches::kDisableLayerSquashing))
-      prefs.layer_squashing_enabled = false;
-
   prefs.accelerated_2d_canvas_enabled =
       GpuProcessHost::gpu_enabled() &&
       !command_line.HasSwitch(switches::kDisableAccelerated2dCanvas);
@@ -391,10 +382,10 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs(const GURL& url) {
   prefs.accelerated_2d_canvas_msaa_sample_count =
       atoi(command_line.GetSwitchValueASCII(
       switches::kAcceleratedCanvas2dMSAASampleCount).c_str());
-  prefs.container_culling_enabled =
-      command_line.HasSwitch(switches::kEnableContainerCulling);
-  prefs.text_blobs_enabled =
-      command_line.HasSwitch(switches::kEnableTextBlobs);
+  // Text blobs rely on impl-side painting for proper LCD handling.
+  prefs.text_blobs_enabled = command_line.HasSwitch(switches::kForceTextBlobs)
+      || (content::IsImplSidePaintingEnabled() &&
+          !command_line.HasSwitch(switches::kDisableTextBlobs));
   prefs.region_based_columns_enabled =
       command_line.HasSwitch(switches::kEnableRegionBasedColumns);
 
@@ -402,6 +393,14 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs(const GURL& url) {
     prefs.pinch_virtual_viewport_enabled = true;
     prefs.pinch_overlay_scrollbar_thickness = 10;
   }
+#if defined(OS_MACOSX)
+  // This preference has the effect of disabling Blink's elastic overscroll,
+  // and may be removed when Blink's elastic overscroll implementation is
+  // removed.
+  // http://crbug.com/138003
+  prefs.rubber_banding_on_compositor_thread =
+      !command_line.HasSwitch(switches::kDisableThreadedEventHandlingMac);
+#endif
   prefs.use_solid_color_scrollbars = ui::IsOverlayScrollbarEnabled();
 
 #if defined(OS_ANDROID)
@@ -418,6 +417,11 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs(const GURL& url) {
   prefs.touch_enabled = ui::AreTouchEventsEnabled();
   prefs.device_supports_touch = prefs.touch_enabled &&
       ui::IsTouchDevicePresent();
+  prefs.available_pointer_types = ui::GetAvailablePointerTypes();
+  prefs.primary_pointer_type = ui::GetPrimaryPointerType();
+  prefs.available_hover_types = ui::GetAvailableHoverTypes();
+  prefs.primary_hover_type = ui::GetPrimaryHoverType();
+
 #if defined(OS_ANDROID)
   prefs.device_supports_mouse = false;
 #endif
@@ -476,34 +480,36 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs(const GURL& url) {
   prefs.spatial_navigation_enabled = command_line.HasSwitch(
       switches::kEnableSpatialNavigation);
 
-  if (command_line.HasSwitch(switches::kV8CacheOptions)) {
-    const std::string v8_cache_options =
-        command_line.GetSwitchValueASCII(switches::kV8CacheOptions);
-    if (v8_cache_options == "parse") {
-      prefs.v8_cache_options = V8_CACHE_OPTIONS_PARSE;
-    } else if (v8_cache_options == "code") {
-      prefs.v8_cache_options = V8_CACHE_OPTIONS_CODE;
-    } else {
-      prefs.v8_cache_options = V8_CACHE_OPTIONS_OFF;
-    }
+  prefs.strict_mixed_content_checking =
+      command_line.HasSwitch(switches::kEnableStrictMixedContentChecking);
+
+  std::string v8_cache_options =
+      command_line.GetSwitchValueASCII(switches::kV8CacheOptions);
+  if (v8_cache_options.empty())
+    v8_cache_options = base::FieldTrialList::FindFullName("V8CacheOptions");
+  if (v8_cache_options == "parse") {
+    prefs.v8_cache_options = V8_CACHE_OPTIONS_PARSE;
+  } else if (v8_cache_options == "code") {
+    prefs.v8_cache_options = V8_CACHE_OPTIONS_CODE;
+  } else if (v8_cache_options == "code-compressed") {
+    prefs.v8_cache_options = V8_CACHE_OPTIONS_CODE_COMPRESSED;
+  } else if (v8_cache_options == "none") {
+    prefs.v8_cache_options = V8_CACHE_OPTIONS_NONE;
+  } else if (v8_cache_options == "parse-memory") {
+    prefs.v8_cache_options = V8_CACHE_OPTIONS_PARSE_MEMORY;
+  } else if (v8_cache_options == "heuristics") {
+    prefs.v8_cache_options = V8_CACHE_OPTIONS_HEURISTICS;
+  } else if (v8_cache_options == "heuristics-mobile") {
+    prefs.v8_cache_options = V8_CACHE_OPTIONS_HEURISTICS_MOBILE;
+  } else {
+    prefs.v8_cache_options = V8_CACHE_OPTIONS_DEFAULT;
   }
 
-  std::string streaming_experiment_group =
-      base::FieldTrialList::FindFullName("V8ScriptStreaming");
-  prefs.v8_script_streaming_enabled =
-      command_line.HasSwitch(switches::kEnableV8ScriptStreaming);
-  if (streaming_experiment_group == "Enabled") {
-    prefs.v8_script_streaming_enabled = true;
-    prefs.v8_script_streaming_mode = V8_SCRIPT_STREAMING_MODE_ALL;
-  } else if (streaming_experiment_group == "OnlyAsyncAndDefer") {
-    prefs.v8_script_streaming_enabled = true;
-    prefs.v8_script_streaming_mode =
-        V8_SCRIPT_STREAMING_MODE_ONLY_ASYNC_AND_DEFER;
-  } else if (streaming_experiment_group == "AllPlusBlockParserBlocking") {
-    prefs.v8_script_streaming_enabled = true;
-    prefs.v8_script_streaming_mode =
-        V8_SCRIPT_STREAMING_MODE_ALL_PLUS_BLOCK_PARSER_BLOCKING;
-  }
+  // TODO(marja): Clean up preferences + command line flag after streaming has
+  // launched in stable.
+  prefs.v8_script_streaming_enabled = true;
+  prefs.v8_script_streaming_mode =
+      V8_SCRIPT_STREAMING_MODE_ONLY_ASYNC_AND_DEFER;
 
   GetContentClient()->browser()->OverrideWebkitPrefs(this, url, &prefs);
   return prefs;
@@ -744,8 +750,7 @@ void RenderViewHostImpl::SetWebUIProperty(const std::string& name,
   } else {
     RecordAction(
         base::UserMetricsAction("BindingsMismatchTerminate_RVH_WebUI"));
-    base::KillProcess(
-        GetProcess()->GetHandle(), content::RESULT_CODE_KILLED, false);
+    GetProcess()->Shutdown(content::RESULT_CODE_KILLED, false);
   }
 }
 
@@ -1077,7 +1082,7 @@ void RenderViewHostImpl::OnUpdateState(int32 page_id, const PageState& state) {
 
 void RenderViewHostImpl::OnUpdateTargetURL(const GURL& url) {
   if (is_active_)
-    delegate_->UpdateTargetURL(url);
+    delegate_->UpdateTargetURL(this, url);
 
   // Send a notification back to the renderer that we are ready to
   // receive more target urls.
@@ -1104,8 +1109,7 @@ void RenderViewHostImpl::OnDocumentAvailableInMainFrame(
     return;
 
   HostZoomMapImpl* host_zoom_map =
-      static_cast<HostZoomMapImpl*>(HostZoomMap::GetDefaultForBrowserContext(
-          GetProcess()->GetBrowserContext()));
+      static_cast<HostZoomMapImpl*>(HostZoomMap::Get(GetSiteInstance()));
   host_zoom_map->SetTemporaryZoomLevel(GetProcess()->GetID(),
                                        GetRoutingID(),
                                        host_zoom_map->GetDefaultZoomLevel());
@@ -1212,23 +1216,34 @@ void RenderViewHostImpl::OnTakeFocus(bool reverse) {
     view->TakeFocus(reverse);
 }
 
-void RenderViewHostImpl::OnFocusedNodeChanged(bool is_editable_node) {
+void RenderViewHostImpl::OnFocusedNodeChanged(
+    bool is_editable_node,
+    const gfx::Rect& node_bounds_in_viewport) {
   is_focused_element_editable_ = is_editable_node;
   if (view_)
     view_->FocusedNodeChanged(is_editable_node);
 #if defined(OS_WIN)
   if (!is_editable_node && virtual_keyboard_requested_) {
     virtual_keyboard_requested_ = false;
+    delegate_->SetIsVirtualKeyboardRequested(false);
     BrowserThread::PostDelayedTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(base::IgnoreResult(&DismissVirtualKeyboardTask)),
         TimeDelta::FromMilliseconds(kVirtualKeyboardDisplayWaitTimeoutMs));
   }
 #endif
-  NotificationService::current()->Notify(
-      NOTIFICATION_FOCUS_CHANGED_IN_PAGE,
-      Source<RenderViewHost>(this),
-      Details<const bool>(&is_editable_node));
+
+  // Convert node_bounds to screen coordinates.
+  gfx::Rect view_bounds_in_screen = view_->GetViewBounds();
+  gfx::Point origin = node_bounds_in_viewport.origin();
+  origin.Offset(view_bounds_in_screen.x(), view_bounds_in_screen.y());
+  gfx::Rect node_bounds_in_screen(origin.x(), origin.y(),
+                                  node_bounds_in_viewport.width(),
+                                  node_bounds_in_viewport.height());
+  FocusedNodeDetails details = {is_editable_node, node_bounds_in_screen};
+  NotificationService::current()->Notify(NOTIFICATION_FOCUS_CHANGED_IN_PAGE,
+                                         Source<RenderViewHost>(this),
+                                         Details<FocusedNodeDetails>(&details));
 }
 
 void RenderViewHostImpl::OnUserGesture() {
@@ -1419,8 +1434,7 @@ void RenderViewHostImpl::NotifyMoveOrResizeStarted() {
 void RenderViewHostImpl::OnDidZoomURL(double zoom_level,
                                       const GURL& url) {
   HostZoomMapImpl* host_zoom_map =
-      static_cast<HostZoomMapImpl*>(HostZoomMap::GetDefaultForBrowserContext(
-          GetProcess()->GetBrowserContext()));
+      static_cast<HostZoomMapImpl*>(HostZoomMap::Get(GetSiteInstance()));
 
   host_zoom_map->SetZoomLevelForView(GetProcess()->GetID(),
                                      GetRoutingID(),
@@ -1436,8 +1450,10 @@ void RenderViewHostImpl::OnFocusedNodeTouched(bool editable) {
 #if defined(OS_WIN)
   if (editable) {
     virtual_keyboard_requested_ = base::win::DisplayVirtualKeyboard();
+    delegate_->SetIsVirtualKeyboardRequested(true);
   } else {
     virtual_keyboard_requested_ = false;
+    delegate_->SetIsVirtualKeyboardRequested(false);
     base::win::DismissVirtualKeyboard();
   }
 #endif
@@ -1449,12 +1465,22 @@ bool RenderViewHostImpl::CanAccessFilesOfPageState(
       ChildProcessSecurityPolicyImpl::GetInstance();
 
   const std::vector<base::FilePath>& file_paths = state.GetReferencedFiles();
-  for (std::vector<base::FilePath>::const_iterator file = file_paths.begin();
-       file != file_paths.end(); ++file) {
-    if (!policy->CanReadFile(GetProcess()->GetID(), *file))
+  for (const auto& file : file_paths) {
+    if (!policy->CanReadFile(GetProcess()->GetID(), file))
       return false;
   }
   return true;
+}
+
+void RenderViewHostImpl::GrantFileAccessFromPageState(const PageState& state) {
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
+
+  const std::vector<base::FilePath>& file_paths = state.GetReferencedFiles();
+  for (const auto& file : file_paths) {
+    if (!policy->CanReadFile(GetProcess()->GetID(), file))
+      policy->GrantReadFile(GetProcess()->GetID(), file);
+  }
 }
 
 void RenderViewHostImpl::AttachToFrameTree() {

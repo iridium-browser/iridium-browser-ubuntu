@@ -46,7 +46,7 @@ struct SameSizeAsInlineBox {
 #endif
 };
 
-COMPILE_ASSERT(sizeof(InlineBox) == sizeof(SameSizeAsInlineBox), InlineBox_size_guard);
+static_assert(sizeof(InlineBox) == sizeof(SameSizeAsInlineBox), "InlineBox should stay small");
 
 #if ENABLE(ASSERT)
 
@@ -111,7 +111,7 @@ void InlineBox::showBox(int printedCharacters) const
     for (; printedCharacters < showTreeCharacterOffset; printedCharacters++)
         fputc(' ', stderr);
     fprintf(stderr, "\t%s %p {pos=%g,%g size=%g,%g} baseline=%i/%i\n",
-        renderer().renderName(), &renderer(), x(), y(), width(), height(),
+        renderer().renderName(), &renderer(), x().toFloat(), y().toFloat(), width().toFloat(), height().toFloat(),
         baselinePosition(AlphabeticBaseline),
         baselinePosition(IdeographicBaseline));
 }
@@ -123,9 +123,9 @@ FloatWillBeLayoutUnit InlineBox::logicalHeight() const
         return virtualLogicalHeight();
 
     if (renderer().isText())
-        return m_bitfields.isText() ? INT_TO_LAYOUT_UNIT(renderer().style(isFirstLineStyle())->fontMetrics().height()) : ZERO_LAYOUT_UNIT;
+        return m_bitfields.isText() ? FloatWillBeLayoutUnit(renderer().style(isFirstLineStyle())->fontMetrics().height()) : FloatWillBeLayoutUnit();
     if (renderer().isBox() && parent())
-        return isHorizontal() ? LAYOUT_UNIT_TO_FLOAT(toRenderBox(renderer()).height()) : LAYOUT_UNIT_TO_FLOAT(toRenderBox(renderer()).width());
+        return isHorizontal() ? toRenderBox(renderer()).size().height() : toRenderBox(renderer()).size().width();
 
     ASSERT(isInlineFlowBox());
     RenderBoxModelObject* flowObject = boxModelObject();
@@ -192,9 +192,11 @@ void InlineBox::adjustPosition(FloatWillBeLayoutUnit dx, FloatWillBeLayoutUnit d
         toRenderBox(renderer()).move(dx, dy);
 }
 
-void InlineBox::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit /* lineTop */, LayoutUnit /*lineBottom*/)
+void InlineBox::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit /* lineTop */, LayoutUnit /*lineBottom*/)
 {
-    BlockPainter::paintInlineBox(*this, paintInfo, paintOffset);
+    // Text clips are painted only for the direct inline children of the object that has a text clip style on it, not block children.
+    if (paintInfo.phase != PaintPhaseTextClip)
+        BlockPainter::paintInlineBox(*this, paintInfo, paintOffset);
 }
 
 bool InlineBox::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit /* lineTop */, LayoutUnit /*lineBottom*/)
@@ -296,7 +298,7 @@ FloatWillBeLayoutUnit InlineBox::placeEllipsisBox(bool, FloatWillBeLayoutUnit, F
 {
     // Use -1 to mean "we didn't set the position."
     truncatedWidth += logicalWidth();
-    return MINUS_ONE_LAYOUT_UNIT;
+    return -1;
 }
 
 void InlineBox::clearKnownToHaveNoOverflow()
@@ -313,9 +315,9 @@ FloatPointWillBeLayoutPoint InlineBox::locationIncludingFlipping()
 
     RenderBlockFlow& block = root().block();
     if (block.style()->isHorizontalWritingMode())
-        return FloatPointWillBeLayoutPoint(x(), block.height() - height() - y());
+        return FloatPointWillBeLayoutPoint(x(), block.size().height() - size().height() - y());
 
-    return FloatPointWillBeLayoutPoint(block.width() - width() - x(), y());
+    return FloatPointWillBeLayoutPoint(block.size().width() - size().width() - x(), y());
 }
 
 void InlineBox::flipForWritingMode(FloatRect& rect)

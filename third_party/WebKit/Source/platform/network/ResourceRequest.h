@@ -47,6 +47,12 @@ enum ResourceRequestCachePolicy {
     ReloadBypassingCache, // end-to-end reload
 };
 
+enum InputToLoadPerfMetricReportPolicy {
+    NoReport, // Don't report metrics for this ResourceRequest.
+    ReportLink, // Report metrics for this request as initiated by a link click.
+    ReportIntent, // Report metrics for this request as initiated by an intent.
+};
+
 struct CrossThreadResourceRequestData;
 
 class PLATFORM_EXPORT ResourceRequest {
@@ -171,9 +177,18 @@ public:
     bool downloadToFile() const { return m_downloadToFile; }
     void setDownloadToFile(bool downloadToFile) { m_downloadToFile = downloadToFile; }
 
+    // True if the requestor wants to receive a response body as
+    // WebDataConsumerHandle.
+    bool useStreamOnResponse() const { return m_useStreamOnResponse; }
+    void setUseStreamOnResponse(bool useStreamOnResponse) { m_useStreamOnResponse = useStreamOnResponse; }
+
     // True if the request should not be handled by the ServiceWorker.
     bool skipServiceWorker() const { return m_skipServiceWorker; }
     void setSkipServiceWorker(bool skipServiceWorker) { m_skipServiceWorker = skipServiceWorker; }
+
+    // True if corresponding AppCache group should be resetted.
+    bool shouldResetAppCache() { return m_shouldResetAppCache; }
+    void setShouldResetAppCache(bool shouldResetAppCache) { m_shouldResetAppCache = shouldResetAppCache; }
 
     // Extra data associated with this request.
     ExtraData* extraData() const { return m_extraData.get(); }
@@ -200,6 +215,15 @@ public:
 
     static bool compare(const ResourceRequest&, const ResourceRequest&);
 
+    bool checkForBrowserSideNavigation() const { return m_checkForBrowserSideNavigation; }
+    void setCheckForBrowserSideNavigation(bool check) { m_checkForBrowserSideNavigation = check; }
+
+    double uiStartTime() const { return m_uiStartTime; }
+    void setUIStartTime(double uiStartTime) { m_uiStartTime = uiStartTime; }
+
+    InputToLoadPerfMetricReportPolicy inputPerfMetricReportPolicy() const { return m_inputPerfMetricReportPolicy; }
+    void setInputPerfMetricReportPolicy(InputToLoadPerfMetricReportPolicy inputPerfMetricReportPolicy) { m_inputPerfMetricReportPolicy = inputPerfMetricReportPolicy; }
+
 private:
     void initialize(const KURL&);
 
@@ -217,7 +241,9 @@ private:
     bool m_reportRawHeaders : 1;
     bool m_hasUserGesture : 1;
     bool m_downloadToFile : 1;
+    bool m_useStreamOnResponse : 1;
     bool m_skipServiceWorker : 1;
+    bool m_shouldResetAppCache : 1;
     ResourceLoadPriority m_priority;
     int m_intraPriorityValue;
     int m_requestorID;
@@ -229,6 +255,9 @@ private:
     WebURLRequest::FetchRequestMode m_fetchRequestMode;
     WebURLRequest::FetchCredentialsMode m_fetchCredentialsMode;
     ReferrerPolicy m_referrerPolicy;
+    bool m_checkForBrowserSideNavigation;
+    double m_uiStartTime;
+    InputToLoadPerfMetricReportPolicy m_inputPerfMetricReportPolicy;
 
     mutable CacheControlHeader m_cacheControlHeaderCache;
 
@@ -258,6 +287,8 @@ public:
     bool m_hasUserGesture;
     bool m_downloadToFile;
     bool m_skipServiceWorker;
+    bool m_useStreamOnResponse;
+    bool m_shouldResetAppCache;
     ResourceLoadPriority m_priority;
     int m_intraPriorityValue;
     int m_requestorID;
@@ -268,6 +299,9 @@ public:
     WebURLRequest::FetchRequestMode m_fetchRequestMode;
     WebURLRequest::FetchCredentialsMode m_fetchCredentialsMode;
     ReferrerPolicy m_referrerPolicy;
+    bool m_checkForBrowserSideNavigation;
+    double m_uiStartTime;
+    InputToLoadPerfMetricReportPolicy m_inputPerfMetricReportPolicy;
 };
 
 unsigned initializeMaximumHTTPConnectionCountPerHost();

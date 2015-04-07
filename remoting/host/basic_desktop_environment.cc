@@ -10,6 +10,7 @@
 #include "remoting/host/audio_capturer.h"
 #if defined(OS_CHROMEOS)
 #include "remoting/host/chromeos/aura_desktop_capturer.h"
+#include "remoting/host/chromeos/mouse_cursor_monitor_aura.h"
 #endif
 #include "remoting/host/client_session_control.h"
 #include "remoting/host/gnubby_auth_handler.h"
@@ -45,8 +46,12 @@ scoped_ptr<ScreenControls> BasicDesktopEnvironment::CreateScreenControls() {
 
 scoped_ptr<webrtc::MouseCursorMonitor>
 BasicDesktopEnvironment::CreateMouseCursorMonitor() {
+#if defined(OS_CHROMEOS)
+  return make_scoped_ptr(new MouseCursorMonitorAura());
+#else
   return make_scoped_ptr(webrtc::MouseCursorMonitor::CreateForScreen(
       *desktop_capture_options_, webrtc::kFullDesktopScreenId));
+#endif
 }
 
 std::string BasicDesktopEnvironment::GetCapabilities() const {

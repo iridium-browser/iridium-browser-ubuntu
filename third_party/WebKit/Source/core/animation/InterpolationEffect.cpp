@@ -7,24 +7,29 @@
 
 namespace blink {
 
-PassOwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation> > > InterpolationEffect::getActiveInterpolations(double fraction, double iterationDuration) const
+void InterpolationEffect::getActiveInterpolations(double fraction, double iterationDuration, OwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation>>>& result) const
 {
+    if (!result)
+        result = adoptPtrWillBeNoop(new WillBeHeapVector<RefPtrWillBeMember<Interpolation> >());
 
-    WillBeHeapVector<RefPtrWillBeMember<Interpolation> >* result = new WillBeHeapVector<RefPtrWillBeMember<Interpolation> >();
+    size_t existingSize = result->size();
+    size_t resultIndex = 0;
 
-    for (size_t i = 0; i < m_interpolations.size(); ++i) {
-        const InterpolationRecord* record = m_interpolations[i].get();
+    for (const auto& record : m_interpolations) {
         if (fraction >= record->m_applyFrom && fraction < record->m_applyTo) {
             RefPtrWillBeRawPtr<Interpolation> interpolation = record->m_interpolation;
             double localFraction = (fraction - record->m_start) / (record->m_end - record->m_start);
             if (record->m_easing)
                 localFraction = record->m_easing->evaluate(localFraction, accuracyForDuration(iterationDuration));
             interpolation->interpolate(0, localFraction);
-            result->append(interpolation);
+            if (resultIndex < existingSize)
+                (*result)[resultIndex++] = interpolation;
+            else
+                result->append(interpolation);
         }
     }
-
-    return adoptPtrWillBeNoop(result);
+    if (resultIndex < existingSize)
+        result->shrink(resultIndex);
 }
 
 void InterpolationEffect::InterpolationRecord::trace(Visitor* visitor)

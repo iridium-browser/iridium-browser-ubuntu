@@ -253,7 +253,7 @@ base::SequencedTaskRunner* ExtensionAssetsManagerChromeOS::GetFileTaskRunner(
 bool ExtensionAssetsManagerChromeOS::CanShareAssets(
     const Extension* extension,
     const base::FilePath& unpacked_extension_root) {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kEnableExtensionAssetsSharing)) {
     return false;
   }
@@ -288,7 +288,7 @@ void ExtensionAssetsManagerChromeOS::CheckSharedExtension(
   }
 
   if (user_manager->IsUserNonCryptohomeDataEphemeral(user_id) ||
-      !user_manager->IsLoggedInAsRegularUser()) {
+      !user_manager->IsLoggedInAsUserWithGaiaAccount()) {
     // Don't cache anything in shared location for ephemeral user or special
     // user types.
     ExtensionAssetsManagerChromeOS::GetFileTaskRunner(profile)->PostTask(

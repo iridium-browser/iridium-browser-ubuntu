@@ -19,10 +19,10 @@
 #include "ui/compositor/layer.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/display.h"
-#include "ui/gfx/point_conversions.h"
+#include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/screen.h"
-#include "ui/gfx/size_conversions.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/corewm/tooltip.h"
 #include "ui/views/corewm/tooltip_controller.h"
@@ -145,8 +145,11 @@ class DesktopNativeWidgetTopLevelHandler : public aura::WindowObserver {
   void OnWindowBoundsChanged(aura::Window* window,
                              const gfx::Rect& old_bounds,
                              const gfx::Rect& new_bounds) override {
+    // The position of the window may have changed. Hence we use SetBounds in
+    // place of SetSize. We need to pass the bounds in screen coordinates to
+    // the Widget::SetBounds function.
     if (top_level_widget_ && window == child_window_)
-      top_level_widget_->SetSize(new_bounds.size());
+      top_level_widget_->SetBounds(window->GetBoundsInScreen());
   }
 
  private:
@@ -419,9 +422,6 @@ void DesktopNativeWidgetAura::InitNativeWidget(
       DesktopWindowTreeHost::Create(native_widget_delegate_, this);
   host_.reset(desktop_window_tree_host_->AsWindowTreeHost());
   desktop_window_tree_host_->Init(content_window_, params);
-
-  // Mark this window as Desktop root window.
-  host_->window()->SetProperty(views::kDesktopRootWindow, true);
 
   host_->InitHost();
   host_->window()->AddChild(content_window_container_);

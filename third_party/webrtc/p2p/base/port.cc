@@ -270,6 +270,7 @@ void Port::AddAddress(const rtc::SocketAddress& address,
   c.set_username(username_fragment());
   c.set_password(password_);
   c.set_network_name(network_->name());
+  c.set_network_type(network_->type());
   c.set_generation(generation_);
   c.set_related_address(related_address);
   c.set_foundation(ComputeFoundation(type, protocol, base_address));
@@ -851,15 +852,28 @@ class ConnectionRequest : public StunRequest {
 // Connection
 //
 
-Connection::Connection(Port* port, size_t index,
+Connection::Connection(Port* port,
+                       size_t index,
                        const Candidate& remote_candidate)
-  : port_(port), local_candidate_index_(index),
-    remote_candidate_(remote_candidate), read_state_(STATE_READ_INIT),
-    write_state_(STATE_WRITE_INIT), connected_(true), pruned_(false),
-    use_candidate_attr_(false), remote_ice_mode_(ICEMODE_FULL),
-    requests_(port->thread()), rtt_(DEFAULT_RTT), last_ping_sent_(0),
-    last_ping_received_(0), last_data_received_(0),
-    last_ping_response_received_(0), reported_(false), state_(STATE_WAITING) {
+    : port_(port),
+      local_candidate_index_(index),
+      remote_candidate_(remote_candidate),
+      read_state_(STATE_READ_INIT),
+      write_state_(STATE_WRITE_INIT),
+      connected_(true),
+      pruned_(false),
+      use_candidate_attr_(false),
+      remote_ice_mode_(ICEMODE_FULL),
+      requests_(port->thread()),
+      rtt_(DEFAULT_RTT),
+      last_ping_sent_(0),
+      last_ping_received_(0),
+      last_data_received_(0),
+      last_ping_response_received_(0),
+      sent_packets_discarded_(0),
+      sent_packets_total_(0),
+      reported_(false),
+      state_(STATE_WAITING) {
   // All of our connections start in WAITING state.
   // TODO(mallinath) - Start connections from STATE_FROZEN.
   // Wire up to send stun packets
@@ -914,7 +928,8 @@ void Connection::set_write_state(WriteState value) {
   WriteState old_value = write_state_;
   write_state_ = value;
   if (value != old_value) {
-    LOG_J(LS_VERBOSE, this) << "set_write_state";
+    LOG_J(LS_VERBOSE, this) << "set_write_state from: " << old_value << " to "
+                            << value;
     SignalStateChange(this);
     CheckTimeout();
   }
@@ -1089,8 +1104,10 @@ void Connection::UpdateState(uint32 now) {
         pings_since_last_response_[i]);
     pings.append(buf).append(" ");
   }
-  LOG_J(LS_VERBOSE, this) << "UpdateState(): pings_since_last_response_=" <<
-      pings << ", rtt=" << rtt << ", now=" << now;
+  LOG_J(LS_VERBOSE, this) << "UpdateState(): pings_since_last_response_="
+                          << pings << ", rtt=" << rtt << ", now=" << now
+                          << ", last ping received: " << last_ping_received_
+                          << ", last data_received: " << last_data_received_;
 
   // Check the readable state.
   //
@@ -1174,6 +1191,12 @@ void Connection::ReceivedPing() {
   set_read_state(STATE_READABLE);
 }
 
+std::string Connection::ToDebugId() const {
+  std::stringstream ss;
+  ss << std::hex << this;
+  return ss.str();
+}
+
 std::string Connection::ToString() const {
   const char CONNECT_STATE_ABBREV[2] = {
     '-',  // not connected (false)
@@ -1199,7 +1222,8 @@ std::string Connection::ToString() const {
   const Candidate& local = local_candidate();
   const Candidate& remote = remote_candidate();
   std::stringstream ss;
-  ss << "Conn[" << port_->content_name()
+  ss << "Conn[" << ToDebugId()
+     << ":" << port_->content_name()
      << ":" << local.id() << ":" << local.component()
      << ":" << local.generation()
      << ":" << local.type() << ":" << local.protocol()
@@ -1327,7 +1351,7 @@ void Connection::HandleRoleConflictFromPeer() {
 void Connection::OnMessage(rtc::Message *pmsg) {
   ASSERT(pmsg->message_id == MSG_DELETE);
 
-  LOG_J(LS_INFO, this) << "Connection deleted";
+  LOG_J(LS_INFO, this) << "Connection deleted due to read or write timeout";
   SignalDestroyed(this);
   delete this;
 }
@@ -1346,6 +1370,14 @@ size_t Connection::sent_bytes_second() {
 
 size_t Connection::sent_total_bytes() {
   return send_rate_tracker_.total_units();
+}
+
+size_t Connection::sent_discarded_packets() {
+  return sent_packets_discarded_;
+}
+
+size_t Connection::sent_total_packets() {
+  return sent_packets_total_;
 }
 
 void Connection::MaybeAddPrflxCandidate(ConnectionRequest* request,
@@ -1399,6 +1431,7 @@ void Connection::MaybeAddPrflxCandidate(ConnectionRequest* request,
   new_local_candidate.set_username(local_candidate().username());
   new_local_candidate.set_password(local_candidate().password());
   new_local_candidate.set_network_name(local_candidate().network_name());
+  new_local_candidate.set_network_type(local_candidate().network_type());
   new_local_candidate.set_related_address(local_candidate().address());
   new_local_candidate.set_foundation(
       ComputeFoundation(PRFLX_PORT_TYPE, local_candidate().protocol(),
@@ -1423,11 +1456,13 @@ int ProxyConnection::Send(const void* data, size_t size,
     error_ = EWOULDBLOCK;
     return SOCKET_ERROR;
   }
+  sent_packets_total_++;
   int sent = port_->SendTo(data, size, remote_candidate_.address(),
                            options, true);
   if (sent <= 0) {
     ASSERT(sent < 0);
     error_ = port_->GetError();
+    sent_packets_discarded_++;
   } else {
     send_rate_tracker_.Update(sent);
   }

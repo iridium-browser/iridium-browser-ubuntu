@@ -64,6 +64,7 @@ struct WebGLInfo {
     WebString vendorInfo;
     WebString rendererInfo;
     WebString driverVersion;
+    WebString contextInfoCollectionFailure;
 };
 
 // This interface abstracts the operations performed by the
@@ -408,6 +409,17 @@ public:
     virtual void shallowFlushCHROMIUM() { }
     virtual void shallowFinishCHROMIUM() { }
 
+    // GL_CHROMIUM_subscribe_uniform
+    virtual void genValuebuffersCHROMIUM(WGC3Dsizei count, WebGLId* ids) { }
+    virtual WebGLId createValuebufferCHROMIUM() { return 0; }
+    virtual void deleteValuebuffersCHROMIUM(WGC3Dsizei count, WebGLId* ids) { }
+    virtual void deleteValuebufferCHROMIUM(WebGLId) { }
+    virtual WGC3Dboolean isValuebufferCHROMIUM(WebGLId renderbuffer) { return false; }
+    virtual void bindValuebufferCHROMIUM(WGC3Denum target, WebGLId valuebuffer) { }
+    virtual void subscribeValueCHROMIUM(WGC3Denum target, WGC3Denum subscription) { }
+    virtual void populateSubscribedValuesCHROMIUM(WGC3Denum target) { }
+    virtual void uniformValuebufferCHROMIUM(WGC3Dint location, WGC3Denum target, WGC3Denum subscription) { }
+
     // GL_CHROMIUM_texture_mailbox
     virtual void genMailboxCHROMIUM(WGC3Dbyte* mailbox) { }
     virtual void produceTextureCHROMIUM(WGC3Denum target, const WGC3Dbyte* mailbox) { }
@@ -420,6 +432,10 @@ public:
     virtual void insertEventMarkerEXT(const WGC3Dchar* marker) { }
     virtual void pushGroupMarkerEXT(const WGC3Dchar* marker) { }
     virtual void popGroupMarkerEXT(void) { }
+
+    // GL_CHROMIUM_trace_marker
+    virtual void traceBeginCHROMIUM(const WGC3Dchar* category, const WGC3Dchar* trace) { }
+    virtual void traceEndCHROMIUM() { }
 
     // GL_OES_vertex_array_object
     virtual WebGLId createVertexArrayOES() { return 0; }

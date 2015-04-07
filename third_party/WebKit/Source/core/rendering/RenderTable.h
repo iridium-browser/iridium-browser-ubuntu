@@ -61,27 +61,27 @@ public:
     {
         if (style()->isHorizontalWritingMode())
             return style()->isLeftToRightDirection() ? borderStart() : borderEnd();
-        return style()->slowIsFlippedBlocksWritingMode() ? borderAfter() : borderBefore();
+        return style()->isFlippedBlocksWritingMode() ? borderAfter() : borderBefore();
     }
 
     virtual int borderRight() const override
     {
         if (style()->isHorizontalWritingMode())
             return style()->isLeftToRightDirection() ? borderEnd() : borderStart();
-        return style()->slowIsFlippedBlocksWritingMode() ? borderBefore() : borderAfter();
+        return style()->isFlippedBlocksWritingMode() ? borderBefore() : borderAfter();
     }
 
     virtual int borderTop() const override
     {
         if (style()->isHorizontalWritingMode())
-            return style()->slowIsFlippedBlocksWritingMode() ? borderAfter() : borderBefore();
+            return style()->isFlippedBlocksWritingMode() ? borderAfter() : borderBefore();
         return style()->isLeftToRightDirection() ? borderStart() : borderEnd();
     }
 
     virtual int borderBottom() const override
     {
         if (style()->isHorizontalWritingMode())
-            return style()->slowIsFlippedBlocksWritingMode() ? borderBefore() : borderAfter();
+            return style()->isFlippedBlocksWritingMode() ? borderBefore() : borderAfter();
         return style()->isLeftToRightDirection() ? borderEnd() : borderStart();
     }
 
@@ -94,27 +94,27 @@ public:
     {
         if (style()->isHorizontalWritingMode())
             return style()->isLeftToRightDirection() ? outerBorderStart() : outerBorderEnd();
-        return style()->slowIsFlippedBlocksWritingMode() ? outerBorderAfter() : outerBorderBefore();
+        return style()->isFlippedBlocksWritingMode() ? outerBorderAfter() : outerBorderBefore();
     }
 
     int outerBorderRight() const
     {
         if (style()->isHorizontalWritingMode())
             return style()->isLeftToRightDirection() ? outerBorderEnd() : outerBorderStart();
-        return style()->slowIsFlippedBlocksWritingMode() ? outerBorderBefore() : outerBorderAfter();
+        return style()->isFlippedBlocksWritingMode() ? outerBorderBefore() : outerBorderAfter();
     }
 
     int outerBorderTop() const
     {
         if (style()->isHorizontalWritingMode())
-            return style()->slowIsFlippedBlocksWritingMode() ? outerBorderAfter() : outerBorderBefore();
+            return style()->isFlippedBlocksWritingMode() ? outerBorderAfter() : outerBorderBefore();
         return style()->isLeftToRightDirection() ? outerBorderStart() : outerBorderEnd();
     }
 
     int outerBorderBottom() const
     {
         if (style()->isHorizontalWritingMode())
-            return style()->slowIsFlippedBlocksWritingMode() ? outerBorderBefore() : outerBorderAfter();
+            return style()->isFlippedBlocksWritingMode() ? outerBorderBefore() : outerBorderAfter();
         return style()->isLeftToRightDirection() ? outerBorderEnd() : outerBorderStart();
     }
 
@@ -269,10 +269,9 @@ public:
     void addColumn(const RenderTableCol*);
     void removeColumn(const RenderTableCol*);
 
-    // FIXME: this method should be moved into TablePainter.
-    virtual void paintBoxDecorationBackground(PaintInfo&, const LayoutPoint&) override;
+    virtual void paintBoxDecorationBackground(const PaintInfo&, const LayoutPoint&) override final;
 
-    virtual void paintMask(PaintInfo&, const LayoutPoint&) override;
+    virtual void paintMask(const PaintInfo&, const LayoutPoint&) override final;
 
     const CollapsedBorderValues& collapsedBorders() { return m_collapsedBorders; }
     void subtractCaptionRect(LayoutRect&) const;
@@ -287,8 +286,7 @@ private:
 
     virtual bool isOfType(RenderObjectType type) const override { return type == RenderObjectTable || RenderBlock::isOfType(type); }
 
-    virtual void paint(PaintInfo&, const LayoutPoint&) override;
-    virtual void paintObject(PaintInfo&, const LayoutPoint&) override;
+    virtual void paintObject(const PaintInfo&, const LayoutPoint&) override;
     virtual void layout() override;
     virtual void computeIntrinsicLogicalWidths(LayoutUnit& minWidth, LayoutUnit& maxWidth) const override;
     virtual void computePreferredLogicalWidths() override;
@@ -313,7 +311,7 @@ private:
     virtual void addOverflowFromChildren() override;
 
     void recalcSections() const;
-    void layoutCaption(RenderTableCaption*);
+    void layoutCaption(RenderTableCaption&);
 
     void distributeExtraLogicalHeight(int extraLogicalHeight);
 

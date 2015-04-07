@@ -6,6 +6,7 @@
 
 from __future__ import print_function
 
+import datetime
 import glob
 import logging
 import os
@@ -21,7 +22,8 @@ except ImportError:
       '`sudo apt-get install python-sqlalchemy` or similar.')
 
 from chromite.cbuildbot import constants
-from chromite.lib import retry_util
+from chromite.lib import retry_stats
+from chromite.lib import clactions
 
 CIDB_MIGRATIONS_DIR = os.path.join(constants.CHROMITE_DIR, 'cidb',
                                    'migrations')
@@ -85,7 +87,7 @@ def minimum_schema(min_version):
 
 class StrictModeListener(sqlalchemy.interfaces.PoolListener):
   """This listener ensures that STRICT_ALL_TABLES for all connections."""
-  # pylint: disable-msg=W0613
+  # pylint: disable=W0613
   def connect(self, dbapi_con, *args, **kwargs):
     cur = dbapi_con.cursor()
     cur.execute("SET SESSION sql_mode='STRICT_ALL_TABLES'")
@@ -185,8 +187,8 @@ class SchemaVersionedMySQLConnection(object):
     """
     tables = self._Execute('SHOW TABLES').fetchall()
     if (self.SCHEMA_VERSION_TABLE_NAME,) in tables:
-      r = self._Execute('SELECT MAX(%s) from %s' %
-          (self.SCHEMA_VERSION_COL, self.SCHEMA_VERSION_TABLE_NAME))
+      r = self._Execute('SELECT MAX(%s) from %s' % (
+          self.SCHEMA_VERSION_COL, self.SCHEMA_VERSION_TABLE_NAME))
       return r.fetchone()[0] or 0
     else:
       return 0
@@ -290,8 +292,8 @@ class SchemaVersionedMySQLConnection(object):
       return 1
 
     self._ReflectToMetadata()
-    ins = self._meta.tables[table].insert().values(values)
-    r = self._Execute(ins)
+    ins = self._meta.tables[table].insert()
+    r = self._Execute(ins, *values)
     return r.rowcount
 
   def _GetPrimaryKey(self, table):
@@ -340,8 +342,8 @@ class SchemaVersionedMySQLConnection(object):
     """
     self._ReflectToMetadata()
     primary_key = self._GetPrimaryKey(table)
-    upd = self._meta.tables[table].update().where(primary_key==row_id
-                                                  ).values(values)
+    upd = self._meta.tables[table].update().where(
+        primary_key == row_id).values(values)
     r = self._Execute(upd)
     return r.rowcount
 
@@ -378,7 +380,7 @@ class SchemaVersionedMySQLConnection(object):
     primary_key = self._GetPrimaryKey(table)
     table_m = self._meta.tables[table]
     columns_m = [table_m.c[col_name] for col_name in columns]
-    sel = sqlalchemy.sql.select(columns_m).where(primary_key==row_id)
+    sel = sqlalchemy.sql.select(columns_m).where(primary_key == row_id)
     r = self._Execute(sel).fetchall()
     if r:
       assert len(r) == 1, 'Query by primary key returned more than 1 row.'
@@ -445,10 +447,14 @@ class SchemaVersionedMySQLConnection(object):
       The result of .execute(...)
     """
     f = lambda: engine.execute(query, *args, **kwargs)
-    return retry_util.GenericRetry(
+    logging.info('Running cidb query on pid %s, repr(query) starts with %s',
+                 os.getpid(), repr(query)[:100])
+    return retry_stats.RetryWithStats(
+        retry_stats.CIDB,
         handler=_IsRetryableException,
-        max_retry=4,
-        sleep=1,
+        max_retry=8,
+        sleep=4,
+        backoff_factor=2,
         functor=f)
 
   def _GetEngine(self):
@@ -486,13 +492,28 @@ class SchemaVersionedMySQLConnection(object):
 
 class CIDBConnection(SchemaVersionedMySQLConnection):
   """Connection to a Continuous Integration database."""
+
+  _SQL_FETCH_ACTIONS = (
+      'SELECT c.id, b.id, action, c.reason, build_config, '
+      'change_number, patch_number, change_source, timestamp FROM '
+      'clActionTable c JOIN buildTable b ON build_id = b.id ')
+
   def __init__(self, db_credentials_dir):
     super(CIDBConnection, self).__init__('cidb', CIDB_MIGRATIONS_DIR,
                                          db_credentials_dir)
 
-  @minimum_schema(2)
+  def GetTime(self):
+    """Gets the current time, according to database.
+
+    Returns:
+      datetime.datetime instance.
+    """
+    return self._Execute('SELECT NOW()').fetchall()[0][0]
+
+  @minimum_schema(32)
   def InsertBuild(self, builder_name, waterfall, build_number,
-                  build_config, bot_hostname,  master_build_id=None):
+                  build_config, bot_hostname, master_build_id=None,
+                  timeout_seconds=None):
     """Insert a build row.
 
     Args:
@@ -502,18 +523,24 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
       build_config: cbuildbot config of build
       bot_hostname: hostname of bot running the build
       master_build_id: (Optional) primary key of master build to this build.
+      timeout_seconds: (Optional) If provided, total time allocated for this
+          build. A deadline is recorded in cidb for the current build to end.
     """
-    return self._Insert('buildTable', {'builder_name': builder_name,
-                                       'buildbot_generation':
-                                         constants.BUILDBOT_GENERATION,
-                                       'waterfall': waterfall,
-                                       'build_number': build_number,
-                                       'build_config' : build_config,
-                                       'bot_hostname': bot_hostname,
-                                       'start_time' :
-                                           sqlalchemy.func.current_timestamp(),
-                                       'master_build_id' : master_build_id}
-                        )
+    values = {
+        'builder_name': builder_name,
+        'buildbot_generation': constants.BUILDBOT_GENERATION,
+        'waterfall': waterfall,
+        'build_number': build_number,
+        'build_config': build_config,
+        'bot_hostname': bot_hostname,
+        'start_time': sqlalchemy.func.current_timestamp(),
+        'master_build_id': master_build_id}
+    if timeout_seconds is not None:
+      now = self.GetTime()
+      duration = datetime.timedelta(seconds=timeout_seconds)
+      values.update({'deadline': now + duration})
+
+    return self._Insert('buildTable', values)
 
   @minimum_schema(3)
   def InsertCLActions(self, build_id, cl_actions):
@@ -523,7 +550,7 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
 
     Args:
       build_id: primary key of build that performed these actions.
-      cl_actions: A list of cl_action tuples.
+      cl_actions: A list of CLAction objects.
 
     Returns:
       Number of actions inserted.
@@ -532,70 +559,21 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
       return 0
 
     values = []
-    # TODO(akeshet): Refactor to use either cl action tuples out of the
-    # metadata dict (as now) OR CLActionTuple objects.
     for cl_action in cl_actions:
-      change_source = 'internal' if cl_action[0]['internal'] else 'external'
-      change_number = cl_action[0]['gerrit_number']
-      patch_number = cl_action[0]['patch_number']
-      action = cl_action[1]
-      reason = cl_action[3]
+      change_number = cl_action.change_number
+      patch_number = cl_action.patch_number
+      change_source = cl_action.change_source
+      action = cl_action.action
+      reason = cl_action.reason
       values.append({
-          'build_id' : build_id,
-          'change_source' : change_source,
+          'build_id': build_id,
+          'change_source': change_source,
           'change_number': change_number,
-          'patch_number' : patch_number,
-          'action' : action,
-          'reason' : reason})
+          'patch_number': patch_number,
+          'action': action,
+          'reason': reason})
 
     return self._InsertMany('clActionTable', values)
-
-  @minimum_schema(4)
-  def InsertBuildStage(self, build_id, stage_name, board, status,
-                       log_url, duration_seconds, summary):
-    """Insert a build stage into buildStageTable.
-
-    Args:
-      build_id: id of responsible build
-      stage_name: name of stage
-      board: board that stage ran for
-      status: 'pass' or 'fail'
-      log_url: URL of stage log
-      duration_seconds: run time of stage, in seconds
-      summary: summary message of stage
-
-    Returns:
-      Primary key of inserted stage.
-    """
-    return self._Insert('buildStageTable',
-                        {'build_id': build_id,
-                         'name': stage_name,
-                         'board': board,
-                         'status': status,
-                         'log_url': log_url,
-                         'duration_seconds': duration_seconds,
-                         'summary': summary})
-
-  @minimum_schema(4)
-  def InsertBuildStages(self, stages):
-    """For testing only. Insert multiple build stages into buildStageTable.
-
-    This method allows integration tests to more quickly populate build
-    stages into the database, from test data. Normal builder operations are
-    expected to insert build stage rows one at a time, using InsertBuildStage.
-
-    Args:
-      stages: A list of dictionaries, each dictionary containing keys
-              build_id, name, board, status, log_url, duration_seconds, and
-              summary.
-
-    Returns:
-      The number of build stage rows inserted.
-    """
-    if not stages:
-      return 0
-    return self._InsertMany('buildStageTable',
-                            stages)
 
   @minimum_schema(6)
   def InsertBoardPerBuild(self, build_id, board):
@@ -619,6 +597,55 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     self._Insert('childConfigPerBuildTable', {'build_id': build_id,
                                               'child_config': child_config})
 
+  @minimum_schema(28)
+  def InsertBuildStage(self, build_id, name, board=None,
+                       status=constants.BUILDER_STATUS_PLANNED):
+    """Insert a build stage entry into database.
+
+    Args:
+      build_id: primary key of the build in buildTable
+      name: Full name of build stage.
+      board: (Optional) board name, if this is a board-specific stage.
+      status: (Optional) stage status, one of constants.BUILDER_ALL_STATUSES.
+              Default constants.BUILDER_STATUS_PLANNED.
+
+    Returns:
+      Integer primary key of inserted stage, i.e. build_stage_id
+    """
+    return self._Insert('buildStageTable', {'build_id': build_id,
+                                            'name': name,
+                                            'board': board,
+                                            'status': status})
+
+  @minimum_schema(29)
+  def InsertFailure(self, build_stage_id, exception,
+                    exception_category=constants.EXCEPTION_CATEGORY_UNKNOWN,
+                    outer_failure_id=None,
+                    extra_info=None):
+    """Insert a failure description into database.
+
+    Args:
+      build_stage_id: primary key, in buildStageTable, of the stage where
+                      failure occured.
+      exception: Exception instance that occured.
+      exception_category: (Optional) one of
+                          constants.EXCEPTION_CATEGORY_ALL_CATEGORIES,
+                          Default: 'unknown'.
+      outer_failure_id: (Optional) primary key of outer failure which contains
+                        this failure. Used to store CompoundFailure
+                        relationship.
+      extra_info: (Optional) extra category-specific string description giving
+                  failure details. Used for programmatic triage.
+    """
+    values = {'build_stage_id': build_stage_id,
+              'exception_type': type(exception).__name__,
+              'exception_message': exception.message,
+              'exception_category': exception_category,
+              'outer_failure_id': outer_failure_id,
+              'extra_info': extra_info}
+
+    return self._Insert('failureTable', values)
+
   @minimum_schema(2)
   def UpdateMetadata(self, build_id, metadata):
     """Update the given metadata row in database.
@@ -641,6 +668,28 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
                          'toolchain_url': d.get('toolchain-url'),
                          'build_type': d.get('build_type')})
 
+  @minimum_schema(32)
+  def ExtendDeadline(self, build_id, timeout_seconds):
+    """Extend the deadline for this build.
+
+    Args:
+      build_id: primary key, in buildTable, of the build for which deadline
+          should be extended.
+      timeout_seconds: Time remaining for the deadline from the current time.
+
+    Returns:
+      Number of rows updated (1 for success, 0 for failure)
+      Deadline extension can fail if
+        (1) The deadline is already past, or
+        (2) The new deadline requested is earlier than the original deadline.
+    """
+    return self._Execute(
+        'UPDATE buildTable SET deadline = NOW() + INTERVAL %s SECOND WHERE '
+        'id = %s AND '
+        '(deadline = 0 OR deadline > NOW()) AND '
+        'NOW() + INTERVAL %s SECOND > deadline',
+        timeout_seconds, build_id, timeout_seconds).rowcount
+
   @minimum_schema(6)
   def UpdateBoardPerBuildMetadata(self, build_id, board, board_metadata):
     """Update the given board-per-build metadata.
@@ -652,16 +701,45 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     """
     update_dict = {
         'main_firmware_version': board_metadata.get('main-firmware-version'),
-        'ec_firmware_version': board_metadata.get('ec-firmware-version')
-        }
-    return self._UpdateWhere('boardPerBuildTable',
+        'ec_firmware_version': board_metadata.get('ec-firmware-version'),
+    }
+    return self._UpdateWhere(
+        'boardPerBuildTable',
         'build_id = %s and board = "%s"' % (build_id, board),
         update_dict)
 
+  @minimum_schema(28)
+  def StartBuildStage(self, build_stage_id):
+    """Marks a build stage as inflight, in the database.
 
-  @minimum_schema(11)
-  def FinishBuild(self, build_id, status=None, status_pickle=None,
-                  metadata_url=None):
+    Args:
+      build_stage_id: primary key of the build stage in buildStageTable.
+    """
+    current_timestamp = sqlalchemy.func.current_timestamp()
+    return self._Update(
+        'buildStageTable',
+        build_stage_id,
+        {'status': constants.BUILDER_STATUS_INFLIGHT,
+         'start_time': current_timestamp})
+
+  @minimum_schema(28)
+  def FinishBuildStage(self, build_stage_id, status):
+    """Marks a build stage as finished, in the database.
+
+    Args:
+      build_stage_id: primary key of the build stage in buildStageTable.
+      status: one of constants.BUILDER_COMPLETED_STATUSES
+    """
+    current_timestamp = sqlalchemy.func.current_timestamp()
+    return self._Update(
+        'buildStageTable',
+        build_stage_id,
+        {'status': status,
+         'finish_time': current_timestamp,
+         'final': True})
+
+  @minimum_schema(25)
+  def FinishBuild(self, build_id, status=None, summary=None, metadata_url=None):
     """Update the given build row, marking it as finished.
 
     This should be called once per build, as the last update to the build.
@@ -670,20 +748,44 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     Args:
       build_id: id of row to update.
       status: Final build status, one of
-              manifest_version.BuilderStatus.COMPLETED_STATUSES.
-      status_pickle: Pickled manifest_version.BuilderStatus.
+              constants.BUILDER_COMPLETED_STATUSES.
+      summary: A summary of the build (failures) collected from all slaves.
       metadata_url: google storage url to metadata.json file for this build,
                     e.g. ('gs://chromeos-image-archive/master-paladin/'
                           'R39-6225.0.0-rc1/metadata.json')
     """
     self._ReflectToMetadata()
+    if summary:
+      summary = summary[:1024]
     # The current timestamp is evaluated on the database, not locally.
     current_timestamp = sqlalchemy.func.current_timestamp()
-    self._Update('buildTable', build_id, {'finish_time' : current_timestamp,
-                                          'status' : status,
-                                          'status_pickle' : status_pickle,
+    self._Update('buildTable', build_id, {'finish_time': current_timestamp,
+                                          'status': status,
+                                          'summary': summary,
                                           'metadata_url': metadata_url,
-                                          'final' : True})
+                                          'final': True})
+
+
+  @minimum_schema(16)
+  def FinishChildConfig(self, build_id, child_config, status=None):
+    """Marks the given child config as finished with |status|.
+
+    This should be called before FinishBuild, on all child configs that
+    were used in a build.
+
+    Args:
+      build_id: primary key of the build in the buildTable
+      child_config: String child_config name.
+      status: Final child_config status, one of
+              constants.BUILDER_COMPLETED_STATUSES or None
+              for default "inflight".
+    """
+    self._Execute(
+        'UPDATE childConfigPerBuildTable '
+        'SET status="%s", final=1 '
+        'WHERE (build_id, child_config) = (%s, "%s")' %
+        (status, build_id, child_config))
+
 
   @minimum_schema(2)
   def GetBuildStatus(self, build_id):
@@ -694,11 +796,28 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
 
     Returns:
       A dictionary with keys (id, build_config, start_time, finish_time,
-      status), or None if no build with this id was found.
+      status, waterfall, build_number, builder_name), or None if no build
+      with this id was found.
     """
-    return self._Select('buildTable', build_id,
-                        ['id', 'build_config', 'start_time',
-                         'finish_time', 'status'])
+    return self.GetBuildStatuses([build_id])[0]
+
+  @minimum_schema(2)
+  def GetBuildStatuses(self, build_ids):
+    """Gets the statuses of the builds.
+
+    Args:
+      build_ids: A list of build id to fetch.
+
+    Returns:
+      A list of dictionary with keys (id, build_config, start_time,
+      finish_time, status, waterfall, build_number, builder_name), or
+      None if no build with this id was found.
+    """
+    return self._SelectWhere(
+        'buildTable',
+        'id IN (%s)' % ','.join(str(x) for x in build_ids),
+        ['id', 'build_config', 'start_time', 'finish_time', 'status',
+         'waterfall', 'build_number', 'builder_name'])
 
   @minimum_schema(2)
   def GetSlaveStatuses(self, master_build_id):
@@ -717,32 +836,116 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
                              ['id', 'build_config', 'start_time',
                               'finish_time', 'status'])
 
-  @minimum_schema(11)
-  def GetActionsForChange(self, change):
-    """Gets all the actions for the given change.
+  @minimum_schema(32)
+  def GetTimeToDeadline(self, build_id):
+    """Gets the time remaining till the deadline for given build_id.
 
-    Note, this includes all patches of the given change.
+    Always use this function to find time remaining to a deadline. This function
+    computes all times on the database. You run the risk of hitting timezone
+    issues if you compute remaining time locally.
 
     Args:
-      change: A GerritChangeTuple or GerritPatchTuple specifing the
-              change.
+      build_id: The build_id of the build to query.
 
     Returns:
-      A list of actions, in timestamp order, each of which is a dict
-      with keys (id, build_id, action, build_config, change_number,
-                 patch_number, change_source, timestamp)
+      The time remaining to the deadline in seconds.
+      0 if the deadline is already past.
+      None if no deadline is found.
     """
-    change_number = int(change.gerrit_number)
-    change_source = 'internal' if change.internal else 'external'
+    # Sign information is lost in the timediff coercion into python
+    # datetime.timedelta type. So, we must find out if the deadline is past
+    # separately.
+    r = self._Execute(
+        'SELECT deadline >= NOW(), TIMEDIFF(deadline, NOW()) '
+        'from buildTable where id = %s' % build_id).fetchall()
+    if not r:
+      return None
+
+    time_remaining = r[0][1]
+    if time_remaining is None:
+      return None
+
+    deadline_past = (r[0][0] == 0)
+    return 0 if deadline_past else abs(time_remaining.total_seconds())
+
+  @minimum_schema(2)
+  def GetLastBuildStatuses(self, build_config, number):
+    """Returns basic information about most recent builds.
+
+    Args:
+      build_config: config name of the build.
+      number: number of builds to search back.
+
+    Returns:
+      A sorted list of dicts containining up to |number| dictionaries for
+      build statuses in descending order. Dictionaries contain
+      id, build_config, start_time, finish_time, full_version and status.
+    """
     results = self._Execute(
-        'SELECT c.id, b.id, action, build_config, change_number, '
-        'patch_number, change_source, timestamp FROM '
-        'clActionTable c JOIN buildTable b ON build_id = b.id '
-        'WHERE change_number = %s AND change_source = "%s"' % (
-        change_number, change_source)).fetchall()
-    columns = ['id', 'build_id', 'action', 'build_config', 'change_number',
-               'patch_number', 'change_source', 'timestamp']
+        'SELECT id, build_config, start_time, finish_time, full_version, status'
+        ' FROM buildTable'
+        ' WHERE build_config = "%s"'
+        ' ORDER BY id DESC LIMIT %d' % (build_config, number)).fetchall()
+    columns = ['id', 'build_config', 'start_time', 'finish_time',
+               'full_version', 'status']
     return [dict(zip(columns, values)) for values in results]
+
+  @minimum_schema(11)
+  def GetActionsForChanges(self, changes):
+    """Gets all the actions for the given changes.
+
+    Note, this includes all patches of the given changes.
+
+    Args:
+      changes: A list of GerritChangeTuple, GerritPatchTuple or GerritPatch
+               specifying the changes to whose actions should be fetched.
+
+    Returns:
+      A list of CLAction instances, in action id order.
+    """
+    if not changes:
+      return []
+
+    clauses = []
+    # Note: We are using a string of OR statements rather than a 'WHERE IN'
+    # style clause, because 'WHERE IN' does not make use of multi-column
+    # indexes, and therefore has poor performance with a large table.
+    for change in changes:
+      change_number = int(change.gerrit_number)
+      change_source = 'internal' if change.internal else 'external'
+      clauses.append('(change_number, change_source) = (%s, "%s")' %
+                     (change_number, change_source))
+    clause = ' OR '.join(clauses)
+    results = self._Execute(
+        '%s WHERE %s' % (self._SQL_FETCH_ACTIONS, clause)).fetchall()
+    return [clactions.CLAction(*values) for values in results]
+
+  @minimum_schema(11)
+  def GetActionHistory(self, start_date, end_date=None):
+    """Get the action history of CLs in the specified range.
+
+    This will get the full action history of any patches that were touched
+    by the CQ or Pre-CQ during the specified time range. Note: Since this
+    includes the full action history of these patches, it may include actions
+    outside the time range.
+
+    Args:
+      start_date: The first date on which you want action history.
+      end_date: The last date on which you want action history.
+    """
+    values = {'start_date': str(start_date),
+              'end_date': str(end_date)}
+
+    # Enforce start and end date.
+    conds = 'timestamp >= %(start_date)s'
+    if end_date:
+      conds += ' AND timestamp <= %(end_date)s'
+
+    changes = ('SELECT DISTINCT change_number, patch_number, change_source '
+               'FROM clActionTable WHERE %s' % conds)
+    query = '%s NATURAL JOIN (%s) as w' % (self._SQL_FETCH_ACTIONS, changes)
+    results = self._Execute(query, values).fetchall()
+    return [clactions.CLAction(*values) for values in results]
 
 
 class CIDBConnectionFactory(object):
@@ -847,10 +1050,24 @@ class CIDBConnectionFactory(object):
     """
     if cls._ConnectionIsSetup:
       assert (cls._ConnectionType == cls._CONNECTION_TYPE_MOCK or
-              cls._ConnectionType == cls._CONNECTION_TYPE_NONE) , (
-          'A non-mock CIDB is already set up.')
+              cls._ConnectionType == cls._CONNECTION_TYPE_NONE), (
+                  'A non-mock CIDB is already set up.')
     cls._ConnectionType = cls._CONNECTION_TYPE_NONE
     cls._ConnectionIsSetup = True
+
+
+  @classmethod
+  def ClearMock(cls):
+    """Clear a mock CIDB object.
+
+    This method clears a cidb mock object, but leaves the connection factory
+    in _CONNECTION_TYPE_MOCK, so that future calls to set up a non-mock
+    cidb will fail.
+    """
+    assert cls._ConnectionType == cls._CONNECTION_TYPE_MOCK, (
+        'CIDB is not set for mock use.')
+    cls._ConnectionIsSetup = False
+    cls._MockCIDB = None
 
 
   @classmethod

@@ -32,6 +32,7 @@ class AppViewGuest : public GuestView<AppViewGuest>,
       const std::string& guest_extension_id);
 
   static GuestViewBase* Create(content::BrowserContext* browser_context,
+                               content::WebContents* owner_web_contents,
                                int guest_instance_id);
 
   // ExtensionFunctionDispatcher::Delegate implementation.
@@ -43,20 +44,29 @@ class AppViewGuest : public GuestView<AppViewGuest>,
 
   // content::WebContentsDelegate implementation.
   bool HandleContextMenu(const content::ContextMenuParams& params) override;
+  void RequestMediaAccessPermission(
+      content::WebContents* web_contents,
+      const content::MediaStreamRequest& request,
+      const content::MediaResponseCallback& callback) override;
+  bool CheckMediaAccessPermission(content::WebContents* web_contents,
+                                  const GURL& security_origin,
+                                  content::MediaStreamType type) override;
 
   // GuestViewBase implementation.
   const char* GetAPINamespace() const override;
   int GetTaskPrefix() const override;
-  void CreateWebContents(const std::string& embedder_extension_id,
-                         int embedder_render_process_id,
-                         const GURL& embedder_site_url,
-                         const base::DictionaryValue& create_params,
+  void CreateWebContents(const base::DictionaryValue& create_params,
                          const WebContentsCreatedCallback& callback) override;
   void DidAttachToEmbedder() override;
   void DidInitialize() override;
 
+  // Sets the AppDelegate for this guest.
+  void SetAppDelegateForTest(AppDelegate* delegate);
+
  private:
-  AppViewGuest(content::BrowserContext* browser_context, int guest_instance_id);
+  AppViewGuest(content::BrowserContext* browser_context,
+               content::WebContents* owner_web_contents,
+               int guest_instance_id);
 
   ~AppViewGuest() override;
 
@@ -74,6 +84,7 @@ class AppViewGuest : public GuestView<AppViewGuest>,
   std::string guest_extension_id_;
   scoped_ptr<ExtensionFunctionDispatcher> extension_function_dispatcher_;
   scoped_ptr<AppViewGuestDelegate> app_view_guest_delegate_;
+  scoped_ptr<AppDelegate> app_delegate_;
 
   // This is used to ensure pending tasks will not fire after this object is
   // destroyed.

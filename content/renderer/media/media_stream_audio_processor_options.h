@@ -41,6 +41,7 @@ class CONTENT_EXPORT MediaAudioConstraints {
   static const char kGoogExperimentalAutoGainControl[];
   static const char kGoogNoiseSuppression[];
   static const char kGoogExperimentalNoiseSuppression[];
+  static const char kGoogBeamforming[];
   static const char kGoogHighpassFilter[];
   static const char kGoogTypingNoiseDetection[];
   static const char kGoogAudioMirroring[];
@@ -58,10 +59,6 @@ class CONTENT_EXPORT MediaAudioConstraints {
   MediaAudioConstraints(const blink::WebMediaConstraints& constraints,
                         int effects);
   virtual ~MediaAudioConstraints();
-
-  // Checks if any audio constraints are set that requires audio processing to
-  // be applied.
-  bool NeedsAudioProcessing();
 
   // Gets the property of the constraint named by |key| in |constraints_|.
   // Returns the constraint's value if the key is found; Otherwise returns the

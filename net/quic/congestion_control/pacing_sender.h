@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// A send algorithm which adds pacing on top of an another send algorithm.
-// It uses the underlying sender's bandwidth estimate to determine the
-// pacing rate to be used.  It also takes into consideration the expected
-// resolution of the underlying alarm mechanism to ensure that alarms are
-// not set too aggressively, and to smooth out variations.
+// A send algorithm that adds pacing on top of an another send algorithm.
+// It uses the underlying sender's pacing rate to schedule packets.
+// It also takes into consideration the expected granularity of the underlying
+// alarm to ensure that alarms are not set too aggressively, and err towards
+// sending packets too early instead of too late.
 
 #ifndef NET_QUIC_CONGESTION_CONTROL_PACING_SENDER_H_
 #define NET_QUIC_CONGESTION_CONTROL_PACING_SENDER_H_
@@ -16,6 +16,7 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "net/quic/congestion_control/send_algorithm_interface.h"
+#include "net/quic/crypto/cached_network_parameters.h"
 #include "net/quic/quic_bandwidth.h"
 #include "net/quic/quic_config.h"
 #include "net/quic/quic_protocol.h"
@@ -35,7 +36,11 @@ class NET_EXPORT_PRIVATE PacingSender : public SendAlgorithmInterface {
   ~PacingSender() override;
 
   // SendAlgorithmInterface methods.
-  void SetFromConfig(const QuicConfig& config, bool is_server) override;
+  void SetFromConfig(const QuicConfig& config,
+                     bool is_server,
+                     bool using_pacing) override;
+  bool ResumeConnectionState(
+      const CachedNetworkParameters& cached_network_params) override;
   void SetNumEmulatedConnections(int num_connections) override;
   void OnCongestionEvent(bool rtt_updated,
                          QuicByteCount bytes_in_flight,
@@ -61,15 +66,19 @@ class NET_EXPORT_PRIVATE PacingSender : public SendAlgorithmInterface {
   bool InRecovery() const override;
   QuicByteCount GetSlowStartThreshold() const override;
   CongestionControlType GetCongestionControlType() const override;
+  // End implementation of SendAlgorithmInterface.
 
  private:
   scoped_ptr<SendAlgorithmInterface> sender_;  // Underlying sender.
-  QuicTime::Delta alarm_granularity_;
-  uint32 initial_packet_burst_;
-  mutable uint32 burst_tokens_;
+  // The estimated system alarm granularity.
+  const QuicTime::Delta alarm_granularity_;
+  // Configured size of the burst coming out of quiescence.
+  const uint32 initial_packet_burst_;
+  // Number of unpaced packets to be sent before packets are delayed.
+  uint32 burst_tokens_;
   // Send time of the last packet considered delayed.
   QuicTime last_delayed_packet_sent_time_;
-  QuicTime next_packet_send_time_;  // When can the next packet be sent.
+  QuicTime ideal_next_packet_send_time_;  // When can the next packet be sent.
   mutable bool was_last_send_delayed_;  // True when the last send was delayed.
 
   DISALLOW_COPY_AND_ASSIGN(PacingSender);

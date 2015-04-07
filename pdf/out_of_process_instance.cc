@@ -41,10 +41,6 @@
 #include "ppapi/cpp/var_dictionary.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
-#if defined(OS_MACOSX)
-#include "base/mac/mac_util.h"
-#endif
-
 namespace chrome_pdf {
 
 const char kChromePrint[] = "chrome://print/";
@@ -84,6 +80,8 @@ const char kJSGetPasswordCompleteType[] = "getPasswordComplete";
 const char kJSPassword[] = "password";
 // Print (Page -> Plugin)
 const char kJSPrintType[] = "print";
+// Save (Page -> Plugin)
+const char kJSSaveType[] = "save";
 // Go to page (Plugin -> Page)
 const char kJSGoToPageType[] = "goToPage";
 const char kJSPageNumber[] = "page";
@@ -165,9 +163,22 @@ void Transform(PP_Instance instance, PP_PrivatePageTransformType type) {
   }
 }
 
+PP_Bool GetPrintPresetOptionsFromDocument(
+    PP_Instance instance,
+    PP_PdfPrintPresetOptions_Dev* options) {
+  void* object = pp::Instance::GetPerInstanceObject(instance, kPPPPdfInterface);
+  if (object) {
+    OutOfProcessInstance* obj_instance =
+        static_cast<OutOfProcessInstance*>(object);
+    obj_instance->GetPrintPresetOptionsFromDocument(options);
+  }
+  return PP_TRUE;
+}
+
 const PPP_Pdf ppp_private = {
   &GetLinkAtPosition,
-  &Transform
+  &Transform,
+  &GetPrintPresetOptionsFromDocument
 };
 
 int ExtractPrintPreviewPageIndex(const std::string& src_url) {
@@ -379,6 +390,8 @@ void OutOfProcessInstance::HandleMessage(const pp::Var& message) {
     }
   } else if (type == kJSPrintType) {
     Print();
+  } else if (type == kJSSaveType) {
+    pp::PDF::SaveAs(this);
   } else if (type == kJSRotateClockwiseType) {
     RotateClockwise();
   } else if (type == kJSRotateCounterclockwiseType) {
@@ -537,6 +550,12 @@ void OutOfProcessInstance::DidChangeView(const pp::View& view) {
     engine_->ScrolledToXPosition(scroll_offset_float.x() * device_scale_);
     engine_->ScrolledToYPosition(scroll_offset_float.y() * device_scale_);
   }
+}
+
+void OutOfProcessInstance::GetPrintPresetOptionsFromDocument(
+    PP_PdfPrintPresetOptions_Dev* options) {
+  options->is_scaling_disabled = PP_FromBool(IsPrintScalingDisabled());
+  options->copies = engine_->GetCopiesToPrint();
 }
 
 pp::Var OutOfProcessInstance::GetLinkAtPosition(

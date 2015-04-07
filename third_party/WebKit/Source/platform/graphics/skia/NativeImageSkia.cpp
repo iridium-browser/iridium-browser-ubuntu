@@ -32,6 +32,7 @@
 #include "platform/graphics/skia/NativeImageSkia.h"
 
 #include "platform/PlatformInstrumentation.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/TraceEvent.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/graphics/DeferredImageDecoder.h"
@@ -60,17 +61,18 @@ void NativeImageSkia::draw(
     bool isLazyDecoded = DeferredImageDecoder::isLazyDecoded(bitmap());
     bool isOpaque = bitmap().isOpaque();
 
-    SkPaint paint;
-    context->preparePaintForDrawRectToRect(&paint, srcRect, destRect, compositeOp, blendMode, !isOpaque, isLazyDecoded, isDataComplete());
-    // We want to filter it if we decided to do interpolation above, or if
-    // there is something interesting going on with the matrix (like a rotation).
-    // Note: for serialization, we will want to subset the bitmap first so we
-    // don't send extra pixels.
-    context->drawBitmapRect(bitmap(), &srcRect, destRect, &paint);
+    {
+        SkPaint paint;
+        OwnPtr<GraphicsContext::AutoCanvasRestorer> restorer = context->preparePaintForDrawRectToRect(&paint, srcRect, destRect, compositeOp, blendMode, !isOpaque, isLazyDecoded, isDataComplete());
+        // We want to filter it if we decided to do interpolation above, or if
+        // there is something interesting going on with the matrix (like a rotation).
+        // Note: for serialization, we will want to subset the bitmap first so we
+        // don't send extra pixels.
+        context->drawBitmapRect(bitmap(), &srcRect, destRect, &paint);
+    }
 
     if (isLazyDecoded)
         PlatformInstrumentation::didDrawLazyPixelRef(bitmap().getGenerationID());
-    context->didDrawRect(destRect, paint, &bitmap());
 }
 
 static SkBitmap createBitmapWithSpace(const SkBitmap& bitmap, int spaceWidth, int spaceHeight)
@@ -102,9 +104,6 @@ void NativeImageSkia::drawPattern(
         return; // nothing to draw
 
     SkMatrix totalMatrix = context->getTotalMatrix();
-    AffineTransform ctm = context->getCTM();
-    SkScalar ctmScaleX = ctm.xScale();
-    SkScalar ctmScaleY = ctm.yScale();
     totalMatrix.preScale(scale.width(), scale.height());
 
     // Figure out what size the bitmap will be in the destination. The
@@ -145,6 +144,15 @@ void NativeImageSkia::drawPattern(
     SkBitmap bitmapToPaint;
     bitmap().extractSubset(&bitmapToPaint, enclosingIntRect(normSrcRect));
     if (!repeatSpacing.isZero()) {
+        SkScalar ctmScaleX = 1.0;
+        SkScalar ctmScaleY = 1.0;
+
+        if (!RuntimeEnabledFeatures::slimmingPaintEnabled()) {
+            AffineTransform ctm = context->getCTM();
+            ctmScaleX = ctm.xScale();
+            ctmScaleY = ctm.yScale();
+        }
+
         bitmapToPaint = createBitmapWithSpace(
             bitmapToPaint,
             repeatSpacing.width() * ctmScaleX / scale.width(),

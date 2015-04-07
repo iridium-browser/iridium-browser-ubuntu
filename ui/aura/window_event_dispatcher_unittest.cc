@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
+#include "base/thread_task_runner_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/event_client.h"
@@ -29,8 +30,8 @@
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/events/test/test_event_handler.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/transform.h"
 
@@ -449,7 +450,8 @@ class EventFilterRecorder : public ui::EventHandler {
   typedef std::vector<int> EventFlags;
 
   EventFilterRecorder()
-      : wait_until_event_(ui::ET_UNKNOWN) {
+      : wait_until_event_(ui::ET_UNKNOWN),
+        last_touch_may_cause_scrolling_(false) {
   }
 
   const Events& events() const { return events_; }
@@ -478,6 +480,7 @@ class EventFilterRecorder : public ui::EventHandler {
     touch_locations_.clear();
     gesture_locations_.clear();
     mouse_event_flags_.clear();
+    last_touch_may_cause_scrolling_ = false;
   }
 
   // ui::EventHandler overrides:
@@ -497,6 +500,7 @@ class EventFilterRecorder : public ui::EventHandler {
 
   void OnTouchEvent(ui::TouchEvent* event) override {
     touch_locations_.push_back(event->location());
+    last_touch_may_cause_scrolling_ = event->may_cause_scrolling();
   }
 
   void OnGestureEvent(ui::GestureEvent* event) override {
@@ -505,6 +509,10 @@ class EventFilterRecorder : public ui::EventHandler {
 
   bool HasReceivedEvent(ui::EventType type) {
     return std::find(events_.begin(), events_.end(), type) != events_.end();
+  }
+
+  bool LastTouchMayCauseScrolling() const {
+    return last_touch_may_cause_scrolling_;
   }
 
  private:
@@ -516,6 +524,7 @@ class EventFilterRecorder : public ui::EventHandler {
   EventLocations touch_locations_;
   EventLocations gesture_locations_;
   EventFlags mouse_event_flags_;
+  bool last_touch_may_cause_scrolling_;
 
   DISALLOW_COPY_AND_ASSIGN(EventFilterRecorder);
 };
@@ -805,6 +814,36 @@ TEST_F(WindowEventDispatcherTest, TouchMovesHeld) {
   host()->dispatcher()->ReleasePointerMoves();
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(recorder.events().empty());
+}
+
+// Tests that mouse move event has a right location
+// when there isn't the target window
+TEST_F(WindowEventDispatcherTest, MouseEventWithoutTargetWindow) {
+  EventFilterRecorder recorder_first;
+  EventFilterRecorder recorder_second;
+
+  test::TestWindowDelegate delegate;
+  scoped_ptr<aura::Window> window_first(CreateTestWindowWithDelegate(
+      &delegate, 1, gfx::Rect(20, 10, 10, 20), root_window()));
+  window_first->Show();
+  window_first->AddPreTargetHandler(&recorder_first);
+
+  scoped_ptr<aura::Window> window_second(CreateTestWindowWithDelegate(
+      &delegate, 2, gfx::Rect(20, 30, 10, 20), root_window()));
+  window_second->Show();
+  window_second->AddPreTargetHandler(&recorder_second);
+
+  const gfx::Point event_location(22, 33);
+  ui::MouseEvent mouse(ui::ET_MOUSE_MOVED, event_location, event_location, 0,
+                       0);
+  DispatchEventUsingWindowDispatcher(&mouse);
+
+  EXPECT_TRUE(recorder_first.events().empty());
+  EXPECT_EQ("MOUSE_ENTERED MOUSE_MOVED",
+            EventTypesToString(recorder_second.events()));
+  ASSERT_EQ(2u, recorder_second.mouse_locations().size());
+  EXPECT_EQ(gfx::Point(2, 3).ToString(),
+            recorder_second.mouse_locations()[0].ToString());
 }
 
 // Verifies that a direct call to ProcessedTouchEvent() with a
@@ -1946,6 +1985,10 @@ class WindowEventDispatcherTestInHighDPI : public WindowEventDispatcherTest {
   WindowEventDispatcherTestInHighDPI() {}
   ~WindowEventDispatcherTestInHighDPI() override {}
 
+  void DispatchEvent(ui::Event* event) {
+    DispatchEventUsingWindowDispatcher(event);
+  }
+
  protected:
   void SetUp() override {
     WindowEventDispatcherTest::SetUp();
@@ -2018,6 +2061,75 @@ TEST_F(WindowEventDispatcherTestInHighDPI, TouchMovesHeldOnScroll) {
             recorder.touch_locations()[0].ToString());
   EXPECT_EQ(gfx::Point(-40, 10).ToString(),
             recorder.touch_locations()[1].ToString());
+}
+
+// This handler triggers a nested message loop when it receives a right click
+// event, and runs a single callback in the nested message loop.
+class TriggerNestedLoopOnRightMousePress : public ui::test::TestEventHandler {
+ public:
+  explicit TriggerNestedLoopOnRightMousePress(const base::Closure& callback)
+      : callback_(callback) {}
+  ~TriggerNestedLoopOnRightMousePress() override {}
+
+  const gfx::Point mouse_move_location() const { return mouse_move_location_; }
+
+ private:
+  void OnMouseEvent(ui::MouseEvent* mouse) override {
+    TestEventHandler::OnMouseEvent(mouse);
+    if (mouse->type() == ui::ET_MOUSE_PRESSED &&
+        mouse->IsOnlyRightMouseButton()) {
+      base::MessageLoop::ScopedNestableTaskAllower allow(
+          base::MessageLoopForUI::current());
+      base::RunLoop run_loop;
+      scoped_refptr<base::TaskRunner> task_runner =
+          base::ThreadTaskRunnerHandle::Get();
+      if (!callback_.is_null())
+        task_runner->PostTask(FROM_HERE, callback_);
+      task_runner->PostTask(FROM_HERE, run_loop.QuitClosure());
+      run_loop.Run();
+    } else if (mouse->type() == ui::ET_MOUSE_MOVED) {
+      mouse_move_location_ = mouse->location();
+    }
+  }
+
+  base::Closure callback_;
+  gfx::Point mouse_move_location_;
+
+  DISALLOW_COPY_AND_ASSIGN(TriggerNestedLoopOnRightMousePress);
+};
+
+// Tests that if dispatching a 'held' event triggers a nested message loop, then
+// the events that are dispatched from the nested message loop are transformed
+// correctly.
+TEST_F(WindowEventDispatcherTestInHighDPI,
+       EventsTransformedInRepostedEventTriggeredNestedLoop) {
+  scoped_ptr<Window> window(CreateNormalWindow(1, root_window(), NULL));
+  // Make sure the window is visible.
+  RunAllPendingInMessageLoop();
+
+  ui::MouseEvent mouse_move(ui::ET_MOUSE_MOVED, gfx::Point(80, 80),
+                            gfx::Point(80, 80), ui::EF_NONE, ui::EF_NONE);
+  const base::Closure callback_on_right_click = base::Bind(
+      base::IgnoreResult(&WindowEventDispatcherTestInHighDPI::DispatchEvent),
+      base::Unretained(this), base::Unretained(&mouse_move));
+  TriggerNestedLoopOnRightMousePress handler(callback_on_right_click);
+  window->AddPreTargetHandler(&handler);
+
+  scoped_ptr<ui::MouseEvent> mouse(new ui::MouseEvent(
+      ui::ET_MOUSE_PRESSED, gfx::Point(10, 10), gfx::Point(10, 10),
+      ui::EF_RIGHT_MOUSE_BUTTON, ui::EF_RIGHT_MOUSE_BUTTON));
+  host()->dispatcher()->RepostEvent(*mouse);
+  EXPECT_EQ(0, handler.num_mouse_events());
+
+  base::RunLoop run_loop;
+  run_loop.RunUntilIdle();
+  // The window should receive the mouse-press and the mouse-move events.
+  EXPECT_EQ(2, handler.num_mouse_events());
+  // The mouse-move event location should be transformed because of the DSF
+  // before it reaches the window.
+  EXPECT_EQ(gfx::Point(40, 40).ToString(),
+            handler.mouse_move_location().ToString());
+  window->RemovePreTargetHandler(&handler);
 }
 
 class SelfDestructDelegate : public test::TestWindowDelegate {
@@ -2333,6 +2445,7 @@ class AsyncWindowDelegate : public test::TestWindowDelegate {
   void OnTouchEvent(ui::TouchEvent* event) override {
     // Convert touch event back to root window coordinates.
     event->ConvertLocationToTarget(window_, window_->GetRootWindow());
+    event->DisableSynchronousHandling();
     dispatcher_->ProcessedTouchEvent(event, window_, ui::ER_UNHANDLED);
     event->StopPropagation();
   }
@@ -2377,4 +2490,51 @@ TEST_F(WindowEventDispatcherTest, GestureEventCoordinates) {
             recorder.gesture_locations()[0].ToString());
 }
 
+// Tests that a scroll-generating touch-event is marked as such.
+TEST_F(WindowEventDispatcherTest, TouchMovesMarkedWhenCausingScroll) {
+  EventFilterRecorder recorder;
+  root_window()->AddPreTargetHandler(&recorder);
+
+  const gfx::Point location(20, 20);
+  ui::TouchEvent press(
+      ui::ET_TOUCH_PRESSED, location, 0, ui::EventTimeForNow());
+  DispatchEventUsingWindowDispatcher(&press);
+  EXPECT_FALSE(recorder.LastTouchMayCauseScrolling());
+  EXPECT_TRUE(recorder.HasReceivedEvent(ui::ET_TOUCH_PRESSED));
+  recorder.Reset();
+
+  ui::TouchEvent move(ui::ET_TOUCH_MOVED,
+                      location + gfx::Vector2d(100, 100),
+                      0,
+                      ui::EventTimeForNow());
+  DispatchEventUsingWindowDispatcher(&move);
+  EXPECT_TRUE(recorder.LastTouchMayCauseScrolling());
+  EXPECT_TRUE(recorder.HasReceivedEvent(ui::ET_TOUCH_MOVED));
+  EXPECT_TRUE(recorder.HasReceivedEvent(ui::ET_GESTURE_SCROLL_BEGIN));
+  EXPECT_TRUE(recorder.HasReceivedEvent(ui::ET_GESTURE_SCROLL_UPDATE));
+  recorder.Reset();
+
+  ui::TouchEvent move2(ui::ET_TOUCH_MOVED,
+                       location + gfx::Vector2d(200, 200),
+                       0,
+                       ui::EventTimeForNow());
+  DispatchEventUsingWindowDispatcher(&move2);
+  EXPECT_TRUE(recorder.LastTouchMayCauseScrolling());
+  EXPECT_TRUE(recorder.HasReceivedEvent(ui::ET_TOUCH_MOVED));
+  EXPECT_TRUE(recorder.HasReceivedEvent(ui::ET_GESTURE_SCROLL_UPDATE));
+  recorder.Reset();
+
+  // Delay the release to avoid fling generation.
+  ui::TouchEvent release(
+      ui::ET_TOUCH_RELEASED,
+      location + gfx::Vector2dF(200, 200),
+      0,
+      ui::EventTimeForNow() + base::TimeDelta::FromSeconds(1));
+  DispatchEventUsingWindowDispatcher(&release);
+  EXPECT_FALSE(recorder.LastTouchMayCauseScrolling());
+  EXPECT_TRUE(recorder.HasReceivedEvent(ui::ET_TOUCH_RELEASED));
+  EXPECT_TRUE(recorder.HasReceivedEvent(ui::ET_GESTURE_SCROLL_END));
+
+  root_window()->RemovePreTargetHandler(&recorder);
+}
 }  // namespace aura

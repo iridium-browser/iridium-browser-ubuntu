@@ -17,6 +17,7 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
+#include "net/base/net_log.h"
 #include "net/base/net_util.h"
 #include "net/base/network_change_notifier.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -33,14 +34,18 @@ class URLRequestContextGetter;
 
 namespace data_reduction_proxy {
 
+class DataReductionProxyEventStore;
+class DataReductionProxyStatisticsPrefs;
+
 // The number of days of bandwidth usage statistics that are tracked.
 const unsigned int kNumDaysInHistory = 60;
 
 // The number of days of bandwidth usage statistics that are presented.
 const unsigned int kNumDaysInHistorySummary = 30;
 
-COMPILE_ASSERT(kNumDaysInHistorySummary <= kNumDaysInHistory,
-               DataReductionProxySettings_summary_too_long);
+static_assert(kNumDaysInHistorySummary <= kNumDaysInHistory,
+              "kNumDaysInHistorySummary should be no larger than "
+              "kNumDaysInHistory");
 
 // Values of the UMA DataReductionProxy.StartupState histogram.
 // This enum must remain synchronized with DataReductionProxyStartupState
@@ -104,22 +109,19 @@ class DataReductionProxySettings
   // |DataReductionProxySettings| instance.
   void InitDataReductionProxySettings(
       PrefService* prefs,
-      net::URLRequestContextGetter* url_request_context_getter);
-
-  // Initializes the data reduction proxy with profile and local state prefs,
-  // a |UrlRequestContextGetter| for canary probes, and a proxy configurator.
-  // The caller must ensure that all parameters remain alive for the lifetime of
-  // the |DataReductionProxySettings| instance.
-  // TODO(marq): Remove when iOS supports the new interface above.
-  void InitDataReductionProxySettings(
-      PrefService* prefs,
+      scoped_ptr<DataReductionProxyStatisticsPrefs> statistics_prefs,
       net::URLRequestContextGetter* url_request_context_getter,
-      DataReductionProxyConfigurator* configurator);
+      net::NetLog* net_log,
+      DataReductionProxyEventStore* event_store);
 
-  // Sets the |statistics_prefs_| to be used for data reduction proxy pref reads
-  // and writes.
-  void SetDataReductionProxyStatisticsPrefs(
-      DataReductionProxyStatisticsPrefs* statistics_prefs);
+  // Constructs statistics prefs. This should not be called if a valid
+  // statistics prefs is passed into the constructor.
+  void EnableCompressionStatisticsLogging(
+      PrefService* prefs,
+      scoped_refptr<base::SequencedTaskRunner> ui_task_runner,
+      const base::TimeDelta& commit_delay);
+
+  base::WeakPtr<DataReductionProxyStatisticsPrefs> statistics_prefs();
 
   // Sets the |on_data_reduction_proxy_enabled_| callback and runs to register
   // the DataReductionProxyEnabled synthetic field trial.
@@ -185,6 +187,16 @@ class DataReductionProxySettings
   // determine server availability. |at_startup| is true when this method is
   // called in response to creating or loading a new profile.
   void MaybeActivateDataReductionProxy(bool at_startup);
+
+  // Returns the event store being used. May be null if
+  // InitDataReductionProxySettings has not been called.
+  DataReductionProxyEventStore* GetEventStore() const {
+    return event_store_;
+  }
+
+  // Used for testing.
+  void SetDataReductionProxyStatisticsPrefs(
+      scoped_ptr<DataReductionProxyStatisticsPrefs> statistics_prefs);
 
  protected:
   void InitPrefMembers();
@@ -301,13 +313,25 @@ class DataReductionProxySettings
 
   scoped_ptr<net::URLFetcher> fetcher_;
 
+  // A new BoundNetLog is created for each canary check so that we can correlate
+  // the request begin/end phases.
+  net::BoundNetLog bound_net_log_;
+
   BooleanPrefMember spdy_proxy_auth_enabled_;
   BooleanPrefMember data_reduction_proxy_alternative_enabled_;
 
   PrefService* prefs_;
-  DataReductionProxyStatisticsPrefs* statistics_prefs_;
+  scoped_ptr<DataReductionProxyStatisticsPrefs> statistics_prefs_;
 
   net::URLRequestContextGetter* url_request_context_getter_;
+
+  // The caller must ensure that the |net_log_|, if set, outlives this instance.
+  // It is used to create new instances of |bound_net_log_| on canary
+  // requests.
+  net::NetLog* net_log_;
+
+  // The caller must ensure that the |event_store_| outlives this instance.
+  DataReductionProxyEventStore* event_store_;
 
   base::Callback<void(bool)> on_data_reduction_proxy_enabled_;
 

@@ -5,63 +5,136 @@
 import("//native_client/build/config/sysroot.gni")
 import("//native_client/build/toolchain/nacl_toolchain.gni")
 
-nacl_toolchain("newlib_arm") {
-  nacl_libc = "newlib"
-  package_arch = "arm"
-  toolchain_cpu_arch = "arm"
-  toolprefix = "toolchain/${os}_x86/nacl_arm_newlib/bin/arm-nacl-"
+declare_args() {
+  nacl_toolchain_dir = rebase_path("//native_client/toolchain", root_build_dir)
+}
 
-  cc = "gcc"
-  cxx = "g++"
-  ar = "ar"
+os_toolchain_dir = "${nacl_toolchain_dir}/${os}_x86"
+
+nacl_toolchain("newlib_arm") {
+  toolchain_cpu_arch = "arm"
+  toolprefix = "${os_toolchain_dir}/nacl_arm_newlib/bin/arm-nacl-"
+
+  cc = toolprefix + "gcc"
+  cxx = toolprefix + "g++"
+  ar = toolprefix + "ar"
   ld = cxx
 }
 
 nacl_toolchain("newlib_x86") {
-  nacl_libc = "newlib"
-  package_arch = "x86"
   toolchain_cpu_arch = "x86"
-  toolprefix = "toolchain/${os}_x86/nacl_x86_newlib/bin/i686-nacl-"
+  toolprefix = "${os_toolchain_dir}/nacl_x86_newlib/bin/i686-nacl-"
 
-  cc = "gcc"
-  cxx = "g++"
-  ar = "ar"
+  cc = toolprefix + "gcc"
+  cxx = toolprefix + "g++"
+  ar = toolprefix + "ar"
   ld = cxx
 }
 
 nacl_toolchain("newlib_x64") {
-  nacl_libc = "newlib"
-  package_arch = "x86"
   toolchain_cpu_arch = "x64"
-  toolprefix = "toolchain/${os}_x86/nacl_x86_newlib/bin/x86_64-nacl-"
+  toolprefix = "${os_toolchain_dir}/nacl_x86_newlib/bin/x86_64-nacl-"
 
-  cc = "gcc"
-  cxx = "g++"
-  ar = "ar"
+  cc = toolprefix + "gcc"
+  cxx = toolprefix + "g++"
+  ar = toolprefix + "ar"
   ld = cxx
 }
 
 nacl_toolchain("glibc_x86") {
-  nacl_libc = "glibc"
-  package_arch = "x86"
   toolchain_cpu_arch = "x86"
-  toolprefix = "toolchain/${os}_x86/nacl_x86_glibc/bin/i686-nacl-"
+  toolprefix = "${os_toolchain_dir}/nacl_x86_glibc/bin/i686-nacl-"
 
-  cc = "gcc"
-  cxx = "g++"
-  ar = "ar"
+  cc = toolprefix + "gcc"
+  cxx = toolprefix + "g++"
+  ar = toolprefix + "ar"
   ld = cxx
 }
 
 nacl_toolchain("glibc_x64") {
-  nacl_libc = "glibc"
-  package_arch = "x86"
   toolchain_cpu_arch = "x64"
-  toolprefix = "toolchain/${os}_x86/nacl_x86_glibc/bin/x86_64-nacl-"
+  toolprefix = "${os_toolchain_dir}/nacl_x86_glibc/bin/x86_64-nacl-"
 
-  cc = "gcc"
-  cxx = "g++"
-  ar = "ar"
+  cc = toolprefix + "gcc"
+  cxx = toolprefix + "g++"
+  ar = toolprefix + "ar"
   ld = cxx
 }
 
+nacl_toolchain("clang_newlib_x86") {
+  toolchain_cpu_arch = "x86"
+  toolprefix = "${os_toolchain_dir}/pnacl_newlib/bin/i686-nacl-"
+  is_clang = true
+
+  cc = toolprefix + "clang"
+  cxx = toolprefix + "clang++"
+  ar = toolprefix + "ar"
+  ld = cxx
+}
+
+nacl_toolchain("clang_newlib_x64") {
+  toolchain_cpu_arch = "x64"
+  toolprefix = "${os_toolchain_dir}/pnacl_newlib/bin/x86_64-nacl-"
+  is_clang = true
+
+  cc = toolprefix + "clang"
+  cxx = toolprefix + "clang++"
+  ar = toolprefix + "ar"
+  ld = cxx
+}
+
+link_irt = rebase_path("//native_client/build/link_irt.py", root_build_dir)
+
+nacl_toolchain("irt_x86") {
+  toolchain_cpu_arch = "x86"
+  toolprefix = "${os_toolchain_dir}/pnacl_newlib/bin/i686-nacl-"
+  is_clang = true
+
+  cc = toolprefix + "clang"
+  cxx = toolprefix + "clang++"
+  ar = toolprefix + "ar"
+  readelf = toolprefix + "readelf"
+  # Link with cc to avoid including any C++ libs.
+  ld = "${python_path} ${link_irt} --tls-edit=tls_edit --link-cmd=${cc} --readelf-cmd=${readelf}"
+
+  # TODO(ncbray): depend on link script
+  deps = [
+    "//native_client/src/tools/tls_edit:tls_edit($host_toolchain)",
+  ]
+}
+
+nacl_toolchain("irt_x64") {
+  toolchain_cpu_arch = "x64"
+  toolprefix = "${os_toolchain_dir}/pnacl_newlib/bin/x86_64-nacl-"
+  is_clang = true
+
+  cc = toolprefix + "clang"
+  cxx = toolprefix + "clang++"
+  ar = toolprefix + "ar"
+  readelf = toolprefix + "readelf"
+  # Link with cc to avoid including any C++ libs.
+  ld = "${python_path} ${link_irt} --tls-edit=tls_edit --link-cmd=${cc} --readelf-cmd=${readelf}"
+
+  # TODO(ncbray): depend on link script
+  deps = [
+    "//native_client/src/tools/tls_edit:tls_edit($host_toolchain)",
+  ]
+}
+
+# Uses newlib to match the Chrome build.
+nacl_toolchain("irt_arm") {
+  toolchain_cpu_arch = "arm"
+  toolprefix = "${os_toolchain_dir}/nacl_arm_newlib/bin/arm-nacl-"
+
+  cc = toolprefix + "gcc"
+  cxx = toolprefix + "g++"
+  ar = toolprefix + "ar"
+  readelf = toolprefix + "readelf"
+  # Link with cc to avoid including any C++ libs.
+  ld = "${python_path} ${link_irt} --tls-edit=tls_edit --link-cmd=${cc} --readelf-cmd=${readelf}"
+
+  # TODO(ncbray): depend on link script
+  deps = [
+    "//native_client/src/tools/tls_edit:tls_edit($host_toolchain)",
+  ]
+}

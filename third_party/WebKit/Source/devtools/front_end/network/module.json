@@ -16,12 +16,32 @@
             "type": "@WebInspector.Revealer",
             "contextTypes": ["WebInspector.NetworkRequest"],
             "className": "WebInspector.NetworkPanel.RequestRevealer"
+        },
+        {
+            "type": "ui-setting",
+            "section": "Network",
+            "title": "Show primary load waterfall",
+            "settingName": "networkShowPrimaryLoadWaterfall",
+            "settingType": "checkbox",
+            "experiment": "showPrimaryLoadWaterfallInNetworkTimeline"
+        },
+        {
+            "type": "ui-setting",
+            "section": "Network",
+            "title": "Color-code resource types",
+            "settingName": "networkColorCodeResourceTypes",
+            "settingType": "checkbox"
         }
     ],
     "dependencies": ["source_frame"],
     "scripts": [
+        "FilterSuggestionBuilder.js",
+        "HARWriter.js",
         "RequestView.js",
+        "NetworkDataGridNode.js",
         "NetworkItemView.js",
+        "NetworkTimeCalculator.js",
+        "NetworkLogView.js",
         "RequestCookiesView.js",
         "RequestHeadersView.js",
         "RequestHTMLView.js",

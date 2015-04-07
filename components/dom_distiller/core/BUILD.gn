@@ -7,6 +7,8 @@ source_set("core") {
   sources = [
     "../android/component_jni_registrar.cc",
     "../android/component_jni_registrar.h",
+    "article_attachments_data.cc",
+    "article_attachments_data.h",
     "article_distillation_update.cc",
     "article_distillation_update.h",
     "article_entry.cc",
@@ -52,7 +54,9 @@ source_set("core") {
   ]
   deps = [
     "//base",
+    "//base:prefs",
     "//components/leveldb_proto",
+    "//components/pref_registry",
     "//components/resources",
     "//components/strings",
     "//net",
@@ -72,7 +76,7 @@ source_set("core") {
 }
 
 # GYP version: components/dom_distiller.gypi:dom_distiller_test_support
-static_library("test_support") {
+source_set("test_support") {
   testonly = true
   sources = [
     "dom_distiller_test_util.cc",
@@ -85,10 +89,12 @@ static_library("test_support") {
 
   deps = [
     ":core",
+    "//base",
     "//components/leveldb_proto:test_support",
     "//sync",
     "//testing/gmock",
     "//testing/gtest",
+    "//url",
   ]
 }
 
@@ -111,8 +117,14 @@ source_set("unit_tests") {
   deps = [
     ":core",
     ":test_support",
+    "//base",
+    "//components/leveldb_proto:test_support",
+    "//components/pref_registry:test_support",
+    "//net:test_support",
+    "//sync",
     "//testing/gmock",
     "//testing/gtest",
+    "//url",
   ]
 }
 

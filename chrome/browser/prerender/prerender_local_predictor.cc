@@ -20,7 +20,6 @@
 #include "base/timer/timer.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
@@ -33,6 +32,7 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/common/prefetch_messages.h"
+#include "components/history/core/browser/history_db_task.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -307,14 +307,14 @@ bool IsLogOutURL(const GURL& url) {
 }
 
 int64 URLHashToInt64(const unsigned char* data) {
-  COMPILE_ASSERT(kURLHashSize < sizeof(int64), url_hash_must_fit_in_int64);
+  static_assert(kURLHashSize < sizeof(int64), "url hash must fit in int64");
   int64 value = 0;
   memcpy(&value, data, kURLHashSize);
   return value;
 }
 
 int64 GetInt64URLHashForURL(const GURL& url) {
-  COMPILE_ASSERT(kURLHashSize < sizeof(int64), url_hash_must_fit_in_int64);
+  static_assert(kURLHashSize < sizeof(int64), "url hash must fit in int64");
   scoped_ptr<crypto::SecureHash> hash(
       crypto::SecureHash::Create(crypto::SecureHash::SHA256));
   int64 hash_value = 0;
@@ -528,9 +528,9 @@ class PrerenderLocalPredictor::PrefetchList {
 PrerenderLocalPredictor::PrerenderLocalPredictor(
     PrerenderManager* prerender_manager)
     : prerender_manager_(prerender_manager),
-      is_history_service_observer_(false),
-      weak_factory_(this),
-      prefetch_list_(new PrefetchList()) {
+      prefetch_list_(new PrefetchList()),
+      history_service_observer_(this),
+      weak_factory_(this) {
   RecordEvent(EVENT_CONSTRUCTED);
   if (base::MessageLoop::current()) {
     timer_.Start(FROM_HERE,
@@ -583,12 +583,7 @@ PrerenderLocalPredictor::~PrerenderLocalPredictor() {
 
 void PrerenderLocalPredictor::Shutdown() {
   timer_.Stop();
-  if (is_history_service_observer_) {
-    HistoryService* history = GetHistoryIfExists();
-    CHECK(history);
-    history->RemoveObserver(this);
-    is_history_service_observer_ = false;
-  }
+  history_service_observer_.RemoveAll();
 }
 
 void PrerenderLocalPredictor::OnAddVisit(HistoryService* history_service,
@@ -1139,13 +1134,12 @@ void PrerenderLocalPredictor::Init() {
   }
   HistoryService* history = GetHistoryIfExists();
   if (history) {
-    CHECK(!is_history_service_observer_);
+    CHECK(!history_service_observer_.IsObserving(history));
     history->ScheduleDBTask(
         scoped_ptr<history::HistoryDBTask>(
             new GetVisitHistoryTask(this, kMaxVisitHistory)),
         &history_db_tracker_);
-    history->AddObserver(this);
-    is_history_service_observer_ = true;
+    history_service_observer_.Add(history);
   } else {
     RecordEvent(EVENT_INIT_FAILED_NO_HISTORY);
   }

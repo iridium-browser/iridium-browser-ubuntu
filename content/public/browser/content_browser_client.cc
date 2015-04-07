@@ -176,6 +176,14 @@ QuotaPermissionContext* ContentBrowserClient::CreateQuotaPermissionContext() {
   return NULL;
 }
 
+void ContentBrowserClient::SelectClientCertificate(
+    int render_process_id,
+    int render_frame_id,
+    net::SSLCertRequestInfo* cert_request_info,
+    const base::Callback<void(net::X509Certificate*)>& callback) {
+  callback.Run(NULL);
+}
+
 net::URLRequestContext* ContentBrowserClient::OverrideRequestContextForURL(
     const GURL& url, ResourceContext* context) {
   return NULL;
@@ -211,12 +219,9 @@ MediaObserver* ContentBrowserClient::GetMediaObserver() {
   return NULL;
 }
 
-blink::WebNotificationPermission
-ContentBrowserClient::CheckDesktopNotificationPermission(
-    const GURL& source_origin,
-    ResourceContext* context,
-    int render_process_id) {
-  return blink::WebNotificationPermissionAllowed;
+PlatformNotificationService*
+ContentBrowserClient::GetPlatformNotificationService() {
+  return NULL;
 }
 
 void ContentBrowserClient::RequestPermission(
@@ -227,6 +232,14 @@ void ContentBrowserClient::RequestPermission(
     bool user_gesture,
     const base::Callback<void(bool)>& result_callback) {
   result_callback.Run(true);
+}
+
+PermissionStatus ContentBrowserClient::GetPermissionStatus(
+    PermissionType permission,
+    BrowserContext* browser_context,
+    const GURL& requesting_origin,
+    const GURL& embedding_origin) {
+  return PERMISSION_STATUS_DENIED;
 }
 
 bool ContentBrowserClient::CanCreateWindow(
@@ -249,7 +262,7 @@ bool ContentBrowserClient::CanCreateWindow(
 }
 
 SpeechRecognitionManagerDelegate*
-    ContentBrowserClient::GetSpeechRecognitionManagerDelegate() {
+    ContentBrowserClient::CreateSpeechRecognitionManagerDelegate() {
   return NULL;
 }
 
@@ -295,10 +308,6 @@ LocationProvider* ContentBrowserClient::OverrideSystemLocationProvider() {
   return NULL;
 }
 
-VibrationProvider* ContentBrowserClient::OverrideVibrationProvider() {
-  return NULL;
-}
-
 DevToolsManagerDelegate* ContentBrowserClient::GetDevToolsManagerDelegate() {
   return NULL;
 }
@@ -320,6 +329,13 @@ net::CookieStore* ContentBrowserClient::OverrideCookieStoreForRenderProcess(
   return NULL;
 }
 
+bool ContentBrowserClient::CheckMediaAccessPermission(
+    BrowserContext* browser_context,
+    const GURL& security_origin,
+    MediaStreamType type) {
+  return false;
+}
+
 #if defined(OS_WIN)
 const wchar_t* ContentBrowserClient::GetResourceDllName() {
   return NULL;
@@ -333,12 +349,5 @@ ContentBrowserClient::OverrideCreateExternalVideoSurfaceContainer(
   return NULL;
 }
 #endif
-
-bool ContentBrowserClient::CheckMediaAccessPermission(
-    BrowserContext* browser_context,
-    const GURL& security_origin,
-    MediaStreamType type) {
-  return false;
-}
 
 }  // namespace content

@@ -7,7 +7,7 @@
 #include <GL/osmesa.h>
 
 #include "base/logging.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_surface.h"
 
@@ -123,7 +123,7 @@ void* GLContextOSMesa::GetHandle() {
   return context_;
 }
 
-void GLContextOSMesa::SetSwapInterval(int interval) {
+void GLContextOSMesa::OnSetSwapInterval(int interval) {
   DCHECK(IsCurrent(NULL));
 }
 

@@ -181,7 +181,8 @@ void RenderLayerModelObject::invalidateTreeIfNeeded(const PaintInvalidationState
 
     bool establishesNewPaintInvalidationContainer = isPaintInvalidationContainer();
     const RenderLayerModelObject& newPaintInvalidationContainer = *adjustCompositedContainerForSpecialAncestors(establishesNewPaintInvalidationContainer ? this : &paintInvalidationState.paintInvalidationContainer());
-    ASSERT(&newPaintInvalidationContainer == containerForPaintInvalidation());
+    // FIXME: This assert should be re-enabled when we move paint invalidation to after compositing update. crbug.com/360286
+    // ASSERT(&newPaintInvalidationContainer == containerForPaintInvalidation());
 
     PaintInvalidationReason reason = invalidatePaintIfNeeded(paintInvalidationState, newPaintInvalidationContainer);
     clearPaintInvalidationState(paintInvalidationState);
@@ -207,6 +208,36 @@ void RenderLayerModelObject::setBackingNeedsPaintInvalidationInRect(const Layout
         }
     } else {
         layer()->compositedLayerMapping()->setContentsNeedDisplayInRect(r, invalidationReason);
+    }
+}
+
+void RenderLayerModelObject::addChildFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoint& additionalOffset) const
+{
+    for (RenderObject* current = slowFirstChild(); current; current = current->nextSibling()) {
+        if (current->isText() || current->isListMarker())
+            continue;
+
+        if (!current->isBox()) {
+            current->addFocusRingRects(rects, additionalOffset);
+            continue;
+        }
+
+        RenderBox* box = toRenderBox(current);
+        if (!box->hasLayer()) {
+            box->addFocusRingRects(rects, additionalOffset + box->locationOffset());
+            continue;
+        }
+
+        Vector<LayoutRect> layerFocusRingRects;
+        box->addFocusRingRects(layerFocusRingRects, LayoutPoint());
+        for (size_t i = 0; i < layerFocusRingRects.size(); ++i) {
+            FloatQuad quadInBox = box->localToContainerQuad(FloatQuad(layerFocusRingRects[i]), this);
+            LayoutRect rect = LayoutRect(quadInBox.boundingBox());
+            if (!rect.isEmpty()) {
+                rect.moveBy(additionalOffset);
+                rects.append(rect);
+            }
+        }
     }
 }
 

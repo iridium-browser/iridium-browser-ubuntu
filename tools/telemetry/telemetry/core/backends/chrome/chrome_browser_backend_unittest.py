@@ -4,10 +4,16 @@
 
 import unittest
 
-from telemetry.core import forwarders
 from telemetry.core import wpr_modes
 from telemetry.core.backends.chrome import chrome_browser_backend
 
+
+class FakePlatformBackend(object):
+  def __init__(self, wpr_http_device_port, wpr_https_device_port,
+               is_host_platform):
+    self.wpr_http_device_port = wpr_http_device_port
+    self.wpr_https_device_port = wpr_https_device_port
+    self.is_host_platform = is_host_platform
 
 class FakeBrowserOptions(object):
   def __init__(self, netsim=False, wpr_mode=wpr_modes.WPR_OFF):
@@ -27,9 +33,12 @@ class FakeForwarderFactory(object):
 class TestChromeBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
   # The test does not need to define the abstract methods. pylint: disable=W0223
 
-  def __init__(self, browser_options, does_forwarder_override_dns=False):
+  def __init__(self, browser_options, does_forwarder_override_dns=False,
+               wpr_http_device_port=None, wpr_https_device_port=None,
+               is_running_locally=False):
     super(TestChromeBrowserBackend, self).__init__(
-        platform_backend=None,
+        platform_backend=FakePlatformBackend(
+            wpr_http_device_port, wpr_https_device_port, is_running_locally),
         supports_tab_control=False,
         supports_extensions=False,
         browser_options=browser_options,
@@ -46,22 +55,17 @@ class ReplayStartupArgsTest(unittest.TestCase):
     browser_backend = TestChromeBrowserBackend(browser_options)
     self.assertEqual([], browser_backend.GetReplayBrowserStartupArgs())
 
-  def testReplayOnGivesBasicArgs(self):
+  def BasicArgsHelper(self, is_running_locally):
+    # Covers Android without RNDIS and CrOS.
     browser_options = FakeBrowserOptions(
         wpr_mode=wpr_modes.WPR_REPLAY,
         netsim=False)
-    browser_backend = TestChromeBrowserBackend(browser_options)
-    self.assertEqual((0, 0), tuple(browser_backend.wpr_port_pairs.http))
-    self.assertEqual((0, 0), tuple(browser_backend.wpr_port_pairs.https))
-    self.assertEqual(None, browser_backend.wpr_port_pairs.dns)
-
-    # When Replay is started, it fills in the actual port values.
-    # Use different values here to show that the args get the
-    # remote port values.
-    browser_backend.wpr_port_pairs = forwarders.PortPairs(
-        http=forwarders.PortPair(123, 456),
-        https=forwarders.PortPair(234, 567),
-        dns=None)
+    browser_backend = TestChromeBrowserBackend(
+        browser_options,
+        does_forwarder_override_dns=False,
+        wpr_http_device_port=456,
+        wpr_https_device_port=567,
+        is_running_locally=is_running_locally)
     expected_args = [
         '--host-resolver-rules=MAP * 127.0.0.1,EXCLUDE localhost',
         '--ignore-certificate-errors',
@@ -72,32 +76,64 @@ class ReplayStartupArgsTest(unittest.TestCase):
         expected_args,
         sorted(browser_backend.GetReplayBrowserStartupArgs()))
 
-  def testNetsimGivesNoHostResolver(self):
+  def testBasicArgs(self):
+    # The result is the same regardless of whether running locally.
+    self.BasicArgsHelper(is_running_locally=True)
+    self.BasicArgsHelper(is_running_locally=False)
+
+  def testDesktopNetsimGivesNoFixedPortsNorHostResolverRules(self):
     browser_options = FakeBrowserOptions(
         wpr_mode=wpr_modes.WPR_REPLAY,
         netsim=True)
-    browser_backend = TestChromeBrowserBackend(browser_options)
-    self.assertEqual((80, 80), tuple(browser_backend.wpr_port_pairs.http))
-    self.assertEqual((443, 443), tuple(browser_backend.wpr_port_pairs.https))
-    self.assertEqual((53, 53), tuple(browser_backend.wpr_port_pairs.dns))
+    browser_backend = TestChromeBrowserBackend(
+        browser_options,
+        does_forwarder_override_dns=False,
+        wpr_http_device_port=80,
+        wpr_https_device_port=443,
+        is_running_locally=True)
     expected_args = ['--ignore-certificate-errors']
     self.assertEqual(
         expected_args,
         sorted(browser_backend.GetReplayBrowserStartupArgs()))
 
-  def testForwaderOverridesDnsGivesNoHostResolver(self):
+  def ForwarderOverridesDnsHelper(self, is_netsim):
     # Android with --use-rndis uses standard remote ports and
     # relies on the forwarder to override DNS resolution.
     browser_options = FakeBrowserOptions(
         wpr_mode=wpr_modes.WPR_REPLAY,
-        netsim=False)
+        netsim=is_netsim)
     browser_backend = TestChromeBrowserBackend(
-        browser_options, does_forwarder_override_dns=True)
-    browser_backend.wpr_port_pairs = forwarders.PortPairs(
-        http=forwarders.PortPair(123, 80),
-        https=forwarders.PortPair(234, 443),
-        dns=forwarders.PortPair(345, 53))
+        browser_options,
+        does_forwarder_override_dns=True,
+        wpr_http_device_port=80,
+        wpr_https_device_port=443,
+        is_running_locally=False)
     expected_args = ['--ignore-certificate-errors']
     self.assertEqual(
         expected_args,
         sorted(browser_backend.GetReplayBrowserStartupArgs()))
+
+  def testAndroidRndisGivesNoFixedPortsNorHostResolverRules(self):
+    # The result is the same regardless of netsim setting.
+    self.ForwarderOverridesDnsHelper(is_netsim=True)
+    self.ForwarderOverridesDnsHelper(is_netsim=False)
+
+  def testRemoteCrOsNetsimStillUsesHostResolver(self):
+    # CrOS has not implemented the forwarder override for DNS.
+    browser_options = FakeBrowserOptions(
+        wpr_mode=wpr_modes.WPR_REPLAY,
+        netsim=True)
+    browser_backend = TestChromeBrowserBackend(
+        browser_options,
+        does_forwarder_override_dns=False,
+        wpr_http_device_port=80,
+        wpr_https_device_port=443,
+        is_running_locally=False)
+    expected_args = [
+        '--host-resolver-rules=MAP * 127.0.0.1,EXCLUDE localhost',
+        '--ignore-certificate-errors',
+        ]
+    self.assertEqual(
+        expected_args,
+        sorted(browser_backend.GetReplayBrowserStartupArgs()))
+

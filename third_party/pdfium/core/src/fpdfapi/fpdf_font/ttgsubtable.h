@@ -6,7 +6,7 @@
 
 #ifndef TTGSUBTable_H
 #define TTGSUBTable_H
-#include "../../fx_freetype.h"
+#include "../../../include/fxge/fx_freetype.h"
 #include "../../../include/fxcrt/fx_basic.h"
 #include "common.h"
 class CFX_GlyphMap
@@ -414,6 +414,11 @@ public:
         delete this;
     }
     virtual FX_BOOL GetVerticalGlyph(FX_DWORD glyphnum, FX_DWORD* vglyphnum) FX_OVERRIDE;
+
     CFX_CTTGSUBTable m_GsubImp;
+
+private:
+    ~CFX_GSUBTable() { }
 };
 #endif
+

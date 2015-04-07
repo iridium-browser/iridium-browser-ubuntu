@@ -40,7 +40,6 @@
 #include <signal.h>
 #include <unistd.h>
 
-#include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/message_loop/message_pump_mac.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -58,7 +57,8 @@ namespace content {
 namespace {
 // This function provides some ways to test crash and assertion handling
 // behavior of the renderer.
-static void HandleRendererErrorTestParameters(const CommandLine& command_line) {
+static void HandleRendererErrorTestParameters(
+    const base::CommandLine& command_line) {
   if (command_line.HasSwitch(switches::kWaitForDebugger))
     base::debug::WaitForDebugger(60, true);
 
@@ -105,7 +105,7 @@ int RendererMain(const MainFunctionParams& parameters) {
   base::debug::TraceLog::GetInstance()->SetProcessSortIndex(
       kTraceEventRendererProcessSortIndex);
 
-  const CommandLine& parsed_command_line = parameters.command_line;
+  const base::CommandLine& parsed_command_line = parameters.command_line;
 
 #if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool;
@@ -148,12 +148,13 @@ int RendererMain(const MainFunctionParams& parameters) {
   // needs to be backed by a Foundation-level loop to process NSTimers. See
   // http://crbug.com/306348#c24 for details.
   scoped_ptr<base::MessagePump> pump(new base::MessagePumpNSRunLoop());
-  base::MessageLoop main_message_loop(pump.Pass());
+  scoped_ptr<base::MessageLoop> main_message_loop(
+      new base::MessageLoop(pump.Pass()));
 #else
   // The main message loop of the renderer services doesn't have IO or UI tasks.
-  base::MessageLoop main_message_loop;
+  scoped_ptr<base::MessageLoop> main_message_loop(new base::MessageLoop());
 #endif
-  main_message_loop.AddTaskObserver(&task_observer);
+  main_message_loop->AddTaskObserver(&task_observer);
 
   base::PlatformThread::SetName("CrRendererMain");
 
@@ -202,7 +203,7 @@ int RendererMain(const MainFunctionParams& parameters) {
     // TODO(markus): Check if it is OK to unconditionally move this
     // instruction down.
     RenderProcessImpl render_process;
-    new RenderThreadImpl();
+    new RenderThreadImpl(main_message_loop.Pass());
 #endif
     bool run_loop = true;
     if (!no_sandbox) {
@@ -218,7 +219,7 @@ int RendererMain(const MainFunctionParams& parameters) {
     }
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     RenderProcessImpl render_process;
-    new RenderThreadImpl();
+    new RenderThreadImpl(main_message_loop.Pass());
 #endif
 
     base::HighResolutionTimerManager hi_res_timer_manager;

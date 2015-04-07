@@ -47,6 +47,8 @@ class CallPerfTest : public test::CallTest {
  protected:
   void TestAudioVideoSync(bool fec);
 
+  void TestCpuOveruse(LoadObserver::Load tested_load, int encode_delay_ms);
+
   void TestMinTransmitBitrate(bool pad_to_min_bitrate);
 
   void TestCaptureNtpTime(const FakeNetworkPipe::Config& net_config,
@@ -197,12 +199,11 @@ void CallPerfTest::TestAudioVideoSync(bool fec) {
     virtual DeliveryStatus DeliverPacket(const uint8_t* packet,
                                          size_t length) OVERRIDE {
       int ret;
-      if (parser_->IsRtcp(packet, static_cast<int>(length))) {
-        ret = voe_network_->ReceivedRTCPPacket(
-            channel_, packet, static_cast<unsigned int>(length));
+      if (parser_->IsRtcp(packet, length)) {
+        ret = voe_network_->ReceivedRTCPPacket(channel_, packet, length);
       } else {
-        ret = voe_network_->ReceivedRTPPacket(
-            channel_, packet, static_cast<unsigned int>(length), PacketTime());
+        ret = voe_network_->ReceivedRTPPacket(channel_, packet, length,
+                                              PacketTime());
       }
       return ret == 0 ? DELIVERY_OK : DELIVERY_PACKET_ERROR;
     }
@@ -449,14 +450,18 @@ TEST_F(CallPerfTest, CaptureNtpTimeWithNetworkJitter) {
   TestCaptureNtpTime(net_config, kThresholdMs, kStartTimeMs, kRunTimeMs);
 }
 
-TEST_F(CallPerfTest, RegisterCpuOveruseObserver) {
-  // Verifies that either a normal or overuse callback is triggered.
+void CallPerfTest::TestCpuOveruse(LoadObserver::Load tested_load,
+                                  int encode_delay_ms) {
   class LoadObserver : public test::SendTest, public webrtc::LoadObserver {
    public:
-    LoadObserver() : SendTest(kLongTimeoutMs) {}
+    LoadObserver(LoadObserver::Load tested_load, int encode_delay_ms)
+        : SendTest(kLongTimeoutMs),
+          tested_load_(tested_load),
+          encoder_(Clock::GetRealTimeClock(), encode_delay_ms) {}
 
     virtual void OnLoadUpdate(Load load) OVERRIDE {
-      observation_complete_->Set();
+      if (load == tested_load_)
+        observation_complete_->Set();
     }
 
     virtual Call::Config GetSenderCallConfig() OVERRIDE {
@@ -465,13 +470,33 @@ TEST_F(CallPerfTest, RegisterCpuOveruseObserver) {
       return config;
     }
 
+    virtual void ModifyConfigs(
+        VideoSendStream::Config* send_config,
+        std::vector<VideoReceiveStream::Config>* receive_configs,
+        VideoEncoderConfig* encoder_config) OVERRIDE {
+      send_config->encoder_settings.encoder = &encoder_;
+    }
+
     virtual void PerformTest() OVERRIDE {
       EXPECT_EQ(kEventSignaled, Wait())
           << "Timed out before receiving an overuse callback.";
     }
-  } test;
+
+    LoadObserver::Load tested_load_;
+    test::DelayedEncoder encoder_;
+  } test(tested_load, encode_delay_ms);
 
   RunBaseTest(&test);
+}
+
+TEST_F(CallPerfTest, ReceivesCpuUnderuse) {
+  const int kEncodeDelayMs = 2;
+  TestCpuOveruse(LoadObserver::kUnderuse, kEncodeDelayMs);
+}
+
+TEST_F(CallPerfTest, ReceivesCpuOveruse) {
+  const int kEncodeDelayMs = 35;
+  TestCpuOveruse(LoadObserver::kOveruse, kEncodeDelayMs);
 }
 
 void CallPerfTest::TestMinTransmitBitrate(bool pad_to_min_bitrate) {
@@ -586,7 +611,7 @@ TEST_F(CallPerfTest, KeepsHighBitrateWhenReconfiguringSender) {
 
     virtual int32_t InitEncode(const VideoCodec* config,
                                int32_t number_of_cores,
-                               uint32_t max_payload_size) OVERRIDE {
+                               size_t max_payload_size) OVERRIDE {
       if (encoder_inits_ == 0) {
         EXPECT_EQ(kInitialBitrateKbps, config->startBitrate)
             << "Encoder not initialized at expected bitrate.";
@@ -615,7 +640,7 @@ TEST_F(CallPerfTest, KeepsHighBitrateWhenReconfiguringSender) {
 
     Call::Config GetSenderCallConfig() OVERRIDE {
       Call::Config config = EndToEndTest::GetSenderCallConfig();
-      config.stream_start_bitrate_bps = kInitialBitrateKbps * 1000;
+      config.stream_bitrates.start_bitrate_bps = kInitialBitrateKbps * 1000;
       return config;
     }
 

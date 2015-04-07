@@ -11,6 +11,7 @@
       'target_name': 'device_usb',
       'type': 'static_library',
       'dependencies': [
+        '../../net/net.gyp:net',
         '../../third_party/libusb/libusb.gyp:libusb',
       ],
       'include_dirs': [
@@ -62,7 +63,7 @@
       'conditions': [
         ['use_udev == 1', {
           'dependencies': [
-            '../../build/linux/system.gyp:udev',
+            '../udev_linux/udev.gyp:udev_linux',
           ],
         }],
         ['chromeos==1', {

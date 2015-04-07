@@ -32,12 +32,12 @@
 #include "core/EventNames.h"
 #include "core/HTMLNames.h"
 #include "core/XLinkNames.h"
-#include "core/accessibility/AXObjectCache.h"
 #include "core/clipboard/DataObject.h"
 #include "core/clipboard/DataTransfer.h"
 #include "core/clipboard/Pasteboard.h"
 #include "core/css/CSSComputedStyleDeclaration.h"
 #include "core/css/StylePropertySet.h"
+#include "core/dom/AXObjectCache.h"
 #include "core/dom/DocumentFragment.h"
 #include "core/dom/DocumentMarkerController.h"
 #include "core/dom/NodeTraversal.h"
@@ -416,12 +416,12 @@ void Editor::pasteWithPasteboard(Pasteboard* pasteboard)
 
 void Editor::writeSelectionToPasteboard(Pasteboard* pasteboard, Range* selectedRange, const String& plainText)
 {
-    String html = createMarkup(selectedRange, 0, AnnotateForInterchange, false, ResolveNonLocalURLs);
+    String html = createMarkup(selectedRange, AnnotateForInterchange, false, ResolveNonLocalURLs);
     KURL url = selectedRange->startContainer()->document().url();
     pasteboard->writeHTML(html, url, plainText, canSmartCopyOrDelete());
 }
 
-static Image* imageFromNode(const Node& node)
+static PassRefPtr<Image> imageFromNode(const Node& node)
 {
     node.document().updateLayoutIgnorePendingStylesheets();
     RenderObject* renderer = node.renderer();
@@ -429,7 +429,7 @@ static Image* imageFromNode(const Node& node)
         return nullptr;
 
     if (renderer->isCanvas())
-        return toHTMLCanvasElement(node).copiedImage();
+        return toHTMLCanvasElement(node).copiedImage(FrontBuffer);
 
     if (renderer->isImage()) {
         RenderImage* renderImage = toRenderImage(renderer);

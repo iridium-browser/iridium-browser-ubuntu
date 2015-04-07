@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/os_crypt/ie7_password_win.h"
@@ -24,11 +23,9 @@ using password_manager::PasswordStoreDefault;
 // Handles requests to PasswordWebDataService.
 class PasswordStoreWin::DBHandler : public WebDataServiceConsumer {
  public:
-  DBHandler(PasswordWebDataService* web_data_service,
+  DBHandler(const scoped_refptr<PasswordWebDataService>& web_data_service,
             PasswordStoreWin* password_store)
-      : web_data_service_(web_data_service),
-        password_store_(password_store) {
-  }
+      : web_data_service_(web_data_service), password_store_(password_store) {}
 
   ~DBHandler();
 
@@ -116,7 +113,7 @@ std::vector<PasswordForm*> PasswordStoreWin::DBHandler::GetIE7Results(
     // table.
     web_data_service_->RemoveIE7Login(info);
     std::vector<ie7_password::DecryptedCredentials> credentials;
-    std::wstring url = base::ASCIIToWide(form.origin.spec());
+    base::string16 url = base::ASCIIToUTF16(form.origin.spec());
     if (ie7_password::DecryptPasswords(url,
                                        info.encrypted_data,
                                        &credentials)) {
@@ -143,11 +140,6 @@ std::vector<PasswordForm*> PasswordStoreWin::DBHandler::GetIE7Results(
 void PasswordStoreWin::DBHandler::OnWebDataServiceRequestDone(
     PasswordWebDataService::Handle handle,
     const WDTypedResult* result) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "422460 PasswordStoreWin::DBHandler::OnWebDataServiceRequestDone"));
-
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
 
   PendingRequestMap::iterator i = pending_requests_.find(handle);
@@ -176,7 +168,7 @@ PasswordStoreWin::PasswordStoreWin(
     scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner,
     scoped_refptr<base::SingleThreadTaskRunner> db_thread_runner,
     password_manager::LoginDatabase* login_database,
-    PasswordWebDataService* web_data_service)
+    const scoped_refptr<PasswordWebDataService>& web_data_service)
     : PasswordStoreDefault(main_thread_runner,
                            db_thread_runner,
                            login_database) {

@@ -90,6 +90,7 @@ WorkerGlobalScope::WorkerGlobalScope(const KURL& url, const String& userAgent, W
     , m_workerClients(workerClients)
     , m_timeOrigin(timeOrigin)
     , m_messageStorage(ConsoleMessageStorage::createForWorker(this))
+    , m_workerExceptionUniqueIdentifier(0)
 {
     setSecurityOrigin(SecurityOrigin::create(url));
     if (starterOrigin)
@@ -213,6 +214,8 @@ void WorkerGlobalScope::dispose()
     // being carried out on the right thread. We therefore cannot clear
     // the thread field before all references to the worker global
     // scope are gone.
+
+    ExecutionContext::notifyContextDestroyed();
 }
 
 void WorkerGlobalScope::didEvaluateWorkerScript()
@@ -267,9 +270,14 @@ EventTarget* WorkerGlobalScope::errorEventTarget()
     return this;
 }
 
-void WorkerGlobalScope::logExceptionToConsole(const String& errorMessage, int, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>)
+void WorkerGlobalScope::logExceptionToConsole(const String& errorMessage, int, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack> callStack)
 {
-    thread()->workerReportingProxy().reportException(errorMessage, lineNumber, columnNumber, sourceURL);
+    unsigned long exceptionId = ++m_workerExceptionUniqueIdentifier;
+    RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, errorMessage, sourceURL, lineNumber);
+    consoleMessage->setCallStack(callStack);
+    m_pendingMessages.set(exceptionId, consoleMessage);
+
+    thread()->workerReportingProxy().reportException(errorMessage, lineNumber, columnNumber, sourceURL, exceptionId);
 }
 
 void WorkerGlobalScope::reportBlockedScriptExecutionToInspector(const String& directiveText)
@@ -329,6 +337,13 @@ ConsoleMessageStorage* WorkerGlobalScope::messageStorage()
     return m_messageStorage.get();
 }
 
+void WorkerGlobalScope::exceptionHandled(int exceptionId, bool isHandled)
+{
+    RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = m_pendingMessages.take(exceptionId);
+    if (!isHandled)
+        addConsoleMessage(consoleMessage.release());
+}
+
 void WorkerGlobalScope::trace(Visitor* visitor)
 {
 #if ENABLE(OILPAN)
@@ -339,6 +354,7 @@ void WorkerGlobalScope::trace(Visitor* visitor)
     visitor->trace(m_eventQueue);
     visitor->trace(m_workerClients);
     visitor->trace(m_messageStorage);
+    visitor->trace(m_pendingMessages);
     HeapSupplementable<WorkerGlobalScope>::trace(visitor);
 #endif
     ExecutionContext::trace(visitor);

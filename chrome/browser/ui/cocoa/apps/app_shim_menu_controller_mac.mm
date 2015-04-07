@@ -10,7 +10,10 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_shim/extension_app_shim_handler_mac.h"
 #include "chrome/browser/apps/app_window_registry_util.h"
+#include "chrome/browser/profiles/profile.h"
 #import "chrome/browser/ui/cocoa/apps/native_app_window_cocoa.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/common/extension.h"
@@ -50,6 +53,26 @@ void AddDuplicateItem(NSMenuItem* top_level_item,
       [GetItemByTag(menu_tag, item_tag) copy]);
   DCHECK(item);
   [[top_level_item submenu] addItem:item];
+}
+
+// Finds an item with |item_tag| and removes it from the submenu of
+// |top_level_item|.
+void RemoveMenuItemWithTag(NSMenuItem* top_level_item,
+                           NSInteger item_tag,
+                           bool remove_following_separator) {
+  NSMenu* submenu = [top_level_item submenu];
+  NSInteger index = [submenu indexOfItemWithTag:item_tag];
+  if (index < 0)
+    return;
+
+  [submenu removeItemAtIndex:index];
+
+  if (!remove_following_separator || index == [submenu numberOfItems])
+    return;
+
+  NSMenuItem* nextItem = [submenu itemAtIndex:index];
+  if ([nextItem isSeparatorItem])
+    [submenu removeItem:nextItem];
 }
 
 }  // namespace
@@ -252,10 +275,18 @@ void AddDuplicateItem(NSMenuItem* top_level_item,
   // "Start Dictation" and "Special Characters" are added by OSX, so we can't
   // copy them explicitly.
   editMenuItem_.reset([[[NSApp mainMenu] itemWithTag:IDC_EDIT_MENU] copy]);
-  NSMenu* editMenu = [editMenuItem_ submenu];
-  [editMenu removeItem:[editMenu
-      itemWithTag:IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE]];
-  [editMenu removeItem:[editMenu itemWithTag:IDC_FIND_MENU]];
+  RemoveMenuItemWithTag(editMenuItem_,
+                        IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE, NO);
+  RemoveMenuItemWithTag(editMenuItem_, IDC_FIND_MENU, NO);
+
+  // View menu. Remove "Always Show Bookmark Bar" and separator.
+  viewMenuItem_.reset([[[NSApp mainMenu] itemWithTag:IDC_VIEW_MENU] copy]);
+  RemoveMenuItemWithTag(viewMenuItem_, IDC_SHOW_BOOKMARK_BAR, YES);
+
+  // History menu.
+  historyMenuItem_.reset([NewTopLevelItemFrom(IDC_HISTORY_MENU) retain]);
+  AddDuplicateItem(historyMenuItem_, IDC_HISTORY_MENU, IDC_BACK);
+  AddDuplicateItem(historyMenuItem_, IDC_HISTORY_MENU, IDC_FORWARD);
 
   // Window menu.
   windowMenuItem_.reset([NewTopLevelItemFrom(IDC_WINDOW_MENU) retain]);
@@ -295,8 +326,13 @@ void AddDuplicateItem(NSMenuItem* top_level_item,
             window);
 
     const extensions::Extension* extension = NULL;
+    // If there is no corresponding AppWindow, this could be a hosted app, so
+    // check for a browser.
     if (appWindow)
       extension = appWindow->GetExtension();
+    else
+      extension = apps::ExtensionAppShimHandler::GetAppForBrowser(
+          chrome::FindBrowserWithWindow(window));
 
     if (extension)
       [self addMenuItems:extension];
@@ -344,6 +380,10 @@ void AddDuplicateItem(NSMenuItem* top_level_item,
   [mainMenu addItem:appMenuItem_];
   [mainMenu addItem:fileMenuItem_];
   [mainMenu addItem:editMenuItem_];
+  if (app->is_hosted_app()) {
+    [mainMenu addItem:viewMenuItem_];
+    [mainMenu addItem:historyMenuItem_];
+  }
   [mainMenu addItem:windowMenuItem_];
 }
 
@@ -356,6 +396,10 @@ void AddDuplicateItem(NSMenuItem* top_level_item,
   NSMenu* mainMenu = [NSApp mainMenu];
   [mainMenu removeItem:appMenuItem_];
   [mainMenu removeItem:fileMenuItem_];
+  if ([mainMenu indexOfItem:viewMenuItem_] >= 0)
+    [mainMenu removeItem:viewMenuItem_];
+  if ([mainMenu indexOfItem:historyMenuItem_] >= 0)
+    [mainMenu removeItem:historyMenuItem_];
   [mainMenu removeItem:editMenuItem_];
   [mainMenu removeItem:windowMenuItem_];
 
@@ -374,16 +418,32 @@ void AddDuplicateItem(NSMenuItem* top_level_item,
   extensions::AppWindow* appWindow =
       AppWindowRegistryUtil::GetAppWindowForNativeWindowAnyProfile(
           [NSApp keyWindow]);
-  if (appWindow)
+  if (appWindow) {
     apps::ExtensionAppShimHandler::QuitAppForWindow(appWindow);
+  } else {
+    Browser* browser = chrome::FindBrowserWithWindow([NSApp keyWindow]);
+    const extensions::Extension* extension =
+        apps::ExtensionAppShimHandler::GetAppForBrowser(browser);
+    if (extension)
+      apps::ExtensionAppShimHandler::QuitHostedAppForWindow(browser->profile(),
+                                                            extension->id());
+  }
 }
 
 - (void)hideCurrentPlatformApp {
   extensions::AppWindow* appWindow =
       AppWindowRegistryUtil::GetAppWindowForNativeWindowAnyProfile(
           [NSApp keyWindow]);
-  if (appWindow)
+  if (appWindow) {
     apps::ExtensionAppShimHandler::HideAppForWindow(appWindow);
+  } else {
+    Browser* browser = chrome::FindBrowserWithWindow([NSApp keyWindow]);
+    const extensions::Extension* extension =
+        apps::ExtensionAppShimHandler::GetAppForBrowser(browser);
+    if (extension)
+      apps::ExtensionAppShimHandler::HideHostedApp(browser->profile(),
+                                                   extension->id());
+  }
 }
 
 - (void)focusCurrentPlatformApp {

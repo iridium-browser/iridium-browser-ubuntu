@@ -66,7 +66,7 @@ bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, bool
     if (!dictionary.get(key, v8Value))
         return false;
 
-    v8::Local<v8::Boolean> v8Bool = v8Value->ToBoolean();
+    v8::Local<v8::Boolean> v8Bool = v8Value->ToBoolean(dictionary.isolate());
     if (v8Bool.IsEmpty())
         return false;
     value = v8Bool->Value();
@@ -88,7 +88,7 @@ bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, int3
     if (!dictionary.get(key, v8Value))
         return false;
 
-    v8::Local<v8::Int32> v8Int32 = v8Value->ToInt32();
+    v8::Local<v8::Int32> v8Int32 = v8Value->ToInt32(dictionary.isolate());
     if (v8Int32.IsEmpty())
         return false;
     value = v8Int32->Value();
@@ -105,7 +105,7 @@ bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, doub
     }
 
     hasValue = true;
-    TONATIVE_DEFAULT(v8::Local<v8::Number>, v8Number, v8Value->ToNumber(), false);
+    TONATIVE_DEFAULT(v8::Local<v8::Number>, v8Number, v8Value->ToNumber(dictionary.isolate()), false);
     if (v8Number.IsEmpty())
         return false;
     value = v8Number->Value();
@@ -197,7 +197,7 @@ bool getNumericType(const Dictionary& dictionary, const String& key, NumericType
     if (!dictionary.get(key, v8Value))
         return false;
 
-    v8::Local<v8::Int32> v8Int32 = v8Value->ToInt32();
+    v8::Local<v8::Int32> v8Int32 = v8Value->ToInt32(dictionary.isolate());
     if (v8Int32.IsEmpty())
         return false;
     value = static_cast<NumericType>(v8Int32->Value());
@@ -229,7 +229,7 @@ bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, unsi
     if (!dictionary.get(key, v8Value))
         return false;
 
-    v8::Local<v8::Integer> v8Integer = v8Value->ToInteger();
+    v8::Local<v8::Integer> v8Integer = v8Value->ToInteger(dictionary.isolate());
     if (v8Integer.IsEmpty())
         return false;
     value = static_cast<unsigned long>(v8Integer->Value());
@@ -243,7 +243,7 @@ bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, unsi
     if (!dictionary.get(key, v8Value))
         return false;
 
-    TONATIVE_DEFAULT(v8::Local<v8::Number>, v8Number, v8Value->ToNumber(), false);
+    TONATIVE_DEFAULT(v8::Local<v8::Number>, v8Number, v8Value->ToNumber(dictionary.isolate()), false);
     if (v8Number.IsEmpty())
         return false;
     double d = v8Number->Value();
@@ -252,7 +252,7 @@ bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, unsi
 }
 
 template <>
-bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, RefPtrWillBeMember<LocalDOMWindow>& value)
+bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, RefPtrWillBeMember<DOMWindow>& value)
 {
     v8::Local<v8::Value> v8Value;
     if (!dictionary.get(key, v8Value))
@@ -260,7 +260,7 @@ bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, RefP
 
     // We need to handle a DOMWindow specially, because a DOMWindow wrapper
     // exists on a prototype chain of v8Value.
-    value = toDOMWindow(v8Value, dictionary.isolate());
+    value = toDOMWindow(dictionary.isolate(), v8Value);
     return true;
 }
 
@@ -336,7 +336,7 @@ bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, RefP
         return false;
 
     value = nullptr;
-    // We need to handle a LocalDOMWindow specially, because a LocalDOMWindow wrapper
+    // We need to handle a DOMWindow specially, because a DOMWindow wrapper
     // exists on a prototype chain of v8Value.
     if (v8Value->IsObject()) {
         v8::Handle<v8::Object> wrapper = v8::Handle<v8::Object>::Cast(v8Value);
@@ -628,7 +628,7 @@ bool DictionaryHelper::convert(const Dictionary& dictionary, Dictionary::Convers
         return true;
 
     if (context.isNullable() && blink::isUndefinedOrNull(v8Value)) {
-        value = Nullable<T>();
+        value = nullptr;
         return true;
     }
 
@@ -652,7 +652,7 @@ template bool DictionaryHelper::convert(const Dictionary&, Dictionary::Conversio
 template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, Nullable<long long>& value);
 template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, Nullable<unsigned long long>& value);
 
-template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtrWillBeMember<LocalDOMWindow>& value);
+template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtrWillBeMember<DOMWindow>& value);
 template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtrWillBeMember<Storage>& value);
 template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtr<DOMUint8Array>& value);
 template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtr<DOMArrayBufferView>& value);

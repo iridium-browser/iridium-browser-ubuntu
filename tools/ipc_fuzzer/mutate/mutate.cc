@@ -94,64 +94,64 @@ class DefaultFuzzer : public Fuzzer {
 
   virtual ~DefaultFuzzer() {}
 
-  virtual void FuzzBool(bool* value) override {
+  void FuzzBool(bool* value) override {
     if (RandEvent(frequency_))
       (*value) = !(*value);
   }
 
-  virtual void FuzzInt(int* value) override {
+  void FuzzInt(int* value) override {
     FuzzIntegralType<int>(value, frequency_);
   }
 
-  virtual void FuzzLong(long* value) override {
+  void FuzzLong(long* value) override {
     FuzzIntegralType<long>(value, frequency_);
   }
 
-  virtual void FuzzSize(size_t* value) override {
+  void FuzzSize(size_t* value) override {
     FuzzIntegralType<size_t>(value, frequency_);
   }
 
-  virtual void FuzzUChar(unsigned char* value) override {
+  void FuzzUChar(unsigned char* value) override {
     FuzzIntegralType<unsigned char>(value, frequency_);
   }
 
-  virtual void FuzzUInt16(uint16* value) override {
+  void FuzzUInt16(uint16* value) override {
     FuzzIntegralType<uint16>(value, frequency_);
   }
 
-  virtual void FuzzUInt32(uint32* value) override {
+  void FuzzUInt32(uint32* value) override {
     FuzzIntegralType<uint32>(value, frequency_);
   }
 
-  virtual void FuzzInt64(int64* value) override {
+  void FuzzInt64(int64* value) override {
     FuzzIntegralType<int64>(value, frequency_);
   }
 
-  virtual void FuzzUInt64(uint64* value) override {
+  void FuzzUInt64(uint64* value) override {
     FuzzIntegralType<uint64>(value, frequency_);
   }
 
-  virtual void FuzzFloat(float* value) override {
+  void FuzzFloat(float* value) override {
     if (RandEvent(frequency_))
       *value = RandDouble();
   }
 
-  virtual void FuzzDouble(double* value) override {
+  void FuzzDouble(double* value) override {
     if (RandEvent(frequency_))
       *value = RandDouble();
   }
 
-  virtual void FuzzString(std::string* value) override {
+  void FuzzString(std::string* value) override {
     FuzzStringType<std::string>(value, frequency_, "BORKED", std::string());
   }
 
-  virtual void FuzzString16(base::string16* value) override {
+  void FuzzString16(base::string16* value) override {
     FuzzStringType<base::string16>(value, frequency_,
                                    base::WideToUTF16(L"BORKED"),
                                    base::WideToUTF16(L""));
   }
 
-  virtual void FuzzData(char* data, int length) override {
+  void FuzzData(char* data, int length) override {
     if (RandEvent(frequency_)) {
       for (int i = 0; i < length; ++i) {
         FuzzIntegralType<char>(&data[i], frequency_);
@@ -159,7 +159,7 @@ class DefaultFuzzer : public Fuzzer {
     }
   }
 
-  virtual void FuzzBytes(void* data, int data_len) override {
+  void FuzzBytes(void* data, int data_len) override {
     FuzzData(static_cast<char*>(data), data_len);
   }
 
@@ -175,21 +175,21 @@ class NoOpFuzzer : public Fuzzer {
   NoOpFuzzer() {}
   virtual ~NoOpFuzzer() {}
 
-  virtual void FuzzBool(bool* value) override {}
-  virtual void FuzzInt(int* value) override {}
-  virtual void FuzzLong(long* value) override {}
-  virtual void FuzzSize(size_t* value) override {}
-  virtual void FuzzUChar(unsigned char* value) override {}
-  virtual void FuzzUInt16(uint16* value) override {}
-  virtual void FuzzUInt32(uint32* value) override {}
-  virtual void FuzzInt64(int64* value) override {}
-  virtual void FuzzUInt64(uint64* value) override {}
-  virtual void FuzzFloat(float* value) override {}
-  virtual void FuzzDouble(double* value) override {}
-  virtual void FuzzString(std::string* value) override {}
-  virtual void FuzzString16(base::string16* value) override {}
-  virtual void FuzzData(char* data, int length) override {}
-  virtual void FuzzBytes(void* data, int data_len) override {}
+  void FuzzBool(bool* value) override {}
+  void FuzzInt(int* value) override {}
+  void FuzzLong(long* value) override {}
+  void FuzzSize(size_t* value) override {}
+  void FuzzUChar(unsigned char* value) override {}
+  void FuzzUInt16(uint16* value) override {}
+  void FuzzUInt32(uint32* value) override {}
+  void FuzzInt64(int64* value) override {}
+  void FuzzUInt64(uint64* value) override {}
+  void FuzzFloat(float* value) override {}
+  void FuzzDouble(double* value) override {}
+  void FuzzString(std::string* value) override {}
+  void FuzzString16(base::string16* value) override {}
+  void FuzzData(char* data, int length) override {}
+  void FuzzBytes(void* data, int data_len) override {}
 };
 
 class FuzzerFactory {
@@ -330,47 +330,47 @@ struct FuzzTraits<base::string16> {
 
 // Specializations to fuzz tuples.
 template <class A>
-struct FuzzTraits<Tuple1<A> > {
-  static void Fuzz(Tuple1<A>* p, Fuzzer* fuzzer) {
-    FuzzParam(&p->a, fuzzer);
+struct FuzzTraits<Tuple<A>> {
+  static void Fuzz(Tuple<A>* p, Fuzzer* fuzzer) {
+    FuzzParam(&get<0>(*p), fuzzer);
   }
 };
 
 template <class A, class B>
-struct FuzzTraits<Tuple2<A, B> > {
-  static void Fuzz(Tuple2<A, B>* p, Fuzzer* fuzzer) {
-    FuzzParam(&p->a, fuzzer);
-    FuzzParam(&p->b, fuzzer);
+struct FuzzTraits<Tuple<A, B>> {
+  static void Fuzz(Tuple<A, B>* p, Fuzzer* fuzzer) {
+    FuzzParam(&get<0>(*p), fuzzer);
+    FuzzParam(&get<1>(*p), fuzzer);
   }
 };
 
 template <class A, class B, class C>
-struct FuzzTraits<Tuple3<A, B, C> > {
-  static void Fuzz(Tuple3<A, B, C>* p, Fuzzer* fuzzer) {
-    FuzzParam(&p->a, fuzzer);
-    FuzzParam(&p->b, fuzzer);
-    FuzzParam(&p->c, fuzzer);
+struct FuzzTraits<Tuple<A, B, C>> {
+  static void Fuzz(Tuple<A, B, C>* p, Fuzzer* fuzzer) {
+    FuzzParam(&get<0>(*p), fuzzer);
+    FuzzParam(&get<1>(*p), fuzzer);
+    FuzzParam(&get<2>(*p), fuzzer);
   }
 };
 
 template <class A, class B, class C, class D>
-struct FuzzTraits<Tuple4<A, B, C, D> > {
-  static void Fuzz(Tuple4<A, B, C, D>* p, Fuzzer* fuzzer) {
-    FuzzParam(&p->a, fuzzer);
-    FuzzParam(&p->b, fuzzer);
-    FuzzParam(&p->c, fuzzer);
-    FuzzParam(&p->d, fuzzer);
+struct FuzzTraits<Tuple<A, B, C, D>> {
+  static void Fuzz(Tuple<A, B, C, D>* p, Fuzzer* fuzzer) {
+    FuzzParam(&get<0>(*p), fuzzer);
+    FuzzParam(&get<1>(*p), fuzzer);
+    FuzzParam(&get<2>(*p), fuzzer);
+    FuzzParam(&get<3>(*p), fuzzer);
   }
 };
 
 template <class A, class B, class C, class D, class E>
-struct FuzzTraits<Tuple5<A, B, C, D, E> > {
-  static void Fuzz(Tuple5<A, B, C, D, E>* p, Fuzzer* fuzzer) {
-    FuzzParam(&p->a, fuzzer);
-    FuzzParam(&p->b, fuzzer);
-    FuzzParam(&p->c, fuzzer);
-    FuzzParam(&p->d, fuzzer);
-    FuzzParam(&p->e, fuzzer);
+struct FuzzTraits<Tuple<A, B, C, D, E>> {
+  static void Fuzz(Tuple<A, B, C, D, E>* p, Fuzzer* fuzzer) {
+    FuzzParam(&get<0>(*p), fuzzer);
+    FuzzParam(&get<1>(*p), fuzzer);
+    FuzzParam(&get<2>(*p), fuzzer);
+    FuzzParam(&get<3>(*p), fuzzer);
+    FuzzParam(&get<4>(*p), fuzzer);
   }
 };
 
@@ -564,11 +564,12 @@ struct FuzzTraits<gfx::Rect> {
   }
 
 #define IPC_MEMBERS_IN_0(p)
-#define IPC_MEMBERS_IN_1(p) p.a
-#define IPC_MEMBERS_IN_2(p) p.a, p.b
-#define IPC_MEMBERS_IN_3(p) p.a, p.b, p.c
-#define IPC_MEMBERS_IN_4(p) p.a, p.b, p.c, p.d
-#define IPC_MEMBERS_IN_5(p) p.a, p.b, p.c, p.d, p.e
+#define IPC_MEMBERS_IN_1(p) get<0>(p)
+#define IPC_MEMBERS_IN_2(p) get<0>(p), get<1>(p)
+#define IPC_MEMBERS_IN_3(p) get<0>(p), get<1>(p), get<2>(p)
+#define IPC_MEMBERS_IN_4(p) get<0>(p), get<1>(p), get<2>(p), get<3>(p)
+#define IPC_MEMBERS_IN_5(p) get<0>(p), get<1>(p), get<2>(p), get<3>(p),     \
+                            get<4>(p)
 
 #define IPC_MEMBERS_OUT_0()
 #define IPC_MEMBERS_OUT_1() NULL
@@ -655,9 +656,9 @@ void usage() {
 }  // namespace
 
 int MutateMain(int argc, char** argv) {
-  CommandLine::Init(argc, argv);
-  CommandLine* cmd = CommandLine::ForCurrentProcess();
-  CommandLine::StringVector args = cmd->GetArgs();
+  base::CommandLine::Init(argc, argv);
+  base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
+  base::CommandLine::StringVector args = cmd->GetArgs();
 
   if (args.size() != 2 || cmd->HasSwitch(kHelpSwitch)) {
     usage();

@@ -56,22 +56,20 @@ class AstRawStringInternalizationKey : public HashTableKey {
   explicit AstRawStringInternalizationKey(const AstRawString* string)
       : string_(string) {}
 
-  virtual bool IsMatch(Object* other) OVERRIDE {
+  bool IsMatch(Object* other) OVERRIDE {
     if (string_->is_one_byte_)
       return String::cast(other)->IsOneByteEqualTo(string_->literal_bytes_);
     return String::cast(other)->IsTwoByteEqualTo(
         Vector<const uint16_t>::cast(string_->literal_bytes_));
   }
 
-  virtual uint32_t Hash() OVERRIDE {
-    return string_->hash() >> Name::kHashShift;
-  }
+  uint32_t Hash() OVERRIDE { return string_->hash() >> Name::kHashShift; }
 
-  virtual uint32_t HashForObject(Object* key) OVERRIDE {
+  uint32_t HashForObject(Object* key) OVERRIDE {
     return String::cast(key)->Hash();
   }
 
-  virtual Handle<Object> AsHandle(Isolate* isolate) OVERRIDE {
+  Handle<Object> AsHandle(Isolate* isolate) OVERRIDE {
     if (string_->is_one_byte_)
       return isolate->factory()->NewOneByteInternalizedString(
           string_->literal_bytes_, string_->hash());
@@ -182,9 +180,8 @@ void AstValue::Internalize(Isolate* isolate) {
       DCHECK(!string_->string().is_null());
       break;
     case SYMBOL:
-      value_ = Object::GetProperty(
-                   isolate, handle(isolate->native_context()->builtins()),
-                   symbol_name_).ToHandleChecked();
+      DCHECK_EQ(0, strcmp(symbol_name_, "iterator_symbol"));
+      value_ = isolate->factory()->iterator_symbol();
       break;
     case NUMBER:
       value_ = isolate->factory()->NewNumber(number_, TENURED);
@@ -212,7 +209,7 @@ void AstValue::Internalize(Isolate* isolate) {
 }
 
 
-const AstRawString* AstValueFactory::GetOneByteString(
+AstRawString* AstValueFactory::GetOneByteStringInternal(
     Vector<const uint8_t> literal) {
   uint32_t hash = StringHasher::HashSequentialString<uint8_t>(
       literal.start(), literal.length(), hash_seed_);
@@ -220,7 +217,7 @@ const AstRawString* AstValueFactory::GetOneByteString(
 }
 
 
-const AstRawString* AstValueFactory::GetTwoByteString(
+AstRawString* AstValueFactory::GetTwoByteStringInternal(
     Vector<const uint16_t> literal) {
   uint32_t hash = StringHasher::HashSequentialString<uint16_t>(
       literal.start(), literal.length(), hash_seed_);
@@ -229,13 +226,24 @@ const AstRawString* AstValueFactory::GetTwoByteString(
 
 
 const AstRawString* AstValueFactory::GetString(Handle<String> literal) {
-  DisallowHeapAllocation no_gc;
-  String::FlatContent content = literal->GetFlatContent();
-  if (content.IsOneByte()) {
-    return GetOneByteString(content.ToOneByteVector());
+  // For the FlatContent to stay valid, we shouldn't do any heap
+  // allocation. Make sure we won't try to internalize the string in GetString.
+  AstRawString* result = NULL;
+  Isolate* saved_isolate = isolate_;
+  isolate_ = NULL;
+  {
+    DisallowHeapAllocation no_gc;
+    String::FlatContent content = literal->GetFlatContent();
+    if (content.IsOneByte()) {
+      result = GetOneByteStringInternal(content.ToOneByteVector());
+    } else {
+      DCHECK(content.IsTwoByte());
+      result = GetTwoByteStringInternal(content.ToUC16Vector());
+    }
   }
-  DCHECK(content.IsTwoByte());
-  return GetTwoByteString(content.ToUC16Vector());
+  isolate_ = saved_isolate;
+  if (isolate_) result->Internalize(isolate_);
+  return result;
 }
 
 
@@ -348,8 +356,8 @@ const AstValue* AstValueFactory::NewTheHole() {
 
 #undef GENERATE_VALUE_GETTER
 
-const AstRawString* AstValueFactory::GetString(
-    uint32_t hash, bool is_one_byte, Vector<const byte> literal_bytes) {
+AstRawString* AstValueFactory::GetString(uint32_t hash, bool is_one_byte,
+                                         Vector<const byte> literal_bytes) {
   // literal_bytes here points to whatever the user passed, and this is OK
   // because we use vector_compare (which checks the contents) to compare
   // against the AstRawStrings which are in the string_table_. We should not

@@ -99,6 +99,7 @@ class CC_EXPORT ResourceProvider {
     return use_rgba_4444_texture_format_ ? RGBA_4444 : best_texture_format_;
   }
   ResourceFormat best_texture_format() const { return best_texture_format_; }
+  ResourceFormat yuv_resource_format() const { return yuv_resource_format_; }
   bool use_sync_query() const { return use_sync_query_; }
   size_t num_resources() const { return resources_.size(); }
 
@@ -296,14 +297,13 @@ class CC_EXPORT ResourceProvider {
                             ResourceProvider::ResourceId resource_id);
     ~ScopedWriteLockSoftware();
 
-    SkCanvas* sk_canvas() { return sk_canvas_.get(); }
+    SkBitmap& sk_bitmap() { return sk_bitmap_; }
     bool valid() const { return !!sk_bitmap_.getPixels(); }
 
    private:
     ResourceProvider* resource_provider_;
     ResourceProvider::Resource* resource_;
     SkBitmap sk_bitmap_;
-    scoped_ptr<SkCanvas> sk_canvas_;
     base::ThreadChecker thread_checker_;
 
     DISALLOW_COPY_AND_ASSIGN(ScopedWriteLockSoftware);
@@ -335,9 +335,13 @@ class CC_EXPORT ResourceProvider {
                       ResourceProvider::ResourceId resource_id);
     ~ScopedWriteLockGr();
 
-    SkSurface* GetSkSurface(bool use_distance_field_text);
+    SkSurface* GetSkSurface(bool use_distance_field_text,
+                            bool can_use_lcd_text);
 
    private:
+    bool SurfaceHasMatchingProperties(bool use_distance_field_text,
+                                      bool can_use_lcd_text) const;
+
     ResourceProvider* resource_provider_;
     ResourceProvider::Resource* resource_;
     base::ThreadChecker thread_checker_;
@@ -575,6 +579,7 @@ class CC_EXPORT ResourceProvider {
   bool use_texture_format_bgra_;
   bool use_texture_usage_hint_;
   bool use_compressed_texture_etc1_;
+  ResourceFormat yuv_resource_format_;
   scoped_ptr<TextureUploader> texture_uploader_;
   int max_texture_size_;
   ResourceFormat best_texture_format_;
@@ -595,33 +600,38 @@ class CC_EXPORT ResourceProvider {
   DISALLOW_COPY_AND_ASSIGN(ResourceProvider);
 };
 
-
 // TODO(epenner): Move these format conversions to resource_format.h
 // once that builds on mac (npapi.h currently #includes OpenGL.h).
 inline unsigned BitsPerPixel(ResourceFormat format) {
-  DCHECK_LE(format, RESOURCE_FORMAT_MAX);
-  static const unsigned format_bits_per_pixel[RESOURCE_FORMAT_MAX + 1] = {
-    32,  // RGBA_8888
-    16,  // RGBA_4444
-    32,  // BGRA_8888
-    8,   // ALPHA_8
-    8,   // LUMINANCE_8
-    16,  // RGB_565,
-    4    // ETC1
-  };
-  return format_bits_per_pixel[format];
+  switch (format) {
+    case BGRA_8888:
+    case RGBA_8888:
+      return 32;
+    case RGBA_4444:
+    case RGB_565:
+      return 16;
+    case ALPHA_8:
+    case LUMINANCE_8:
+    case RED_8:
+      return 8;
+    case ETC1:
+      return 4;
+  }
+  NOTREACHED();
+  return 0;
 }
 
 inline GLenum GLDataType(ResourceFormat format) {
   DCHECK_LE(format, RESOURCE_FORMAT_MAX);
   static const unsigned format_gl_data_type[RESOURCE_FORMAT_MAX + 1] = {
-    GL_UNSIGNED_BYTE,           // RGBA_8888
-    GL_UNSIGNED_SHORT_4_4_4_4,  // RGBA_4444
-    GL_UNSIGNED_BYTE,           // BGRA_8888
-    GL_UNSIGNED_BYTE,           // ALPHA_8
-    GL_UNSIGNED_BYTE,           // LUMINANCE_8
-    GL_UNSIGNED_SHORT_5_6_5,    // RGB_565,
-    GL_UNSIGNED_BYTE            // ETC1
+      GL_UNSIGNED_BYTE,           // RGBA_8888
+      GL_UNSIGNED_SHORT_4_4_4_4,  // RGBA_4444
+      GL_UNSIGNED_BYTE,           // BGRA_8888
+      GL_UNSIGNED_BYTE,           // ALPHA_8
+      GL_UNSIGNED_BYTE,           // LUMINANCE_8
+      GL_UNSIGNED_SHORT_5_6_5,    // RGB_565,
+      GL_UNSIGNED_BYTE,           // ETC1
+      GL_UNSIGNED_BYTE            // RED_8
   };
   return format_gl_data_type[format];
 }
@@ -629,13 +639,14 @@ inline GLenum GLDataType(ResourceFormat format) {
 inline GLenum GLDataFormat(ResourceFormat format) {
   DCHECK_LE(format, RESOURCE_FORMAT_MAX);
   static const unsigned format_gl_data_format[RESOURCE_FORMAT_MAX + 1] = {
-    GL_RGBA,           // RGBA_8888
-    GL_RGBA,           // RGBA_4444
-    GL_BGRA_EXT,       // BGRA_8888
-    GL_ALPHA,          // ALPHA_8
-    GL_LUMINANCE,      // LUMINANCE_8
-    GL_RGB,            // RGB_565
-    GL_ETC1_RGB8_OES   // ETC1
+      GL_RGBA,           // RGBA_8888
+      GL_RGBA,           // RGBA_4444
+      GL_BGRA_EXT,       // BGRA_8888
+      GL_ALPHA,          // ALPHA_8
+      GL_LUMINANCE,      // LUMINANCE_8
+      GL_RGB,            // RGB_565
+      GL_ETC1_RGB8_OES,  // ETC1
+      GL_RED_EXT         // RED_8
   };
   return format_gl_data_format[format];
 }

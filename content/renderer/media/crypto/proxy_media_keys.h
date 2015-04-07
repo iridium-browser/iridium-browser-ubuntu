@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/containers/hash_tables.h"
 #include "base/containers/scoped_ptr_hash_map.h"
+#include "media/base/cdm_context.h"
 #include "media/base/cdm_promise.h"
 #include "media/base/media_keys.h"
 
@@ -21,56 +22,53 @@ namespace content {
 class RendererCdmManager;
 
 // A MediaKeys proxy that wraps the EME part of RendererCdmManager.
-class ProxyMediaKeys : public media::MediaKeys {
+class ProxyMediaKeys : public media::MediaKeys, public media::CdmContext {
  public:
   static scoped_ptr<ProxyMediaKeys> Create(
       const std::string& key_system,
       const GURL& security_origin,
       RendererCdmManager* manager,
       const media::SessionMessageCB& session_message_cb,
-      const media::SessionReadyCB& session_ready_cb,
       const media::SessionClosedCB& session_closed_cb,
       const media::SessionErrorCB& session_error_cb,
       const media::SessionKeysChangeCB& session_keys_change_cb,
       const media::SessionExpirationUpdateCB& session_expiration_update_cb);
 
-  virtual ~ProxyMediaKeys();
+  ~ProxyMediaKeys() override;
 
   // MediaKeys implementation.
-  virtual void SetServerCertificate(
+  void SetServerCertificate(
       const uint8* certificate_data,
       int certificate_data_length,
       scoped_ptr<media::SimpleCdmPromise> promise) override;
-  virtual void CreateSession(
+  void CreateSessionAndGenerateRequest(
+      SessionType session_type,
       const std::string& init_data_type,
       const uint8* init_data,
       int init_data_length,
-      SessionType session_type,
       scoped_ptr<media::NewSessionCdmPromise> promise) override;
-  virtual void LoadSession(
-      const std::string& web_session_id,
-      scoped_ptr<media::NewSessionCdmPromise> promise) override;
-  virtual void UpdateSession(
-      const std::string& web_session_id,
-      const uint8* response,
-      int response_length,
-      scoped_ptr<media::SimpleCdmPromise> promise) override;
-  virtual void CloseSession(
-      const std::string& web_session_id,
-      scoped_ptr<media::SimpleCdmPromise> promise) override;
-  virtual void RemoveSession(
-      const std::string& web_session_id,
-      scoped_ptr<media::SimpleCdmPromise> promise) override;
-  virtual void GetUsableKeyIds(
-      const std::string& web_session_id,
-      scoped_ptr<media::KeyIdsPromise> promise) override;
-  virtual int GetCdmId() const override;
+  void LoadSession(SessionType session_type,
+                   const std::string& web_session_id,
+                   scoped_ptr<media::NewSessionCdmPromise> promise) override;
+  void UpdateSession(const std::string& web_session_id,
+                     const uint8* response,
+                     int response_length,
+                     scoped_ptr<media::SimpleCdmPromise> promise) override;
+  void CloseSession(const std::string& web_session_id,
+                    scoped_ptr<media::SimpleCdmPromise> promise) override;
+  void RemoveSession(const std::string& web_session_id,
+                     scoped_ptr<media::SimpleCdmPromise> promise) override;
+  media::CdmContext* GetCdmContext() override;
+
+  // media::CdmContext implementation.
+  media::Decryptor* GetDecryptor() override;
+  int GetCdmId() const override;
 
   // Callbacks.
   void OnSessionCreated(uint32 session_id, const std::string& web_session_id);
   void OnSessionMessage(uint32 session_id,
                         const std::vector<uint8>& message,
-                        const GURL& destination_url);
+                        const GURL& legacy_destination_url);
   void OnSessionReady(uint32 session_id);
   void OnSessionClosed(uint32 session_id);
   void OnSessionError(uint32 session_id,
@@ -92,7 +90,6 @@ class ProxyMediaKeys : public media::MediaKeys {
 
   ProxyMediaKeys(RendererCdmManager* manager,
                  const media::SessionMessageCB& session_message_cb,
-                 const media::SessionReadyCB& session_ready_cb,
                  const media::SessionClosedCB& session_closed_cb,
                  const media::SessionErrorCB& session_error_cb);
 
@@ -119,7 +116,6 @@ class ProxyMediaKeys : public media::MediaKeys {
   int cdm_id_;
 
   media::SessionMessageCB session_message_cb_;
-  media::SessionReadyCB session_ready_cb_;
   media::SessionClosedCB session_closed_cb_;
   media::SessionErrorCB session_error_cb_;
 

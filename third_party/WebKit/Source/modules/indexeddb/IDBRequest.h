@@ -54,12 +54,10 @@ struct IDBDatabaseMetadata;
 class SharedBuffer;
 
 class IDBRequest
-    : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<IDBRequest>
-    , public EventTargetWithInlineData
+    : public RefCountedGarbageCollectedEventTargetWithInlineData<IDBRequest>
     , public ActiveDOMObject {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<IDBRequest>);
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(IDBRequest);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(IDBRequest);
 public:
     static IDBRequest* create(ScriptState*, IDBAny* source, IDBTransaction*);

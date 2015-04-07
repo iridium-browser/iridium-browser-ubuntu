@@ -10,30 +10,20 @@
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/V8ThrowException.h"
 #include "core/dom/DOMException.h"
-#include "modules/serviceworkers/Request.h"
-#include "modules/serviceworkers/Response.h"
+#include "modules/fetch/BodyStreamBuffer.h"
+#include "modules/fetch/Request.h"
+#include "modules/fetch/Response.h"
 #include "public/platform/WebServiceWorkerCache.h"
 
 namespace blink {
 
 namespace {
 
-WebServiceWorkerCache::QueryParams toWebQueryParams(const CacheQueryOptions& options)
-{
-    WebServiceWorkerCache::QueryParams webQueryParams;
-    webQueryParams.ignoreSearch = options.ignoreSearch();
-    webQueryParams.ignoreMethod = options.ignoreMethod();
-    webQueryParams.ignoreVary = options.ignoreVary();
-    webQueryParams.prefixMatch = options.prefixMatch();
-    webQueryParams.cacheName = options.cacheName();
-    return webQueryParams;
-}
-
 // FIXME: Consider using CallbackPromiseAdapter.
 class CacheMatchCallbacks : public WebServiceWorkerCache::CacheMatchCallbacks {
     WTF_MAKE_NONCOPYABLE(CacheMatchCallbacks);
 public:
-    CacheMatchCallbacks(PassRefPtr<ScriptPromiseResolver> resolver)
+    CacheMatchCallbacks(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
         : m_resolver(resolver) { }
 
     virtual void onSuccess(WebServiceWorkerResponse* webResponse) override
@@ -52,14 +42,14 @@ public:
     }
 
 private:
-    RefPtr<ScriptPromiseResolver> m_resolver;
+    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
 };
 
 // FIXME: Consider using CallbackPromiseAdapter.
 class CacheWithResponsesCallbacks : public WebServiceWorkerCache::CacheWithResponsesCallbacks {
     WTF_MAKE_NONCOPYABLE(CacheWithResponsesCallbacks);
 public:
-    CacheWithResponsesCallbacks(PassRefPtr<ScriptPromiseResolver> resolver)
+    CacheWithResponsesCallbacks(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
         : m_resolver(resolver) { }
 
     virtual void onSuccess(WebVector<WebServiceWorkerResponse>* webResponses) override
@@ -78,14 +68,14 @@ public:
     }
 
 protected:
-    RefPtr<ScriptPromiseResolver> m_resolver;
+    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
 };
 
 // FIXME: Consider using CallbackPromiseAdapter.
 class CacheAddOrPutCallbacks : public CacheWithResponsesCallbacks {
     WTF_MAKE_NONCOPYABLE(CacheAddOrPutCallbacks);
 public:
-    CacheAddOrPutCallbacks(PassRefPtr<ScriptPromiseResolver> resolver)
+    CacheAddOrPutCallbacks(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
         : CacheWithResponsesCallbacks(resolver) { }
 
     virtual void onSuccess(WebVector<WebServiceWorkerResponse>* webResponses) override
@@ -100,7 +90,7 @@ public:
 class CacheDeleteCallback : public WebServiceWorkerCache::CacheWithResponsesCallbacks {
     WTF_MAKE_NONCOPYABLE(CacheDeleteCallback);
 public:
-    CacheDeleteCallback(PassRefPtr<ScriptPromiseResolver> resolver)
+    CacheDeleteCallback(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
         : m_resolver(resolver) { }
 
     virtual void onSuccess(WebVector<WebServiceWorkerResponse>* webResponses) override
@@ -120,14 +110,14 @@ public:
     }
 
 private:
-    RefPtr<ScriptPromiseResolver> m_resolver;
+    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
 };
 
 // FIXME: Consider using CallbackPromiseAdapter.
 class CacheWithRequestsCallbacks : public WebServiceWorkerCache::CacheWithRequestsCallbacks {
     WTF_MAKE_NONCOPYABLE(CacheWithRequestsCallbacks);
 public:
-    CacheWithRequestsCallbacks(PassRefPtr<ScriptPromiseResolver> resolver)
+    CacheWithRequestsCallbacks(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver)
         : m_resolver(resolver) { }
 
     virtual void onSuccess(WebVector<WebServiceWorkerRequest>* webRequests) override
@@ -146,7 +136,7 @@ public:
     }
 
 private:
-    RefPtr<ScriptPromiseResolver> m_resolver;
+    RefPtrWillBePersistent<ScriptPromiseResolver> m_resolver;
 };
 
 ScriptPromise rejectAsNotImplemented(ScriptState* scriptState)
@@ -156,48 +146,89 @@ ScriptPromise rejectAsNotImplemented(ScriptState* scriptState)
 
 } // namespace
 
+class Cache::AsyncPutBatch final : public BodyStreamBuffer::BlobHandleCreatorClient {
+public:
+    AsyncPutBatch(PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver, Cache* cache, Request* request, Response* response)
+        : m_resolver(resolver)
+        , m_cache(cache)
+    {
+        request->populateWebServiceWorkerRequest(m_webRequest);
+        response->populateWebServiceWorkerResponse(m_webResponse);
+    }
+    ~AsyncPutBatch() override { }
+    void didCreateBlobHandle(PassRefPtr<BlobDataHandle> handle) override
+    {
+        WebVector<WebServiceWorkerCache::BatchOperation> batchOperations(size_t(1));
+        batchOperations[0].operationType = WebServiceWorkerCache::OperationTypePut;
+        batchOperations[0].request = m_webRequest;
+        batchOperations[0].response = m_webResponse;
+        batchOperations[0].response.setBlobDataHandle(handle);
+        m_cache->webCache()->dispatchBatch(new CacheAddOrPutCallbacks(m_resolver.get()), batchOperations);
+        cleanup();
+    }
+    void didFail(PassRefPtrWillBeRawPtr<DOMException> exception) override
+    {
+        ScriptState* state = m_resolver->scriptState();
+        ScriptState::Scope scope(state);
+        m_resolver->reject(V8ThrowException::createTypeError(state->isolate(), exception->toString()));
+        cleanup();
+    }
+
+    void trace(Visitor* visitor) override
+    {
+        BlobHandleCreatorClient::trace(visitor);
+        visitor->trace(m_resolver);
+        visitor->trace(m_cache);
+    }
+
+private:
+    void cleanup()
+    {
+        m_resolver = nullptr;
+        m_cache = nullptr;
+    }
+    RefPtrWillBeMember<ScriptPromiseResolver> m_resolver;
+    Member<Cache> m_cache;
+    WebServiceWorkerRequest m_webRequest;
+    WebServiceWorkerResponse m_webResponse;
+};
+
 Cache* Cache::create(WebServiceWorkerCache* webCache)
 {
     return new Cache(webCache);
 }
 
-ScriptPromise Cache::match(ScriptState* scriptState, Request* request, const CacheQueryOptions& options)
+ScriptPromise Cache::match(ScriptState* scriptState, const RequestInfo& request, const CacheQueryOptions& options, ExceptionState& exceptionState)
 {
-    return matchImpl(scriptState, request, options);
-}
-
-ScriptPromise Cache::match(ScriptState* scriptState, const String& requestString, const CacheQueryOptions& options, ExceptionState& exceptionState)
-{
-    Request* request = Request::create(scriptState->executionContext(), requestString, exceptionState);
+    ASSERT(!request.isNull());
+    if (request.isRequest())
+        return matchImpl(scriptState, request.getAsRequest(), options);
+    Request* newRequest = Request::create(scriptState->executionContext(), request.getAsUSVString(), exceptionState);
     if (exceptionState.hadException())
         return ScriptPromise();
-    return matchImpl(scriptState, request, options);
+    return matchImpl(scriptState, newRequest, options);
 }
 
-ScriptPromise Cache::matchAll(ScriptState* scriptState, Request* request, const CacheQueryOptions& options)
+ScriptPromise Cache::matchAll(ScriptState* scriptState, const RequestInfo& request, const CacheQueryOptions& options, ExceptionState& exceptionState)
 {
-    return matchAllImpl(scriptState, request, options);
-}
-
-ScriptPromise Cache::matchAll(ScriptState* scriptState, const String& requestString, const CacheQueryOptions& options, ExceptionState& exceptionState)
-{
-    Request* request = Request::create(scriptState->executionContext(), requestString, exceptionState);
+    ASSERT(!request.isNull());
+    if (request.isRequest())
+        return matchAllImpl(scriptState, request.getAsRequest(), options);
+    Request* newRequest = Request::create(scriptState->executionContext(), request.getAsUSVString(), exceptionState);
     if (exceptionState.hadException())
         return ScriptPromise();
-    return matchAllImpl(scriptState, request, options);
+    return matchAllImpl(scriptState, newRequest, options);
 }
 
-ScriptPromise Cache::add(ScriptState* scriptState, Request* request)
+ScriptPromise Cache::add(ScriptState* scriptState, const RequestInfo& request, ExceptionState& exceptionState)
 {
-    return addImpl(scriptState, request);
-}
-
-ScriptPromise Cache::add(ScriptState* scriptState, const String& requestString, ExceptionState& exceptionState)
-{
-    Request* request = Request::create(scriptState->executionContext(), requestString, exceptionState);
+    ASSERT(!request.isNull());
+    if (request.isRequest())
+        return addImpl(scriptState, request.getAsRequest());
+    Request* newRequest = Request::create(scriptState->executionContext(), request.getAsUSVString(), exceptionState);
     if (exceptionState.hadException())
         return ScriptPromise();
-    return addImpl(scriptState, request);
+    return addImpl(scriptState, newRequest);
 }
 
 ScriptPromise Cache::addAll(ScriptState* scriptState, const Vector<ScriptValue>& rawRequests)
@@ -206,48 +237,54 @@ ScriptPromise Cache::addAll(ScriptState* scriptState, const Vector<ScriptValue>&
     return rejectAsNotImplemented(scriptState);
 }
 
-ScriptPromise Cache::deleteFunction(ScriptState* scriptState, Request* request, const CacheQueryOptions& options)
+ScriptPromise Cache::deleteFunction(ScriptState* scriptState, const RequestInfo& request, const CacheQueryOptions& options, ExceptionState& exceptionState)
 {
-    return deleteImpl(scriptState, request, options);
-}
-
-ScriptPromise Cache::deleteFunction(ScriptState* scriptState, const String& requestString, const CacheQueryOptions& options, ExceptionState& exceptionState)
-{
-    Request* request = Request::create(scriptState->executionContext(), requestString, exceptionState);
+    ASSERT(!request.isNull());
+    if (request.isRequest())
+        return deleteImpl(scriptState, request.getAsRequest(), options);
+    Request* newRequest = Request::create(scriptState->executionContext(), request.getAsUSVString(), exceptionState);
     if (exceptionState.hadException())
         return ScriptPromise();
-    return deleteImpl(scriptState, request, options);
+    return deleteImpl(scriptState, newRequest, options);
 }
 
-ScriptPromise Cache::put(ScriptState* scriptState, Request* request, Response* response)
+ScriptPromise Cache::put(ScriptState* scriptState, const RequestInfo& request, Response* response, ExceptionState& exceptionState)
 {
-    return putImpl(scriptState, request, response);
-}
-
-ScriptPromise Cache::put(ScriptState* scriptState, const String& requestString, Response* response, ExceptionState& exceptionState)
-{
-    Request* request = Request::create(scriptState->executionContext(), requestString, exceptionState);
+    ASSERT(!request.isNull());
+    if (request.isRequest())
+        return putImpl(scriptState, request.getAsRequest(), response);
+    Request* newRequest = Request::create(scriptState->executionContext(), request.getAsUSVString(), exceptionState);
     if (exceptionState.hadException())
         return ScriptPromise();
-    return putImpl(scriptState, request, response);
+    return putImpl(scriptState, newRequest, response);
 }
 
-ScriptPromise Cache::keys(ScriptState* scriptState)
+ScriptPromise Cache::keys(ScriptState* scriptState, ExceptionState&)
 {
     return keysImpl(scriptState);
 }
 
-ScriptPromise Cache::keys(ScriptState* scriptState, Request* request, const CacheQueryOptions& options)
+ScriptPromise Cache::keys(ScriptState* scriptState, const RequestInfo& request, const CacheQueryOptions& options, ExceptionState& exceptionState)
 {
-    return keysImpl(scriptState, request, options);
-}
-
-ScriptPromise Cache::keys(ScriptState* scriptState, const String& requestString, const CacheQueryOptions& options, ExceptionState& exceptionState)
-{
-    Request* request = Request::create(scriptState->executionContext(), requestString, exceptionState);
+    ASSERT(!request.isNull());
+    if (request.isRequest())
+        return keysImpl(scriptState, request.getAsRequest(), options);
+    Request* newRequest = Request::create(scriptState->executionContext(), request.getAsUSVString(), exceptionState);
     if (exceptionState.hadException())
         return ScriptPromise();
-    return keysImpl(scriptState, request, options);
+    return keysImpl(scriptState, newRequest, options);
+}
+
+// static
+WebServiceWorkerCache::QueryParams Cache::toWebQueryParams(const CacheQueryOptions& options)
+{
+    WebServiceWorkerCache::QueryParams webQueryParams;
+    webQueryParams.ignoreSearch = options.ignoreSearch();
+    webQueryParams.ignoreMethod = options.ignoreMethod();
+    webQueryParams.ignoreVary = options.ignoreVary();
+    webQueryParams.prefixMatch = options.prefixMatch();
+    webQueryParams.cacheName = options.cacheName();
+    return webQueryParams;
 }
 
 Cache::Cache(WebServiceWorkerCache* webCache)
@@ -258,7 +295,7 @@ ScriptPromise Cache::matchImpl(ScriptState* scriptState, const Request* request,
     WebServiceWorkerRequest webRequest;
     request->populateWebServiceWorkerRequest(webRequest);
 
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
     m_webCache->dispatchMatch(new CacheMatchCallbacks(resolver), webRequest, toWebQueryParams(options));
     return promise;
@@ -269,7 +306,7 @@ ScriptPromise Cache::matchAllImpl(ScriptState* scriptState, const Request* reque
     WebServiceWorkerRequest webRequest;
     request->populateWebServiceWorkerRequest(webRequest);
 
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
     m_webCache->dispatchMatchAll(new CacheWithResponsesCallbacks(resolver), webRequest, toWebQueryParams(options));
     return promise;
@@ -309,7 +346,7 @@ ScriptPromise Cache::deleteImpl(ScriptState* scriptState, const Request* request
     request->populateWebServiceWorkerRequest(batchOperations[0].request);
     batchOperations[0].matchParams = toWebQueryParams(options);
 
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
     m_webCache->dispatchBatch(new CacheDeleteCallback(resolver), batchOperations);
     return promise;
@@ -326,26 +363,34 @@ ScriptPromise Cache::putImpl(ScriptState* scriptState, Request* request, Respons
         return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "Request body is already used"));
     if (response->hasBody() && response->bodyUsed())
         return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "Response body is already used"));
+    if (response->internalBuffer() && response->streamAccessed())
+        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "Storing the Response which .body is accessed is not supported."));
 
     if (request->hasBody())
         request->setBodyUsed();
     if (response->hasBody())
         response->setBodyUsed();
 
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    const ScriptPromise promise = resolver->promise();
+    if (response->internalBuffer()) {
+        // If the response body type is stream, read the all data and create the
+        // blob handle and dispatch the put batch asynchronously.
+        response->internalBuffer()->readAllAndCreateBlobHandle(response->internalContentTypeForBuffer(), new AsyncPutBatch(resolver, this, request, response));
+        return promise;
+    }
     WebVector<WebServiceWorkerCache::BatchOperation> batchOperations(size_t(1));
     batchOperations[0].operationType = WebServiceWorkerCache::OperationTypePut;
     request->populateWebServiceWorkerRequest(batchOperations[0].request);
     response->populateWebServiceWorkerResponse(batchOperations[0].response);
 
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
-    const ScriptPromise promise = resolver->promise();
     m_webCache->dispatchBatch(new CacheAddOrPutCallbacks(resolver), batchOperations);
     return promise;
 }
 
 ScriptPromise Cache::keysImpl(ScriptState* scriptState)
 {
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
     m_webCache->dispatchKeys(new CacheWithRequestsCallbacks(resolver), 0, WebServiceWorkerCache::QueryParams());
     return promise;
@@ -356,10 +401,15 @@ ScriptPromise Cache::keysImpl(ScriptState* scriptState, const Request* request, 
     WebServiceWorkerRequest webRequest;
     request->populateWebServiceWorkerRequest(webRequest);
 
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
     m_webCache->dispatchKeys(new CacheWithRequestsCallbacks(resolver), 0, toWebQueryParams(options));
     return promise;
+}
+
+WebServiceWorkerCache* Cache::webCache() const
+{
+    return m_webCache.get();
 }
 
 } // namespace blink

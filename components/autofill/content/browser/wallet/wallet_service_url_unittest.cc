@@ -13,12 +13,13 @@ namespace autofill {
 namespace wallet {
 
 TEST(WalletServiceSandboxUrl, CheckSandboxUrls) {
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kWalletServiceUseSandbox, "1");
 
-  EXPECT_EQ("https://wallet-web.sandbox.google.com/online/v2/u/1/wallet/"
-            "autocheckout/v1/getWalletItemsJwtless",
-           GetGetWalletItemsUrl(1).spec());
+  EXPECT_EQ(
+      "https://wallet-web.sandbox.google.com/online/v2/u/1/wallet/"
+      "autocheckout/v1/getWalletItemsJwtless",
+      GetGetWalletItemsUrl(1).spec());
   EXPECT_EQ("https://wallet-web.sandbox.google.com/online-secure/v2/u/1/"
             "autocheckout/v1/getFullWalletJwtless?s7e=otp",
             GetGetFullWalletUrl(1).spec());
@@ -27,6 +28,10 @@ TEST(WalletServiceSandboxUrl, CheckSandboxUrls) {
   EXPECT_EQ("https://wallet-web.sandbox.google.com/manage/w/1/settings/"
             "addresses",
             GetManageAddressesUrl(1).spec());
+  EXPECT_EQ(
+      "https://wallet-web.sandbox.google.com/"
+      "legaldocument?family=0.privacynotice",
+      GetPrivacyNoticeUrl().spec());
   EXPECT_EQ("https://wallet-web.sandbox.google.com/online/v2/u/1/wallet/"
             "autocheckout/v1/acceptLegalDocument",
             GetAcceptLegalDocumentsUrl(1).spec());
@@ -45,7 +50,7 @@ TEST(WalletServiceSandboxUrl, CheckSandboxUrls) {
 }
 
 TEST(WalletServiceSandboxUrl, CheckProdUrls) {
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kWalletServiceUseSandbox, "0");
 
   EXPECT_EQ("https://wallet.google.com/online/v2/u/1/wallet/"
@@ -58,6 +63,10 @@ TEST(WalletServiceSandboxUrl, CheckProdUrls) {
             GetManageInstrumentsUrl(1).spec());
   EXPECT_EQ("https://wallet.google.com/manage/w/1/settings/addresses",
             GetManageAddressesUrl(1).spec());
+  EXPECT_EQ(
+      "https://wallet.google.com/"
+      "legaldocument?family=0.privacynotice",
+      GetPrivacyNoticeUrl().spec());
   EXPECT_EQ("https://wallet.google.com/online/v2/u/1/wallet/"
             "autocheckout/v1/acceptLegalDocument",
             GetAcceptLegalDocumentsUrl(1).spec());
@@ -82,7 +91,7 @@ TEST(WalletServiceUrl, DefaultsToProd) {
   EXPECT_FALSE(IsUsingProd());
 #endif
 
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(::switches::kReduceSecurityForTesting);
   EXPECT_FALSE(IsUsingProd());
 
@@ -91,7 +100,7 @@ TEST(WalletServiceUrl, DefaultsToProd) {
 }
 
 TEST(WalletServiceUrl, IsUsingProd) {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitchASCII(switches::kWalletServiceUseSandbox, "1");
   EXPECT_FALSE(IsUsingProd());
 
@@ -108,7 +117,7 @@ TEST(WalletServiceUrl, IsUsingProd) {
 TEST(WalletServiceUrl, IsSignInContinueUrl) {
   EXPECT_TRUE(GetSignInContinueUrl().SchemeIsSecure());
 
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitchASCII(switches::kWalletServiceUseSandbox, "1");
 
   // authuser query param is respected.

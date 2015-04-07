@@ -47,7 +47,7 @@ const char kHttpNotFound[] = "HTTP/1.1 404 Not Found\n\n";
 #if defined(DEBUG_DEVTOOLS)
 // Local frontend url provided by InspectUI.
 const char kFallbackFrontendURL[] =
-    "chrome-devtools://devtools/bundled/devtools.html";
+    "chrome-devtools://devtools/bundled/inspector.html";
 #else
 // URL causing the DevTools window to display a plain text warning.
 const char kFallbackFrontendURL[] =
@@ -143,6 +143,7 @@ class DevToolsDataSource : public content::URLDataSource {
   // content::URLDataSource overrides.
   std::string GetMimeType(const std::string& path) const override;
   bool ShouldAddContentSecurityPolicy() const override;
+  bool ShouldDenyXFrameOptions() const override;
   bool ShouldServeMimeTypeAsContentTypeHeader() const override;
 
   // Serves bundled DevTools frontend from ResourceBundle.
@@ -190,7 +191,7 @@ void DevToolsDataSource::StartDataRequest(
 
   // Serve static response while connecting to the remote device.
   if (StartsWithASCII(path, kRemoteOpenPrefix, false)) {
-    if (!CommandLine::ForCurrentProcess()->HasSwitch(
+    if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kEnableDevToolsExperiments)) {
       callback.Run(NULL);
       return;
@@ -217,6 +218,10 @@ std::string DevToolsDataSource::GetMimeType(const std::string& path) const {
 }
 
 bool DevToolsDataSource::ShouldAddContentSecurityPolicy() const {
+  return false;
+}
+
+bool DevToolsDataSource::ShouldDenyXFrameOptions() const {
   return false;
 }
 
@@ -276,7 +281,7 @@ class OpenRemotePageRequest : public DevToolsAndroidBridge::DeviceListListener {
   std::string url_;
   DevToolsAndroidBridge::RemotePageCallback callback_;
   bool opening_;
-  scoped_refptr<DevToolsAndroidBridge> android_bridge_;
+  DevToolsAndroidBridge* android_bridge_;
 
   DISALLOW_COPY_AND_ASSIGN(OpenRemotePageRequest);
 };
@@ -372,8 +377,8 @@ DevToolsUI::~DevToolsUI() {
 void DevToolsUI::NavigationEntryCommitted(
     const content::LoadCommittedDetails& load_details) {
   content::NavigationEntry* entry = load_details.entry;
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableDevToolsExperiments)) {
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableDevToolsExperiments)) {
     return;
   }
 

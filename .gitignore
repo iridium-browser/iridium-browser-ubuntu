@@ -7,6 +7,8 @@
 *.rules
 *.sdf
 *.sln
+*.sublime-project
+*.sublime-workspace
 *.suo
 *.targets
 *.user
@@ -76,7 +78,6 @@ v8.log
 /chrome/browser/extensions/api/ledger/
 /chrome/browser/extensions/default_extensions/chromeos
 /chrome/browser/google/linkdoctor_internal
-/chrome/browser/intents/internal/
 /chrome/browser/internal
 /chrome/browser/performance_monitor/performance_monitor.xml
 /chrome/browser/protector/internal
@@ -266,6 +267,7 @@ v8.log
 /third_party/apache-win32/bin/iconv/*.so
 /third_party/apache-win32/modules/*.so
 /third_party/apache-win32/modules/*.dll
+/third_party/appurify-python/src
 /third_party/asan
 /third_party/bidichecker
 /third_party/bison
@@ -333,6 +335,7 @@ v8.log
 /third_party/mesa/src
 /third_party/mingw-w64
 /third_party/mkl
+/third_party/mockito/src
 /third_party/nacl_sdk_binaries/
 /third_party/nss
 /third_party/omaha/src/omaha
@@ -359,12 +362,14 @@ v8.log
 /third_party/python_26
 /third_party/pywebsocket/src
 /third_party/pywebsocket/src
+/third_party/requests/src
 /third_party/safe_browsing/testing
 /third_party/scons-2.0.1
 /third_party/sfntly/cpp
 /third_party/skia
 /third_party/smhasher/src
 /third_party/snappy/src
+/third_party/stp/src
 /third_party/swiftshader/include/
 /third_party/swig
 /third_party/syzygy

@@ -17,7 +17,7 @@
 #include "ui/base/ime/dummy_text_input_client.h"
 #include "ui/base/layout.h"
 #include "ui/base/page_transition_types.h"
-#include "ui/gfx/vector2d_f.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 
 // This file provides a testing framework for mocking out the RenderProcessHost
 // layer. It allows you to test RenderViewHost, WebContentsImpl,
@@ -100,11 +100,9 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
                             bool can_compose_inline,
                             int flags) override {}
   void ImeCancelComposition() override {}
-#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   void ImeCompositionRangeChanged(
       const gfx::Range& range,
       const std::vector<gfx::Rect>& character_bounds) override {}
-#endif
   void RenderProcessGone(base::TerminationStatus status,
                          int error_code) override;
   void Destroy() override;
@@ -113,7 +111,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
       const ViewHostMsg_SelectionBounds_Params& params) override {}
   void CopyFromCompositingSurface(const gfx::Rect& src_subrect,
                                   const gfx::Size& dst_size,
-                                  CopyFromCompositingSurfaceCallback& callback,
+                                  ReadbackRequestCallback& callback,
                                   const SkColorType color_type) override;
   void CopyFromCompositingSurfaceToVideoFrame(
       const gfx::Rect& src_subrect,

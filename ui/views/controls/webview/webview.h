@@ -72,6 +72,10 @@ class WEBVIEW_EXPORT WebView : public View,
   //         resizing performance during interactive resizes and animations.
   void SetFastResize(bool fast_resize);
 
+  // Set the background color to use while resizing with a clip. This is white
+  // by default.
+  void SetResizeBackgroundColor(SkColor resize_background_color);
+
   // Called when the WebContents is focused.
   // TODO(beng): This view should become a WebContentsViewObserver when a
   //             WebContents is attached, and not rely on the delegate to
@@ -103,6 +107,7 @@ class WEBVIEW_EXPORT WebView : public View,
   void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) override;
   bool SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
   void OnFocus() override;
   void AboutToRequestFocusFromTabTraversal(bool reverse) override;
   void GetAccessibleState(ui::AXViewState* state) override;

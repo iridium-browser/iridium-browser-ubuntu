@@ -29,7 +29,6 @@ struct SkGlyph {
     uint16_t    fWidth, fHeight;
     int16_t     fTop, fLeft;
 
-    void*       fDistanceField;
     uint8_t     fMaskFormat;
     int8_t      fRsbDelta, fLsbDelta;  // used by auto-kerning
     int8_t      fForceBW;
@@ -38,7 +37,6 @@ struct SkGlyph {
         fID             = id;
         fImage          = NULL;
         fPath           = NULL;
-        fDistanceField  = NULL;
         fMaskFormat     = MASK_FORMAT_UNKNOWN;
         fForceBW        = 0;
     }
@@ -50,9 +48,7 @@ struct SkGlyph {
         unsigned rb = width;
         if (SkMask::kBW_Format == format) {
             rb = (rb + 7) >> 3;
-        } else if (SkMask::kARGB32_Format == format ||
-                   SkMask::kLCD32_Format == format)
-        {
+        } else if (SkMask::kARGB32_Format == format) {
             rb <<= 2;
         } else if (SkMask::kLCD16_Format == format) {
             rb = SkAlign4(rb << 1);

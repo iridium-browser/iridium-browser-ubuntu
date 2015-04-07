@@ -48,14 +48,23 @@ namespace content {
 V4L2ImageProcessor::InputRecord::InputRecord() : at_device(false) {
 }
 
+V4L2ImageProcessor::InputRecord::~InputRecord() {
+}
+
 V4L2ImageProcessor::OutputRecord::OutputRecord()
     : at_device(false), at_client(false) {
+}
+
+V4L2ImageProcessor::OutputRecord::~OutputRecord() {
 }
 
 V4L2ImageProcessor::JobRecord::JobRecord() {
 }
 
-V4L2ImageProcessor::V4L2ImageProcessor(scoped_ptr<V4L2Device> device)
+V4L2ImageProcessor::JobRecord::~JobRecord() {
+}
+
+V4L2ImageProcessor::V4L2ImageProcessor(const scoped_refptr<V4L2Device>& device)
     : input_format_(media::VideoFrame::UNKNOWN),
       output_format_(media::VideoFrame::UNKNOWN),
       input_format_fourcc_(0),
@@ -63,7 +72,7 @@ V4L2ImageProcessor::V4L2ImageProcessor(scoped_ptr<V4L2Device> device)
       input_planes_count_(0),
       output_planes_count_(0),
       child_message_loop_proxy_(base::MessageLoopProxy::current()),
-      device_(device.Pass()),
+      device_(device),
       device_thread_("V4L2ImageProcessorThread"),
       device_poll_thread_("V4L2ImageProcessorDevicePollThread"),
       input_streamon_(false),

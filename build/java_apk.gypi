@@ -44,6 +44,8 @@
 #    shared library to be included in this apk. A stripped copy of the
 #    library will be included in the apk.
 #  resource_dir - The directory for resources.
+#  shared_resources - Make a resource package that can be loaded by a different
+#    application at runtime to access the package's resources.
 #  R_package - A custom Java package to generate the resource file R.java in.
 #    By default, the package given in AndroidManifest.xml will be used.
 #  use_chromium_linker - Enable the content dynamic linker that allows sharing the
@@ -126,6 +128,7 @@
     'resource_zip_path': '<(intermediate_dir)/<(_target_name).resources.zip',
     'resource_packaged_apk_name': '<(apk_name)-resources.ap_',
     'resource_packaged_apk_path': '<(intermediate_dir)/<(resource_packaged_apk_name)',
+    'shared_resources%': 0,
     'unsigned_apk_path': '<(intermediate_dir)/<(apk_name)-unsigned.apk',
     'final_apk_path%': '<(PRODUCT_DIR)/apks/<(apk_name).apk',
     'incomplete_apk_path': '<(intermediate_dir)/<(apk_name)-incomplete.apk',
@@ -575,7 +578,10 @@
             'additional_res_packages=': [],
           }],
           ['res_v14_verify_only == 1', {
-            'process_resources_options': ['--v14-verify-only']
+            'process_resources_options+': ['--v14-verify-only']
+          }],
+          ['shared_resources == 1', {
+            'process_resources_options+': ['--shared-resources']
           }],
         ],
       },
@@ -825,9 +831,15 @@
       'action_name': 'package_resources',
       'message': 'packaging resources for <(_target_name)',
       'variables': {
+        'package_resources_options': [],
         'package_resource_zip_input_paths': [
           '<(resource_zip_path)',
           '>@(dependencies_res_zip_paths)',
+        ],
+        'conditions': [
+          ['shared_resources == 1', {
+            'package_resources_options+': ['--shared-resources']
+          }],
         ],
       },
       'conditions': [
@@ -868,6 +880,8 @@
         '--no-compress', '<(extensions_to_not_compress)',
 
         '--apk-path', '<(resource_packaged_apk_path)',
+
+        '<@(package_resources_options)',
       ],
     },
     {

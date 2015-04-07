@@ -59,8 +59,6 @@ const char kStreamsPrivateTestExtensionId[] =
 const char kYoutubeAppId[] = "blpcfgokakmgnkcojhhkbfbldkacnbeo";
 const char kInAppPaymentsSupportAppId[] = "nmmhkkegccagdldgiimedpiccmgmieda";
 
-const char kAppLaunchHistogram[] = "Extensions.AppLaunch";
-const char kPlatformAppLaunchHistogram[] = "Apps.AppLaunch";
 #if defined(OS_CHROMEOS)
 // The extension id for the built-in component extension.
 const char kChromeVoxExtensionId[] =
@@ -68,8 +66,6 @@ const char kChromeVoxExtensionId[] =
 const char kChromeVoxExtensionPath[] = "chromeos/chromevox";
 const char kChromeVoxManifestFilename[] = "manifest.json";
 const char kChromeVoxGuestManifestFilename[] = "manifest_guest.json";
-const char kChromeVoxNextManifestFilename[] = "manifest_next.json";
-const char kChromeVoxNextGuestManifestFilename[] = "manifest_next_guest.json";
 const char kBrailleImeExtensionId[] =
     "jddehjeebkoimngcbdkaahpobgicbffp";
 const char kBrailleImeExtensionPath[] =

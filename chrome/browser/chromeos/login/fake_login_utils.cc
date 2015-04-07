@@ -16,11 +16,13 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/login/auth/mock_authenticator.h"
 #include "chromeos/login/auth/user_context.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
@@ -44,13 +46,9 @@ void FakeLoginUtils::DoBrowserLaunch(Profile* profile,
     chrome::startup::IsFirstRun first_run =
         first_run::IsChromeFirstRun() ? chrome::startup::IS_FIRST_RUN
                                       : chrome::startup::IS_NOT_FIRST_RUN;
-    ASSERT_TRUE(
-        browser_creator.LaunchBrowser(*CommandLine::ForCurrentProcess(),
-                                      profile,
-                                      base::FilePath(),
-                                      chrome::startup::IS_PROCESS_STARTUP,
-                                      first_run,
-                                      NULL));
+    ASSERT_TRUE(browser_creator.LaunchBrowser(
+        *base::CommandLine::ForCurrentProcess(), profile, base::FilePath(),
+        chrome::startup::IS_PROCESS_STARTUP, first_run, NULL));
   }
   if (login_host)
     login_host->Finalize();
@@ -71,8 +69,8 @@ void FakeLoginUtils::PrepareProfile(const UserContext& user_context,
   // Make sure that we get the real Profile instead of the login Profile.
   user->set_profile_is_created();
   Profile* profile = ProfileHelper::Get()->GetProfileByUserUnsafe(user);
-  profile->GetPrefs()->SetString(prefs::kGoogleServicesUsername,
-                                 user_context.GetUserID());
+  SigninManagerFactory::GetForProfile(profile)->SetAuthenticatedUsername(
+      user_context.GetUserID());
 
   if (user_manager->IsLoggedInAsSupervisedUser()) {
     user_manager::User* active_user = user_manager->GetActiveUser();
@@ -115,12 +113,6 @@ scoped_refptr<Authenticator> FakeLoginUtils::CreateAuthenticator(
     AuthStatusConsumer* consumer) {
   authenticator_ = new MockAuthenticator(consumer, expected_user_context_);
   return authenticator_;
-}
-
-bool FakeLoginUtils::RestartToApplyPerSessionFlagsIfNeed(Profile* profile,
-                                                         bool early_restart) {
-  NOTREACHED() << "Method not implemented.";
-  return false;
 }
 
 void FakeLoginUtils::SetExpectedCredentials(const UserContext& user_context) {

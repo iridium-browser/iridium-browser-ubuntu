@@ -204,6 +204,7 @@ HistoryAPI::~HistoryAPI() {
 }
 
 void HistoryAPI::Shutdown() {
+  history_event_router_.reset();
   EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
@@ -218,6 +219,7 @@ BrowserContextKeyedAPIFactory<HistoryAPI>* HistoryAPI::GetFactoryInstance() {
 template <>
 void BrowserContextKeyedAPIFactory<HistoryAPI>::DeclareFactoryDependencies() {
   DependsOn(ActivityLog::GetFactoryInstance());
+  DependsOn(HistoryServiceFactory::GetInstance());
   DependsOn(ExtensionsBrowserClient::Get()->GetExtensionSystemFactory());
 }
 
@@ -396,7 +398,7 @@ bool HistoryDeleteUrlFunction::RunAsync() {
   // Also clean out from the activity log. If the activity log testing flag is
   // set then don't clean so testers can see what potentially malicious
   // extensions have been trying to clean from their logs.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableExtensionActivityLogTesting)) {
     ActivityLog* activity_log = ActivityLog::GetInstance(GetProfile());
     DCHECK(activity_log);
@@ -429,7 +431,7 @@ bool HistoryDeleteRangeFunction::RunAsyncImpl() {
       &task_tracker_);
 
   // Also clean from the activity log unless in testing mode.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableExtensionActivityLogTesting)) {
     ActivityLog* activity_log = ActivityLog::GetInstance(GetProfile());
     DCHECK(activity_log);
@@ -459,7 +461,7 @@ bool HistoryDeleteAllFunction::RunAsyncImpl() {
       &task_tracker_);
 
   // Also clean from the activity log unless in testing mode.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableExtensionActivityLogTesting)) {
     ActivityLog* activity_log = ActivityLog::GetInstance(GetProfile());
     DCHECK(activity_log);

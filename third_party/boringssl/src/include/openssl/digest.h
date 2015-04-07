@@ -84,6 +84,10 @@ OPENSSL_EXPORT const EVP_MD *EVP_sha256(void);
 OPENSSL_EXPORT const EVP_MD *EVP_sha384(void);
 OPENSSL_EXPORT const EVP_MD *EVP_sha512(void);
 
+/* EVP_md5_sha1 is a TLS-specific |EVP_MD| which computes the concatenation of
+ * MD5 and SHA-1, as used in TLS 1.1 and below. */
+OPENSSL_EXPORT const EVP_MD *EVP_md5_sha1(void);
+
 /* EVP_get_digestbynid returns an |EVP_MD| for the given NID, or NULL if no
  * such digest is known. */
 OPENSSL_EXPORT const EVP_MD *EVP_get_digestbynid(int nid);
@@ -142,7 +146,7 @@ OPENSSL_EXPORT int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *data,
  * |md_out|. At most |EVP_MAX_MD_SIZE| bytes are written. If |out_size| is not
  * NULL then |*out_size| is set to the number of bytes written. It returns one
  * on success and zero otherwise. After this call, the hash cannot be updated
- * or finished again until |EVP_DigestFinal_ex| is called to start another
+ * or finished again until |EVP_DigestInit_ex| is called to start another
  * hashing operation. */
 OPENSSL_EXPORT int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, uint8_t *md_out,
                                       unsigned int *out_size);

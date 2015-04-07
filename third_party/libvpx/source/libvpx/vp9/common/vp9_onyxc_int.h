@@ -56,9 +56,16 @@ typedef enum {
   REFERENCE_MODES       = 3,
 } REFERENCE_MODE;
 
+typedef struct {
+  int_mv mv[2];
+  MV_REFERENCE_FRAME ref_frame[2];
+} MV_REF;
 
 typedef struct {
   int ref_count;
+  MV_REF *mvs;
+  int mi_rows;
+  int mi_cols;
   vpx_codec_frame_buffer_t raw_frame_buffer;
   YV12_BUFFER_CONFIG buf;
 } RefCntBuffer;
@@ -89,8 +96,11 @@ typedef struct VP9Common {
 #endif
 
   YV12_BUFFER_CONFIG *frame_to_show;
-
   RefCntBuffer frame_bufs[FRAME_BUFFERS];
+  RefCntBuffer *prev_frame;
+
+  // TODO(hkuang): Combine this with cur_buf in macroblockd.
+  RefCntBuffer *cur_frame;
 
   int ref_frame_map[REF_FRAMES]; /* maps fb_idx to reference slot */
 
@@ -138,16 +148,23 @@ typedef struct VP9Common {
 
   /* We allocate a MODE_INFO struct for each macroblock, together with
      an extra row on top and column on the left to simplify prediction. */
-
-  int mi_idx;
-  int prev_mi_idx;
   int mi_alloc_size;
-  MODE_INFO *mip_array[2];
-
   MODE_INFO *mip; /* Base of allocated array */
   MODE_INFO *mi;  /* Corresponds to upper left visible macroblock */
+
+  // TODO(agrange): Move prev_mi into encoder structure.
+  // prev_mip and prev_mi will only be allocated in VP9 encoder.
   MODE_INFO *prev_mip; /* MODE_INFO array 'mip' from last decoded frame */
   MODE_INFO *prev_mi;  /* 'mi' from last frame (points into prev_mip) */
+
+  // Separate mi functions between encoder and decoder.
+  int (*alloc_mi)(struct VP9Common *cm, int mi_size);
+  void (*free_mi)(struct VP9Common *cm);
+  void (*setup_mi)(struct VP9Common *cm);
+
+
+  // Whether to use previous frame's motion vectors for prediction.
+  int use_prev_frame_mvs;
 
   // Persistent mb segment id map used in prediction.
   unsigned char *last_frame_seg_map;
@@ -169,8 +186,8 @@ typedef struct VP9Common {
   MV_REFERENCE_FRAME comp_var_ref[2];
   REFERENCE_MODE reference_mode;
 
-  FRAME_CONTEXT fc;  /* this frame entropy */
-  FRAME_CONTEXT frame_contexts[FRAME_CONTEXTS];
+  FRAME_CONTEXT *fc;  /* this frame entropy */
+  FRAME_CONTEXT *frame_contexts;   // FRAME_CONTEXTS
   unsigned int  frame_context_idx; /* Context to use/update */
   FRAME_COUNTS counts;
 
@@ -261,7 +278,7 @@ static INLINE int frame_is_intra_only(const VP9_COMMON *const cm) {
 static INLINE const vp9_prob* get_partition_probs(const VP9_COMMON *cm,
                                                   int ctx) {
   return frame_is_intra_only(cm) ? vp9_kf_partition_probs[ctx]
-                                 : cm->fc.partition_prob[ctx];
+                                 : cm->fc->partition_prob[ctx];
 }
 
 static INLINE void set_skip_context(MACROBLOCKD *xd, int mi_row, int mi_col) {

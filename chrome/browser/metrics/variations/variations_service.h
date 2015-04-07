@@ -16,9 +16,9 @@
 #include "base/time/time.h"
 #include "chrome/browser/metrics/variations/variations_request_scheduler.h"
 #include "chrome/browser/metrics/variations/variations_seed_store.h"
-#include "chrome/browser/web_resource/resource_request_allowed_notifier.h"
 #include "chrome/common/chrome_version_info.h"
 #include "components/variations/variations_seed_simulator.h"
+#include "components/web_resource/resource_request_allowed_notifier.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "url/gurl.h"
 
@@ -51,7 +51,7 @@ namespace chrome_variations {
 // new seed data from the variations server.
 class VariationsService
     : public net::URLFetcherDelegate,
-      public ResourceRequestAllowedNotifier::Observer {
+      public web_resource::ResourceRequestAllowedNotifier::Observer {
  public:
   class Observer {
    public:
@@ -133,6 +133,11 @@ class VariationsService
     policy_pref_service_ = service;
   }
 
+  // Returns the invalid variations seed signature in base64 format, or an empty
+  // string if the signature was valid, missing, or if signature verification is
+  // disabled.
+  std::string GetInvalidVariationsSeedSignature() const;
+
  protected:
   // Starts the fetching process once, where |OnURLFetchComplete| is called with
   // the response.
@@ -149,7 +154,7 @@ class VariationsService
   // Does not take ownership of |state_manager|. Caller should ensure that
   // |state_manager| is valid for the lifetime of this class. Use the |Create|
   // factory method to create a VariationsService.
-  VariationsService(ResourceRequestAllowedNotifier* notifier,
+  VariationsService(web_resource::ResourceRequestAllowedNotifier* notifier,
                     PrefService* local_state,
                     metrics::MetricsStateManager* state_manager);
 
@@ -215,7 +220,8 @@ class VariationsService
 
   // Helper class used to tell this service if it's allowed to make network
   // resource requests.
-  scoped_ptr<ResourceRequestAllowedNotifier> resource_request_allowed_notifier_;
+  scoped_ptr<web_resource::ResourceRequestAllowedNotifier>
+      resource_request_allowed_notifier_;
 
   // The start time of the last seed request. This is used to measure the
   // latency of seed requests. Initially zero.

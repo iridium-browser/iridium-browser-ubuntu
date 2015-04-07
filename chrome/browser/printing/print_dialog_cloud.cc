@@ -196,13 +196,13 @@ bool GetPageSetupParameters(const std::string& json,
   return result;
 }
 
-base::string16 GetSwitchValueString16(const CommandLine& command_line,
+base::string16 GetSwitchValueString16(const base::CommandLine& command_line,
                                       const char* switchName) {
 #if defined(OS_WIN)
   return command_line.GetSwitchValueNative(switchName);
 #elif defined(OS_POSIX)
   // POSIX Command line string types are different.
-  CommandLine::StringType native_switch_val;
+  base::CommandLine::StringType native_switch_val;
   native_switch_val = command_line.GetSwitchValueASCII(switchName);
   // Convert the ASCII string to UTF16 to prepare to pass.
   return base::ASCIIToUTF16(native_switch_val);
@@ -486,7 +486,7 @@ bool CloudPrintFlowHandler::IsCloudPrintDialogUrl(const GURL& url) {
 
 CloudPrintWebDialogDelegate::CloudPrintWebDialogDelegate(
     content::BrowserContext* browser_context,
-    gfx::NativeWindow modal_parent,
+    gfx::NativeView modal_parent,
     const base::RefCountedMemory* data,
     const std::string& json_arguments,
     const base::string16& print_job_title,
@@ -617,7 +617,7 @@ bool CloudPrintWebDialogDelegate::HandleContextMenu(
 
 // Called from the UI thread, starts up the dialog.
 void CreateDialogImpl(content::BrowserContext* browser_context,
-                      gfx::NativeWindow modal_parent,
+                      gfx::NativeView modal_parent,
                       const base::RefCountedMemory* data,
                       const base::string16& print_job_title,
                       const base::string16& print_ticket,
@@ -649,7 +649,7 @@ void CreateDialogImpl(content::BrowserContext* browser_context,
 }
 
 void CreateDialogForFileImpl(content::BrowserContext* browser_context,
-                             gfx::NativeWindow modal_parent,
+                             gfx::NativeView modal_parent,
                              const base::FilePath& path_to_file,
                              const base::string16& print_job_title,
                              const base::string16& print_ticket,
@@ -696,7 +696,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 // the dialog.
 
 void CreatePrintDialogForFile(content::BrowserContext* browser_context,
-                              gfx::NativeWindow modal_parent,
+                              gfx::NativeView modal_parent,
                               const base::FilePath& path_to_file,
                               const base::string16& print_job_title,
                               const base::string16& print_ticket,
@@ -737,7 +737,7 @@ void CreateCloudPrintSigninTab(Browser* browser,
 }
 
 void CreatePrintDialogForBytes(content::BrowserContext* browser_context,
-                               gfx::NativeWindow modal_parent,
+                               gfx::NativeView modal_parent,
                                const base::RefCountedMemory* data,
                                const base::string16& print_job_title,
                                const base::string16& print_ticket,
@@ -748,7 +748,7 @@ void CreatePrintDialogForBytes(content::BrowserContext* browser_context,
 }
 
 bool CreatePrintDialogFromCommandLine(Profile* profile,
-                                      const CommandLine& command_line) {
+                                      const base::CommandLine& command_line) {
   DCHECK(command_line.HasSwitch(switches::kCloudPrintFile));
   if (!command_line.GetSwitchValuePath(switches::kCloudPrintFile).empty()) {
     base::FilePath cloud_print_file;

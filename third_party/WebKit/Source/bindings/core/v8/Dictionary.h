@@ -43,14 +43,14 @@
 
 namespace blink {
 
-class Element;
-class Path2D;
-
+// Dictionary class provides ways to retrieve property values as C++ objects
+// from a V8 object. Instances of this class must not outlive V8's handle scope
+// because they hold a V8 value without putting it on persistent handles.
 class Dictionary {
     ALLOW_ONLY_INLINE_ALLOCATION();
 public:
     Dictionary();
-    Dictionary(const v8::Handle<v8::Value>& options, v8::Isolate*);
+    Dictionary(const v8::Handle<v8::Value>& options, v8::Isolate*, ExceptionState&);
     ~Dictionary();
 
     Dictionary& operator=(const Dictionary&);
@@ -76,18 +76,13 @@ public:
 
     class ConversionContext {
     public:
-        ConversionContext(const String& interfaceName, const String& methodName, ExceptionState& exceptionState)
-            : m_interfaceName(interfaceName)
-            , m_methodName(methodName)
-            , m_exceptionState(exceptionState)
+        explicit ConversionContext(ExceptionState& exceptionState)
+            : m_exceptionState(exceptionState)
             , m_dirty(true)
         {
             resetPerPropertyContext();
         }
 
-        const String& interfaceName() const { return m_interfaceName; }
-        const String& methodName() const { return m_methodName; }
-        bool forConstructor() const { return m_methodName.isEmpty(); }
         ExceptionState& exceptionState() const { return m_exceptionState; }
 
         bool isNullable() const { return m_isNullable; }
@@ -100,8 +95,6 @@ public:
         void resetPerPropertyContext();
 
     private:
-        const String m_interfaceName;
-        const String m_methodName;
         ExceptionState& m_exceptionState;
         bool m_dirty;
 
@@ -111,7 +104,7 @@ public:
 
     class ConversionContextScope {
     public:
-        ConversionContextScope(ConversionContext& context)
+        explicit ConversionContextScope(ConversionContext& context)
             : m_context(context) { }
         ~ConversionContextScope()
         {
@@ -124,12 +117,7 @@ public:
     bool convert(ConversionContext&, const String&, Dictionary&) const;
 
     bool getOwnPropertiesAsStringHashMap(HashMap<String, String>&) const;
-    bool getOwnPropertyNames(Vector<String>&) const;
     bool getPropertyNames(Vector<String>&) const;
-
-    bool getWithUndefinedOrNullCheck(const String&, String&) const;
-    bool getWithUndefinedOrNullCheck(const String&, RefPtrWillBeMember<Element>&) const;
-    bool getWithUndefinedOrNullCheck(const String&, RefPtrWillBeMember<Path2D>&) const;
 
     bool hasProperty(const String&) const;
 
@@ -140,13 +128,14 @@ public:
 private:
     v8::Handle<v8::Value> m_options;
     v8::Isolate* m_isolate;
+    ExceptionState* m_exceptionState;
 };
 
 template<>
 struct NativeValueTraits<Dictionary> {
-    static inline Dictionary nativeValue(const v8::Handle<v8::Value>& value, v8::Isolate* isolate, ExceptionState&)
+    static inline Dictionary nativeValue(const v8::Handle<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
     {
-        return Dictionary(value, isolate);
+        return Dictionary(value, isolate, exceptionState);
     }
 };
 

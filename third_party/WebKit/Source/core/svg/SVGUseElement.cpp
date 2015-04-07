@@ -78,6 +78,17 @@ SVGUseElement::~SVGUseElement()
 #endif
 }
 
+void SVGUseElement::trace(Visitor* visitor)
+{
+    visitor->trace(m_x);
+    visitor->trace(m_y);
+    visitor->trace(m_width);
+    visitor->trace(m_height);
+    visitor->trace(m_targetElementInstance);
+    SVGGraphicsElement::trace(visitor);
+    SVGURIReference::trace(visitor);
+}
+
 bool SVGUseElement::isSupportedAttribute(const QualifiedName& attrName)
 {
     DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, supportedAttributes, ());
@@ -286,7 +297,7 @@ void SVGUseElement::clearResourceReferences()
 
     // FIXME: We should try to optimize this, to at least allow partial reclones.
     if (ShadowRoot* shadowTreeRootElement = userAgentShadowRoot())
-        shadowTreeRootElement->removeChildren();
+        shadowTreeRootElement->removeChildren(OmitSubtreeModifiedEvent);
 
     m_needsShadowTreeRecreation = false;
     document().unscheduleUseShadowTreeUpdate(*this);
@@ -661,9 +672,8 @@ void SVGUseElement::invalidateDependentShadowTrees()
 {
     // Recursively invalidate dependent <use> shadow trees
     const WillBeHeapHashSet<RawPtrWillBeWeakMember<SVGElement> >& instances = instancesForElement();
-    const WillBeHeapHashSet<RawPtrWillBeWeakMember<SVGElement> >::const_iterator end = instances.end();
-    for (WillBeHeapHashSet<RawPtrWillBeWeakMember<SVGElement> >::const_iterator it = instances.begin(); it != end; ++it) {
-        if (SVGUseElement* element = (*it)->correspondingUseElement()) {
+    for (SVGElement* instance : instances) {
+        if (SVGUseElement* element = instance->correspondingUseElement()) {
             ASSERT(element->inDocument());
             element->invalidateShadowTree();
         }
@@ -748,12 +758,6 @@ void SVGUseElement::setDocumentResource(ResourcePtr<DocumentResource> resource)
     m_resource = resource;
     if (m_resource)
         m_resource->addClient(this);
-}
-
-void SVGUseElement::trace(Visitor* visitor)
-{
-    visitor->trace(m_targetElementInstance);
-    SVGGraphicsElement::trace(visitor);
 }
 
 }

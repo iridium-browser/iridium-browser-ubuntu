@@ -43,7 +43,7 @@ class NET_EXPORT_PRIVATE SdchFilter : public Filter {
   FilterStatus ReadFilteredData(char* dest_buffer, int* dest_len) override;
 
  private:
-  // Internal status.  Once we enter an error state, we stop processing data.
+  // Internal status. Once we enter an error state, we stop processing data.
   enum DecodingStatus {
     DECODING_UNINITIALIZED,
     WAITING_FOR_DICTIONARY_SELECTION,
@@ -54,7 +54,7 @@ class NET_EXPORT_PRIVATE SdchFilter : public Filter {
   };
 
   // Only to be instantiated by Filter::Factory.
-  explicit SdchFilter(const FilterContext& filter_context);
+  SdchFilter(FilterType type, const FilterContext& filter_context);
   friend class Filter;
 
   // Identify the suggested dictionary, and initialize underlying decompressor.
@@ -63,6 +63,9 @@ class NET_EXPORT_PRIVATE SdchFilter : public Filter {
   // Move data that was internally buffered (after decompression) to the
   // specified dest_buffer.
   int OutputBufferExcess(char* const dest_buffer, size_t available_space);
+
+  // Add SDCH Problem to net-log and record histogram.
+  void LogSdchProblem(SdchProblemCode problem);
 
   // Context data from the owner of this filter.
   const FilterContext& filter_context_;
@@ -84,19 +87,19 @@ class NET_EXPORT_PRIVATE SdchFilter : public Filter {
   // After assembling an entire dictionary hash (the first 9 bytes of the
   // sdch payload, we check to see if it is plausible, meaning it has a null
   // termination, and has 8 characters that are possible in a net-safe base64
-  // encoding.  If the hash is not plausible, then the payload is probably not
+  // encoding. If the hash is not plausible, then the payload is probably not
   // an SDCH encoded bundle, and various error recovery strategies can be
   // attempted.
   bool dictionary_hash_is_plausible_;
 
-  // We hold an in-memory copy of the dictionary during the entire decoding, as
-  // it is used directly by the VC-DIFF decoding system.
-  // That char* data is part of the dictionary_ we hold a reference to.
-  scoped_refptr<SdchManager::Dictionary> dictionary_;
+  // Validity of this pointer is guaranteed by either the FilterContext holding
+  // a containing SdchManager::DictionarySet, or this object holding a
+  // container in |unexpected_dictionary_handle_| below.
+  const SdchManager::Dictionary *dictionary_;
 
   // We keep a copy of the URLRequestContext for use in the destructor, (at
   // which point GetURLRequestContext() will likely return null because of
-  // the disassociation of the URLRequest from the URLRequestJob).  This is
+  // the disassociation of the URLRequest from the URLRequestJob). This is
   // safe because the URLRequestJob (and any filters) are guaranteed to be
   // deleted before the URLRequestContext is destroyed.
   const URLRequestContext* const url_request_context_;
@@ -125,6 +128,11 @@ class NET_EXPORT_PRIVATE SdchFilter : public Filter {
   // To facilitate error recovery, allow filter to know if content is text/html
   // by checking within this mime type (we may do a meta-refresh via html).
   std::string mime_type_;
+
+  // If the response was encoded with a dictionary different than those
+  // advertised (e.g. a cached response using an old dictionary), this
+  // variable preserves that dictionary from deletion during decoding.
+  scoped_ptr<SdchManager::DictionarySet> unexpected_dictionary_handle_;
 
   DISALLOW_COPY_AND_ASSIGN(SdchFilter);
 };

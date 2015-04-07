@@ -76,7 +76,7 @@ class FakeAudioCaptureModule
   // Only functions called by PeerConnection are implemented, the rest do
   // nothing and return success. If a function is not expected to be called by
   // PeerConnection an assertion is triggered if it is in fact called.
-  virtual int32_t TimeUntilNextProcess() OVERRIDE;
+  virtual int64_t TimeUntilNextProcess() OVERRIDE;
   virtual int32_t Process() OVERRIDE;
   virtual int32_t ChangeUniqueId(const int32_t id) OVERRIDE;
 
@@ -198,6 +198,8 @@ class FakeAudioCaptureModule
   virtual int32_t ResetAudioDevice() OVERRIDE;
   virtual int32_t SetLoudspeakerStatus(bool enable) OVERRIDE;
   virtual int32_t GetLoudspeakerStatus(bool* enabled) const OVERRIDE;
+  virtual bool BuiltInAECIsAvailable() const { return false; }
+  virtual int32_t EnableBuiltInAEC(bool enable) { return -1; }
   // End of functions inherited from webrtc::AudioDeviceModule.
 
   // The following function is inherited from rtc::MessageHandler.

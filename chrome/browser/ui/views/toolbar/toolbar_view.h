@@ -68,6 +68,9 @@ class ToolbarView : public views::AccessiblePaneView,
   // as well.
   void Update(content::WebContents* tab);
 
+  // Clears the current state for |tab|.
+  void ResetTabState(content::WebContents* tab);
+
   // Set focus to the toolbar with complete keyboard access, with the
   // focus initially set to the app menu. Focus will be restored
   // to the last focused view if the user escapes.
@@ -103,7 +106,7 @@ class ToolbarView : public views::AccessiblePaneView,
   BrowserActionsContainer* browser_actions() const { return browser_actions_; }
   ReloadButton* reload_button() const { return reload_; }
   LocationBarView* location_bar() const { return location_bar_; }
-  views::MenuButton* app_menu() const;
+  WrenchToolbarButton* app_menu() const { return app_menu_; }
   HomeButton* home_button() const { return home_; }
 
   // AccessiblePaneView:

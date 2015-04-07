@@ -19,10 +19,9 @@ struct FormData {
   FormData(const FormData& data);
   ~FormData();
 
-  // Used in testing, and in recording metrics and setting preferences, where
-  // false positives/negatives aren't super important.
-  bool operator==(const FormData& form) const;
-  bool operator!=(const FormData& form) const;
+  // Returns true if two forms are the same, not counting the values of the
+  // form elements.
+  bool SameFormAs(const FormData& other) const;
 
   // Allow FormData to be a key in STL containers.
   bool operator<(const FormData& form) const;
@@ -35,6 +34,8 @@ struct FormData {
   GURL action;
   // true if this form was submitted by a user gesture and not javascript.
   bool user_submitted;
+  // true if this form is a form tag.
+  bool is_form_tag;
   // A vector of all the input fields in the form.
   std::vector<FormFieldData> fields;
 };

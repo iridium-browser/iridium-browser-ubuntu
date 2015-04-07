@@ -73,7 +73,7 @@ static FloatRect toNormalizedRect(const FloatRect& absoluteRect, const RenderObj
     if (container->hasOverflowClip())
         scrolledOrigin = -IntPoint(container->scrolledContentOffset());
 
-    FloatRect overflowRect(scrolledOrigin, container->maxLayoutOverflow());
+    FloatRect overflowRect(scrolledOrigin, FloatSize(container->maxLayoutOverflow()));
     FloatRect containerRect = container->localToAbsoluteQuad(FloatQuad(overflowRect)).enclosingBoundingBox();
 
     if (containerRect.isEmpty())
@@ -87,7 +87,7 @@ static FloatRect toNormalizedRect(const FloatRect& absoluteRect, const RenderObj
     // Fixed positions do not make sense in this coordinate system, but need to leave consistent tickmarks.
     // So, use their position when the view is not scrolled, like an absolute position.
     if (renderer->style()->position() == FixedPosition && container->isRenderView())
-        normalizedRect.move(-toRenderView(container)->frameView()->scrollOffsetForFixedPosition());
+        normalizedRect.move(-toRenderView(container)->frameView()->scrollOffsetForViewportConstrainedObjects());
 
     normalizedRect.scale(1 / containerRect.width(), 1 / containerRect.height());
     return normalizedRect;

@@ -27,6 +27,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/jstemplate_builder.h"
+#include "url/url_util.h"
 
 using base::UserMetricsAction;
 using blink::WebDocument;
@@ -45,8 +46,10 @@ namespace {
 const plugins::PluginPlaceholder* g_last_active_menu = NULL;
 }  // namespace
 
+// The placeholder is loaded in normal web renderer processes, so it should not
+// have a chrome:// scheme that might let it be confused with a WebUI page.
 const char ChromePluginPlaceholder::kPluginPlaceholderDataURL[] =
-    "chrome://pluginplaceholderdata/";
+    "data:text/html,pluginplaceholderdata";
 
 ChromePluginPlaceholder::ChromePluginPlaceholder(
     content::RenderFrame* render_frame,
@@ -149,11 +152,15 @@ ChromePluginPlaceholder* ChromePluginPlaceholder::CreateBlockedPlugin(
     const std::string& identifier,
     const base::string16& name,
     int template_id,
-    const base::string16& message) {
+    const base::string16& message,
+    const GURL& poster_url) {
   base::DictionaryValue values;
   values.SetString("message", message);
   values.SetString("name", name);
   values.SetString("hide", l10n_util::GetStringUTF8(IDS_PLUGIN_HIDE));
+
+  if (poster_url.is_valid())
+    values.SetString("background", "url('" + poster_url.spec() + "')");
 
   const base::StringPiece template_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(template_id));
@@ -165,6 +172,11 @@ ChromePluginPlaceholder* ChromePluginPlaceholder::CreateBlockedPlugin(
   // |blocked_plugin| will destroy itself when its WebViewPlugin is going away.
   ChromePluginPlaceholder* blocked_plugin = new ChromePluginPlaceholder(
       render_frame, frame, params, html_data, name);
+
+#if defined(ENABLE_PLUGINS)
+  if (poster_url.is_valid())
+    blocked_plugin->BlockForPowerSaverPoster();
+#endif
   blocked_plugin->SetPluginInfo(plugin);
   blocked_plugin->SetIdentifier(identifier);
   return blocked_plugin;
@@ -299,6 +311,9 @@ void ChromePluginPlaceholder::OnMenuAction(int request_id, unsigned action) {
   switch (action) {
     case chrome::MENU_COMMAND_PLUGIN_RUN: {
       RenderThread::Get()->RecordAction(UserMetricsAction("Plugin_Load_Menu"));
+#if defined(ENABLE_PLUGINS)
+      DisablePowerSaverForInstance();
+#endif
       LoadPlugin();
       break;
     }

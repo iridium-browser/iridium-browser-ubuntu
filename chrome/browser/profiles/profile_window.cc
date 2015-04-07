@@ -17,6 +17,9 @@
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
+#include "chrome/browser/signin/account_tracker_service_factory.h"
+#include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/profile_chooser_constants.h"
@@ -25,9 +28,18 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/signin/core/browser/account_reconcilor.h"
+#include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/user_metrics.h"
+
+#if defined(ENABLE_EXTENSIONS)
+#include "chrome/browser/extensions/extension_service.h"
+#include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_registry_factory.h"
+#include "extensions/browser/extension_system.h"
+#endif  // defined(ENABLE_EXTENSIONS)
 
 #if !defined(OS_IOS)
 #include "chrome/browser/ui/browser_finder.h"
@@ -44,6 +56,20 @@ namespace {
 
 const char kNewProfileManagementExperimentInternalName[] =
     "enable-new-profile-management";
+
+#if defined(ENABLE_EXTENSIONS)
+void BlockExtensions(Profile* profile) {
+  ExtensionService* extension_service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  extension_service->BlockAllExtensions();
+}
+
+void UnblockExtensions(Profile* profile) {
+  ExtensionService* extension_service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  extension_service->UnblockAllExtensions();
+}
+#endif  // defined(ENABLE_EXTENSIONS)
 
 // Handles running a callback when a new Browser for the given profile
 // has been completely created.
@@ -97,6 +123,19 @@ void OpenBrowserWindowForProfile(
     is_process_startup = chrome::startup::IS_PROCESS_STARTUP;
     is_first_run = chrome::startup::IS_FIRST_RUN;
   }
+
+#if defined(ENABLE_EXTENSIONS)
+  // The signin bit will still be set if the profile is being unlocked and the
+  // browser window for it is opening. As part of this unlock process, unblock
+  // all the extensions.
+  const ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+  int index = cache.GetIndexOfProfileWithPath(profile->GetPath());
+  if (!profile->IsGuestSession() &&
+      cache.ProfileIsSigninRequiredAtIndex(index)) {
+    UnblockExtensions(profile);
+  }
+#endif  // defined(ENABLE_EXTENSIONS)
 
   // If |always_create| is false, and we have a |callback| to run, check
   // whether a browser already exists so that we can run the callback. We don't
@@ -218,7 +257,7 @@ void FindOrCreateNewWindowForProfile(
   }
 
   content::RecordAction(UserMetricsAction("NewWindow"));
-  CommandLine command_line(CommandLine::NO_PROGRAM);
+  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
   int return_code;
   StartupBrowserCreator browser_creator;
   browser_creator.LaunchBrowser(command_line, profile, base::FilePath(),
@@ -297,11 +336,17 @@ void CloseGuestProfileWindows() {
 }
 
 void LockBrowserCloseSuccess(const base::FilePath& profile_path) {
-  ProfileInfoCache* cache =
-      &g_browser_process->profile_manager()->GetProfileInfoCache();
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  ProfileInfoCache* cache = &profile_manager->GetProfileInfoCache();
 
   cache->SetProfileSigninRequiredAtIndex(
       cache->GetIndexOfProfileWithPath(profile_path), true);
+
+#if defined(ENABLE_EXTENSIONS)
+  // Profile guaranteed to exist for it to have been locked.
+  BlockExtensions(profile_manager->GetProfileByPath(profile_path));
+#endif  // defined(ENABLE_EXTENSIONS)
+
   chrome::HideTaskManager();
   UserManager::Show(profile_path,
                     profiles::USER_MANAGER_NO_TUTORIAL,
@@ -321,8 +366,22 @@ bool IsLockAvailable(Profile* profile) {
   if (!switches::IsNewProfileManagement())
     return false;
 
-  const std::string& hosted_domain = profile->GetPrefs()->
+  if (profile->IsGuestSession())
+    return false;
+
+  const ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+  std::string hosted_domain = profile->GetPrefs()->
       GetString(prefs::kGoogleServicesHostedDomain);
+  // TODO(mlerman): After one release remove any hosted_domain reference to the
+  // pref, since all users will have this in the AccountTrackerService.
+  if (hosted_domain.empty()) {
+    AccountTrackerService* account_tracker =
+        AccountTrackerServiceFactory::GetForProfile(profile);
+    int profile_index = cache.GetIndexOfProfileWithPath(profile->GetPath());
+    hosted_domain = account_tracker->FindAccountInfoByEmail(base::UTF16ToUTF8(
+        cache.GetUserNameOfProfileAtIndex(profile_index))).hosted_domain;
+  }
   // TODO(mlerman): Prohibit only users who authenticate using SAML. Until then,
   // prohibited users who use hosted domains (aside from google.com).
   if (hosted_domain != Profile::kNoHostedDomainFound &&
@@ -330,8 +389,6 @@ bool IsLockAvailable(Profile* profile) {
     return false;
   }
 
-  const ProfileInfoCache& cache =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
   for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
     if (cache.ProfileIsSupervisedAtIndex(i))
       return true;
@@ -398,7 +455,7 @@ void EnableNewProfileManagementPreview(Profile* profile) {
       true);
 
   switches::EnableNewProfileManagementForTesting(
-      CommandLine::ForCurrentProcess());
+      base::CommandLine::ForCurrentProcess());
   UserManager::Show(base::FilePath(),
                     profiles::USER_MANAGER_TUTORIAL_OVERVIEW,
                     profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);

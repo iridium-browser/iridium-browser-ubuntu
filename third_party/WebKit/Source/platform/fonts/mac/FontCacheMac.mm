@@ -72,7 +72,7 @@ static bool useHinting()
     // Enable hinting when subpixel font scaling is disabled or
     // when running the set of standard non-subpixel layout tests,
     // otherwise use subpixel glyph positioning.
-    return (LayoutTestSupport::isRunningLayoutTest() && !LayoutTestSupport::isFontAntialiasingEnabledForTest()) || !RuntimeEnabledFeatures::subpixelFontScalingEnabled();
+    return (LayoutTestSupport::isRunningLayoutTest() && !LayoutTestSupport::isFontAntialiasingEnabledForTest());
 }
 
 void FontCache::platformInit()
@@ -127,10 +127,6 @@ PassRefPtr<SimpleFontData> FontCache::fallbackFontForCharacter(const FontDescrip
     if (!substituteFont && codeUnitsLength == 1)
         substituteFont = [NSFont findFontLike:nsFont forCharacter:codeUnits[0] inLanguage:nil];
     if (!substituteFont)
-        return nullptr;
-
-    // Chromium can't render AppleColorEmoji.
-    if ([[substituteFont familyName] isEqual:@"Apple Color Emoji"])
         return nullptr;
 
     // Use the family name from the AppKit-supplied substitute font, requesting the
@@ -224,7 +220,7 @@ FontPlatformData* FontCache::createFontPlatformData(const FontDescription& fontD
 
     // FontPlatformData::font() can be null for the case of Chromium out-of-process font loading.
     // In that case, we don't want to use the platformData.
-    OwnPtr<FontPlatformData> platformData = adoptPtr(new FontPlatformData(platformFont, size, syntheticBold, syntheticItalic, fontDescription.orientation(), fontDescription.widthVariant()));
+    OwnPtr<FontPlatformData> platformData = adoptPtr(new FontPlatformData(platformFont, size, syntheticBold, syntheticItalic, fontDescription.orientation()));
     if (!platformData->font())
         return 0;
     return platformData.leakPtr();

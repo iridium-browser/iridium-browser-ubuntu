@@ -31,7 +31,6 @@ const char kGoogleRestrictedPrefix[] = "google";
 const char kInvalidParameter[] =
     "Function was called with invalid parameters.";
 const char kGCMDisabled[] = "GCM is currently disabled.";
-const char kNotSignedIn[] = "Profile was not signed in.";
 const char kAsyncOperationPending[] =
     "Asynchronous operation is pending.";
 const char kNetworkError[] = "Network error occurred.";
@@ -47,8 +46,6 @@ const char* GcmResultToError(gcm::GCMClient::Result result) {
       return kInvalidParameter;
     case gcm::GCMClient::GCM_DISABLED:
       return kGCMDisabled;
-    case gcm::GCMClient::NOT_SIGNED_IN:
-      return kNotSignedIn;
     case gcm::GCMClient::ASYNC_OPERATION_PENDING:
       return kAsyncOperationPending;
     case gcm::GCMClient::NETWORK_ERROR:
@@ -213,6 +210,8 @@ void GcmJsEventRouter::OnMessage(
     const gcm::GCMClient::IncomingMessage& message) {
   api::gcm::OnMessage::Message message_arg;
   message_arg.data.additional_properties = message.data;
+  if (!message.sender_id.empty())
+    message_arg.from.reset(new std::string(message.sender_id));
   if (!message.collapse_key.empty())
     message_arg.collapse_key.reset(new std::string(message.collapse_key));
 

@@ -29,9 +29,9 @@ class EncodedImageCallback {
   virtual ~EncodedImageCallback() {}
 
   // Callback function which is called when an image has been encoded.
-  // TODO(pbos): Make encoded_image const or pointer. Remove default arguments.
+  // TODO(pbos): Remove default arguments.
   virtual int32_t Encoded(
-      EncodedImage& encoded_image,
+      const EncodedImage& encoded_image,
       const CodecSpecificInfo* codec_specific_info = NULL,
       const RTPFragmentationHeader* fragmentation = NULL) = 0;
 };
@@ -68,7 +68,7 @@ class VideoEncoder {
   //                                  WEBRTC_VIDEO_CODEC_ERROR
   virtual int32_t InitEncode(const VideoCodec* codec_settings,
                              int32_t number_of_cores,
-                             uint32_t max_payload_size) = 0;
+                             size_t max_payload_size) = 0;
 
   // Register an encode complete callback object.
   //

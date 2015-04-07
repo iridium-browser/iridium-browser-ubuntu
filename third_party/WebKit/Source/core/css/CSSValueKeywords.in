@@ -943,9 +943,11 @@ markers
 // auto
 isolate
 
-// touch-action-delay
+// scroll-blocks-on
 // none
-script
+start-touch
+wheel-event
+scroll-event
 
 // touch-action
 pan-x
@@ -971,7 +973,7 @@ safe
 legacy
 
 // scroll-behavior
-instant
+// auto
 smooth
 
 // will-change
@@ -1057,6 +1059,9 @@ translatex
 translatey
 translatez
 translate3d
+
+// motion path
+path
 
 calc
 -webkit-calc

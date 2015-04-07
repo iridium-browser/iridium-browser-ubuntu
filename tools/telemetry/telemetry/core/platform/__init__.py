@@ -1,7 +1,6 @@
 # Copyright 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
 import logging as real_logging
 import os
 import sys
@@ -19,42 +18,30 @@ _host_platform = None
 _remote_platforms = {}
 
 
-def _IsRunningOnCrosDevice():
-  """Returns True if we're on a ChromeOS device."""
-  lsb_release = '/etc/lsb-release'
-  if sys.platform.startswith('linux') and os.path.exists(lsb_release):
-    with open(lsb_release, 'r') as f:
-      res = f.read()
-      if res.count('CHROMEOS_RELEASE_NAME'):
-        return True
-  return False
-
-
 def _InitHostPlatformIfNeeded():
   global _host_platform
   if _host_platform:
     return
-  if _IsRunningOnCrosDevice():
-    from telemetry.core.platform import cros_platform_backend
-    backend = cros_platform_backend.CrosPlatformBackend()
-  elif sys.platform.startswith('linux'):
-    from telemetry.core.platform import linux_platform_backend
-    backend = linux_platform_backend.LinuxPlatformBackend()
-  elif sys.platform == 'darwin':
-    from telemetry.core.platform import mac_platform_backend
-    backend = mac_platform_backend.MacPlatformBackend()
-  elif sys.platform == 'win32':
-    from telemetry.core.platform import win_platform_backend
-    backend = win_platform_backend.WinPlatformBackend()
-  else:
+  backend = None
+  for platform_backend_class in _IterAllPlatformBackendClasses():
+    if platform_backend_class.IsPlatformBackendForHost():
+      backend = platform_backend_class()
+      break
+  if not backend:
     raise NotImplementedError()
-
   _host_platform = Platform(backend)
 
 
 def GetHostPlatform():
   _InitHostPlatformIfNeeded()
   return _host_platform
+
+
+def _IterAllPlatformBackendClasses():
+  platform_dir = os.path.dirname(os.path.realpath(__file__))
+  return discover.DiscoverClasses(
+      platform_dir, util.GetTelemetryDir(),
+      platform_backend_module.PlatformBackend).itervalues()
 
 
 def GetPlatformForDevice(device, logging=real_logging):
@@ -65,14 +52,10 @@ def GetPlatformForDevice(device, logging=real_logging):
   if device.guid in _remote_platforms:
     return _remote_platforms[device.guid]
   try:
-    platform_backend = None
-    platform_dir = os.path.dirname(os.path.realpath(__file__))
-    for platform_backend_class in discover.DiscoverClasses(
-        platform_dir, util.GetTelemetryDir(),
-        platform_backend_module.PlatformBackend).itervalues():
+    for platform_backend_class in _IterAllPlatformBackendClasses():
       if platform_backend_class.SupportsDevice(device):
-        platform_backend = platform_backend_class(device)
-        _remote_platforms[device.guid] = Platform(platform_backend)
+        _remote_platforms[device.guid] = (
+            platform_backend_class.CreatePlatformForDevice(device))
         return _remote_platforms[device.guid]
     return None
   except Exception:
@@ -98,6 +81,10 @@ class Platform(object):
         self._platform_backend.profiling_controller_backend)
 
   @property
+  def is_host_platform(self):
+    return self == GetHostPlatform()
+
+  @property
   def network_controller(self):
     """Control network settings and servers to simulate the Web."""
     return self._network_controller
@@ -109,40 +96,6 @@ class Platform(object):
   @property
   def profiling_controller(self):
     return self._profiling_controller
-
-  def IsRawDisplayFrameRateSupported(self):
-    """Platforms may be able to collect GL surface stats."""
-    return self._platform_backend.IsRawDisplayFrameRateSupported()
-
-  def StartRawDisplayFrameRateMeasurement(self):
-    """Start measuring GL surface stats."""
-    return self._platform_backend.StartRawDisplayFrameRateMeasurement()
-
-  def StopRawDisplayFrameRateMeasurement(self):
-    """Stop measuring GL surface stats."""
-    return self._platform_backend.StopRawDisplayFrameRateMeasurement()
-
-  class RawDisplayFrameRateMeasurement(object):
-    def __init__(self, name, value, unit):
-      self._name = name
-      self._value = value
-      self._unit = unit
-
-    @property
-    def name(self):
-      return self._name
-
-    @property
-    def value(self):
-      return self._value
-
-    @property
-    def unit(self):
-      return self._unit
-
-  def GetRawDisplayFrameRateMeasurements(self):
-    """Returns a list of RawDisplayFrameRateMeasurement."""
-    return self._platform_backend.GetRawDisplayFrameRateMeasurements()
 
   def CanMonitorThermalThrottling(self):
     """Platforms may be able to detect thermal throttling.
@@ -190,15 +143,14 @@ class Platform(object):
     This function may require root or administrator access."""
     return self._platform_backend.FlushEntireSystemCache()
 
-  def FlushSystemCacheForDirectory(self, directory, ignoring=None):
+  def FlushSystemCacheForDirectory(self, directory):
     """Flushes the OS's file cache for the specified directory.
 
     Any files or directories inside |directory| matching a name in the
     |ignoring| list will be skipped.
 
     This function does not require root or administrator access."""
-    return self._platform_backend.FlushSystemCacheForDirectory(
-        directory, ignoring=ignoring)
+    return self._platform_backend.FlushSystemCacheForDirectory(directory)
 
   def FlushDnsCache(self):
     """Flushes the OS's DNS cache completely.
@@ -322,3 +274,24 @@ class Platform(object):
       }
     """
     return self._platform_backend.StopMonitoringPower()
+
+  def IsCooperativeShutdownSupported(self):
+    """Indicates whether CooperativelyShutdown, below, is supported.
+    It is not necessary to implement it on all platforms."""
+    return self._platform_backend.IsCooperativeShutdownSupported()
+
+  def CooperativelyShutdown(self, proc, app_name):
+    """Cooperatively shut down the given process from subprocess.Popen.
+
+    Currently this is only implemented on Windows. See
+    crbug.com/424024 for background on why it was added.
+
+    Args:
+      proc: a process object returned from subprocess.Popen.
+      app_name: on Windows, is the prefix of the application's window
+          class name that should be searched for. This helps ensure
+          that only the application's windows are closed.
+
+    Returns True if it is believed the attempt succeeded.
+    """
+    return self._platform_backend.CooperativelyShutdown(proc, app_name)

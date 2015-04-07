@@ -37,8 +37,6 @@
 #include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/browser/history/in_memory_url_index.h"
 #include "chrome/browser/history/top_sites.h"
-#include "chrome/browser/history/visit_database.h"
-#include "chrome/browser/history/visit_filter.h"
 #include "chrome/browser/history/web_history_service.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -53,6 +51,8 @@
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/in_memory_database.h"
 #include "components/history/core/browser/keyword_search_term.h"
+#include "components/history/core/browser/visit_database.h"
+#include "components/history/core/browser/visit_filter.h"
 #include "components/history/core/common/thumbnail_score.h"
 #include "components/visitedlink/browser/visitedlink_master.h"
 #include "content/public/browser/browser_thread.h"
@@ -179,6 +179,14 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
                                               row,
                                               redirects,
                                               visit_time));
+  }
+
+  void NotifyURLsModified(const history::URLRows& changed_urls) override {
+    service_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&HistoryService::NotifyURLsModified,
+                   history_service_,
+                   changed_urls));
   }
 
   void BroadcastNotifications(
@@ -384,7 +392,7 @@ void HistoryService::SetOnBackendDestroyTask(const base::Closure& task) {
 void HistoryService::AddPage(const GURL& url,
                              Time time,
                              history::ContextID context_id,
-                             int32 page_id,
+                             int nav_entry_id,
                              const GURL& referrer,
                              const history::RedirectList& redirects,
                              ui::PageTransition transition,
@@ -392,7 +400,7 @@ void HistoryService::AddPage(const GURL& url,
                              bool did_replace_entry) {
   DCHECK(thread_checker_.CalledOnValidThread());
   AddPage(
-      history::HistoryAddPageArgs(url, time, context_id, page_id, referrer,
+      history::HistoryAddPageArgs(url, time, context_id, nav_entry_id, referrer,
                                   redirects, transition, visit_source,
                                   did_replace_entry));
 }
@@ -457,13 +465,13 @@ void HistoryService::SetPageTitle(const GURL& url,
 }
 
 void HistoryService::UpdateWithPageEndTime(history::ContextID context_id,
-                                           int32 page_id,
+                                           int nav_entry_id,
                                            const GURL& url,
                                            Time end_ts) {
   DCHECK(thread_) << "History service being called after cleanup";
   DCHECK(thread_checker_.CalledOnValidThread());
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::UpdateWithPageEndTime,
-                    context_id, page_id, url, end_ts);
+                    context_id, nav_entry_id, url, end_ts);
 }
 
 void HistoryService::AddPageWithDetails(const GURL& url,
@@ -880,6 +888,8 @@ void HistoryService::Cleanup() {
     return;
   }
 
+  NotifyHistoryServiceBeingDeleted();
+
   weak_ptr_factory_.InvalidateWeakPtrs();
 
   // Unload the backend.
@@ -1226,10 +1236,7 @@ void HistoryService::BroadcastNotificationsHelper(
 void HistoryService::OnDBLoaded() {
   DCHECK(thread_checker_.CalledOnValidThread());
   backend_loaded_ = true;
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_HISTORY_LOADED,
-      content::Source<Profile>(profile_),
-      content::Details<HistoryService>(this));
+  NotifyHistoryServiceLoaded();
 }
 
 bool HistoryService::GetRowForURL(const GURL& url, history::URLRow* url_row) {
@@ -1252,6 +1259,25 @@ void HistoryService::NotifyURLVisited(ui::PageTransition transition,
   FOR_EACH_OBSERVER(history::HistoryServiceObserver,
                     observers_,
                     OnURLVisited(this, transition, row, redirects, visit_time));
+}
+
+void HistoryService::NotifyURLsModified(const history::URLRows& changed_urls) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  FOR_EACH_OBSERVER(history::HistoryServiceObserver,
+                    observers_,
+                    OnURLsModified(this, changed_urls));
+}
+
+void HistoryService::NotifyHistoryServiceLoaded() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  FOR_EACH_OBSERVER(history::HistoryServiceObserver, observers_,
+                    OnHistoryServiceLoaded(this));
+}
+
+void HistoryService::NotifyHistoryServiceBeingDeleted() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  FOR_EACH_OBSERVER(history::HistoryServiceObserver, observers_,
+                    HistoryServiceBeingDeleted(this));
 }
 
 scoped_ptr<base::CallbackList<void(const std::set<GURL>&)>::Subscription>

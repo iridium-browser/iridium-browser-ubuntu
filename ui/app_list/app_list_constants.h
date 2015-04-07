@@ -43,10 +43,16 @@ APP_LIST_EXPORT extern const float kFolderBubbleRadius;
 APP_LIST_EXPORT extern const float kFolderShadowRadius;
 APP_LIST_EXPORT extern const float kFolderShadowOffsetY;
 
+APP_LIST_EXPORT extern const int kCardShadowBlur;
+APP_LIST_EXPORT extern const int kCardShadowYOffset;
+APP_LIST_EXPORT extern const SkColor kCardShadowColor;
+APP_LIST_EXPORT extern const SkColor kCardBackgroundColor;
+
 APP_LIST_EXPORT extern const int kPageTransitionDurationInMs;
 APP_LIST_EXPORT extern const int kOverscrollPageTransitionDurationMs;
 APP_LIST_EXPORT extern const int kFolderTransitionInDurationMs;
 APP_LIST_EXPORT extern const int kFolderTransitionOutDurationMs;
+APP_LIST_EXPORT extern const int kCustomPageCollapsedHeight;
 APP_LIST_EXPORT extern const gfx::Tween::Type kFolderFadeInTweenType;
 APP_LIST_EXPORT extern const gfx::Tween::Type kFolderFadeOutTweenType;
 

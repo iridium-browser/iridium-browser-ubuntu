@@ -10,6 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/logging.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -228,6 +229,11 @@ Window::~Window() {
     delegate_->OnWindowDestroying(this);
   FOR_EACH_OBSERVER(WindowObserver, observers_, OnWindowDestroying(this));
 
+  // While we are being destroyed, our target handler may also be in the
+  // process of destruction or already destroyed, so do not forward any
+  // input events at the ui::EP_TARGET phase.
+  set_target_handler(nullptr);
+
   // TODO(beng): See comment in window_event_dispatcher.h. This shouldn't be
   //             necessary but unfortunately is right now due to ordering
   //             peculiarities. WED must be notified _after_ other observers
@@ -378,9 +384,9 @@ gfx::Rect Window::GetBoundsInRootWindow() const {
   //             do for now.
   if (!GetRootWindow())
     return bounds();
-  gfx::Point origin = bounds().origin();
-  ConvertPointToTarget(parent_, GetRootWindow(), &origin);
-  return gfx::Rect(origin, bounds().size());
+  gfx::Rect bounds_in_root(bounds().size());
+  ConvertRectToTarget(this, GetRootWindow(), &bounds_in_root);
+  return bounds_in_root;
 }
 
 gfx::Rect Window::GetBoundsInScreen() const {
@@ -663,7 +669,7 @@ void Window::RemoveObserver(WindowObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-bool Window::HasObserver(WindowObserver* observer) {
+bool Window::HasObserver(const WindowObserver* observer) const {
   return observers_.HasObserver(observer);
 }
 
@@ -917,6 +923,10 @@ void Window::SetBoundsInternal(const gfx::Rect& new_bounds) {
 }
 
 void Window::SetVisible(bool visible) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/440919 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("440919 Window::SetVisible"));
+
   if ((layer() && visible == layer()->GetTargetVisibility()) ||
       (!layer() && visible == visible_))
     return;  // No change.
@@ -1416,8 +1426,7 @@ ui::EventTarget* Window::GetParentTarget() {
 }
 
 scoped_ptr<ui::EventTargetIterator> Window::GetChildIterator() const {
-  return scoped_ptr<ui::EventTargetIterator>(
-      new ui::EventTargetIteratorImpl<Window>(children()));
+  return make_scoped_ptr(new ui::EventTargetIteratorImpl<Window>(children()));
 }
 
 ui::EventTargeter* Window::GetEventTargeter() {

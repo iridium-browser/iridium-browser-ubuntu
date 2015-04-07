@@ -37,6 +37,8 @@ namespace blink {
 class AutoscrollController;
 class ExceptionState;
 class HTMLOptionElement;
+class HTMLOptionElementOrHTMLOptGroupElement;
+class HTMLElementOrLong;
 
 class HTMLSelectElement final : public HTMLFormControlElementWithState, public TypeAheadDataSource {
     DEFINE_WRAPPERTYPEINFO();
@@ -64,8 +66,7 @@ public:
 
     bool usesMenuList() const;
 
-    void add(HTMLElement*, HTMLElement* beforeElement, ExceptionState&);
-    void addBeforeOptionAtIndex(HTMLElement*, int beforeIndex, ExceptionState&);
+    void add(const HTMLOptionElementOrHTMLOptGroupElement&, const HTMLElementOrLong&, ExceptionState&);
 
     using Node::remove;
     void remove(int index);
@@ -100,7 +101,7 @@ public:
     HTMLOptionElement* item(unsigned index);
 
     void scrollToSelection();
-    void scrollTo(int listIndex);
+    void scrollToIndex(int listIndex);
 
     void listBoxSelectItem(int listIndex, bool allowMultiplySelections, bool shift, bool fireOnChangeNow = true);
 
@@ -116,6 +117,7 @@ public:
 
     // For use in the implementation of HTMLOptionElement.
     void optionSelectionStateChanged(HTMLOptionElement*, bool optionIsSelected);
+    void optionInserted(const HTMLOptionElement&, bool optionIsSelected);
     void optionRemoved(const HTMLOptionElement&);
     bool anonymousIndexedSetter(unsigned, PassRefPtrWillBeRawPtr<HTMLOptionElement>, ExceptionState&);
 

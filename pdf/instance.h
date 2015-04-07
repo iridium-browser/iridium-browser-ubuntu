@@ -22,6 +22,7 @@
 #include "pdf/thumbnail_control.h"
 
 #include "ppapi/c/private/ppb_pdf.h"
+#include "ppapi/c/private/ppp_pdf.h"
 #include "ppapi/cpp/dev/printing_dev.h"
 #include "ppapi/cpp/dev/scriptable_object_deprecated.h"
 #include "ppapi/cpp/dev/scrollbar_dev.h"
@@ -90,6 +91,8 @@ class Instance : public pp::InstancePrivate,
 
   // pp::Private implementation.
   virtual pp::Var GetLinkAtPosition(const pp::Point& point);
+  virtual void GetPrintPresetOptionsFromDocument(
+      PP_PdfPrintPresetOptions_Dev* options);
 
   // PPP_Selection_Dev implementation.
   virtual pp::Var GetSelectedText(bool html) override;
@@ -196,6 +199,10 @@ class Instance : public pp::InstancePrivate,
   // Helper functions for implementing PPP_PDF.
   void RotateClockwise();
   void RotateCounterclockwise();
+
+  // Helper function to inform when mouse pointer is on scrollbar, returns true
+  // when mouse is on vertical or horizaontal scrollbar else returns false.
+  bool IsMouseOnScrollbar(const pp::InputEvent& event);
 
  private:
   // Called whenever the plugin geometry changes to update the location of the

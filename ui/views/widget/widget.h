@@ -16,8 +16,8 @@
 #include "ui/aura/window_layer_type.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/events/event_source.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/rect.h"
 #include "ui/native_theme/native_theme_observer.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/widget/native_widget_delegate.h"
@@ -364,12 +364,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Add/remove observer.
   void AddObserver(WidgetObserver* observer);
   void RemoveObserver(WidgetObserver* observer);
-  bool HasObserver(WidgetObserver* observer);
+  bool HasObserver(const WidgetObserver* observer) const;
 
   // Add/remove removals observer.
   void AddRemovalsObserver(WidgetRemovalsObserver* observer);
   void RemoveRemovalsObserver(WidgetRemovalsObserver* observer);
-  bool HasRemovalsObserver(WidgetRemovalsObserver* observer);
+  bool HasRemovalsObserver(const WidgetRemovalsObserver* observer) const;
 
   // Returns the accelerator given a command id. Returns false if there is
   // no accelerator associated with a given id, which is a common condition.

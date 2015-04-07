@@ -36,7 +36,8 @@
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/loader/DocumentLoadTiming.h"
 #include "core/loader/DocumentWriter.h"
-#include "core/loader/NavigationAction.h"
+#include "core/loader/FrameLoaderTypes.h"
+#include "core/loader/NavigationPolicy.h"
 #include "core/loader/SubstituteData.h"
 #include "platform/network/ResourceError.h"
 #include "platform/network/ResourceRequest.h"
@@ -107,9 +108,9 @@ namespace blink {
 
         bool scheduleArchiveLoad(Resource*, const ResourceRequest&);
 
-        bool shouldContinueForNavigationPolicy(const ResourceRequest&, ContentSecurityPolicyCheck shouldCheckMainWorldContentSecurityPolicy, bool isTransitionNavigation = false);
-        const NavigationAction& triggeringAction() const { return m_triggeringAction; }
-        void setTriggeringAction(const NavigationAction& action) { m_triggeringAction = action; }
+        bool shouldContinueForNavigationPolicy(const ResourceRequest&, ContentSecurityPolicyDisposition shouldCheckMainWorldContentSecurityPolicy, NavigationPolicy = NavigationPolicyCurrentTab, bool isTransitionNavigation = false);
+        NavigationType navigationType() const { return m_navigationType; }
+        void setNavigationType(NavigationType navigationType) { m_navigationType = navigationType; }
 
         void setDefersLoading(bool);
 
@@ -133,7 +134,7 @@ namespace blink {
         Vector<KURL> m_redirectChain;
 
     private:
-        static PassRefPtrWillBeRawPtr<DocumentWriter> createWriterFor(const Document* ownerDocument, const DocumentInit&, const AtomicString& mimeType, const AtomicString& encoding, bool dispatch);
+        static PassRefPtrWillBeRawPtr<DocumentWriter> createWriterFor(const Document* ownerDocument, const DocumentInit&, const AtomicString& mimeType, const AtomicString& encoding, bool dispatch, ParserSynchronizationPolicy);
 
         void ensureWriter(const AtomicString& mimeType, const KURL& overridingURL = KURL());
         void endWriting(DocumentWriter*);
@@ -196,9 +197,7 @@ namespace blink {
         bool m_isClientRedirect;
         bool m_replacesCurrentHistoryItem;
 
-        // The action that triggered loading - we keep this around for the
-        // benefit of the various policy handlers.
-        NavigationAction m_triggeringAction;
+        NavigationType m_navigationType;
 
         OwnPtrWillBePersistent<ArchiveResourceCollection> m_archiveResourceCollection;
         RefPtrWillBePersistent<MHTMLArchive> m_archive;

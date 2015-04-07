@@ -229,14 +229,14 @@ void AppListServiceImpl::SendAppListStats() {
 AppListServiceImpl::AppListServiceImpl()
     : profile_store_(
           new ProfileStoreImpl(g_browser_process->profile_manager())),
-      command_line_(*CommandLine::ForCurrentProcess()),
+      command_line_(*base::CommandLine::ForCurrentProcess()),
       local_state_(g_browser_process->local_state()),
       profile_loader_(new ProfileLoader(profile_store_.get())),
       weak_factory_(this) {
   profile_store_->AddProfileObserver(this);
 }
 
-AppListServiceImpl::AppListServiceImpl(const CommandLine& command_line,
+AppListServiceImpl::AppListServiceImpl(const base::CommandLine& command_line,
                                        PrefService* local_state,
                                        scoped_ptr<ProfileStore> profile_store)
     : profile_store_(profile_store.Pass()),
@@ -257,8 +257,6 @@ AppListViewDelegate* AppListServiceImpl::GetViewDelegate(Profile* profile) {
 }
 
 void AppListServiceImpl::SetAppListNextPaintCallback(void (*callback)()) {}
-
-void AppListServiceImpl::HandleFirstRun() {}
 
 void AppListServiceImpl::Init(Profile* initial_profile) {}
 
@@ -329,9 +327,11 @@ void AppListServiceImpl::Show() {
                  weak_factory_.GetWeakPtr()));
 }
 
-void AppListServiceImpl::ShowForVoiceSearch(Profile* profile) {
+void AppListServiceImpl::ShowForVoiceSearch(
+    Profile* profile,
+    const scoped_refptr<content::SpeechRecognitionSessionPreamble>& preamble) {
   ShowForProfile(profile);
-  view_delegate_->ToggleSpeechRecognition();
+  view_delegate_->ToggleSpeechRecognitionForHotword(preamble);
 }
 
 void AppListServiceImpl::ShowForAppInstall(Profile* profile,

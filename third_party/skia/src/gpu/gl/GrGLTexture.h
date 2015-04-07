@@ -27,13 +27,11 @@ public:
     };
 
     struct IDDesc {
-        GrGLuint        fTextureID;
-        bool            fIsWrapped;
+        GrGLuint                    fTextureID;
+        GrGpuResource::LifeCycle    fLifeCycle;
     };
 
-    GrGLTexture(GrGpuGL*, const GrSurfaceDesc&, const IDDesc&);
-
-    virtual ~GrGLTexture() { this->release(); }
+    GrGLTexture(GrGLGpu*, const GrSurfaceDesc&, const IDDesc&);
 
     virtual GrBackendObject getTextureHandle() const SK_OVERRIDE;
 
@@ -58,7 +56,7 @@ protected:
     // class should register with the cache. This constructor does not do the registration and
     // rather moves that burden onto the derived class.
     enum Derived { kDerived };
-    GrGLTexture(GrGpuGL*, const GrSurfaceDesc&, const IDDesc&, Derived);
+    GrGLTexture(GrGLGpu*, const GrSurfaceDesc&, const IDDesc&, Derived);
 
     void init(const GrSurfaceDesc&, const IDDesc&);
 

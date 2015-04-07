@@ -19,6 +19,7 @@
 namespace autofill {
 class AutofillMetrics;
 class AutofillPopupDelegate;
+class CardUnmaskDelegate;
 class CreditCard;
 class FormStructure;
 class PasswordGenerator;
@@ -61,20 +62,22 @@ class AwAutofillClient : public autofill::AutofillClient,
   virtual PrefService* GetPrefs() override;
   virtual void HideRequestAutocompleteDialog() override;
   virtual void ShowAutofillSettings() override;
+  virtual void ShowUnmaskPrompt(
+      const autofill::CreditCard& card,
+      base::WeakPtr<autofill::CardUnmaskDelegate> delegate) override;
+  virtual void OnUnmaskVerificationResult(bool success) override;
   virtual void ConfirmSaveCreditCard(
-      const autofill::AutofillMetrics& metric_logger,
       const base::Closure& save_card_callback) override;
+  virtual bool HasCreditCardScanFeature() override;
+  virtual void ScanCreditCard(const CreditCardScanCallback& callback) override;
   virtual void ShowRequestAutocompleteDialog(
       const autofill::FormData& form,
-      const GURL& source_url,
+      content::RenderFrameHost* rfh,
       const ResultCallback& callback) override;
   virtual void ShowAutofillPopup(
       const gfx::RectF& element_bounds,
       base::i18n::TextDirection text_direction,
-      const std::vector<base::string16>& values,
-      const std::vector<base::string16>& labels,
-      const std::vector<base::string16>& icons,
-      const std::vector<int>& identifiers,
+      const std::vector<autofill::Suggestion>& suggestions,
       base::WeakPtr<autofill::AutofillPopupDelegate> delegate) override;
   virtual void UpdateAutofillPopupDataListValues(
       const std::vector<base::string16>& values,
@@ -82,10 +85,12 @@ class AwAutofillClient : public autofill::AutofillClient,
   virtual void HideAutofillPopup() override;
   virtual bool IsAutocompleteEnabled() override;
   virtual void DetectAccountCreationForms(
+      content::RenderFrameHost* rfh,
       const std::vector<autofill::FormStructure*>& forms) override;
   virtual void DidFillOrPreviewField(
       const base::string16& autofilled_value,
       const base::string16& profile_full_name) override;
+  virtual void OnFirstUserGestureObserved() override;
 
   void SuggestionSelected(JNIEnv* env, jobject obj, jint position);
 
@@ -93,11 +98,10 @@ class AwAutofillClient : public autofill::AutofillClient,
   AwAutofillClient(content::WebContents* web_contents);
   friend class content::WebContentsUserData<AwAutofillClient>;
 
-  void ShowAutofillPopupImpl(const gfx::RectF& element_bounds,
-                             bool is_rtl,
-                             const std::vector<base::string16>& values,
-                             const std::vector<base::string16>& labels,
-                             const std::vector<int>& identifiers);
+  void ShowAutofillPopupImpl(
+      const gfx::RectF& element_bounds,
+      bool is_rtl,
+      const std::vector<autofill::Suggestion>& suggestions);
 
   // The web_contents associated with this delegate.
   content::WebContents* web_contents_;
@@ -105,8 +109,7 @@ class AwAutofillClient : public autofill::AutofillClient,
   JavaObjectWeakGlobalRef java_ref_;
 
   // The current Autofill query values.
-  std::vector<base::string16> values_;
-  std::vector<int> identifiers_;
+  std::vector<autofill::Suggestion> suggestions_;
   base::WeakPtr<autofill::AutofillPopupDelegate> delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(AwAutofillClient);

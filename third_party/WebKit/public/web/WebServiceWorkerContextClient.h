@@ -33,12 +33,15 @@
 
 #include "WebWorkerPermissionClientProxy.h"
 #include "public/platform/WebMessagePortChannel.h"
+#include "public/platform/WebServiceWorkerClientFocusCallback.h"
 #include "public/platform/WebServiceWorkerClientsInfo.h"
 #include "public/platform/WebServiceWorkerEventResult.h"
+#include "public/platform/WebServiceWorkerSkipWaitingCallbacks.h"
 #include "public/platform/WebURL.h"
 
 namespace blink {
 
+struct WebCrossOriginServiceWorkerClient;
 class WebDataSource;
 class WebServiceWorkerCacheStorage;
 class WebServiceWorkerContextProxy;
@@ -111,21 +114,36 @@ public:
     // ServiceWorker specific method.
     virtual void didHandleActivateEvent(int eventID, WebServiceWorkerEventResult result) { }
 
-    // ServiceWorker specific method. Called after InstallEvent (dispatched
-    // via WebServiceWorkerContextProxy) is handled by the ServiceWorker's
-    // script context.
-    virtual void didHandleInstallEvent(int installEventID, WebServiceWorkerEventResult result) { }
-
     // ServiceWorker specific methods. Called after FetchEvent is handled by the
     // ServiceWorker's script context. When no response is provided, the browser
     // should fallback to native fetch.
     virtual void didHandleFetchEvent(int fetchEventID) { }
     virtual void didHandleFetchEvent(int fetchEventID, const WebServiceWorkerResponse& response) { }
 
+    // ServiceWorker specific method. Called after InstallEvent (dispatched
+    // via WebServiceWorkerContextProxy) is handled by the ServiceWorker's
+    // script context.
+    virtual void didHandleInstallEvent(int installEventID, WebServiceWorkerEventResult result) { }
+
+    // ServiceWorker specific method. Called after NotificationClickEvent
+    // (dispatched via WebServiceWorkerContextProxy) is handled by the
+    // ServiceWorker's script context.
+    virtual void didHandleNotificationClickEvent(int eventID, WebServiceWorkerEventResult result) { }
+
+    // ServiceWorker specific method. Called after PushEvent (dispatched via
+    // WebServiceWorkerContextProxy) is handled by the ServiceWorker's script
+    // context.
+    virtual void didHandlePushEvent(int pushEventID, WebServiceWorkerEventResult result) { }
+
     // ServiceWorker specific method. Called after SyncEvent (dispatched via
     // WebServiceWorkerContextProxy) is handled by the ServiceWorker's script
     // context.
     virtual void didHandleSyncEvent(int syncEventID) { }
+
+    // ServiceWorker specific method. Called after CrossOriginConnectEvent
+    // (dispatched via WebServiceWorkerContextProxy) is handled by the
+    // ServiceWorker's script context.
+    virtual void didHandleCrossOriginConnectEvent(int connectEventID, bool acceptConnect) { }
 
     // Ownership of the returned object is transferred to the caller.
     virtual WebServiceWorkerNetworkProvider* createServiceWorkerNetworkProvider(WebDataSource*) { return 0; }
@@ -139,6 +157,25 @@ public:
     // Callee receives ownership of the passed vector.
     // FIXME: Blob refs should be passed to maintain ref counts. crbug.com/351753
     virtual void postMessageToClient(int clientID, const WebString&, WebMessagePortChannelArray*) { BLINK_ASSERT_NOT_REACHED(); }
+
+    // Callee receives ownership of the passed vector.
+    // FIXME: Blob refs should be passed to maintain ref counts. crbug.com/351753
+    virtual void postMessageToCrossOriginClient(const WebCrossOriginServiceWorkerClient&, const WebString&, WebMessagePortChannelArray*) { BLINK_ASSERT_NOT_REACHED(); }
+
+    // Ownership of the passed callbacks is transferred to the callee, callee
+    // should delete the callbacks after run.
+    virtual void skipWaiting(WebServiceWorkerSkipWaitingCallbacks*) { BLINK_ASSERT_NOT_REACHED(); }
+
+    // Ownership of the passed callbacks is transferred to the callee, callee
+    // should delete the callback after calling either onSuccess or onError.
+    virtual void focus(int clientID, WebServiceWorkerClientFocusCallback* callback)
+    {
+        // FIXME: call BLINK_ASSERT_NOT_REACHED() when Chromium implementation
+        // is present. https://crbug.com/437149
+        bool result = true;
+        callback->onSuccess(&result);
+        delete callback;
+    }
 };
 
 } // namespace blink

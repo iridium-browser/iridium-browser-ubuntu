@@ -103,7 +103,7 @@ class LoginScreenDefaultPolicyLoginScreenBrowsertest
   virtual ~LoginScreenDefaultPolicyLoginScreenBrowsertest();
 
   // LoginScreenDefaultPolicyBrowsertestBase:
-  virtual void SetUpCommandLine(CommandLine* command_line) override;
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override;
   virtual void SetUpOnMainThread() override;
   virtual void TearDownOnMainThread() override;
 
@@ -166,7 +166,7 @@ LoginScreenDefaultPolicyLoginScreenBrowsertest::
 }
 
 void LoginScreenDefaultPolicyLoginScreenBrowsertest::SetUpCommandLine(
-    CommandLine* command_line) {
+    base::CommandLine* command_line) {
   LoginScreenDefaultPolicyBrowsertestBase::SetUpCommandLine(command_line);
   command_line->AppendSwitch(chromeos::switches::kLoginManager);
   command_line->AppendSwitch(chromeos::switches::kForceLoginManagerInTests);
@@ -463,4 +463,4 @@ IN_PROC_BROWSER_TEST_F(LoginScreenDefaultPolicyLoginScreenBrowsertest,
   EXPECT_TRUE(accessibility_manager->IsVirtualKeyboardEnabled());
 }
 
-} // namespace policy
+}  // namespace policy

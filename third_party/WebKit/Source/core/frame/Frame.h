@@ -28,6 +28,7 @@
 #ifndef Frame_h
 #define Frame_h
 
+#include "core/frame/FrameTypes.h"
 #include "core/page/FrameTree.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
@@ -41,14 +42,13 @@ class FrameClient;
 class FrameHost;
 class FrameOwner;
 class HTMLFrameOwnerElement;
-class LocalDOMWindow;
+class DOMWindow;
 class KURL;
 class Page;
 class RenderPart;
+class SecurityContext;
 class Settings;
 class WebLayer;
-
-struct Referrer;
 
 class Frame : public RefCountedWillBeGarbageCollectedFinalized<Frame> {
 public:
@@ -59,10 +59,10 @@ public:
     virtual bool isLocalFrame() const { return false; }
     virtual bool isRemoteFrame() const { return false; }
 
-    // FIXME: This should return a DOMWindow*.
-    virtual LocalDOMWindow* domWindow() const = 0;
+    virtual DOMWindow* domWindow() const = 0;
 
     virtual void navigate(Document& originDocument, const KURL&, bool lockBackForwardList) = 0;
+    virtual void reload(ReloadPolicy, ClientRedirectPolicy) = 0;
 
     virtual void detach();
     void detachChildren();
@@ -86,6 +86,14 @@ public:
     FrameTree& tree() const;
     ChromeClient& chromeClient() const;
 
+    virtual SecurityContext* securityContext() const = 0;
+
+    Frame* findFrameForNavigation(const AtomicString& name, Frame& activeFrame);
+    Frame* findUnsafeParentScrollPropagationBoundary();
+
+    bool canNavigate(const Frame&);
+    virtual void printNavigationErrorMessage(const Frame&, const char* reason) = 0;
+
     RenderPart* ownerRenderer() const; // Renderer for the element that contains this frame.
 
     // FIXME: These should move to RemoteFrame when that is instantiated.
@@ -99,6 +107,8 @@ public:
     // it can be removed and its callers can be converted to use the isRemoteFrame()
     // method.
     bool isRemoteFrameTemporary() const { return m_remotePlatformLayer; }
+
+    virtual bool checkLoadComplete() = 0;
 
 protected:
     Frame(FrameClient*, FrameHost*, FrameOwner*);

@@ -26,21 +26,23 @@
 #ifndef CHROME_COMMON_CHROME_UTILITY_MESSAGES_H_
 #define CHROME_COMMON_CHROME_UTILITY_MESSAGES_H_
 
-typedef std::vector<Tuple2<SkBitmap, base::FilePath> > DecodedImages;
+typedef std::vector<Tuple<SkBitmap, base::FilePath>> DecodedImages;
 
 #endif  // CHROME_COMMON_CHROME_UTILITY_MESSAGES_H_
 
+#if defined(FULL_SAFE_BROWSING)
 IPC_STRUCT_TRAITS_BEGIN(safe_browsing::zip_analyzer::Results)
   IPC_STRUCT_TRAITS_MEMBER(success)
   IPC_STRUCT_TRAITS_MEMBER(has_executable)
   IPC_STRUCT_TRAITS_MEMBER(has_archive)
 IPC_STRUCT_TRAITS_END()
+#endif
 
 #if defined(OS_WIN)
 
-// A vector of filters, each being a Tuple2 containing a display string (i.e.
+// A vector of filters, each being a Tuple containing a display string (i.e.
 // "Text Files") and a filter pattern (i.e. "*.txt").
-typedef std::vector<Tuple2<base::string16, base::string16> >
+typedef std::vector<Tuple<base::string16, base::string16>>
     GetOpenFileNameFilter;
 
 IPC_STRUCT_BEGIN(ChromeUtilityMsg_GetSaveFileName_Params)
@@ -59,10 +61,9 @@ IPC_STRUCT_END()
 // Utility process messages:
 // These are messages from the browser to the utility process.
 
-// Tell the utility process to parse the given JSON data and verify its
-// validity.
-IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_UnpackWebResource,
-                     std::string /* JSON data */)
+// Tell the utility process to parse a JSON string into a Value object.
+IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_ParseJSON,
+                     std::string /* JSON to parse */)
 
 // Tell the utility process to decode the given image data.
 IPC_MESSAGE_CONTROL2(ChromeUtilityMsg_DecodeImage,
@@ -136,10 +137,18 @@ IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_GetSaveFileName,
 // Utility process host messages:
 // These are messages from the utility process to the browser.
 
-// Reply when the utility process is done unpacking and parsing JSON data
-// from a web resource.
-IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_UnpackWebResource_Succeeded,
-                     base::DictionaryValue /* json data */)
+// Reply when the utility process successfully parsed a JSON string.
+//
+// WARNING: The result can be of any Value subclass type, but we can't easily
+// pass indeterminate value types by const object reference with our IPC macros,
+// so we put the result Value into a ListValue. Handlers should examine the
+// first (and only) element of the ListValue for the actual result.
+IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_ParseJSON_Succeeded,
+                     base::ListValue)
+
+// Reply when the utility process failed in parsing a JSON string.
+IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_ParseJSON_Failed,
+                     std::string /* error message, if any*/)
 
 // Reply when the utility process has failed while unpacking and parsing a
 // web resource.  |error_message| is a user-readable explanation of what
@@ -184,4 +193,6 @@ IPC_MESSAGE_CONTROL0(ChromeUtilityHostMsg_GetSaveFileName_Failed)
 IPC_MESSAGE_CONTROL2(ChromeUtilityHostMsg_GetSaveFileName_Result,
                      base::FilePath /* path */,
                      int /* one_based_filter_index  */)
+IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_BuildDirectWriteFontCache,
+                     base::FilePath /* cache file path */)
 #endif  // defined(OS_WIN)

@@ -8,6 +8,8 @@ This ranges from optparse, to a basic script wrapper setup (much like
 what is used for chromite.bin.*).
 """
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import argparse
@@ -133,7 +135,7 @@ def NormalizeGSPath(value):
 
 def NormalizeLocalOrGSPath(value):
   """Normalize a local or GS path."""
-  ptype = 'gs_path' if value.startswith(gs.BASE_GS_URL) else 'path'
+  ptype = 'gs_path' if gs.PathIsGs(value) else 'path'
   return VALID_TYPES[ptype](value)
 
 

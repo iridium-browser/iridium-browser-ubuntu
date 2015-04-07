@@ -32,6 +32,7 @@
 #include "core/frame/ImageBitmap.h"
 
 #include "SkPixelRef.h" // FIXME: qualify this skia header file.
+#include "bindings/core/v8/UnionTypesCore.h"
 #include "core/dom/Document.h"
 #include "core/fetch/ImageResource.h"
 #include "core/fetch/MemoryCache.h"
@@ -39,7 +40,9 @@
 #include "core/fetch/ResourcePtr.h"
 #include "core/html/HTMLCanvasElement.h"
 #include "core/html/HTMLImageElement.h"
+#include "core/html/HTMLVideoElement.h"
 #include "core/html/canvas/CanvasRenderingContext2D.h"
+#include "core/html/canvas/WebGLRenderingContext.h"
 #include "platform/graphics/BitmapImage.h"
 #include "platform/graphics/skia/NativeImageSkia.h"
 #include "platform/heap/Handle.h"
@@ -205,9 +208,13 @@ TEST_F(ImageBitmapTest, ImageResourceLifetime)
         RefPtrWillBeRawPtr<ImageBitmap> imageBitmapFromCanvas = ImageBitmap::create(canvasElement.get(), IntRect(0, 0, canvasElement->width(), canvasElement->height()));
         imageBitmapDerived = ImageBitmap::create(imageBitmapFromCanvas.get(), IntRect(0, 0, 20, 20));
     }
-    CanvasRenderingContext* context = canvasElement->getContext("2d");
+    CanvasContextCreationAttributes attributes;
+    CanvasRenderingContext2DOrWebGLRenderingContext context;
+    canvasElement->getContext("2d", attributes, context);
     TrackExceptionState exceptionState;
-    toCanvasRenderingContext2D(context)->drawImage(imageBitmapDerived.get(), 0, 0, exceptionState);
+    CanvasImageSourceUnion imageSource;
+    imageSource.setImageBitmap(imageBitmapDerived);
+    context.getAsCanvasRenderingContext2D()->drawImage(imageSource, 0, 0, exceptionState);
 }
 
 } // namespace

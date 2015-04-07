@@ -1,7 +1,7 @@
 # crbug.com/389132
 WebRtcAecDumpBrowserTest.*WithAecDump*
 
-# http://code.google.com/p/drmemory/issues/detail?id=1528
+# https://github.com/DynamoRIO/drmemory/issues/1528
 # Un-analyzed test failures:
 DeviceInertialSensorBrowserTest.MotionNullTestWithAlert
 DeviceInertialSensorBrowserTest.OrientationNullTestWithAlert
@@ -17,6 +17,8 @@ RenderViewImplTest.DontIgnoreBackAfterNavEntryLimit
 RenderViewImplTest.ReloadWhileSwappedOut
 RenderViewImplTest.SendSwapOutACK
 RenderViewImplTest.StaleNavigationsIgnored
+RenderFrameHostManagerTest.RestoreFileAccessForHistoryNavigation
+RenderFrameHostManagerTest.RestoreSubframeFileAccessForHistoryNavigation
 ResourceFetcherTests.ResourceFetcher404
 ResourceFetcherTests.ResourceFetcherDidFail
 ResourceFetcherTests.ResourceFetcherDownload
@@ -42,3 +44,4 @@ WebRtcBrowserTest.CanSetupVideoCallWith16To9AspectRatio
 WebRtcBrowserTest.CanSetupVideoCallWith1To1AspectRatio
 WebRtcBrowserTest.CanSetupVideoCallWith4To3AspectRatio
 WebRtcBrowserTest.NegotiateOfferWithBLine
+WebRtcBrowserTest.CanMakeAudioCallAndThenRenegotiateToVideo

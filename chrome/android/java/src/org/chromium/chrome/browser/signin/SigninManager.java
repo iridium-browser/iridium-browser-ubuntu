@@ -7,9 +7,13 @@ package org.chromium.chrome.browser.signin;
 import android.accounts.Account;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Dialog;
+import android.app.DialogFragment;
 import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.os.AsyncTask;
+import android.os.Bundle;
 import android.os.Handler;
 import android.util.Log;
 
@@ -40,6 +44,10 @@ import java.util.HashSet;
  */
 public class SigninManager {
 
+    public static final String CONFIRM_MANAGED_SIGNIN_DIALOG_TAG =
+            "confirm_managed_signin_dialog_tag";
+    private static final String CLEAR_DATA_PROGRESS_DIALOG_TAG = "clear_data_progress";
+
     private static final String TAG = "SigninManager";
 
     private static SigninManager sSigninManager;
@@ -63,10 +71,10 @@ public class SigninManager {
     private SignInFlowObserver mSignInFlowObserver;
     private boolean mPassive = false;
 
-    private ProgressDialog mSignOutProgressDialog;
+    private DialogFragment mClearDataProgressDialog;
     private Runnable mSignOutCallback;
 
-    private AlertDialog mPolicyConfirmationDialog;
+    private ConfirmManagedSigninFragment mPolicyConfirmationDialog;
 
     private boolean mSigninAllowedByPolicy;
 
@@ -114,6 +122,28 @@ public class SigninManager {
     }
 
     /**
+     * Structure used to pass account ids and names from a background async task to the
+     * foreground post execute function.  This structure contains two arrays of the same
+     * length: one containing strings of stable account ids and the other containing
+     * strings of account names (or emails).  An account id corresponds with the account
+     * name at the same position in the array.
+     */
+    private static class AccountIdsAndNames {
+        public final String[] mAccountIds;
+        public final String[] mAccountNames;
+
+        public AccountIdsAndNames(String[] accountIds, String[] accountNames) {
+            // Make sure that both arrays arguments are either null or have the same length.
+            assert (accountIds == null) == (accountNames == null);
+            if (accountIds != null && accountNames != null) {
+                assert accountIds.length == accountNames.length;
+            }
+            mAccountIds = accountIds;
+            mAccountNames = accountNames;
+        }
+    }
+
+    /**
      * A helper method for retrieving the application-wide SigninManager.
      * <p/>
      * Can only be accessed on the main thread.
@@ -153,10 +183,10 @@ public class SigninManager {
      * Returns true if signin can be started now.
      */
     public boolean isSignInAllowed() {
-        return mSigninAllowedByPolicy &&
-                !mFirstRunCheckIsPending &&
-                mSignInAccount == null &&
-                ChromeSigninController.get(mContext).getSignedInUser() == null;
+        return mSigninAllowedByPolicy
+                && !mFirstRunCheckIsPending
+                && mSignInAccount == null
+                && ChromeSigninController.get(mContext).getSignedInUser() == null;
     }
 
     /**
@@ -249,8 +279,9 @@ public class SigninManager {
             return;
         }
 
-        if (mSignInActivity != null &&
-                ApplicationStatus.getStateForActivity(mSignInActivity) == ActivityState.DESTROYED) {
+        if (mSignInActivity != null
+                && ApplicationStatus.getStateForActivity(mSignInActivity)
+                        == ActivityState.DESTROYED) {
             // The activity is no longer running, cancel sign in.
             cancelSignIn();
             return;
@@ -264,44 +295,30 @@ public class SigninManager {
         }
 
         Log.d(TAG, "Account has policy management");
-        AlertDialog.Builder builder = new AlertDialog.Builder(mSignInActivity);
-        builder.setTitle(R.string.policy_dialog_title);
-        builder.setMessage(mContext.getResources().getString(R.string.policy_dialog_message,
-                                                             managementDomain));
-        builder.setPositiveButton(
-                R.string.policy_dialog_proceed,
+        mPolicyConfirmationDialog = new ConfirmManagedSigninFragment(
+                managementDomain,
                 new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int id) {
-                        Log.d(TAG, "Accepted policy management, proceeding with sign-in");
-                        // This will call back to onPolicyFetchedBeforeSignIn.
-                        nativeFetchPolicyBeforeSignIn(mNativeSigninManagerAndroid);
+                        if (mPolicyConfirmationDialog == null) return;
                         mPolicyConfirmationDialog = null;
-                    }
-                });
-        builder.setNegativeButton(
-                R.string.policy_dialog_cancel,
-                new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int id) {
-                        Log.d(TAG, "Cancelled sign-in");
-                        cancelSignIn();
-                        mPolicyConfirmationDialog = null;
-                    }
-                });
-        mPolicyConfirmationDialog = builder.create();
-        mPolicyConfirmationDialog.setOnDismissListener(
-                new DialogInterface.OnDismissListener() {
-                    @Override
-                    public void onDismiss(DialogInterface dialog) {
-                        if (mPolicyConfirmationDialog != null) {
-                            Log.d(TAG, "Policy dialog dismissed, cancelling sign-in.");
-                            cancelSignIn();
-                            mPolicyConfirmationDialog = null;
+
+                        switch (id) {
+                            case AlertDialog.BUTTON_POSITIVE:
+                                Log.d(TAG, "Accepted policy management, proceeding with sign-in");
+                                // This will call back to onPolicyFetchedBeforeSignIn.
+                                nativeFetchPolicyBeforeSignIn(mNativeSigninManagerAndroid);
+                                break;
+
+                            default:
+                                Log.d(TAG, "Cancelled sign-in");
+                                cancelSignIn();
+                                break;
                         }
                     }
                 });
-        mPolicyConfirmationDialog.show();
+        mPolicyConfirmationDialog.show(mSignInActivity.getFragmentManager(),
+                                       CONFIRM_MANAGED_SIGNIN_DIALOG_TAG);
     }
 
     @CalledByNative
@@ -315,11 +332,38 @@ public class SigninManager {
         Log.d(TAG, "Committing the sign-in process now");
         assert mSignInAccount != null;
 
+        // Get mapping from account names to account ids.
+        final AccountIdProvider provider = AccountIdProvider.getInstance();
+        if (provider != null) {
+            new AsyncTask<Void, Void, AccountIdsAndNames>() {
+                @Override
+                public AccountIdsAndNames doInBackground(Void... params) {
+                    Log.d(TAG, "Getting id/email mapping");
+                    String[] accountNames = OAuth2TokenService.getSystemAccounts(mContext);
+                    assert accountNames.length > 0;
+                    String[] accountIds = new String[accountNames.length];
+                    for (int i = 0; i < accountIds.length; ++i) {
+                        accountIds[i] = provider.getAccountId(mContext, accountNames[i]);
+                    }
+                    return new AccountIdsAndNames(accountIds, accountNames);
+                }
+                @Override
+                public void onPostExecute(AccountIdsAndNames accountIdsAndNames) {
+                    finishSignIn(accountIdsAndNames);
+                }
+            }.execute();
+        } else {
+            finishSignIn(new AccountIdsAndNames(null, null));
+        }
+    }
+
+    private void finishSignIn(AccountIdsAndNames accountIdsAndNames) {
         // Cache the signed-in account name.
         ChromeSigninController.get(mContext).setSignedInAccountName(mSignInAccount.name);
 
         // Tell the native side that sign-in has completed.
-        nativeOnSignInCompleted(mNativeSigninManagerAndroid, mSignInAccount.name);
+        nativeOnSignInCompleted(mNativeSigninManagerAndroid, mSignInAccount.name,
+                                accountIdsAndNames.mAccountIds, accountIdsAndNames.mAccountNames);
 
         // Register for invalidations.
         InvalidationController invalidationController = InvalidationController.get(mContext);
@@ -327,8 +371,8 @@ public class SigninManager {
 
         // Sign-in to sync.
         ProfileSyncService profileSyncService = ProfileSyncService.get(mContext);
-        if (SyncStatusHelper.get(mContext).isSyncEnabled(mSignInAccount) &&
-                !profileSyncService.hasSyncSetupCompleted()) {
+        if (SyncStatusHelper.get(mContext).isSyncEnabled(mSignInAccount)
+                && !profileSyncService.hasSyncSetupCompleted()) {
             profileSyncService.setSetupInProgress(true);
             profileSyncService.syncSignIn();
         }
@@ -374,10 +418,6 @@ public class SigninManager {
         } else {
             onSignOutDone();
         }
-
-        for (SignInStateObserver observer : mSignInStateObservers) {
-            observer.onSignedOut();
-        }
     }
 
     /**
@@ -406,24 +446,44 @@ public class SigninManager {
 
     private void wipeProfileData(Activity activity) {
         if (activity != null) {
-            // We don't have progress update, so this takes an indeterminate amount of time.
-            boolean indeterminate = true;
-            // This dialog is not cancelable by the user.
-            boolean cancelable = false;
-            mSignOutProgressDialog = ProgressDialog.show(
-                activity,
-                activity.getString(R.string.wiping_profile_data_title),
-                activity.getString(R.string.wiping_profile_data_message),
-                indeterminate, cancelable);
+            mClearDataProgressDialog = new ClearDataProgressDialog();
+            mClearDataProgressDialog.show(activity.getFragmentManager(),
+                    CLEAR_DATA_PROGRESS_DIALOG_TAG);
         }
         // This will call back to onProfileDataWiped().
         nativeWipeProfileData(mNativeSigninManagerAndroid);
     }
 
+    // This class must be public and static. Otherwise an exception will be thrown when Android
+    // recreates the fragment (e.g. after a configuration change).
+    public static class ClearDataProgressDialog extends DialogFragment {
+        @Override
+        public void onCreate(Bundle savedInstanceState) {
+            super.onCreate(savedInstanceState);
+            if (savedInstanceState != null) {
+                // Don't allow the dialog to be recreated by Android, since it wouldn't ever
+                // be dismissed after recreation.
+                dismiss();
+            }
+        }
+
+        @Override
+        public Dialog onCreateDialog(Bundle savedInstanceState) {
+            setCancelable(false);
+            ProgressDialog dialog = new ProgressDialog(getActivity());
+            dialog.setTitle(getString(R.string.wiping_profile_data_title));
+            dialog.setMessage(getString(R.string.wiping_profile_data_message));
+            dialog.setIndeterminate(true);
+            return dialog;
+        }
+    }
+
     @CalledByNative
     private void onProfileDataWiped() {
-        if (mSignOutProgressDialog != null && mSignOutProgressDialog.isShowing())
-            mSignOutProgressDialog.dismiss();
+        if (mClearDataProgressDialog != null && mClearDataProgressDialog.isAdded()) {
+            mClearDataProgressDialog.dismissAllowingStateLoss();
+        }
+        mClearDataProgressDialog = null;
         onSignOutDone();
     }
 
@@ -432,6 +492,10 @@ public class SigninManager {
             new Handler().post(mSignOutCallback);
             mSignOutCallback = null;
         }
+
+        for (SignInStateObserver observer : mSignInStateObservers) {
+            observer.onSignedOut();
+        }
     }
 
     /**
@@ -439,6 +503,13 @@ public class SigninManager {
      */
     public static boolean isNewProfileManagementEnabled() {
         return nativeIsNewProfileManagementEnabled();
+    }
+
+    /**
+     * @return Whether there is a signed in account on the native side.
+     */
+    public boolean isSignedInOnNative() {
+        return nativeIsSignedInOnNative(mNativeSigninManagerAndroid);
     }
 
     /**
@@ -470,11 +541,13 @@ public class SigninManager {
     private native void nativeCheckPolicyBeforeSignIn(
             long nativeSigninManagerAndroid, String username);
     private native void nativeFetchPolicyBeforeSignIn(long nativeSigninManagerAndroid);
-    private native void nativeOnSignInCompleted(long nativeSigninManagerAndroid, String username);
+    private native void nativeOnSignInCompleted(long nativeSigninManagerAndroid, String username,
+                                                String[] accountIds, String[] accountNames);
     private native void nativeSignOut(long nativeSigninManagerAndroid);
     private native String nativeGetManagementDomain(long nativeSigninManagerAndroid);
     private native void nativeWipeProfileData(long nativeSigninManagerAndroid);
     private native void nativeClearLastSignedInUser(long nativeSigninManagerAndroid);
     private native void nativeLogInSignedInUser(long nativeSigninManagerAndroid);
+    private native boolean nativeIsSignedInOnNative(long nativeSigninManagerAndroid);
     private static native boolean nativeIsNewProfileManagementEnabled();
 }

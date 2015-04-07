@@ -104,8 +104,6 @@ cvox.ChromeVoxBackground.prototype.init = function() {
         this.onLoadStateChanged);
   }
 
-  this.checkVersionNumber();
-
   // Set up a message passing system for goog.provide() calls from
   // within the content scripts.
   chrome.extension.onMessage.addListener(
@@ -122,21 +120,14 @@ cvox.ChromeVoxBackground.prototype.init = function() {
       });
 
   var self = this;
-  if (chrome.commandLinePrivate) {
-    chrome.commandLinePrivate.hasSwitch('enable-chromevox-next',
-        goog.bind(function(result) {
-            if (result) {
-              return;
-            }
-            // Inject the content script into all running tabs.
-            chrome.windows.getAll({'populate': true}, function(windows) {
-              for (var i = 0; i < windows.length; i++) {
-                var tabs = windows[i].tabs;
-                self.injectChromeVoxIntoTabs(tabs);
-              }
-            });
-        }, this));
-  }
+
+  // Inject the content script into all running tabs.
+  chrome.windows.getAll({'populate': true}, function(windows) {
+    for (var i = 0; i < windows.length; i++) {
+      var tabs = windows[i].tabs;
+      self.injectChromeVoxIntoTabs(tabs);
+    }
+  });
 
   if (localStorage['active'] == 'false') {
     // Warn the user when the browser first starts if ChromeVox is inactive.
@@ -430,67 +421,6 @@ cvox.ChromeVoxBackground.prototype.addBridgeListener = function() {
 
 
 /**
- * Checks the version number. If it has changed, display release notes
- * to the user.
- */
-cvox.ChromeVoxBackground.prototype.checkVersionNumber = function() {
-  // Don't update version or show release notes if the current tab is within an
-  // incognito window (which may occur on ChromeOS immediately after OOBE).
-  if (this.isIncognito_()) {
-    return;
-  }
-  this.localStorageVersion = localStorage['versionString'];
-  this.showNotesIfNewVersion();
-};
-
-
-/**
- * Display release notes to the user.
- */
-cvox.ChromeVoxBackground.prototype.displayReleaseNotes = function() {
-  chrome.tabs.create(
-      {'url': 'http://chromevox.com/release_notes.html'});
-};
-
-
-/**
- * Gets the current version number from the extension manifest.
- */
-cvox.ChromeVoxBackground.prototype.showNotesIfNewVersion = function() {
-  // Check version number in manifest.
-  var url = chrome.extension.getURL('manifest.json');
-  var xhr = new XMLHttpRequest();
-  var context = this;
-  xhr.onreadystatechange = function() {
-    if (xhr.readyState == 4) {
-      var manifest = JSON.parse(xhr.responseText);
-      console.log('Version: ' + manifest.version);
-
-      var shouldShowReleaseNotes =
-          (context.localStorageVersion != manifest.version);
-
-      // On Chrome OS, don't show the release notes the first time, only
-      // after a version upgrade.
-      if (navigator.userAgent.indexOf('CrOS') != -1 &&
-          context.localStorageVersion == undefined) {
-        shouldShowReleaseNotes = false;
-      }
-
-      if (shouldShowReleaseNotes) {
-        context.displayReleaseNotes();
-      }
-
-      // Update version number in local storage
-      localStorage['versionString'] = manifest.version;
-      this.localStorageVersion = manifest.version;
-    }
-  };
-  xhr.open('GET', url);
-  xhr.send();
-};
-
-
-/**
  * Read and apply preferences that affect the background context.
  */
 cvox.ChromeVoxBackground.prototype.readPrefs = function() {
@@ -552,8 +482,9 @@ cvox.ChromeVoxBackground.prototype.onLoadStateChanged = function(
   // Export the prefs object for access by the options page.
   window['prefs'] = background.prefs;
 
-  // Export the braille object for access by the options page.
-  window['braille'] = cvox.ChromeVox.braille;
+  // Export the braille translator manager for access by the options page.
+  window['braille_translator_manager'] =
+      background.backgroundBraille_.getTranslatorManager();
 
   // Export injection for ChromeVox Next.
   cvox.ChromeVox.injectChromeVoxIntoTabs =

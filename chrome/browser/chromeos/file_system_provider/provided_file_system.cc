@@ -108,7 +108,7 @@ void ProvidedFileSystem::SetNotificationManagerForTesting(
   request_manager_.reset(new RequestManager(notification_manager_.get()));
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::RequestUnmount(
+AbortCallback ProvidedFileSystem::RequestUnmount(
     const storage::AsyncFileUtil::StatusCallback& callback) {
   const int request_id = request_manager_->CreateRequest(
       REQUEST_UNMOUNT,
@@ -123,7 +123,7 @@ ProvidedFileSystem::AbortCallback ProvidedFileSystem::RequestUnmount(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::GetMetadata(
+AbortCallback ProvidedFileSystem::GetMetadata(
     const base::FilePath& entry_path,
     MetadataFieldMask fields,
     const GetMetadataCallback& callback) {
@@ -141,7 +141,7 @@ ProvidedFileSystem::AbortCallback ProvidedFileSystem::GetMetadata(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::ReadDirectory(
+AbortCallback ProvidedFileSystem::ReadDirectory(
     const base::FilePath& directory_path,
     const storage::AsyncFileUtil::ReadDirectoryCallback& callback) {
   const int request_id = request_manager_->CreateRequest(
@@ -160,7 +160,7 @@ ProvidedFileSystem::AbortCallback ProvidedFileSystem::ReadDirectory(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::ReadFile(
+AbortCallback ProvidedFileSystem::ReadFile(
     int file_handle,
     net::IOBuffer* buffer,
     int64 offset,
@@ -189,10 +189,9 @@ ProvidedFileSystem::AbortCallback ProvidedFileSystem::ReadFile(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::OpenFile(
-    const base::FilePath& file_path,
-    OpenFileMode mode,
-    const OpenFileCallback& callback) {
+AbortCallback ProvidedFileSystem::OpenFile(const base::FilePath& file_path,
+                                           OpenFileMode mode,
+                                           const OpenFileCallback& callback) {
   const int request_id = request_manager_->CreateRequest(
       OPEN_FILE,
       scoped_ptr<RequestManager::HandlerInterface>(new operations::OpenFile(
@@ -206,7 +205,7 @@ ProvidedFileSystem::AbortCallback ProvidedFileSystem::OpenFile(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::CloseFile(
+AbortCallback ProvidedFileSystem::CloseFile(
     int file_handle,
     const storage::AsyncFileUtil::StatusCallback& callback) {
   const int request_id = request_manager_->CreateRequest(
@@ -222,7 +221,7 @@ ProvidedFileSystem::AbortCallback ProvidedFileSystem::CloseFile(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::CreateDirectory(
+AbortCallback ProvidedFileSystem::CreateDirectory(
     const base::FilePath& directory_path,
     bool recursive,
     const storage::AsyncFileUtil::StatusCallback& callback) {
@@ -243,7 +242,7 @@ ProvidedFileSystem::AbortCallback ProvidedFileSystem::CreateDirectory(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::DeleteEntry(
+AbortCallback ProvidedFileSystem::DeleteEntry(
     const base::FilePath& entry_path,
     bool recursive,
     const storage::AsyncFileUtil::StatusCallback& callback) {
@@ -260,7 +259,7 @@ ProvidedFileSystem::AbortCallback ProvidedFileSystem::DeleteEntry(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::CreateFile(
+AbortCallback ProvidedFileSystem::CreateFile(
     const base::FilePath& file_path,
     const storage::AsyncFileUtil::StatusCallback& callback) {
   const int request_id = request_manager_->CreateRequest(
@@ -276,7 +275,7 @@ ProvidedFileSystem::AbortCallback ProvidedFileSystem::CreateFile(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::CopyEntry(
+AbortCallback ProvidedFileSystem::CopyEntry(
     const base::FilePath& source_path,
     const base::FilePath& target_path,
     const storage::AsyncFileUtil::StatusCallback& callback) {
@@ -297,7 +296,7 @@ ProvidedFileSystem::AbortCallback ProvidedFileSystem::CopyEntry(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::WriteFile(
+AbortCallback ProvidedFileSystem::WriteFile(
     int file_handle,
     net::IOBuffer* buffer,
     int64 offset,
@@ -326,7 +325,7 @@ ProvidedFileSystem::AbortCallback ProvidedFileSystem::WriteFile(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::MoveEntry(
+AbortCallback ProvidedFileSystem::MoveEntry(
     const base::FilePath& source_path,
     const base::FilePath& target_path,
     const storage::AsyncFileUtil::StatusCallback& callback) {
@@ -347,7 +346,7 @@ ProvidedFileSystem::AbortCallback ProvidedFileSystem::MoveEntry(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::Truncate(
+AbortCallback ProvidedFileSystem::Truncate(
     const base::FilePath& file_path,
     int64 length,
     const storage::AsyncFileUtil::StatusCallback& callback) {
@@ -364,7 +363,7 @@ ProvidedFileSystem::AbortCallback ProvidedFileSystem::Truncate(
       &ProvidedFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(), request_id);
 }
 
-ProvidedFileSystem::AbortCallback ProvidedFileSystem::AddWatcher(
+AbortCallback ProvidedFileSystem::AddWatcher(
     const GURL& origin,
     const base::FilePath& entry_path,
     bool recursive,
@@ -501,34 +500,40 @@ void ProvidedFileSystem::RemoveObserver(ProvidedFileSystemObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-bool ProvidedFileSystem::Notify(
+void ProvidedFileSystem::Notify(
     const base::FilePath& entry_path,
     bool recursive,
     storage::WatcherManager::ChangeType change_type,
     scoped_ptr<ProvidedFileSystemObserver::Changes> changes,
-    const std::string& tag) {
+    const std::string& tag,
+    const storage::AsyncFileUtil::StatusCallback& callback) {
   const WatcherKey key(entry_path, recursive);
   const auto& watcher_it = watchers_.find(key);
-  if (watcher_it == watchers_.end())
-    return false;
+  if (watcher_it == watchers_.end()) {
+    callback.Run(base::File::FILE_ERROR_NOT_FOUND);
+    return;
+  }
 
   // The tag must be provided if and only if it's explicitly supported.
-  if (file_system_info_.supports_notify_tag() == tag.empty())
-    return false;
+  if (file_system_info_.supports_notify_tag() == tag.empty()) {
+    callback.Run(base::File::FILE_ERROR_INVALID_OPERATION);
+    return;
+  }
+
+  // It's illegal to provide a tag which is not unique.
+  if (!tag.empty() && tag == watcher_it->second.last_tag) {
+    callback.Run(base::File::FILE_ERROR_INVALID_OPERATION);
+    return;
+  }
 
   // The object is owned by AutoUpdated, so the reference is valid as long as
   // callbacks created with AutoUpdater::CreateCallback().
   const ProvidedFileSystemObserver::Changes& changes_ref = *changes.get();
 
-  scoped_refptr<AutoUpdater> auto_updater(
-      new AutoUpdater(base::Bind(&ProvidedFileSystem::OnNotifyCompleted,
-                                 weak_ptr_factory_.GetWeakPtr(),
-                                 entry_path,
-                                 recursive,
-                                 change_type,
-                                 base::Passed(&changes),
-                                 watcher_it->second.last_tag,
-                                 tag)));
+  scoped_refptr<AutoUpdater> auto_updater(new AutoUpdater(
+      base::Bind(&ProvidedFileSystem::OnNotifyCompleted,
+                 weak_ptr_factory_.GetWeakPtr(), entry_path, recursive,
+                 change_type, base::Passed(&changes), tag, callback)));
 
   // Call all notification callbacks (if any).
   for (const auto& subscriber_it : watcher_it->second.subscribers) {
@@ -546,8 +551,6 @@ bool ProvidedFileSystem::Notify(
                                      change_type,
                                      changes_ref,
                                      auto_updater->CreateCallback()));
-
-  return true;
 }
 
 base::WeakPtr<ProvidedFileSystemInterface> ProvidedFileSystem::GetWeakPtr() {
@@ -607,23 +610,18 @@ void ProvidedFileSystem::OnNotifyCompleted(
     bool recursive,
     storage::WatcherManager::ChangeType change_type,
     scoped_ptr<ProvidedFileSystemObserver::Changes> /* changes */,
-    const std::string& last_tag,
-    const std::string& tag) {
+    const std::string& tag,
+    const storage::AsyncFileUtil::StatusCallback& callback) {
   const WatcherKey key(entry_path, recursive);
   const Watchers::iterator it = watchers_.find(key);
   // Check if the entry is still watched.
-  if (it == watchers_.end())
+  if (it == watchers_.end()) {
+    callback.Run(base::File::FILE_ERROR_NOT_FOUND);
     return;
+  }
 
-  // Another following notification finished earlier.
-  if (it->second.last_tag != last_tag)
-    return;
-
-  // It's illegal to provide a tag which is not unique. As for now only an error
-  // message is printed, but we may want to pass the error to the providing
-  // extension. TODO(mtomasz): Consider it.
-  if (!tag.empty() && tag == it->second.last_tag)
-    LOG(ERROR) << "Tag specified, but same as the previous one.";
+  // TODO(mtomasz): Add an async queue around notify and other watcher related
+  // methods so there is no race.
 
   it->second.last_tag = tag;
 
@@ -643,6 +641,8 @@ void ProvidedFileSystem::OnNotifyCompleted(
                     base::Bind(&EmptyStatusCallback));
     }
   }
+
+  callback.Run(base::File::FILE_OK);
 }
 
 }  // namespace file_system_provider

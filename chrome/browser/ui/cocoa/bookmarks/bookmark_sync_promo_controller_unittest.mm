@@ -20,13 +20,14 @@ namespace {
 
 class BookmarkSyncPromoControllerTest : public BrowserWithTestWindowTest {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
     ASSERT_TRUE(profile());
     // Adds TestExtensionSystem, since signin uses the gaia auth extension.
     static_cast<extensions::TestExtensionSystem*>(
-        extensions::ExtensionSystem::Get(profile()))->CreateExtensionService(
-            CommandLine::ForCurrentProcess(), base::FilePath(), false);
+        extensions::ExtensionSystem::Get(profile()))
+        ->CreateExtensionService(base::CommandLine::ForCurrentProcess(),
+                                 base::FilePath(), false);
   }
 };
 

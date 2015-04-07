@@ -32,96 +32,103 @@ window.requestFileSystem = window.requestFileSystem || window.webkitRequestFileS
 
 /**
  * @constructor
- * @param {!string} dirPath
- * @param {!string} name
- * @param {!function(?WebInspector.TempFile)} callback
  */
-WebInspector.TempFile = function(dirPath, name, callback)
+WebInspector.TempFile = function()
 {
     this._fileEntry = null;
     this._writer = null;
+}
+
+/**
+ * @param {string} dirPath
+ * @param {string} name
+ * @return {!Promise.<!WebInspector.TempFile>}
+ */
+WebInspector.TempFile.create = function(dirPath, name)
+{
+    var file = new WebInspector.TempFile();
+
+    function requestTempFileSystem()
+    {
+        return new Promise(window.requestFileSystem.bind(window, window.TEMPORARY, 10));
+    }
 
     /**
      * @param {!FileSystem} fs
-     * @this {WebInspector.TempFile}
      */
-    function didInitFs(fs)
+    function getDirectoryEntry(fs)
     {
-        fs.root.getDirectory(dirPath, { create: true }, didGetDir.bind(this), errorHandler);
+        return new Promise(fs.root.getDirectory.bind(fs.root, dirPath, { create: true }));
     }
 
     /**
      * @param {!DirectoryEntry} dir
-     * @this {WebInspector.TempFile}
      */
-    function didGetDir(dir)
+    function getFileEntry(dir)
     {
-        dir.getFile(name, { create: true }, didCreateFile.bind(this), errorHandler);
+        return new Promise(dir.getFile.bind(dir, name, { create: true }));
     }
 
     /**
      * @param {!FileEntry} fileEntry
-     * @this {WebInspector.TempFile}
      */
-    function didCreateFile(fileEntry)
+    function createFileWriter(fileEntry)
     {
-        this._fileEntry = fileEntry;
-        fileEntry.createWriter(didCreateWriter.bind(this), errorHandler);
+        file._fileEntry = fileEntry;
+        return new Promise(fileEntry.createWriter.bind(fileEntry));
     }
 
     /**
      * @param {!FileWriter} writer
-     * @this {WebInspector.TempFile}
      */
-    function didCreateWriter(writer)
+    function truncateFile(writer)
     {
+        if (!writer.length) {
+            file._writer = writer;
+            return Promise.resolve(file);
+        }
+
         /**
-         * @this {WebInspector.TempFile}
+         * @param {function(?)} fulfill
+         * @param {function(*)} reject
          */
-        function didTruncate(e)
+        function truncate(fulfill, reject)
         {
-            this._writer = writer;
+            writer.onwriteend = fulfill;
+            writer.onerror = reject;
+            writer.truncate(0);
+        }
+
+        function didTruncate()
+        {
+            file._writer = writer;
             writer.onwriteend = null;
             writer.onerror = null;
-            callback(this);
+            return Promise.resolve(file);
         }
 
         function onTruncateError(e)
         {
-            WebInspector.console.error("Failed to truncate temp file " + e.code + " : " + e.message);
-            callback(null);
+            writer.onwriteend = null;
+            writer.onerror = null;
+            throw e;
         }
 
-        if (writer.length) {
-            writer.onwriteend = didTruncate.bind(this);
-            writer.onerror = onTruncateError;
-            writer.truncate(0);
-        } else {
-            this._writer = writer;
-            callback(this);
-        }
+        return new Promise(truncate).then(didTruncate, onTruncateError);
     }
 
-    function errorHandler(e)
-    {
-        WebInspector.console.error("Failed to create temp file " + e.code + " : " + e.message);
-        callback(null);
-    }
-
-    /**
-     * @this {WebInspector.TempFile}
-     */
-    function didClearTempStorage()
-    {
-        window.requestFileSystem(window.TEMPORARY, 10, didInitFs.bind(this), errorHandler);
-    }
-    WebInspector.TempFile._ensureTempStorageCleared(didClearTempStorage.bind(this));
+    return WebInspector.TempFile.ensureTempStorageCleared()
+        .then(requestTempFileSystem)
+        .then(getDirectoryEntry)
+        .then(getFileEntry)
+        .then(createFileWriter)
+        .then(truncateFile);
 }
 
 WebInspector.TempFile.prototype = {
     /**
      * @param {!Array.<string>} strings
-     * @param {!function(boolean)} callback
+     * @param {function(number)} callback
      */
     write: function(strings, callback)
     {
@@ -129,11 +136,11 @@ WebInspector.TempFile.prototype = {
         this._writer.onerror = function(e)
         {
             WebInspector.console.error("Failed to write into a temp file: " + e.target.error.message);
-            callback(false);
+            callback(-1);
         }
         this._writer.onwriteend = function(e)
         {
-            callback(true);
+            callback(e.target.length);
         }
         this._writer.write(blob);
     },
@@ -173,11 +180,11 @@ WebInspector.TempFile.prototype = {
             reader.onloadend = function(e)
             {
                 callback(/** @type {?string} */ (this.result));
-            }
+            };
             reader.onerror = function(error)
             {
                 WebInspector.console.error("Failed to read from temp file: " + error.message);
-            }
+            };
             reader.readAsText(file);
         }
         function didFailToGetFile(error)
@@ -221,11 +228,12 @@ WebInspector.TempFile.prototype = {
 
 /**
  * @constructor
- * @param {!string} dirPath
- * @param {!string} name
+ * @param {string} dirPath
+ * @param {string} name
  */
 WebInspector.DeferredTempFile = function(dirPath, name)
 {
+    /** @type {!Array.<!{strings: !Array.<string>, callback: function(number)}>} */
     this._chunks = [];
     this._tempFile = null;
     this._isWriting = false;
@@ -233,26 +241,28 @@ WebInspector.DeferredTempFile = function(dirPath, name)
     this._finishedWriting = false;
     this._callsPendingOpen = [];
     this._pendingReads = [];
-    new WebInspector.TempFile(dirPath, name, this._didCreateTempFile.bind(this));
+    WebInspector.TempFile.create(dirPath, name)
+        .then(this._didCreateTempFile.bind(this), this._failedToCreateTempFile.bind(this));
 }
 
 WebInspector.DeferredTempFile.prototype = {
     /**
      * @param {!Array.<string>} strings
+     * @param {function(number)=} callback
      */
-    write: function(strings)
+    write: function(strings, callback)
     {
         if (!this._chunks)
             return;
         if (this._finishCallback)
             throw new Error("No writes are allowed after close.");
-        this._chunks.push.apply(this._chunks, strings);
+        this._chunks.push({strings: strings, callback: callback});
         if (this._tempFile && !this._isWriting)
             this._writeNextChunk();
     },
 
     /**
-     * @param {!function(?WebInspector.TempFile)} callback
+     * @param {function(?WebInspector.TempFile)} callback
      */
     finishWriting: function(callback)
     {
@@ -263,6 +273,18 @@ WebInspector.DeferredTempFile.prototype = {
             this._notifyFinished();
     },
 
+    /**
+     * @param {*} e
+     */
+    _failedToCreateTempFile: function(e)
+    {
+        WebInspector.console.error("Failed to create temp file " + e.code + " : " + e.message);
+        this._notifyFinished();
+    },
+
+    /**
+     * @param {!WebInspector.TempFile} tempFile
+     */
     _didCreateTempFile: function(tempFile)
     {
         this._tempFile = tempFile;
@@ -270,32 +292,31 @@ WebInspector.DeferredTempFile.prototype = {
         this._callsPendingOpen = null;
         for (var i = 0; i < callsPendingOpen.length; ++i)
             callsPendingOpen[i]();
-        if (!tempFile) {
-            this._chunks = null;
-            this._notifyFinished();
-            return;
-        }
         if (this._chunks.length)
             this._writeNextChunk();
     },
 
     _writeNextChunk: function()
     {
-        var chunks = this._chunks;
-        this._chunks = [];
+        var chunk = this._chunks.shift();
         this._isWriting = true;
-        this._tempFile.write(chunks, this._didWriteChunk.bind(this));
+        this._tempFile.write(/** @type {!Array.<string>} */(chunk.strings), this._didWriteChunk.bind(this, chunk.callback));
     },
 
-    _didWriteChunk: function(success)
+    /**
+     * @param {?function(number)} callback
+     * @param {number} size
+     */
+    _didWriteChunk: function(callback, size)
     {
         this._isWriting = false;
-        if (!success) {
+        if (size === -1) {
             this._tempFile = null;
-            this._chunks = null;
             this._notifyFinished();
             return;
         }
+        if (callback)
+            callback(size);
         if (this._chunks.length)
             this._writeNextChunk();
         else if (this._finishCallback)
@@ -307,12 +328,18 @@ WebInspector.DeferredTempFile.prototype = {
         this._finishedWriting = true;
         if (this._tempFile)
             this._tempFile.finishWriting();
+        var chunks = this._chunks;
+        this._chunks = [];
+        for (var i = 0; i < chunks.length; ++i) {
+            if (chunks[i].callback)
+                chunks[i].callback(-1);
+        }
         if (this._finishCallback)
             this._finishCallback(this._tempFile);
         var pendingReads = this._pendingReads;
-        for (var i = 0; i < this._pendingReads.length; ++i)
-            this._pendingReads[i]();
         this._pendingReads = [];
+        for (var i = 0; i < pendingReads.length; ++i)
+            pendingReads[i]();
     },
 
     /**
@@ -359,59 +386,54 @@ WebInspector.DeferredTempFile.prototype = {
 }
 
 /**
- * @constructor
+ * @param {function(?)} fulfill
+ * @param {function(*)} reject
  */
-WebInspector.TempStorageCleaner = function()
+WebInspector.TempFile._clearTempStorage = function(fulfill, reject)
 {
-    this._worker = Runtime.startSharedWorker("temp_storage_shared_worker", "TempStorage");
-    this._worker.onerror = this._handleError.bind(this);
-    this._callbacks = [];
-    this._worker.port.onmessage = this._handleMessage.bind(this);
-    this._worker.port.onerror = this._handleError.bind(this);
-}
-
-WebInspector.TempStorageCleaner.prototype = {
     /**
-     * @param {!function()} callback
+     * @param {!Event} event
      */
-    ensureStorageCleared: function(callback)
+    function handleError(event)
     {
-        if (this._callbacks)
-            this._callbacks.push(callback);
-        else
-            callback();
-    },
+        WebInspector.console.error(WebInspector.UIString("Failed to clear temp storage: %s", event.data));
+        reject(event.data);
+    }
 
-    _handleMessage: function(event)
+    /**
+     * @param {!Event} event
+     */
+    function handleMessage(event)
     {
         if (event.data.type === "tempStorageCleared") {
             if (event.data.error)
                 WebInspector.console.error(event.data.error);
-            this._notifyCallbacks();
+            else
+                fulfill(undefined);
+            return;
         }
-    },
+        reject(event.data);
+    }
 
-    _handleError: function(event)
-    {
-        WebInspector.console.error(WebInspector.UIString("Failed to clear temp storage: %s", event.data));
-        this._notifyCallbacks();
-    },
-
-    _notifyCallbacks: function()
-    {
-        var callbacks = this._callbacks;
-        this._callbacks = null;
-        for (var i = 0; i < callbacks.length; i++)
-            callbacks[i]();
+    try {
+        var worker = new WorkerRuntime.Worker("temp_storage_shared_worker", "TempStorageCleaner");
+        worker.onerror = handleError;
+        worker.port.onmessage = handleMessage;
+        worker.port.onerror = handleError;
+    } catch (e) {
+        if (e.name === "URLMismatchError")
+            console.log("Shared worker wasn't started due to url difference. " + e);
+        else
+            throw e;
     }
 }
 
 /**
- * @param {!function()} callback
+ * @return {!Promise.<undefined>}
  */
-WebInspector.TempFile._ensureTempStorageCleared = function(callback)
+WebInspector.TempFile.ensureTempStorageCleared = function()
 {
-    if (!WebInspector.TempFile._storageCleaner)
-        WebInspector.TempFile._storageCleaner = new WebInspector.TempStorageCleaner();
-    WebInspector.TempFile._storageCleaner.ensureStorageCleared(callback);
+    if (!WebInspector.TempFile._storageCleanerPromise)
+        WebInspector.TempFile._storageCleanerPromise = new Promise(WebInspector.TempFile._clearTempStorage);
+    return WebInspector.TempFile._storageCleanerPromise;
 }

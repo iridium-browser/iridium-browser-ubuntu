@@ -30,7 +30,6 @@
 #include "ash/test/test_shelf_delegate.h"
 #include "ash/test/test_shelf_item_delegate.h"
 #include "base/basictypes.h"
-#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
@@ -38,7 +37,6 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/ui_base_switches.h"
 #include "ui/compositor/layer.h"
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
@@ -290,8 +288,6 @@ class ShelfViewTest : public AshTestBase {
   ~ShelfViewTest() override {}
 
   void SetUp() override {
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableTouchFeedback);
     AshTestBase::SetUp();
     test::ShellTestApi test_api(Shell::GetInstance());
     model_ = test_api.shelf_model();
@@ -1441,6 +1437,9 @@ TEST_F(ShelfViewTest, OverflowBubbleSize) {
   ReplaceShelfDelegateForRipOffTest();
 
   AddButtonsUntilOverflow();
+  // Add one more button to prevent the overflow bubble to disappear upon
+  // dragging an item out on windows (flakiness, see crbug.com/436131).
+  AddAppShortcut();
 
   // Show overflow bubble.
   test_api_->ShowOverflowBubble();
@@ -1658,6 +1657,9 @@ TEST_F(ShelfViewTest, CheckDragAndDropFromOverflowBubbleToShelf) {
   ReplaceShelfDelegateForRipOffTest();
 
   AddButtonsUntilOverflow();
+  // Add one more button to prevent the overflow bubble to disappear upon
+  // dragging an item out on windows (flakiness, see crbug.com/425097).
+  AddAppShortcut();
 
   TestDraggingAnItemFromOverflowToShelf(false);
   TestDraggingAnItemFromOverflowToShelf(true);

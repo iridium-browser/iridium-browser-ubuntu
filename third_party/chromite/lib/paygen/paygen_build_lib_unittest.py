@@ -5,6 +5,8 @@
 
 """Tests for paygen_build_lib."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import itertools
@@ -18,11 +20,11 @@ import fixup_path
 fixup_path.FixupPath()
 
 from chromite.cbuildbot import cbuildbot_config
-from chromite.cbuildbot import commands
+from chromite.cbuildbot import constants
+from chromite.cbuildbot import failures_lib
 
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_test_lib
-from chromite.lib import osutils
 from chromite.lib import parallel
 
 from chromite.lib.paygen import download_cache
@@ -35,22 +37,20 @@ from chromite.lib.paygen import paygen_payload_lib
 from chromite.lib.paygen import utils
 
 
-# pylint: disable-msg=F0401
+# pylint: disable=F0401
 from site_utils.autoupdate.lib import test_control
-# pylint: enable-msg=F0401
+# pylint: enable=F0401
 
 
 # We access a lot of protected members during testing.
-# pylint: disable-msg=W0212
+# pylint: disable=W0212
 
 
-class PaygenBuildLibTest(mox.MoxTestBase):
+class PaygenBuildLibTest(cros_test_lib.MoxTempDirTestCase):
   """Test PaygenBuildLib class."""
 
-  def __init__(self, test_case_names):
-    mox.MoxTestBase.__init__(self, test_case_names)
+  def setUp(self):
     self.work_dir = '/work/foo'
-    self.tempdir = None
 
     self.prev_image = gspaths.Image(channel='foo-channel',
                                     board='foo-board',
@@ -844,7 +844,6 @@ fsi_images: 2913.331.0,2465.105.0
     self.assertEqual(paygen._FindFullTestPayloads('find_full_version'),
                      ['foo', 'bar'])
 
-  @osutils.TempDirDecorator
   def DoGeneratePayloadsTest(self, run_parallel, test_dry_run):
     """Test paygen_build_lib._GeneratePayloads."""
     paygen = paygen_build_lib._PaygenBuild(self.foo_build, self.tempdir,
@@ -889,7 +888,6 @@ fsi_images: 2913.331.0,2465.105.0
       for test_dry_run in (True, False):
         self.DoGeneratePayloadsTest(run_parallel, test_dry_run)
 
-  @osutils.TempDirDecorator
   def testGeneratePayloadInProcess(self):
     """Make sure the _GenerateSinglePayload calls into paygen_payload_lib."""
 
@@ -947,7 +945,7 @@ fsi_images: 2913.331.0,2465.105.0
     lock_uri = paygen._GetFlagURI(gspaths.ChromeosReleases.LOCK)
 
     # Pylint is confused because of helper stubbing things out.
-    # pylint: disable-msg=E1101
+    # pylint: disable=E1101
     gslock.Lock(lock_uri, dry_run=False).AndRaise(gslock.LockNotAcquired())
 
     # Run the test verification.
@@ -1168,13 +1166,13 @@ fsi_images: 2913.331.0,2465.105.0
 
     paygen.CreatePayloads()
 
-  @osutils.TempDirDecorator
   def testFindControlFileDir(self):
     """Test that we find control files in the proper directory."""
     # Test default dir in /tmp.
     result = paygen_build_lib._FindControlFileDir(None)
     self.assertTrue(os.path.isdir(result))
-    self.assertTrue(result.startswith('/tmp/paygen_build-control_files'))
+    tempdir = tempfile.tempdir or '/tmp'
+    self.assertTrue(result.startswith(tempdir + '/'))
     shutil.rmtree(result)
 
     # Test in specified dir.
@@ -1342,7 +1340,8 @@ DOC = "Faux doc"
     timeout_mins = cbuildbot_config.HWTestConfig.DEFAULT_HW_TEST_TIMEOUT / 60
     paygen_build_lib.commands.RunHWTestSuite(
         board='foo-board', build='foo-board-release/R99-1.2.3', file_bugs=True,
-        pool='bvt', suite='paygen_au_foo', timeout_mins=timeout_mins,
+        pool='bvt', priority=constants.HWTEST_BUILD_PRIORITY,
+        suite='paygen_au_foo', timeout_mins=timeout_mins,
         retry=True, wait_for_results=True, debug=False)
 
     self.mox.ReplayAll()
@@ -1366,9 +1365,10 @@ DOC = "Faux doc"
     timeout_mins = cbuildbot_config.HWTestConfig.DEFAULT_HW_TEST_TIMEOUT / 60
     paygen_build_lib.commands.RunHWTestSuite(
         board='foo-board', build='foo-board-release/R99-1.2.3', file_bugs=True,
-        pool='bvt', suite='paygen_au_foo', timeout_mins=timeout_mins,
+        pool='bvt', priority=constants.HWTEST_BUILD_PRIORITY,
+        suite='paygen_au_foo', timeout_mins=timeout_mins,
         retry=True, wait_for_results=True, debug=False).AndRaise(
-          commands.TestWarning('** Suite passed with a warning code **'))
+          failures_lib.TestWarning('** Suite passed with a warning code **'))
 
     self.mox.ReplayAll()
 

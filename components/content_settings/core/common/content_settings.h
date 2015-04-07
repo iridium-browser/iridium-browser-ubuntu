@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "components/content_settings/core/common/content_settings_pattern.h"
+#include "components/content_settings/core/common/content_settings_types.h"
 
 // Different settings that can be assigned for a particular content type.  We
 // give the user the ability to set these on a global and per-origin basis.
@@ -20,12 +21,18 @@ enum ContentSetting {
   CONTENT_SETTING_BLOCK,
   CONTENT_SETTING_ASK,
   CONTENT_SETTING_SESSION_ONLY,
+  CONTENT_SETTING_DETECT_IMPORTANT_CONTENT,
   CONTENT_SETTING_NUM_SETTINGS
 };
 
 // Range-checked conversion of an int to a ContentSetting, for use when reading
 // prefs off disk.
 ContentSetting IntToContentSetting(int content_setting);
+
+// Converts a given content setting to its histogram value, for use when saving
+// content settings types to a histogram.
+ContentSettingsTypeHistogram ContentSettingTypeToHistogramValue(
+    ContentSettingsType content_setting);
 
 struct ContentSettingPatternSource {
   ContentSettingPatternSource(const ContentSettingsPattern& primary_pattern,

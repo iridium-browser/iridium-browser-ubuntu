@@ -126,10 +126,7 @@ public:
 
     virtual void layout() override;
 
-    virtual void paint(PaintInfo&, const LayoutPoint&) override;
-
-    void paintCollapsedBorders(PaintInfo&, const LayoutPoint&);
-    void paintBackgroundsBehindCell(PaintInfo&, const LayoutPoint&, RenderObject* backgroundObject);
+    virtual void paint(const PaintInfo&, const LayoutPoint&) override;
 
     LayoutUnit cellBaselinePosition() const;
     bool isBaselineAligned() const
@@ -232,8 +229,8 @@ private:
 
     virtual void updateLogicalWidth() override;
 
-    virtual void paintBoxDecorationBackground(PaintInfo&, const LayoutPoint&) override;
-    virtual void paintMask(PaintInfo&, const LayoutPoint&) override;
+    virtual void paintBoxDecorationBackground(const PaintInfo&, const LayoutPoint&) override;
+    virtual void paintMask(const PaintInfo&, const LayoutPoint&) override;
 
     virtual bool boxShadowShouldBeAppliedToBackground(BackgroundBleedAvoidance, InlineFlowBox*) const override;
 
@@ -263,11 +260,6 @@ private:
     CollapsedBorderValue collapsedBeforeBorder(IncludeBorderColorOrNot = IncludeBorderColor) const;
     CollapsedBorderValue collapsedAfterBorder(IncludeBorderColorOrNot = IncludeBorderColor) const;
 
-    CollapsedBorderValue cachedCollapsedLeftBorder(const RenderStyle*) const;
-    CollapsedBorderValue cachedCollapsedRightBorder(const RenderStyle*) const;
-    CollapsedBorderValue cachedCollapsedTopBorder(const RenderStyle*) const;
-    CollapsedBorderValue cachedCollapsedBottomBorder(const RenderStyle*) const;
-
     CollapsedBorderValue computeCollapsedStartBorder(IncludeBorderColorOrNot = IncludeBorderColor) const;
     CollapsedBorderValue computeCollapsedEndBorder(IncludeBorderColorOrNot = IncludeBorderColor) const;
     CollapsedBorderValue computeCollapsedBeforeBorder(IncludeBorderColorOrNot = IncludeBorderColor) const;
@@ -280,8 +272,8 @@ private:
     unsigned parseRowSpanFromDOM() const;
     unsigned parseColSpanFromDOM() const;
 
-    void nextSibling() const WTF_DELETED_FUNCTION;
-    void previousSibling() const WTF_DELETED_FUNCTION;
+    void nextSibling() const = delete;
+    void previousSibling() const = delete;
 
     // Note MSVC will only pack members if they have identical types, hence we use unsigned instead of bool here.
     unsigned m_column : 29;

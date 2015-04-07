@@ -81,17 +81,6 @@ class CHROMEOS_EXPORT FakeShillManagerClient
   virtual void ConnectToBestServices(
       const base::Closure& callback,
       const ErrorCallback& error_callback) override;
-  virtual void AddWakeOnPacketConnection(
-      const net::IPEndPoint& ip_connection,
-      const base::Closure& callback,
-      const ErrorCallback& error_callback) override;
-  virtual void RemoveWakeOnPacketConnection(
-      const net::IPEndPoint& ip_endpoint,
-      const base::Closure& callback,
-      const ErrorCallback& error_callback) override;
-  virtual void RemoveAllWakeOnPacketConnections(
-      const base::Closure& callback,
-      const ErrorCallback& error_callback) override;
 
   virtual ShillManagerClient::TestInterface* GetTestInterface() override;
 
@@ -166,15 +155,15 @@ class CHROMEOS_EXPORT FakeShillManagerClient
 
   ObserverList<ShillPropertyChangedObserver> observer_list_;
 
-  // Note: This should remain the last member so it'll be destroyed and
-  // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<FakeShillManagerClient> weak_ptr_factory_;
-
   // Track the default service for signaling Manager.DefaultService.
   std::string default_service_;
 
   // 'Best' service to connect to on ConnectToBestServices() calls.
   std::string best_service_;
+
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
+  base::WeakPtrFactory<FakeShillManagerClient> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeShillManagerClient);
 };

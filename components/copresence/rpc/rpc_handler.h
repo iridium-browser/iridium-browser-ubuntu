@@ -14,6 +14,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "components/copresence/proto/enums.pb.h"
+#include "components/copresence/public/copresence_constants.h"
 #include "components/copresence/public/copresence_delegate.h"
 #include "components/copresence/timed_map.h"
 
@@ -21,6 +22,7 @@ namespace copresence {
 
 struct AudioToken;
 class CopresenceDelegate;
+class CopresenceStateImpl;
 class DirectiveHandler;
 class GCMHandler;
 class HttpPost;
@@ -32,31 +34,33 @@ class SubscribedMessage;
 class RpcHandler {
  public:
   // A callback to indicate whether handler initialization succeeded.
-  typedef base::Callback<void(bool)> SuccessCallback;
+  using SuccessCallback = base::Callback<void(bool)>;
 
   // An HttpPost::ResponseCallback along with an HttpPost object to be deleted.
   // Arguments:
   // HttpPost*: The handler should take ownership of (i.e. delete) this object.
   // int: The HTTP status code of the response.
   // string: The contents of the response.
-  typedef base::Callback<void(HttpPost*, int, const std::string&)>
-      PostCleanupCallback;
+  using PostCleanupCallback = base::Callback<void(HttpPost*,
+                                                  int,
+                                                  const std::string&)>;
 
   // Callback to allow tests to stub out HTTP POST behavior.
   // Arguments:
   // URLRequestContextGetter: Context for the HTTP POST request.
   // string: Name of the rpc to invoke. URL format: server.google.com/rpc_name
-  // string: The API key to pass in the request.
+  // string: The API key to pass in the request. Deprecated.
   // string: The auth token to pass with the request.
   // MessageLite: Contents of POST request to be sent. This needs to be
   //     a (scoped) pointer to ease handling of the abstract MessageLite class.
   // PostCleanupCallback: Receives the response to the request.
-  typedef base::Callback<void(net::URLRequestContextGetter*,
-                              const std::string&,
-                              const std::string&,
-                              const std::string&,
-                              scoped_ptr<google::protobuf::MessageLite>,
-                              const PostCleanupCallback&)> PostCallback;
+  using PostCallback = base::Callback<void(
+      net::URLRequestContextGetter*,
+      const std::string&,
+      const std::string&,
+      const std::string&,
+      scoped_ptr<google::protobuf::MessageLite>,
+      const PostCleanupCallback&)>;
 
   // Report rpc name to send to Apiary.
   static const char kReportRequestRpcName[];
@@ -65,8 +69,10 @@ class RpcHandler {
   // are owned by the caller and must outlive the RpcHandler.
   // |server_post_callback| should be set only by tests.
   RpcHandler(CopresenceDelegate* delegate,
+             CopresenceStateImpl* state,
              DirectiveHandler* directive_handler,
              GCMHandler* gcm_handler,
+             const MessagesCallback& new_messages_callback,
              const PostCallback& server_post_callback = PostCallback());
 
   virtual ~RpcHandler();
@@ -86,13 +92,13 @@ class RpcHandler {
   struct PendingRequest {
     PendingRequest(scoped_ptr<ReportRequest> report,
                    const std::string& app_id,
-                   const std::string& auth_token,
+                   bool authenticated,
                    const StatusCallback& callback);
     ~PendingRequest();
 
     scoped_ptr<ReportRequest> report;
     const std::string app_id;
-    const std::string auth_token;
+    const bool authenticated;
     const StatusCallback callback;
   };
 
@@ -100,20 +106,19 @@ class RpcHandler {
 
   // Before accepting any other calls, the server requires registration,
   // which is tied to the auth token (or lack thereof) used to call Report.
-  void RegisterForToken(const std::string& auth_token);
+  void RegisterDevice(bool authenticated);
 
   // Device registration has completed. Send the requests that it was blocking.
-  void ProcessQueuedRequests(const std::string& auth_token);
+  void ProcessQueuedRequests(bool authenticated);
 
   // Send a ReportRequest from Chrome itself, i.e. no app id.
-  void SendReportRequest(scoped_ptr<ReportRequest> request,
-                         const std::string& auth_token);
+  void ReportOnAllDevices(scoped_ptr<ReportRequest> request);
 
   // Store a GCM ID and send it to the server if needed.
   void RegisterGcmId(const std::string& gcm_id);
 
   // Server call response handlers.
-  void RegisterResponseHandler(const std::string& auth_token,
+  void RegisterResponseHandler(bool authenticated,
                                bool gcm_pending,
                                HttpPost* completed_post,
                                int http_status_code,
@@ -136,7 +141,7 @@ class RpcHandler {
       const google::protobuf::RepeatedPtrField<SubscribedMessage>&
       subscribed_messages);
 
-  RequestHeader* CreateRequestHeader(const std::string& client_name,
+  RequestHeader* CreateRequestHeader(const std::string& app_id,
                                      const std::string& device_id) const;
 
   // Post a request to the server. The request should be in proto format.
@@ -144,7 +149,7 @@ class RpcHandler {
   void SendServerRequest(const std::string& rpc_name,
                          const std::string& device_id,
                          const std::string& app_id,
-                         const std::string& auth_token,
+                         bool authenticated,
                          scoped_ptr<T> request,
                          const PostCleanupCallback& response_handler);
 
@@ -152,22 +157,25 @@ class RpcHandler {
   // to contact the server, but it can be overridden for testing.
   void SendHttpPost(net::URLRequestContextGetter* url_context_getter,
                     const std::string& rpc_name,
-                    const std::string& api_key,
+                    const std::string& api_key,  // Deprecated
                     const std::string& auth_token,
                     scoped_ptr<google::protobuf::MessageLite> request_proto,
                     const PostCleanupCallback& callback);
 
   // These belong to the caller.
   CopresenceDelegate* const delegate_;
+  CopresenceStateImpl* state_;
   DirectiveHandler* const directive_handler_;
   GCMHandler* const gcm_handler_;
 
+  MessagesCallback new_messages_callback_;
   PostCallback server_post_callback_;
 
   ScopedVector<PendingRequest> pending_requests_queue_;
   TimedMap<std::string, bool> invalid_audio_token_cache_;
-  std::map<std::string, std::string> device_id_by_auth_token_;
   std::set<HttpPost*> pending_posts_;
+  std::set<bool> pending_registrations_;
+  std::string auth_token_;
   std::string gcm_id_;
 
   DISALLOW_COPY_AND_ASSIGN(RpcHandler);

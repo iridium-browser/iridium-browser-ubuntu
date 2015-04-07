@@ -19,6 +19,7 @@ LOCAL_SRC_FILES += \
     ../net/android/java/src/org/chromium/net/IRemoteAndroidKeyStoreCallbacks.aidl \
     ../net/android/java/src/org/chromium/net/IRemoteAndroidKeyStore.aidl \
     $(call all-java-files-under, ../base/android/java/src) \
+    $(call all-java-files-under, ../device/battery/android/java/src) \
     $(call all-java-files-under, ../media/base/android/java/src) \
     $(call all-java-files-under, ../mojo/android/system/src) \
     $(call all-java-files-under, ../mojo/public/java/bindings/src) \
@@ -42,11 +43,14 @@ LOCAL_SRC_FILES += \
     $(call all-java-files-under, java/generated_src)
 
 # Java files generated from .template rules. This list should match list of java dependencies in
-# android_webview/android_webview.gyp
+# android_webview/libwebviewchromium.gyp
 LOCAL_GENERATED_SOURCES := \
+$(call intermediates-dir-for,GYP,shared)/enums/android_resource_type_java/org/chromium/ui/resources/AndroidResourceType.java \
 $(call intermediates-dir-for,GYP,shared)/enums/bitmap_format_java/org/chromium/ui/gfx/BitmapFormat.java \
 $(call intermediates-dir-for,GYP,shared)/enums/cert_verify_status_android_java/org/chromium/net/CertVerifyStatusAndroid.java \
 $(call intermediates-dir-for,GYP,shared)/enums/certificate_mime_types_java/org/chromium/net/CertificateMimeType.java \
+$(call intermediates-dir-for,GYP,shared)/enums/network_change_notifier_types_java/org/chromium/net/ConnectionSubtype.java \
+$(call intermediates-dir-for,GYP,shared)/enums/network_change_notifier_types_java/org/chromium/net/ConnectionType.java \
 $(call intermediates-dir-for,GYP,shared)/enums/content_gamepad_mapping/org/chromium/content/browser/input/CanonicalAxisIndex.java \
 $(call intermediates-dir-for,GYP,shared)/enums/content_gamepad_mapping/org/chromium/content/browser/input/CanonicalButtonIndex.java \
 $(call intermediates-dir-for,GYP,shared)/enums/gesture_event_type_java/org/chromium/content/browser/GestureEventType.java \
@@ -54,7 +58,7 @@ $(call intermediates-dir-for,GYP,shared)/enums/popup_item_type_java/org/chromium
 $(call intermediates-dir-for,GYP,shared)/enums/private_key_types_java/org/chromium/net/PrivateKeyType.java \
 $(call intermediates-dir-for,GYP,shared)/enums/result_codes_java/org/chromium/content_public/common/ResultCode.java \
 $(call intermediates-dir-for,GYP,shared)/enums/screen_orientation_values_java/org/chromium/content_public/common/ScreenOrientationValues.java \
-$(call intermediates-dir-for,GYP,shared)/enums/selection_event_type_java/org/chromium/content/browser/input/SelectionEventType.java \
+$(call intermediates-dir-for,GYP,shared)/enums/selection_event_type_java/org/chromium/ui/touch_selection/SelectionEventType.java \
 $(call intermediates-dir-for,GYP,shared)/enums/speech_recognition_error_java/org/chromium/content_public/common/SpeechRecognitionErrorCode.java \
 $(call intermediates-dir-for,GYP,shared)/enums/top_controls_state_java/org/chromium/content_public/common/TopControlsState.java \
 $(call intermediates-dir-for,GYP,shared)/enums/window_open_disposition_java/org/chromium/ui/WindowOpenDisposition.java \
@@ -63,7 +67,14 @@ $(call intermediates-dir-for,GYP,shared)/enums/base_java_library_load_from_apk_s
 $(call intermediates-dir-for,GYP,shared)/enums/base_java_memory_pressure_level/org/chromium/base/MemoryPressureLevel.java \
 $(call intermediates-dir-for,GYP,shared)/enums/media_android_imageformat/org/chromium/media/AndroidImageFormat.java \
 $(call intermediates-dir-for,GYP,shared)/enums/page_transition_types_java/org/chromium/ui/base/PageTransition.java \
+$(call intermediates-dir-for,GYP,shared)/enums/system_ui_resource_type_java/org/chromium/ui/resources/SystemUIResourceType.java \
+$(call intermediates-dir-for,GYP,shared)/enums/text_input_type_java/org/chromium/ui/base/ime/TextInputType.java \
+$(call intermediates-dir-for,GYP,shared)/enums/touch_device_types_java/org/chromium/ui/base/HoverType.java \
+$(call intermediates-dir-for,GYP,shared)/enums/touch_device_types_java/org/chromium/ui/base/PointerType.java \
 $(call intermediates-dir-for,GYP,shared)/templates/net_errors_java/org/chromium/net/NetError.java \
+$(call intermediates-dir-for,GYP,shared)/java_mojo/device_battery_mojo_bindings/src/org/chromium/mojom/device/BatteryMonitor.java \
+$(call intermediates-dir-for,GYP,shared)/java_mojo/device_battery_mojo_bindings/src/org/chromium/mojom/device/BatteryMonitor_Internal.java \
+$(call intermediates-dir-for,GYP,shared)/java_mojo/device_battery_mojo_bindings/src/org/chromium/mojom/device/BatteryStatus.java \
 
 # content dependencies on java components that are provided by the system on
 # android

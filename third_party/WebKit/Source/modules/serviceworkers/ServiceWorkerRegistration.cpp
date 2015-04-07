@@ -101,7 +101,7 @@ String ServiceWorkerRegistration::scope() const
 
 ScriptPromise ServiceWorkerRegistration::unregister(ScriptState* scriptState)
 {
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
     if (!m_provider) {
@@ -157,8 +157,9 @@ void ServiceWorkerRegistration::trace(Visitor* visitor)
     visitor->trace(m_installing);
     visitor->trace(m_waiting);
     visitor->trace(m_active);
-    EventTargetWithInlineData::trace(visitor);
+    RefCountedGarbageCollectedEventTargetWithInlineData<ServiceWorkerRegistration>::trace(visitor);
     HeapSupplementable<ServiceWorkerRegistration>::trace(visitor);
+    ActiveDOMObject::trace(visitor);
 }
 
 bool ServiceWorkerRegistration::hasPendingActivity() const

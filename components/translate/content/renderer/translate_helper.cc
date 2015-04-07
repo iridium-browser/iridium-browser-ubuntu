@@ -13,6 +13,9 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/translate/content/common/translate_messages.h"
+#include "components/translate/content/renderer/renderer_cld_data_provider.h"
+#include "components/translate/content/renderer/renderer_cld_data_provider_factory.h"
+#include "components/translate/content/renderer/renderer_cld_utils.h"
 #include "components/translate/core/common/translate_constants.h"
 #include "components/translate/core/common/translate_metrics.h"
 #include "components/translate/core/common/translate_util.h"
@@ -68,6 +71,16 @@ const char kContentSecurityPolicy[] = "script-src 'self' 'unsafe-eval'";
 // Whether or not we have set the CLD callback yet.
 bool g_cld_callback_set = false;
 
+// Obtain a new CLD data provider. Defined as a standalone method for ease of
+// use in constructor initialization list.
+scoped_ptr<translate::RendererCldDataProvider> CreateDataProvider(
+    content::RenderViewObserver* render_view_observer) {
+  translate::RendererCldUtils::ConfigureDefaultDataProvider();
+  return scoped_ptr<translate::RendererCldDataProvider>(
+      translate::RendererCldDataProviderFactory::Get()->
+      CreateRendererCldDataProvider(render_view_observer));
+}
+
 }  // namespace
 
 namespace translate {
@@ -82,7 +95,7 @@ TranslateHelper::TranslateHelper(content::RenderView* render_view,
     : content::RenderViewObserver(render_view),
       page_seq_no_(0),
       translation_pending_(false),
-      cld_data_provider_(translate::CreateRendererCldDataProviderFor(this)),
+      cld_data_provider_(CreateDataProvider(this)),
       cld_data_polling_started_(false),
       cld_data_polling_canceled_(false),
       deferred_page_capture_(false),
@@ -297,7 +310,7 @@ std::string TranslateHelper::ExecuteScriptAndGetStringResult(
     return std::string();
   }
 
-  v8::Local<v8::String> v8_str = results[0]->ToString();
+  v8::Local<v8::String> v8_str = results[0].As<v8::String>();
   int length = v8_str->Utf8Length() + 1;
   scoped_ptr<char[]> str(new char[length]);
   v8_str->WriteUtf8(str.get(), length);
@@ -564,13 +577,27 @@ void TranslateHelper::CancelCldDataPolling() {
 
 void TranslateHelper::SendCldDataRequest(const int delay_millis,
                                          const int next_delay_millis) {
+  DCHECK_GE(delay_millis, 0);
+  DCHECK_GT(next_delay_millis, 0);
+
   // Terminate immediately if told to stop polling.
-  if (cld_data_polling_canceled_)
+  if (cld_data_polling_canceled_) {
+    DVLOG(1) << "Aborting CLD data request (polling canceled)";
     return;
+  }
 
   // Terminate immediately if data is already loaded.
-  if (cld_data_provider_->IsCldDataAvailable())
+  if (cld_data_provider_->IsCldDataAvailable()) {
+    DVLOG(1) << "Aborting CLD data request (data available)";
     return;
+  }
+
+  // Terminate immediately if the decayed delay is sufficiently large.
+  if (next_delay_millis > std::numeric_limits<int>::max() / 2) {
+    DVLOG(1) << "Aborting CLD data request (exceeded max number of requests)";
+    cld_data_polling_started_ = false;
+    return;
+  }
 
   if (!g_cld_callback_set) {
     g_cld_callback_set = true;
@@ -580,6 +607,7 @@ void TranslateHelper::SendCldDataRequest(const int delay_millis,
   }
 
   // Else, make an asynchronous request to get the data we need.
+  DVLOG(1) << "Requesting CLD data from data provider";
   cld_data_provider_->SendCldDataRequest();
 
   // ... and enqueue another delayed task to call again. This will start a
@@ -595,7 +623,7 @@ void TranslateHelper::SendCldDataRequest(const int delay_millis,
       base::Bind(&TranslateHelper::SendCldDataRequest,
                  weak_method_factory_.GetWeakPtr(),
                  next_delay_millis,
-                 next_delay_millis),
+                 next_delay_millis * 2),
       base::TimeDelta::FromMilliseconds(delay_millis));
 }
 

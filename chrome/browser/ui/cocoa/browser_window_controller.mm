@@ -69,7 +69,7 @@
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/translate/translate_bubble_controller.h"
 #include "chrome/browser/ui/cocoa/website_settings/permission_bubble_cocoa.h"
-#include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
+#include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
@@ -587,7 +587,8 @@ using content::WebContents;
   [self saveWindowPositionIfNeeded];
 
   bool fast_tab_closing_enabled =
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableFastUnload);
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableFastUnload);
 
   if (!browser_->tab_strip_model()->empty()) {
     // Tab strip isn't empty.  Hide the frame (so it appears to have closed
@@ -1262,6 +1263,10 @@ using content::WebContents;
   [toolbarController_ updateToolbarWithContents:tab];
 }
 
+- (void)resetTabState:(WebContents*)tab {
+  [toolbarController_ resetTabState:tab];
+}
+
 - (void)setStarredState:(BOOL)isStarred {
   [toolbarController_ setStarredState:isStarred];
 }
@@ -1853,7 +1858,7 @@ using content::WebContents;
   [view setHidden:![self shouldShowAvatar]];
 
   // Install the view.
-  [[[self window] cr_windowView] addSubview:view];
+  [[[self window] contentView] addSubview:view];
 }
 
 // Called when we get a three-finger swipe.
@@ -2017,8 +2022,9 @@ willAnimateFromState:(BookmarkBar::State)oldState
 }
 
 // (Private/TestingAPI)
-- (FullscreenExitBubbleController*)fullscreenExitBubbleController {
-  return fullscreenExitBubbleController_.get();
+- (ExclusiveAccessBubbleWindowController*)
+        exclusiveAccessBubbleWindowController {
+  return exclusiveAccessBubbleWindowController_.get();
 }
 
 - (NSRect)omniboxPopupAnchorRect {
@@ -2063,22 +2069,33 @@ willAnimateFromState:(BookmarkBar::State)oldState
   chrome::ExecuteCommand(browser_.get(), IDC_FULLSCREEN);
 }
 
-- (void)enterFullscreenWithChrome {
-  if (![self isInAppKitFullscreen]) {
-    // Invoking the AppKitFullscreen API by default uses Canonical Fullscreen.
-    [self enterAppKitFullscreen];
+- (void)enterBrowserFullscreenWithToolbar:(BOOL)withToolbar {
+  if (!chrome::mac::SupportsSystemFullscreen()) {
+    if (![self isInImmersiveFullscreen])
+      [self enterImmersiveFullscreen];
     return;
   }
 
-  // If AppKitFullscreen is already enabled, then just switch to Canonical
-  // Fullscreen.
-  [self adjustUIForSlidingFullscreenStyle:fullscreen_mac::OMNIBOX_TABS_PRESENT];
+  if ([self isInAppKitFullscreen]) {
+    [self updateFullscreenWithToolbar:withToolbar];
+  } else {
+    // Need to invoke AppKit Fullscreen API. Presentation mode (if set) will
+    // automatically be enabled in |-windowWillEnterFullScreen:|.
+    enteringPresentationMode_ = !withToolbar;
+    [self enterAppKitFullscreen];
+  }
+}
+
+- (void)updateFullscreenWithToolbar:(BOOL)withToolbar {
+  [self adjustUIForSlidingFullscreenStyle:
+            withToolbar ? fullscreen_mac::OMNIBOX_TABS_PRESENT
+                        : fullscreen_mac::OMNIBOX_TABS_HIDDEN];
 }
 
 - (void)updateFullscreenExitBubbleURL:(const GURL&)url
-                           bubbleType:(FullscreenExitBubbleType)bubbleType {
+                           bubbleType:(ExclusiveAccessBubbleType)bubbleType {
   fullscreenUrl_ = url;
-  fullscreenBubbleType_ = bubbleType;
+  exclusiveAccessBubbleType_ = bubbleType;
   [self layoutSubviews];
   [self showFullscreenExitBubbleIfNecessary];
 }
@@ -2097,32 +2114,12 @@ willAnimateFromState:(BookmarkBar::State)oldState
          enteringAppKitFullscreen_;
 }
 
-- (void)enterPresentationMode {
-  if (!chrome::mac::SupportsSystemFullscreen()) {
-    if ([self isInImmersiveFullscreen])
-      return;
-    [self enterImmersiveFullscreen];
-    return;
-  }
-
-  if ([self isInAppKitFullscreen]) {
-    // Already in AppKit Fullscreen. Adjust the UI to use Presentation Mode.
-    [self
-        adjustUIForSlidingFullscreenStyle:fullscreen_mac::OMNIBOX_TABS_HIDDEN];
-  } else {
-    // Need to invoke AppKit Fullscreen API. Presentation mode will
-    // automatically be enabled in |-windowWillEnterFullScreen:|.
-    enteringPresentationMode_ = YES;
-    [self enterAppKitFullscreen];
-  }
-}
-
 - (void)enterExtensionFullscreenForURL:(const GURL&)url
-                            bubbleType:(FullscreenExitBubbleType)bubbleType {
+                            bubbleType:(ExclusiveAccessBubbleType)bubbleType {
   if (chrome::mac::SupportsSystemFullscreen()) {
     fullscreenUrl_ = url;
-    fullscreenBubbleType_ = bubbleType;
-    [self enterPresentationMode];
+    exclusiveAccessBubbleType_ = bubbleType;
+    [self enterBrowserFullscreenWithToolbar:NO];
   } else {
     [self enterImmersiveFullscreen];
     DCHECK(!url.is_empty());
@@ -2131,7 +2128,7 @@ willAnimateFromState:(BookmarkBar::State)oldState
 }
 
 - (void)enterWebContentFullscreenForURL:(const GURL&)url
-                             bubbleType:(FullscreenExitBubbleType)bubbleType {
+                             bubbleType:(ExclusiveAccessBubbleType)bubbleType {
   [self enterImmersiveFullscreen];
   if (!url.is_empty())
     [self updateFullscreenExitBubbleURL:url bubbleType:bubbleType];

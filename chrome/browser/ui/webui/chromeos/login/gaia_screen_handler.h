@@ -11,6 +11,7 @@
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/chromeos/login/screens/core_oobe_actor.h"
+#include "chrome/browser/extensions/signin/scoped_gaia_auth_extension.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "net/base/net_errors.h"
 
@@ -84,6 +85,10 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // Cancel embedded signin for the next load.
   void CancelEmbeddedSignin();
 
+  // Decides whether an auth extension should be pre-loaded. If it should,
+  // pre-loads it.
+  void MaybePreloadAuthExtension();
+
   FrameState frame_state() const { return frame_state_; }
   net::Error frame_error() const { return frame_error_; }
 
@@ -114,6 +119,8 @@ class GaiaScreenHandler : public BaseScreenHandler {
   void HandleScrapedPasswordVerificationFailed();
 
   void HandleGaiaUIReady();
+
+  void HandleSwitchToFullTab();
 
   // This is called when ConsumerManagementService::SetOwner() returns.
   void OnSetOwnerDone(const std::string& gaia_id,
@@ -152,14 +159,19 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // principals API was used during SAML login.
   void SetSAMLPrincipalsAPIUsed(bool api_used);
 
-  void ShowGaia(bool is_enrolling_consumer_management);
+  // Show the sign-in screen. Depending on internal state, the screen will
+  // either be shown immediately or after an asynchronous clean-up process that
+  // cleans DNS cache and cookies. In the latter case, the request to show the
+  // screen can be canceled by calling CancelShowGaiaAsync() while the clean-up
+  // is in progress.
+  void ShowGaiaAsync(bool is_enrolling_consumer_management);
+
+  // Cancels the request to show the sign-in screen while the asynchronous
+  // clean-up process that precedes the screen showing is in progress.
+  void CancelShowGaiaAsync();
 
   // Shows signin screen after dns cache and cookie cleanup operations finish.
   void ShowGaiaScreenIfReady();
-
-  // Decides whether an auth extension should be pre-loaded. If it should,
-  // pre-loads it.
-  void MaybePreloadAuthExtension();
 
   // Tells webui to load authentication extension. |force| is used to force the
   // extension reloading, if it has already been loaded. |silent_load| is true
@@ -206,6 +218,10 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // True if cookie jar cleanup is done.
   bool cookies_cleared_;
 
+  // If true, the sign-in screen will be shown when DNS cache and cookie
+  // clean-up finish.
+  bool show_when_dns_and_cookies_cleared_;
+
   // Is focus still stolen from Gaia page?
   bool focus_stolen_;
 
@@ -235,6 +251,9 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // TODO (ygorshenin@): GaiaScreenHandler shouldn't communicate with
   // signin_screen_handler directly.
   SigninScreenHandler* signin_screen_handler_;
+
+  // GAIA extension loader.
+  scoped_ptr<ScopedGaiaAuthExtension> auth_extension_;
 
   base::WeakPtrFactory<GaiaScreenHandler> weak_factory_;
 

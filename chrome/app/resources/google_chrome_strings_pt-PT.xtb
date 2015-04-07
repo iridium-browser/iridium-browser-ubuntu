@@ -6,7 +6,7 @@
 <translation id="123620459398936149">O SO Chrome não conseguiu sincronizar os dados. Atualize a sua frase de acesso de sincronização.</translation>
 <translation id="5430073640787465221">O ficheiro de preferências está danificado ou não é válido. O Google Chrome não consegue recuperar as suas definições.</translation>
 <translation id="6676384891291319759">Aceder à Internet</translation>
-<translation id="573759479754913123">Acerca do SO &amp;Chrome</translation>
+<translation id="573759479754913123">Acerca do SO Chrome</translation>
 <translation id="345171907106878721">Adicionar-se ao Chrome</translation>
 <translation id="4921569541910214635">Partilha um computador? Agora pode configurar o Chrome exatamente como pretende.</translation>
 <translation id="6236285698028833233">O Google Chrome já não se atualiza nem suporta mais esta versão do seu sistema operativo.</translation>
@@ -45,6 +45,7 @@
 <translation id="568643307450491754">Encontre os seus marcadores no menu Chrome ou na barra de marcadores.</translation>
 <translation id="8556340503434111824">Está disponível uma nova versão do Google Chrome, mais rápida do que nunca.</translation>
 <translation id="8987477933582888019">Navegador de Internet</translation>
+<translation id="3749644715096758981">Não foi possível atualizar o Chrome para a versão mais recente, pelo que não está a beneficiar das funcionalidades e das correções de segurança novas. Tem de atualizar o Chrome.</translation>
 <translation id="4728575227883772061">Houve uma falha na instalação devido a um erro não especificado. Se o Google Chrome estiver atualmente em execução, feche-o e tente de novo.</translation>
 <translation id="3080151273017101988">Continuar a executar aplicações em segundo plano quando o Google Chrome está fechado</translation>
 <translation id="4149882025268051530">Houve uma falha no programa de instalação ao descompactar o arquivo. Transfira de novo o Google Chrome.</translation>
@@ -83,6 +84,7 @@
 <translation id="225614027745146050">Bem-vindo</translation>
 <translation id="7473891865547856676">Não, obrigado</translation>
 <translation id="3149510190863420837">Aplicações do Chrome</translation>
+<translation id="8851136666856101339">main</translation>
 <translation id="7473136999113284234">O Chrome é atualizado automaticamente para que tenha sempre a versão mais recente.</translation>
 <translation id="7084448929020576097">O ficheiro <ph name="FILE_NAME"/> é malicioso e o Chrome bloqueou-o.</translation>
 <translation id="6368958679917195344">O SO Chrome é possível através de <ph name="BEGIN_LINK_CROS_OSS"/>software de código aberto<ph name="END_LINK_CROS_OSS"/> adicional.</translation>
@@ -142,7 +144,6 @@ Se, mesmo assim, iniciar sessão, as informações do Chrome, como marcadores, h
 <translation id="5855036575689098185">O software em execução no seu computador é incompatível com o Google Chrome.</translation>
 <translation id="7164397146364144019">Pode contribuir para tornar o Chrome mais seguro e fácil de utilizar ao comunicar automaticamente os detalhes de possíveis incidentes de segurança à Google.</translation>
 <translation id="8008534537613507642">Reinstalar Chrome</translation>
-<translation id="2044287590254833138">Barra de ferramentas do Google Chrome</translation>
 <translation id="8862326446509486874">Não tem os direitos adequados para uma instalação ao nível do sistema. Tente executar o programa de instalação novamente como Administrador.</translation>
 <translation id="2874156562296220396">O Google Chrome foi concretizado graças ao projecto open source (código fonte aberto) <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/>, assim como a outro <ph name="BEGIN_LINK_OSS"/>software open source<ph name="END_LINK_OSS"/>.</translation>
 <translation id="7191567847629796517">O SO Google Chrome não suporta iniciar uma aplicação externa para processar links <ph name="SCHEME"/>. O link solicitado é <ph name="PROTOLINK"/>.</translation>
@@ -154,6 +155,7 @@ Se, mesmo assim, iniciar sessão, as informações do Chrome, como marcadores, h
 <translation id="2290095356545025170">Tem a certeza de que pretende desinstalar o Google Chrome?</translation>
 <translation id="7062966102157262887">A transferência está atualmente em curso. Pretende sair do Google Chrome e cancelar a transferência?</translation>
 <translation id="4273752058983339720">O Google Chrome está configurado para ser iniciado automaticamente quando liga o computador.</translation>
+<translation id="2316129865977710310">Não, obrigado</translation>
 <translation id="415994390253732730">O Chrome está a comportar-se de forma estranha?</translation>
 <translation id="1104959162601287462">Acerca do SO &amp;Chrome</translation>
 <translation id="5328989068199000832">Binários do Google Chrome</translation>
@@ -253,6 +255,7 @@ Se, mesmo assim, iniciar sessão, as informações do Chrome, como marcadores, h
 <translation id="6626317981028933585">Infelizmente, as suas definições do Mozilla Firefox não estão disponíveis enquanto esse browser estiver aberto. Para importar essas definições para o Google Chrome, guarde o seu trabalho e feche todas as janelas do Firefox. De seguida clique em Continuar.</translation>
 <translation id="7242029209006116544">Está a iniciar sessão com uma conta gerida e a permitir que o administrador controle o seu perfil do Google Chrome. Os seus dados do Chrome, como aplicações, marcadores, histórico, palavras-passe e outras definições, ficarão associados definitivamente a <ph name="USER_NAME"/>. Poderá eliminar estes dados através do Painel de Controlo das Contas Google, mas não poderá associá-los a outra conta. Opcionalmente, pode criar um perfil novo para manter os seus dados atuais do Chrome em separado. <ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">Também controla a página apresentada quando inicia o Chrome ou pesquisa a partir da Caixa geral.</translation>
+<translation id="1553358976309200471">Atualizar o Chrome</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Copyright <ph name="YEAR"/> Google Inc. Todos os direitos reservados.</translation>
 <translation id="1698376642261615901">O Google Chrome é um navegador de internet que executa páginas Web e aplicações de forma extremamente rápida. É rápido, estável e fácil de utilizar. Navegue na Web com mais segurança com proteção contra phishing e programas maliciosos incorporada no Google Chrome.</translation>

@@ -4,6 +4,9 @@
 
 #include "chromecast/browser/cast_content_browser_client.h"
 
+#include <string>
+
+#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/files/scoped_file.h"
 #include "base/i18n/rtl.h"
@@ -14,10 +17,14 @@
 #include "chromecast/browser/cast_network_delegate.h"
 #include "chromecast/browser/devtools/cast_dev_tools_delegate.h"
 #include "chromecast/browser/geolocation/cast_access_token_store.h"
+#include "chromecast/browser/media/cma_message_filter_host.h"
 #include "chromecast/browser/url_request_context_factory.h"
 #include "chromecast/common/cast_paths.h"
+#include "chromecast/common/chromecast_switches.h"
 #include "chromecast/common/global_descriptors.h"
 #include "components/crash/app/breakpad_linux.h"
+#include "components/crash/browser/crash_handler_host_linux.h"
+#include "components/dns_prefetch/browser/net_message_filter.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/certificate_request_result_type.h"
 #include "content/public/browser/render_process_host.h"
@@ -57,6 +64,15 @@ content::BrowserMainParts* CastContentBrowserClient::CreateBrowserMainParts(
 
 void CastContentBrowserClient::RenderProcessWillLaunch(
     content::RenderProcessHost* host) {
+  scoped_refptr<content::BrowserMessageFilter> net_message_filter(
+      new dns_prefetch::NetMessageFilter(
+          url_request_context_factory_->host_resolver()));
+  host->AddFilter(net_message_filter.get());
+#if !defined(OS_ANDROID)
+  scoped_refptr<media::CmaMessageFilterHost> cma_message_filter(
+      new media::CmaMessageFilterHost(host->GetID()));
+  host->AddFilter(cma_message_filter.get());
+#endif  // !defined(OS_ANDROID)
 }
 
 net::URLRequestContextGetter* CastContentBrowserClient::CreateRequestContext(
@@ -98,6 +114,15 @@ void CastContentBrowserClient::AppendExtraCommandLineSwitches(
 
   std::string process_type =
       command_line->GetSwitchValueNative(switches::kProcessType);
+  base::CommandLine* browser_command_line =
+      base::CommandLine::ForCurrentProcess();
+
+  // IsCrashReporterEnabled() is set when InitCrashReporter() is called, and
+  // controlled by GetBreakpadClient()->EnableBreakpadForProcess(), therefore
+  // it's ok to add switch to every process here.
+  if (breakpad::IsCrashReporterEnabled()) {
+    command_line->AppendSwitch(switches::kEnableCrashReporter);
+  }
 
   // Renderer process command-line
   if (process_type == switches::kRendererProcess) {
@@ -106,6 +131,9 @@ void CastContentBrowserClient::AppendExtraCommandLineSwitches(
 #if defined(OS_ANDROID)
     command_line->AppendSwitch(switches::kForceUseOverlayEmbeddedVideo);
 #endif  // defined(OS_ANDROID)
+
+    if (browser_command_line->HasSwitch(switches::kEnableCmaMediaPipeline))
+      command_line->AppendSwitch(switches::kEnableCmaMediaPipeline);
   }
 }
 
@@ -124,6 +152,10 @@ void CastContentBrowserClient::OverrideWebkitPrefs(
   // to retrieve media data chunks while running in a https page. This pref
   // should be disabled once all the content providers are no longer doing that.
   prefs->allow_running_insecure_content = true;
+#if defined(DISABLE_DISPLAY)
+  prefs->images_enabled = false;
+  prefs->loads_images_automatically = false;
+#endif  // defined(DISABLE_DISPLAY)
 }
 
 std::string CastContentBrowserClient::GetApplicationLocale() {
@@ -177,21 +209,26 @@ void CastContentBrowserClient::SelectClientCertificate(
       base::Bind(
           &CastContentBrowserClient::SelectClientCertificateOnIOThread,
           base::Unretained(this),
-          requesting_url),
+          requesting_url,
+          render_process_id),
       callback);
 }
 
 net::X509Certificate*
 CastContentBrowserClient::SelectClientCertificateOnIOThread(
-    GURL requesting_url) {
+    GURL requesting_url,
+    int render_process_id) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   CastNetworkDelegate* network_delegate =
       url_request_context_factory_->app_network_delegate();
-  if (network_delegate->IsWhitelisted(requesting_url, false)) {
+  if (network_delegate->IsWhitelisted(requesting_url,
+                                      render_process_id, false)) {
     return CastNetworkDelegate::DeviceCert();
   } else {
     LOG(ERROR) << "Invalid host for client certificate request: "
-               << requesting_url.host();
+               << requesting_url.host()
+               << " with render_process_id: "
+               << render_process_id;
     return NULL;
   }
 }
@@ -249,6 +286,11 @@ void CastContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
                          base::ScopedFD(minidump_file.TakePlatformFile()));
     }
   }
+#else
+  int crash_signal_fd = GetCrashSignalFD(command_line);
+  if (crash_signal_fd >= 0) {
+    mappings->Share(kCrashDumpSignal, crash_signal_fd);
+  }
 #endif  // defined(OS_ANDROID)
 }
 
@@ -260,6 +302,44 @@ CastContentBrowserClient::OverrideCreateExternalVideoSurfaceContainer(
 }
 #endif  // defined(OS_ANDROID) && defined(VIDEO_HOLE)
 
+#if !defined(OS_ANDROID)
+int CastContentBrowserClient::GetCrashSignalFD(
+    const base::CommandLine& command_line) {
+  std::string process_type =
+      command_line.GetSwitchValueASCII(switches::kProcessType);
+
+  if (process_type == switches::kRendererProcess ||
+      process_type == switches::kGpuProcess) {
+    breakpad::CrashHandlerHostLinux* crash_handler =
+        crash_handlers_[process_type];
+    if (!crash_handler) {
+      crash_handler = CreateCrashHandlerHost(process_type);
+      crash_handlers_[process_type] = crash_handler;
+    }
+    return crash_handler->GetDeathSignalSocket();
+  }
+
+  return -1;
+}
+
+breakpad::CrashHandlerHostLinux*
+CastContentBrowserClient::CreateCrashHandlerHost(
+    const std::string& process_type) {
+  // Let cast shell dump to /tmp. Internal minidump generator code can move it
+  // to /data/minidumps later, since /data/minidumps is file lock-controlled.
+  base::FilePath dumps_path;
+  PathService::Get(base::DIR_TEMP, &dumps_path);
+
+  // Alway set "upload" to false to use our own uploader.
+  breakpad::CrashHandlerHostLinux* crash_handler =
+    new breakpad::CrashHandlerHostLinux(
+        process_type, dumps_path, false /* upload */);
+  // StartUploaderThread() even though upload is diferred.
+  // Breakpad-related memory is freed in the uploader thread.
+  crash_handler->StartUploaderThread();
+  return crash_handler;
+}
+#endif  // !defined(OS_ANDROID)
 
 }  // namespace shell
 }  // namespace chromecast

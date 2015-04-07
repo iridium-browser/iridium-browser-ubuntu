@@ -98,6 +98,7 @@ bool SkInstallDiscardablePixelRef(SkImageGenerator* generator, SkBitmap* dst,
     SkAutoTDelete<SkImageGenerator> autoGenerator(generator);
     if ((NULL == autoGenerator.get())
         || (!autoGenerator->getInfo(&info))
+        || info.isEmpty()
         || (!dst->setInfo(info))) {
         return false;
     }
@@ -115,7 +116,13 @@ bool SkInstallDiscardablePixelRef(SkImageGenerator* generator, SkBitmap* dst,
     return true;
 }
 
-// This is the public API
+// These are the public API
+
 bool SkInstallDiscardablePixelRef(SkImageGenerator* generator, SkBitmap* dst) {
     return SkInstallDiscardablePixelRef(generator, dst, NULL);
+}
+
+bool SkInstallDiscardablePixelRef(SkData* encoded, SkBitmap* dst) {
+    SkImageGenerator* generator = SkImageGenerator::NewFromData(encoded);
+    return generator ? SkInstallDiscardablePixelRef(generator, dst, NULL) : false;
 }

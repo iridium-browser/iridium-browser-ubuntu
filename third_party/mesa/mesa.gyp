@@ -657,14 +657,6 @@
             '_GLAPI_NO_EXPORTS',
           ],
         }],
-        ['ubsan==1', {
-          # Due to a bug in LLVM (http://llvm.org/bugs/show_bug.cgi?id=21349),
-          # compilation hangs for some Mesa source files. Disable -O2
-          # temporarily until http://crbug.com/426271 is fixed.
-          'cflags!': [
-            '-O2',
-          ],
-        }],
       ],
     },
     # Building this target will hide the native OpenGL shared library and
@@ -708,6 +700,12 @@
         'src/src/mesa/drivers/osmesa/osmesa.c',
         'src/src/mesa/drivers/osmesa/osmesa.def',
       ],
+      'variables': {
+        'clang_warning_flags_unset': [
+          # Don't warn about string->bool used in asserts.
+          '-Wstring-conversion',
+        ],
+      },
     },
   ],
   'conditions': [

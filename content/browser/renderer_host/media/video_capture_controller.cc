@@ -23,9 +23,7 @@
 #include "media/base/yuv_convert.h"
 #include "third_party/libyuv/include/libyuv.h"
 
-#if defined(OS_ANDROID)
-#include "content/browser/renderer_host/image_transport_factory_android.h"
-#else
+#if !defined(OS_ANDROID)
 #include "content/browser/compositor/image_transport_factory.h"
 #endif
 
@@ -75,17 +73,17 @@ void ReturnVideoFrame(const scoped_refptr<media::VideoFrame>& video_frame,
                       uint32 sync_point) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 #if defined(OS_ANDROID)
-  GLHelper* gl_helper =
-      ImageTransportFactoryAndroid::GetInstance()->GetGLHelper();
+  NOTREACHED();
 #else
   GLHelper* gl_helper = ImageTransportFactory::GetInstance()->GetGLHelper();
-#endif
-  DCHECK(gl_helper);
   // UpdateReleaseSyncPoint() creates a new sync_point using |gl_helper|, so
   // wait the given |sync_point| using |gl_helper|.
-  gl_helper->WaitSyncPoint(sync_point);
-  SyncPointClientImpl client(gl_helper);
-  video_frame->UpdateReleaseSyncPoint(&client);
+  if (gl_helper) {
+    gl_helper->WaitSyncPoint(sync_point);
+    SyncPointClientImpl client(gl_helper);
+    video_frame->UpdateReleaseSyncPoint(&client);
+  }
+#endif
 }
 
 }  // anonymous namespace
@@ -320,6 +318,9 @@ void VideoCaptureController::ReturnBuffer(
   client->active_buffers.erase(iter);
   buffer_pool_->RelinquishConsumerHold(buffer_id, 1);
 
+#if defined(OS_ANDROID)
+  DCHECK_EQ(0u, sync_point);
+#endif
   if (sync_point)
     BrowserThread::PostTask(BrowserThread::UI,
                             FROM_HERE,
@@ -420,6 +421,10 @@ void VideoCaptureController::VideoCaptureDeviceClient::OnIncomingCapturedData(
     case media::PIXEL_FORMAT_YV12:
       DCHECK(!chopped_width && !chopped_height);
       origin_colorspace = libyuv::FOURCC_YV12;
+      break;
+    case media::PIXEL_FORMAT_NV12:
+      DCHECK(!chopped_width && !chopped_height);
+      origin_colorspace = libyuv::FOURCC_NV12;
       break;
     case media::PIXEL_FORMAT_NV21:
       DCHECK(!chopped_width && !chopped_height);

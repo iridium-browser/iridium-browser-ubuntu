@@ -10,8 +10,8 @@
 
 #include "base/compiler_specific.h"
 #include "third_party/skia/include/utils/SkMatrix44.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/gfx/gfx_export.h"
-#include "ui/gfx/vector2d_f.h"
 
 namespace gfx {
 
@@ -121,6 +121,11 @@ class GFX_EXPORT Transform {
 
   // Returns true if the matrix is either identity or pure translation.
   bool IsIdentityOrTranslation() const { return matrix_.isTranslate(); }
+
+  // Returns true if the matrix is either the identity or a 2d translation.
+  bool IsIdentityOr2DTranslation() const {
+    return matrix_.isTranslate() && matrix_.get(2, 3) == 0;
+  }
 
   // Returns true if the matrix is either identity or pure translation,
   // allowing for an amount of inaccuracy as specified by the parameter.

@@ -25,6 +25,7 @@
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "policy/proto/device_management_backend.pb.h"
 
 using google::protobuf::RepeatedField;
@@ -38,48 +39,44 @@ namespace {
 
 // List of settings handled by the DeviceSettingsProvider.
 const char* const kKnownSettings[] = {
-  kAccountsPrefAllowGuest,
-  kAccountsPrefAllowNewUser,
-  kAccountsPrefDeviceLocalAccounts,
-  kAccountsPrefDeviceLocalAccountAutoLoginBailoutEnabled,
-  kAccountsPrefDeviceLocalAccountAutoLoginDelay,
-  kAccountsPrefDeviceLocalAccountAutoLoginId,
-  kAccountsPrefDeviceLocalAccountPromptForNetworkWhenOffline,
-  kAccountsPrefEphemeralUsersEnabled,
-  kAccountsPrefShowUserNamesOnSignIn,
-  kAccountsPrefSupervisedUsersEnabled,
-  kAccountsPrefTransferSAMLCookies,
-  kAccountsPrefUsers,
-  kAllowRedeemChromeOsRegistrationOffers,
-  kAllowedConnectionTypesForUpdate,
-  kAppPack,
-  kAttestationForContentProtectionEnabled,
-  kDeviceAttestationEnabled,
-  kDeviceOwner,
-  kIdleLogoutTimeout,
-  kIdleLogoutWarningDuration,
-  kPolicyMissingMitigationMode,
-  kReleaseChannel,
-  kReleaseChannelDelegated,
-  kReportDeviceActivityTimes,
-  kReportDeviceBootMode,
-  kReportDeviceLocation,
-  kReportDeviceNetworkInterfaces,
-  kReportDeviceUsers,
-  kReportDeviceVersionInfo,
-  kScreenSaverExtensionId,
-  kScreenSaverTimeout,
-  kServiceAccountIdentity,
-  kSignedDataRoamingEnabled,
-  kStartUpFlags,
-  kStartUpUrls,
-  kStatsReportingPref,
-  kSystemTimezonePolicy,
-  kSystemUse24HourClock,
-  kUpdateDisabled,
-  kVariationsRestrictParameter,
-  kDeviceDisabled,
-  kDeviceDisabledMessage,
+    kAccountsPrefAllowGuest,
+    kAccountsPrefAllowNewUser,
+    kAccountsPrefDeviceLocalAccounts,
+    kAccountsPrefDeviceLocalAccountAutoLoginBailoutEnabled,
+    kAccountsPrefDeviceLocalAccountAutoLoginDelay,
+    kAccountsPrefDeviceLocalAccountAutoLoginId,
+    kAccountsPrefDeviceLocalAccountPromptForNetworkWhenOffline,
+    kAccountsPrefEphemeralUsersEnabled,
+    kAccountsPrefShowUserNamesOnSignIn,
+    kAccountsPrefSupervisedUsersEnabled,
+    kAccountsPrefTransferSAMLCookies,
+    kAccountsPrefUsers,
+    kAllowRedeemChromeOsRegistrationOffers,
+    kAllowedConnectionTypesForUpdate,
+    kAttestationForContentProtectionEnabled,
+    kDeviceAttestationEnabled,
+    kDeviceOwner,
+    kPolicyMissingMitigationMode,
+    kReleaseChannel,
+    kReleaseChannelDelegated,
+    kReportDeviceActivityTimes,
+    kReportDeviceBootMode,
+    kReportDeviceLocation,
+    kReportDeviceNetworkInterfaces,
+    kReportDeviceUsers,
+  kReportDeviceHardwareStatus,
+    kReportDeviceVersionInfo,
+    kServiceAccountIdentity,
+    kSignedDataRoamingEnabled,
+    kStartUpFlags,
+    kStatsReportingPref,
+    kSystemTimezonePolicy,
+    kSystemUse24HourClock,
+    kUpdateDisabled,
+    kVariationsRestrictParameter,
+    kDeviceDisabled,
+    kDeviceDisabledMessage,
+    kRebootOnShutdown,
 };
 
 bool HasOldMetricsFile() {
@@ -117,6 +114,12 @@ void DecodeLoginPolicies(
         kAccountsPrefAllowNewUser,
         policy.user_whitelist().user_whitelist_size() == 0);
   }
+
+  new_values_cache->SetBoolean(
+      kRebootOnShutdown,
+      policy.has_reboot_on_shutdown() &&
+      policy.reboot_on_shutdown().has_reboot_on_shutdown() &&
+      policy.reboot_on_shutdown().reboot_on_shutdown());
 
   new_values_cache->SetBoolean(
       kAccountsPrefAllowGuest,
@@ -240,69 +243,6 @@ void DecodeLoginPolicies(
   }
 }
 
-void DecodeKioskPolicies(
-    const em::ChromeDeviceSettingsProto& policy,
-    PrefValueMap* new_values_cache) {
-  if (policy.has_forced_logout_timeouts()) {
-    if (policy.forced_logout_timeouts().has_idle_logout_timeout()) {
-      new_values_cache->SetInteger(
-          kIdleLogoutTimeout,
-          policy.forced_logout_timeouts().idle_logout_timeout());
-    }
-
-    if (policy.forced_logout_timeouts().has_idle_logout_warning_duration()) {
-      new_values_cache->SetInteger(
-          kIdleLogoutWarningDuration,
-          policy.forced_logout_timeouts().idle_logout_warning_duration());
-    }
-  }
-
-  if (policy.has_login_screen_saver()) {
-    if (policy.login_screen_saver().has_screen_saver_timeout()) {
-      new_values_cache->SetInteger(
-          kScreenSaverTimeout,
-          policy.login_screen_saver().screen_saver_timeout());
-    }
-
-    if (policy.login_screen_saver().has_screen_saver_extension_id()) {
-      new_values_cache->SetString(
-          kScreenSaverExtensionId,
-          policy.login_screen_saver().screen_saver_extension_id());
-    }
-  }
-
-  if (policy.has_app_pack()) {
-    typedef RepeatedPtrField<em::AppPackEntryProto> proto_type;
-    base::ListValue* list = new base::ListValue;
-    const proto_type& app_pack = policy.app_pack().app_pack();
-    for (proto_type::const_iterator it = app_pack.begin();
-         it != app_pack.end(); ++it) {
-      base::DictionaryValue* entry = new base::DictionaryValue;
-      if (it->has_extension_id()) {
-        entry->SetStringWithoutPathExpansion(kAppPackKeyExtensionId,
-                                             it->extension_id());
-      }
-      if (it->has_update_url()) {
-        entry->SetStringWithoutPathExpansion(kAppPackKeyUpdateUrl,
-                                             it->update_url());
-      }
-      list->Append(entry);
-    }
-    new_values_cache->SetValue(kAppPack, list);
-  }
-
-  if (policy.has_start_up_urls()) {
-    base::ListValue* list = new base::ListValue();
-    const em::StartUpUrlsProto& urls_proto = policy.start_up_urls();
-    const RepeatedPtrField<std::string>& urls = urls_proto.start_up_urls();
-    for (RepeatedPtrField<std::string>::const_iterator it = urls.begin();
-         it != urls.end(); ++it) {
-      list->Append(new base::StringValue(*it));
-    }
-    new_values_cache->SetValue(kStartUpUrls, list);
-  }
-}
-
 void DecodeNetworkPolicies(
     const em::ChromeDeviceSettingsProto& policy,
     PrefValueMap* new_values_cache) {
@@ -365,6 +305,11 @@ void DecodeReportingPolicies(
       new_values_cache->SetBoolean(
           kReportDeviceUsers,
           reporting_policy.report_users());
+    }
+    if (reporting_policy.has_report_hardware_status()) {
+      new_values_cache->SetBoolean(
+          kReportDeviceHardwareStatus,
+          reporting_policy.report_hardware_status());
     }
   }
 }
@@ -614,8 +559,10 @@ void DeviceSettingsProvider::UpdateValuesCache(
   // If the device is not managed, or is consumer-managed, we set the device
   // owner value.
   if (policy_data.has_username() &&
-      (!policy_data.has_request_token() ||
-       policy_data.management_mode() == em::PolicyData::CONSUMER_MANAGED)) {
+      (policy::GetManagementMode(policy_data) ==
+           policy::MANAGEMENT_MODE_LOCAL_OWNER ||
+       policy::GetManagementMode(policy_data) ==
+           policy::MANAGEMENT_MODE_CONSUMER_MANAGED)) {
     new_values_cache.SetString(kDeviceOwner, policy_data.username());
   }
 
@@ -625,7 +572,6 @@ void DeviceSettingsProvider::UpdateValuesCache(
   }
 
   DecodeLoginPolicies(settings, &new_values_cache);
-  DecodeKioskPolicies(settings, &new_values_cache);
   DecodeNetworkPolicies(settings, &new_values_cache);
   DecodeAutoUpdatePolicies(settings, &new_values_cache);
   DecodeReportingPolicies(settings, &new_values_cache);

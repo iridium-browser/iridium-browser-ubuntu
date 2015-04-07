@@ -12,8 +12,14 @@
 #include "net/quic/test_tools/mock_clock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using std::vector;
+
 namespace net {
 namespace test {
+namespace {
+
+// Default packet length.
+const uint32 kDefaultLength = 1000;
 
 class TcpLossAlgorithmTest : public ::testing::Test {
  protected:
@@ -24,9 +30,16 @@ class TcpLossAlgorithmTest : public ::testing::Test {
                          clock_.Now());
   }
 
+  ~TcpLossAlgorithmTest() override {
+    STLDeleteElements(&packets_);
+  }
+
   void SendDataPacket(QuicPacketSequenceNumber sequence_number) {
+    packets_.push_back(QuicPacket::NewDataPacket(
+        nullptr, kDefaultLength, false, PACKET_8BYTE_CONNECTION_ID, false,
+        PACKET_1BYTE_SEQUENCE_NUMBER));
     SerializedPacket packet(sequence_number, PACKET_1BYTE_SEQUENCE_NUMBER,
-                            nullptr, 0, new RetransmittableFrames());
+                            packets_.back(), 0, new RetransmittableFrames());
     unacked_packets_.AddSentPacket(packet, 0, NOT_RETRANSMISSION, clock_.Now(),
                                    1000, true);
   }
@@ -43,6 +56,7 @@ class TcpLossAlgorithmTest : public ::testing::Test {
     }
   }
 
+  vector<QuicPacket*> packets_;
   QuicUnackedPacketMap unacked_packets_;
   TCPLossAlgorithm loss_algorithm_;
   RttStats rtt_stats_;
@@ -179,5 +193,25 @@ TEST_F(TcpLossAlgorithmTest, DontEarlyRetransmitNeuteredPacket) {
   EXPECT_EQ(QuicTime::Zero(), loss_algorithm_.GetLossTimeout());
 }
 
+TEST_F(TcpLossAlgorithmTest, AlwaysLosePacketSent1RTTEarlier) {
+  // Transmit 1 packet and then wait an rtt plus 1ms.
+  SendDataPacket(1);
+  clock_.AdvanceTime(
+      rtt_stats_.smoothed_rtt().Add(QuicTime::Delta::FromMilliseconds(1)));
+
+  // Transmit 2 packets.
+  SendDataPacket(2);
+  SendDataPacket(3);
+
+  // Wait another RTT and ack 2.
+  clock_.AdvanceTime(rtt_stats_.smoothed_rtt());
+  unacked_packets_.IncreaseLargestObserved(2);
+  unacked_packets_.RemoveFromInFlight(2);
+  unacked_packets_.NackPacket(1, 1);
+  QuicPacketSequenceNumber lost[] = {1};
+  VerifyLosses(2, lost, arraysize(lost));
+}
+
+}  // namespace
 }  // namespace test
 }  // namespace net

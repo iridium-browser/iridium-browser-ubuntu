@@ -10,25 +10,26 @@
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "ui/gfx/insets.h"
-#include "ui/gfx/point_conversions.h"
-#include "ui/gfx/point_f.h"
-#include "ui/gfx/size_conversions.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/point_conversions.h"
+#include "ui/gfx/geometry/point_f.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/switches.h"
 
 namespace gfx {
 namespace {
 
 bool HasForceDeviceScaleFactorImpl() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kForceDeviceScaleFactor);
 }
 
 float GetForcedDeviceScaleFactorImpl() {
   double scale_in_double = 1.0;
   if (HasForceDeviceScaleFactorImpl()) {
-    std::string value = CommandLine::ForCurrentProcess()->
-        GetSwitchValueASCII(switches::kForceDeviceScaleFactor);
+    std::string value =
+        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+            switches::kForceDeviceScaleFactor);
     if (!base::StringToDouble(value, &scale_in_double))
       LOG(ERROR) << "Failed to parse the default device scale factor:" << value;
   }

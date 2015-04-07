@@ -49,6 +49,7 @@
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/platform/WebThread.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
@@ -66,7 +67,7 @@
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "third_party/WebKit/public/web/WebTestingSupport.h"
 #include "third_party/WebKit/public/web/WebView.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 using blink::Platform;
 using blink::WebArrayBufferView;
@@ -88,6 +89,7 @@ using blink::WebURLError;
 using blink::WebURLRequest;
 using blink::WebScreenOrientationType;
 using blink::WebTestingSupport;
+using blink::WebThread;
 using blink::WebVector;
 using blink::WebView;
 
@@ -95,11 +97,16 @@ namespace content {
 
 namespace {
 
-void InvokeTaskHelper(void* context) {
-  WebTask* task = reinterpret_cast<WebTask*>(context);
-  task->run();
-  delete task;
-}
+class InvokeTaskHelper : public WebThread::Task {
+ public:
+  InvokeTaskHelper(scoped_ptr<WebTask> task) : task_(task.Pass()) {}
+
+  // WebThread::Task implementation:
+  void run() override { task_->run(); }
+
+ private:
+  scoped_ptr<WebTask> task_;
+};
 
 class SyncNavigationStateVisitor : public RenderViewVisitor {
  public:
@@ -246,14 +253,13 @@ void WebKitTestRunner::PrintMessage(const std::string& message) {
 }
 
 void WebKitTestRunner::PostTask(WebTask* task) {
-  Platform::current()->callOnMainThread(InvokeTaskHelper, task);
+  Platform::current()->currentThread()->postTask(
+      new InvokeTaskHelper(make_scoped_ptr(task)));
 }
 
 void WebKitTestRunner::PostDelayedTask(WebTask* task, long long ms) {
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&WebTask::run, base::Owned(task)),
-      base::TimeDelta::FromMilliseconds(ms));
+  Platform::current()->currentThread()->postDelayedTask(
+      new InvokeTaskHelper(make_scoped_ptr(task)), ms);
 }
 
 WebString WebKitTestRunner::RegisterIsolatedFileSystem(
@@ -412,16 +418,6 @@ void WebKitTestRunner::SetDatabaseQuota(int quota) {
   Send(new LayoutTestHostMsg_SetDatabaseQuota(routing_id(), quota));
 }
 
-blink::WebNotificationPresenter::Permission
-WebKitTestRunner::CheckWebNotificationPermission(const GURL& origin) {
-  int permission = blink::WebNotificationPresenter::PermissionNotAllowed;
-  Send(new LayoutTestHostMsg_CheckWebNotificationPermission(
-          routing_id(),
-          origin,
-          &permission));
-  return static_cast<blink::WebNotificationPresenter::Permission>(permission);
-}
-
 void WebKitTestRunner::GrantWebNotificationPermission(const GURL& origin,
                                                       bool permission_granted) {
   Send(new LayoutTestHostMsg_GrantWebNotificationPermission(
@@ -436,6 +432,16 @@ void WebKitTestRunner::SimulateWebNotificationClick(const std::string& title) {
   Send(new LayoutTestHostMsg_SimulateWebNotificationClick(routing_id(), title));
 }
 
+void WebKitTestRunner::SetPushMessagingPermission(const GURL& origin,
+                                                  bool allowed) {
+  Send(new LayoutTestHostMsg_SetPushMessagingPermission(routing_id(), origin,
+                                                        allowed));
+}
+
+void WebKitTestRunner::ClearPushMessagingPermissions() {
+  Send(new LayoutTestHostMsg_ClearPushMessagingPermissions(routing_id()));
+}
+
 void WebKitTestRunner::SetDeviceScaleFactor(float factor) {
   content::SetDeviceScaleFactor(render_view(), factor);
 }
@@ -446,6 +452,19 @@ void WebKitTestRunner::SetDeviceColorProfile(const std::string& name) {
 
 void WebKitTestRunner::SetBluetoothMockDataSet(const std::string& name) {
   content::SetBluetoothMockDataSetForTesting(name);
+}
+
+void WebKitTestRunner::SetGeofencingMockProvider(bool service_available) {
+  content::SetGeofencingMockProvider(service_available);
+}
+
+void WebKitTestRunner::ClearGeofencingMockProvider() {
+  content::ClearGeofencingMockProvider();
+}
+
+void WebKitTestRunner::SetGeofencingMockPosition(double latitude,
+                                                 double longitude) {
+  content::SetGeofencingMockPosition(latitude, longitude);
 }
 
 void WebKitTestRunner::SetFocus(WebTestProxyBase* proxy, bool focus) {

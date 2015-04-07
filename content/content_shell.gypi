@@ -112,6 +112,8 @@
         'shell/browser/layout_test/layout_test_message_filter.h',
         'shell/browser/layout_test/layout_test_notification_manager.cc',
         'shell/browser/layout_test/layout_test_notification_manager.h',
+        'shell/browser/layout_test/layout_test_push_messaging_service.cc',
+        'shell/browser/layout_test/layout_test_push_messaging_service.h',
         'shell/browser/layout_test/layout_test_resource_dispatcher_host_delegate.cc',
         'shell/browser/layout_test/layout_test_resource_dispatcher_host_delegate.h',
         'shell/browser/layout_test/layout_test_url_request_context_getter.cc',
@@ -235,8 +237,6 @@
         'shell/renderer/test_runner/mock_web_media_stream_center.h',
         'shell/renderer/test_runner/mock_web_midi_accessor.cc',
         'shell/renderer/test_runner/mock_web_midi_accessor.h',
-        'shell/renderer/test_runner/mock_web_push_client.cc',
-        'shell/renderer/test_runner/mock_web_push_client.h',
         'shell/renderer/test_runner/mock_web_speech_recognizer.cc',
         'shell/renderer/test_runner/mock_web_speech_recognizer.h',
         'shell/renderer/test_runner/mock_web_theme_engine.cc',
@@ -249,8 +249,6 @@
         'shell/renderer/test_runner/mock_webrtc_dtmf_sender_handler.h',
         'shell/renderer/test_runner/mock_webrtc_peer_connection_handler.cc',
         'shell/renderer/test_runner/mock_webrtc_peer_connection_handler.h',
-        'shell/renderer/test_runner/notification_presenter.cc',
-        'shell/renderer/test_runner/notification_presenter.h',
         'shell/renderer/test_runner/spell_check_client.cc',
         'shell/renderer/test_runner/spell_check_client.h',
         'shell/renderer/test_runner/test_common.cc',
@@ -512,7 +510,7 @@
             ],
             'conditions': [
               ['OS!="android"', {
-                'pak_inputs': ['<(SHARED_INTERMEDIATE_DIR)/webkit/devtools_resources.pak',],
+                'pak_inputs': ['<(SHARED_INTERMEDIATE_DIR)/blink/devtools_resources.pak',],
                 'pak_output': '<(PRODUCT_DIR)/content_shell.pak',
               }, {
                 'pak_output': '<(PRODUCT_DIR)/content_shell/assets/content_shell.pak',
@@ -894,6 +892,12 @@
                 '<(PRODUCT_DIR)/icudtl.dat',
               ],
             }],
+            ['v8_use_external_startup_data==1', {
+              'mac_bundle_resources': [
+                '<(PRODUCT_DIR)/natives_blob.bin',
+                '<(PRODUCT_DIR)/snapshot_blob.bin',
+              ],
+            }],
           ],
         },  # target content_shell_framework
         {
@@ -1046,6 +1050,17 @@
           'includes': [ '../build/apk_fake_jar.gypi' ],
         },
         {
+          # GN version: //content/shell/android:content_shell_manifest
+          'target_name': 'content_shell_manifest',
+          'type': 'none',
+          'variables': {
+            'jinja_inputs': ['shell/android/shell_apk/AndroidManifest.xml.jinja2'],
+            'jinja_output': '<(SHARED_INTERMEDIATE_DIR)/content_shell_manifest/AndroidManifest.xml',
+          },
+          'includes': [ '../build/android/jinja_template.gypi' ],
+        },
+        {
+          # GN version: //content/shell/android:content_shell_apk
           'target_name': 'content_shell_apk',
           'type': 'none',
           'dependencies': [
@@ -1065,6 +1080,7 @@
           'variables': {
             'apk_name': 'ContentShell',
             'manifest_package_name': 'org.chromium.content_shell_apk',
+            'android_manifest_path': '<(SHARED_INTERMEDIATE_DIR)/content_shell_manifest/AndroidManifest.xml',
             'java_in_dir': 'shell/android/shell_apk',
             'resource_dir': 'shell/android/shell_apk/res',
             'native_lib_target': 'libcontent_shell_content_view',
@@ -1141,7 +1157,7 @@
               ],
               'action': [
                 'python',
-                '<(DEPTH)/chrome/tools/build/win/syzygy_instrument.py',
+                '<(DEPTH)/chrome/tools/build/win/syzygy/instrument.py',
                 '--mode', 'asan',
                 '--input_executable', '<(PRODUCT_DIR)/content_shell.exe',
                 '--input_symbol', '<(PRODUCT_DIR)/content_shell.exe.pdb',

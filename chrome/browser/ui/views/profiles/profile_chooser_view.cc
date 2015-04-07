@@ -15,7 +15,6 @@
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
-#include "chrome/browser/signin/local_auth.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -881,7 +880,7 @@ bool ProfileChooserView::HandleKeyEvent(views::Textfield* sender,
         active_item.profile_path);
     DCHECK(profile);
 
-    if (profile->IsSupervised())
+    if (profile->IsLegacySupervised())
       return true;
 
     profiles::UpdateProfileName(profile, new_profile_name);
@@ -1126,8 +1125,10 @@ views::View* ProfileChooserView::CreateCurrentProfileView(
   ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
   if (browser_->profile()->IsSupervised()) {
     views::ImageView* supervised_icon = new views::ImageView();
-    supervised_icon->SetImage(
-        rb->GetImageSkiaNamed(IDR_ICON_PROFILES_MENU_SUPERVISED));
+    int image_id = browser_->profile()->IsChild()
+        ? IDR_ICON_PROFILES_MENU_CHILD
+        : IDR_ICON_PROFILES_MENU_SUPERVISED;
+    supervised_icon->SetImage(rb->GetImageSkiaNamed(image_id));
     gfx::Size preferred_size = supervised_icon->GetPreferredSize();
     gfx::Rect parent_bounds = current_profile_photo_->bounds();
     supervised_icon->SetBounds(
@@ -1142,7 +1143,8 @@ views::View* ProfileChooserView::CreateCurrentProfileView(
   layout->AddView(profile_icon_container);
 
   // Profile name, centered.
-  bool editing_allowed = !is_guest && !browser_->profile()->IsSupervised();
+  bool editing_allowed = !is_guest &&
+                         !browser_->profile()->IsLegacySupervised();
   current_profile_name_ = new EditableProfileName(
       this,
       profiles::GetAvatarNameForProfile(browser_->profile()->GetPath()),
@@ -1427,15 +1429,16 @@ views::View* ProfileChooserView::CreateGaiaSigninView() {
 
   switch (view_mode_) {
     case profiles::BUBBLE_VIEW_MODE_GAIA_SIGNIN:
-      url = signin::GetPromoURL(signin::SOURCE_AVATAR_BUBBLE_SIGN_IN,
+      url = signin::GetPromoURL(signin_metrics::SOURCE_AVATAR_BUBBLE_SIGN_IN,
                                 false /* auto_close */,
                                 true /* is_constrained */);
       message_id = IDS_PROFILES_GAIA_SIGNIN_TITLE;
       break;
     case profiles::BUBBLE_VIEW_MODE_GAIA_ADD_ACCOUNT:
-      url = signin::GetPromoURL(signin::SOURCE_AVATAR_BUBBLE_ADD_ACCOUNT,
-                                false /* auto_close */,
-                                true /* is_constrained */);
+      url = signin::GetPromoURL(
+          signin_metrics::SOURCE_AVATAR_BUBBLE_ADD_ACCOUNT,
+          false /* auto_close */,
+          true /* is_constrained */);
       message_id = IDS_PROFILES_GAIA_ADD_ACCOUNT_TITLE;
       break;
     case profiles::BUBBLE_VIEW_MODE_GAIA_REAUTH: {

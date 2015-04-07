@@ -13,6 +13,12 @@ import("//media/media_options.gni")
 # NOT for exporting.
 config("media_config") {
   defines = [ "MEDIA_IMPLEMENTATION" ]
+  if (!media_use_libvpx) {
+    defines += [ "MEDIA_DISABLE_LIBVPX" ]
+  }
+  if (!media_use_ffmpeg) {
+    defines += [ "MEDIA_DISABLE_FFMPEG" ]
+  }
   if (cpu_arch == "arm" && arm_use_neon) {
     defines += [ "USE_NEON" ]
   }
@@ -32,6 +38,9 @@ config("media_dependent_config") {
   if (!media_use_libvpx) {
     defines += [ "MEDIA_DISABLE_LIBVPX" ]
   }
+  if (!media_use_ffmpeg) {
+    defines += [ "MEDIA_DISABLE_FFMPEG" ]
+  }
   if (is_win) {
     ldflags = [
       "/DELAYLOAD:mf.dll",
@@ -49,16 +58,21 @@ if (use_ozone) {
     script = "../ui/ozone/generate_constructor_list.py"
 
     platform_list_txt_file = "$target_gen_dir/../ui/ozone/platform_list.txt"
-    constructor_list_cc_file = "$target_gen_dir/../media/ozone/constructor_list.cc"
+    constructor_list_cc_file =
+        "$target_gen_dir/../media/ozone/constructor_list.cc"
 
-    sources = [ platform_list_txt_file ]
-    outputs = [ constructor_list_cc_file ]
+    sources = [
+      platform_list_txt_file,
+    ]
+    outputs = [
+      constructor_list_cc_file,
+    ]
     args = [
       "--platform_list=" + rebase_path(platform_list_txt_file, root_build_dir),
       "--output_cc=" + rebase_path(constructor_list_cc_file, root_build_dir),
       "--namespace=media",
       "--typename=MediaOzonePlatform",
-      "--include=\"media/ozone/media_ozone_platform.h\""
+      "--include=\"media/ozone/media_ozone_platform.h\"",
     ]
   }
 }
@@ -67,12 +81,16 @@ component("media") {
   sources = [
     "cdm/aes_decryptor.cc",
     "cdm/aes_decryptor.h",
+    "cdm/default_cdm_factory.cc",
+    "cdm/default_cdm_factory.h",
     "cdm/json_web_key.cc",
     "cdm/json_web_key.h",
     "cdm/key_system_names.cc",
     "cdm/key_system_names.h",
     "cdm/player_tracker_impl.cc",
     "cdm/player_tracker_impl.h",
+    "cdm/proxy_decryptor.cc",
+    "cdm/proxy_decyrptor.h",
     "ffmpeg/ffmpeg_deleters.h",
     "filters/audio_clock.cc",
     "filters/audio_clock.h",
@@ -82,6 +100,7 @@ component("media") {
     "filters/audio_renderer_impl.h",
     "filters/chunk_demuxer.cc",
     "filters/chunk_demuxer.h",
+    "filters/context_3d.h",
     "filters/decoder_selector.cc",
     "filters/decoder_selector.h",
     "filters/decoder_stream.cc",
@@ -94,6 +113,8 @@ component("media") {
     "filters/decrypting_demuxer_stream.h",
     "filters/decrypting_video_decoder.cc",
     "filters/decrypting_video_decoder.h",
+    "filters/default_renderer_factory.cc",
+    "filters/default_renderer_factory.h",
     "filters/file_data_source.cc",
     "filters/file_data_source.h",
     "filters/frame_processor.cc",
@@ -125,6 +146,10 @@ component("media") {
     "filters/video_frame_scheduler_proxy.h",
     "filters/video_renderer_impl.cc",
     "filters/video_renderer_impl.h",
+    "filters/vp8_bool_decoder.cc",
+    "filters/vp8_bool_decoder.h",
+    "filters/vp8_parser.cc",
+    "filters/vp8_parser.h",
     "filters/webvtt_util.h",
     "filters/wsola_internals.cc",
     "filters/wsola_internals.h",
@@ -200,6 +225,8 @@ component("media") {
     "video/capture/win/video_capture_device_mf_win.h",
     "video/capture/win/video_capture_device_win.cc",
     "video/capture/win/video_capture_device_win.h",
+    "video/h264_poc.cc",
+    "video/h264_poc.h",
     "video/picture.cc",
     "video/picture.h",
     "video/video_decode_accelerator.cc",
@@ -234,7 +261,7 @@ component("media") {
     "formats/webm/webm_webvtt_parser.h",
   ]
 
-  configs += [ ":media_config", ]
+  configs += [ ":media_config" ]
   all_dependent_configs = [ ":media_dependent_config" ]
 
   cflags = []
@@ -279,11 +306,11 @@ component("media") {
   }
 
   if (media_use_libvpx) {
-     sources += [
-       "filters/vpx_video_decoder.cc",
-       "filters/vpx_video_decoder.h",
-     ]
-     deps += [ "//third_party/libvpx" ]
+    sources += [
+      "filters/vpx_video_decoder.cc",
+      "filters/vpx_video_decoder.h",
+    ]
+    deps += [ "//third_party/libvpx" ]
   }
 
   if (!is_android) {
@@ -336,9 +363,9 @@ component("media") {
     include_dirs += [ target_gen_dir ]
 
     sources += [
-      "ozone/media_ozone_platform.cc",
-      "ozone/media_ozone_platform.h",
-    ] + get_target_outputs(":generate_ozone_constructor_list")
+                 "ozone/media_ozone_platform.cc",
+                 "ozone/media_ozone_platform.h",
+               ] + get_target_outputs(":generate_ozone_constructor_list")
 
     deps += [
       ":generate_ozone_constructor_list",
@@ -360,9 +387,7 @@ component("media") {
   }
 
   if (is_ios) {
-    deps += [
-      "//media/base/mac",
-    ]
+    deps += [ "//media/base/mac" ]
   }
 
   if (is_win) {
@@ -372,10 +397,8 @@ component("media") {
       "mfreadwrite.lib",
       "mfuuid.lib",
     ]
-    cflags += [
-      "/wd4267"  # TODO(wolenetz): Fix size_t to int trunctaion in win64. See
-                 # http://crbug.com/171009
-    ]
+    cflags += [ "/wd4267" ]  # TODO(wolenetz): Fix size_t to int trunctaion in win64. See
+                             # http://crbug.com/171009
   }
 
   if (proprietary_codecs) {
@@ -508,6 +531,8 @@ test("media_unittests") {
     "filters/video_frame_scheduler_unittest.cc",
     "filters/video_frame_stream_unittest.cc",
     "filters/video_renderer_impl_unittest.cc",
+    "filters/vp8_bool_decoder_unittest.cc",
+    "filters/vp8_parser_unittest.cc",
     "midi/midi_manager_unittest.cc",
     "midi/midi_manager_usb_unittest.cc",
     "midi/midi_message_queue_unittest.cc",
@@ -517,6 +542,7 @@ test("media_unittests") {
     "midi/usb_midi_output_stream_unittest.cc",
     "video/capture/fake_video_capture_device_unittest.cc",
     "video/capture/video_capture_device_unittest.cc",
+    "video/h264_poc_unittest.cc",
     "formats/common/offset_byte_queue_unittest.cc",
     "formats/webm/cluster_builder.cc",
     "formats/webm/cluster_builder.h",
@@ -538,6 +564,7 @@ test("media_unittests") {
     "//media/audio:test_support",
     "//media/base:unittests",
     "//media/base:test_support",
+    "//media/test:pipeline_integration_tests",
     "//skia",  # Direct dependency required to inherit config.
     "//testing/gmock",
     "//testing/gtest",
@@ -564,12 +591,10 @@ test("media_unittests") {
       "filters/ffmpeg_glue_unittest.cc",
       "filters/ffmpeg_video_decoder_unittest.cc",
       "filters/in_memory_url_protocol_unittest.cc",
-      "filters/pipeline_integration_test.cc",
-      "filters/pipeline_integration_test_base.cc",
     ]
   }
 
-  if (cpu_arch != "arm" && is_chromeos && use_x11) {
+  if (cpu_arch != "arm" && is_chromeos) {
     sources += [ "filters/h264_bitstream_buffer_unittest.cc" ]
   }
 
@@ -601,40 +626,32 @@ test("media_unittests") {
   }
 
   if (is_win && cpu_arch == "x64") {
-    cflags += [
-      "/wd4267"  # TODO(wolenetz): Fix size_t to int trunctaion in win64. See
-                 # http://crbug.com/171009
-    ]
+    cflags += [ "/wd4267" ]  # TODO(wolenetz): Fix size_t to int trunctaion in win64. See
+                             # http://crbug.com/171009
+  }
+
+  if (is_mac || is_ios) {
+    deps += [ "//media/base/mac" ]
   }
 
   if (is_mac) {
-    sources += [
-      "video/capture/mac/video_capture_device_factory_mac_unittest.mm"
-    ]
+    sources +=
+        [ "video/capture/mac/video_capture_device_factory_mac_unittest.mm" ]
   }
 
-#      include_dirs += [
-#        # Needed by media_drm_bridge.cc.
-#        target_gen_dir,
-#      ],
+  #      include_dirs += [
+  #        # Needed by media_drm_bridge.cc.
+  #        target_gen_dir,
+  #      ],
 
   configs += [ ":media_config" ]
 
   if (media_use_ffmpeg) {
-    deps += [
-      "//third_party/ffmpeg",  # Direct dependency required to inherit config.
-    ]
+    deps += [ "//third_party/ffmpeg" ]  # Direct dependency required to inherit config.
   }
 }
 
 test("media_perftests") {
-  sources = []
-  if (media_use_ffmpeg) {
-    sources += [
-      "filters/pipeline_integration_perftest.cc",
-      "filters/pipeline_integration_test_base.cc",
-    ]
-  }
   configs += [ ":media_config" ]
   deps = [
     ":media",
@@ -644,6 +661,7 @@ test("media_perftests") {
     "//media/audio:test_support",
     "//media/base:perftests",
     "//media/base:test_support",
+    "//media/test:pipeline_integration_perftests",
     "//testing/gmock",
     "//testing/gtest",
     "//testing/perf",
@@ -654,9 +672,7 @@ test("media_perftests") {
     deps += [ "//ui/gl" ]
   }
   if (media_use_ffmpeg) {
-    deps += [
-      "//third_party/ffmpeg",  # Direct dependency required to inherit config.
-    ]
+    deps += [ "//third_party/ffmpeg" ]  # Direct dependency required to inherit config.
   }
 }
 
@@ -698,54 +714,33 @@ component("shared_memory_support") {
   ]
   configs += [ ":media_config" ]
   defines = [ "MEDIA_IMPLEMENTATION" ]
-  deps = [ "//base" ]
+  deps = [
+    "//base",
+  ]
 }
 
 if (media_use_ffmpeg) {
-  test("ffmpeg_unittests") {
-    sources = [ "ffmpeg/ffmpeg_unittest.cc" ]
-
-    deps = [
-       ":media",
-       ":test_support",
-       "//base",
-       "//base:i18n",
-       "//base/test:test_support",
-       "//testing/gtest",
-       "//third_party/ffmpeg",
-       "//ui/gfx:test_support",
-    ]
-  }
-
   test("ffmpeg_regression_tests") {
     sources = [
       "base/run_all_unittests.cc",
       "ffmpeg/ffmpeg_regression_tests.cc",
-      "filters/pipeline_integration_test_base.cc",
     ]
-    configs += [ ":media_config" ]
+
+    configs += [ "//media:media_config" ]
+
     deps = [
-      ":media",
-      ":test_support",
       "//base/test:test_support",
+      "//media",
+      "//media:test_support",
       "//media/audio:test_support",
       "//media/base:test_support",
+      "//media/test:pipeline_integration_tests",
       "//testing/gmock",
       "//testing/gtest",
       "//third_party/ffmpeg",
       "//ui/gfx/geometry",
       "//ui/gfx:test_support",
     ]
-  # TODO(ajwong): This was in the original gyp, but it seems silly.
-  #        ['os_posix==1 and OS!="mac"', {
-  #          'conditions': [
-  #            ['use_allocator!="none"', {
-  #              'dependencies': [
-  #                '../base/allocator/allocator.gyp:allocator',
-  #              ],
-  #            }],
-  #          ],
-  #        }],
   }
 }
 
@@ -764,8 +759,9 @@ if (use_x11) {
       ":media_config",
       "//build/config/linux:x11",
       "//build/config/linux:xext",
-# TODO(ajwong): Why does xext get a separate thing in //build/config/linux:BUILD.gn
-    #  "//build/config/linux:xrender",
+
+      # TODO(ajwong): Why does xext get a separate thing in //build/config/linux:BUILD.gn
+      #  "//build/config/linux:xrender",
     ]
     deps = [
       ":media",

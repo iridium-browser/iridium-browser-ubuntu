@@ -468,7 +468,8 @@ Value RunImport(Scope* scope,
 
   const SourceDir& input_dir = scope->GetSourceDir();
   SourceFile import_file =
-      input_dir.ResolveRelativeFile(args[0].string_value());
+      input_dir.ResolveRelativeFile(args[0].string_value(),
+          scope->settings()->build_settings()->root_path_utf8());
   scope->settings()->import_manager().DoImport(import_file, function,
                                                scope, err);
   return Value();
@@ -599,12 +600,12 @@ Value RunPrint(Scope* scope,
 // -----------------------------------------------------------------------------
 
 FunctionInfo::FunctionInfo()
-    : self_evaluating_args_runner(NULL),
-      generic_block_runner(NULL),
-      executed_block_runner(NULL),
-      no_block_runner(NULL),
-      help_short(NULL),
-      help(NULL),
+    : self_evaluating_args_runner(nullptr),
+      generic_block_runner(nullptr),
+      executed_block_runner(nullptr),
+      no_block_runner(nullptr),
+      help_short(nullptr),
+      help(nullptr),
       is_target(false) {
 }
 
@@ -613,9 +614,9 @@ FunctionInfo::FunctionInfo(SelfEvaluatingArgsFunction seaf,
                            const char* in_help,
                            bool in_is_target)
     : self_evaluating_args_runner(seaf),
-      generic_block_runner(NULL),
-      executed_block_runner(NULL),
-      no_block_runner(NULL),
+      generic_block_runner(nullptr),
+      executed_block_runner(nullptr),
+      no_block_runner(nullptr),
       help_short(in_help_short),
       help(in_help),
       is_target(in_is_target) {
@@ -625,10 +626,10 @@ FunctionInfo::FunctionInfo(GenericBlockFunction gbf,
                            const char* in_help_short,
                            const char* in_help,
                            bool in_is_target)
-    : self_evaluating_args_runner(NULL),
+    : self_evaluating_args_runner(nullptr),
       generic_block_runner(gbf),
-      executed_block_runner(NULL),
-      no_block_runner(NULL),
+      executed_block_runner(nullptr),
+      no_block_runner(nullptr),
       help_short(in_help_short),
       help(in_help),
       is_target(in_is_target) {
@@ -638,10 +639,10 @@ FunctionInfo::FunctionInfo(ExecutedBlockFunction ebf,
                            const char* in_help_short,
                            const char* in_help,
                            bool in_is_target)
-    : self_evaluating_args_runner(NULL),
-      generic_block_runner(NULL),
+    : self_evaluating_args_runner(nullptr),
+      generic_block_runner(nullptr),
       executed_block_runner(ebf),
-      no_block_runner(NULL),
+      no_block_runner(nullptr),
       help_short(in_help_short),
       help(in_help),
       is_target(in_is_target) {
@@ -651,9 +652,9 @@ FunctionInfo::FunctionInfo(NoBlockFunction nbf,
                            const char* in_help_short,
                            const char* in_help,
                            bool in_is_target)
-    : self_evaluating_args_runner(NULL),
-      generic_block_runner(NULL),
-      executed_block_runner(NULL),
+    : self_evaluating_args_runner(nullptr),
+      generic_block_runner(nullptr),
+      executed_block_runner(nullptr),
       no_block_runner(nbf),
       help_short(in_help_short),
       help(in_help),

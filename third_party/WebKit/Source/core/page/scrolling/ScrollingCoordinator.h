@@ -82,9 +82,8 @@ public:
 
     enum MainThreadScrollingReasonFlags {
         HasSlowRepaintObjects = 1 << 0,
-        HasViewportConstrainedObjectsWithoutSupportingFixedLayers = 1 << 1,
-        HasNonLayerViewportConstrainedObjects = 1 << 2,
-        ThreadedScrollingDisabled = 1 << 3
+        HasNonLayerViewportConstrainedObjects = 1 << 1,
+        ThreadedScrollingDisabled = 1 << 2
     };
 
     MainThreadScrollingReasons mainThreadScrollingReasons() const;
@@ -117,6 +116,7 @@ public:
 protected:
     explicit ScrollingCoordinator(Page*);
 
+    bool isForRootLayer(ScrollableArea*) const;
     bool isForMainFrame(ScrollableArea*) const;
     bool isForViewport(ScrollableArea*) const;
 
@@ -150,7 +150,6 @@ private:
     HashSet<const RenderLayer*> m_layersWithTouchRects;
     bool m_wasFrameScrollable;
 
-    // This is retained for testing.
     MainThreadScrollingReasons m_lastMainThreadScrollingReasons;
 };
 

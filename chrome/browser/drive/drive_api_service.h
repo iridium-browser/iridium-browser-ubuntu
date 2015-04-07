@@ -10,6 +10,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
+#include "base/threading/thread_checker.h"
 #include "chrome/browser/drive/drive_service_interface.h"
 #include "google_apis/drive/auth_service_interface.h"
 #include "google_apis/drive/auth_service_observer.h"
@@ -149,13 +150,13 @@ class DriveAPIService : public DriveServiceInterface,
       int64 content_length,
       const std::string& parent_resource_id,
       const std::string& title,
-      const InitiateUploadNewFileOptions& options,
+      const UploadNewFileOptions& options,
       const google_apis::InitiateUploadCallback& callback) override;
   google_apis::CancelCallback InitiateUploadExistingFile(
       const std::string& content_type,
       int64 content_length,
       const std::string& resource_id,
-      const InitiateUploadExistingFileOptions& options,
+      const UploadExistingFileOptions& options,
       const google_apis::InitiateUploadCallback& callback) override;
   google_apis::CancelCallback ResumeUpload(
       const GURL& upload_url,
@@ -170,6 +171,23 @@ class DriveAPIService : public DriveServiceInterface,
       const GURL& upload_url,
       int64 content_length,
       const google_apis::drive::UploadRangeCallback& callback) override;
+  google_apis::CancelCallback MultipartUploadNewFile(
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& parent_resource_id,
+      const std::string& title,
+      const base::FilePath& local_file_path,
+      const UploadNewFileOptions& options,
+      const google_apis::FileResourceCallback& callback,
+      const google_apis::ProgressCallback& progress_callback) override;
+  google_apis::CancelCallback MultipartUploadExistingFile(
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& resource_id,
+      const base::FilePath& local_file_path,
+      const UploadExistingFileOptions& options,
+      const google_apis::FileResourceCallback& callback,
+      const google_apis::ProgressCallback& progress_callback) override;
   google_apis::CancelCallback AuthorizeApp(
       const std::string& resource_id,
       const std::string& app_id,
@@ -186,6 +204,9 @@ class DriveAPIService : public DriveServiceInterface,
  private:
   // AuthServiceObserver override.
   void OnOAuth2RefreshTokenChanged() override;
+
+  // The class is expected to run on UI thread.
+  base::ThreadChecker thread_checker_;
 
   OAuth2TokenService* oauth2_token_service_;
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;

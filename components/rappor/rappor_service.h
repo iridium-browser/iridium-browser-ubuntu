@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer/timer.h"
@@ -24,7 +25,7 @@ class URLRequestContextGetter;
 
 namespace rappor {
 
-class LogUploader;
+class LogUploaderInterface;
 class RapporMetric;
 class RapporReports;
 
@@ -43,16 +44,24 @@ class RapporService {
   // Constructs a RapporService.
   // Calling code is responsible for ensuring that the lifetime of
   // |pref_service| is longer than the lifetime of RapporService.
-  explicit RapporService(PrefService* pref_service);
+  // |is_incognito_callback| will be called to test if incognito mode is active.
+  RapporService(PrefService* pref_service,
+                const base::Callback<bool(void)> is_incognito_callback);
   virtual ~RapporService();
 
   // Add an observer for collecting daily metrics.
   void AddDailyObserver(scoped_ptr<metrics::DailyEvent::Observer> observer);
 
-  // Starts the periodic generation of reports and upload attempts.
-  // |metrics enabled| should be true if UMA users have opted in.
-  void Start(net::URLRequestContextGetter* context,
-             bool metrics_enabled);
+  // Initializes the rappor service, including loading the cohort and secret
+  // preferences from disk.
+  void Initialize(net::URLRequestContextGetter* context);
+
+  // Updates the settings for metric recording and uploading.
+  // The RapporService must be initialized before this method is called.
+  // If |recording_level| > REPORTING_DISABLED, periodic reports will be
+  // generated and queued for upload.
+  // If |may_upload| is true, reports will be uploaded from the queue.
+  void Update(RecordingLevel recording_level, bool may_upload);
 
   // Records a sample of the rappor metric specified by |metric_name|.
   // Creates and initializes the metric, if it doesn't yet exist.
@@ -66,9 +75,12 @@ class RapporService {
 
  protected:
   // Initializes the state of the RapporService.
-  void Initialize(int32_t cohort,
-                  const std::string& secret,
-                  const ReportingLevel& reporting_level);
+  void InitializeInternal(scoped_ptr<LogUploaderInterface> uploader,
+                          int32_t cohort,
+                          const std::string& secret);
+
+  // Sets the recording level.
+  void SetRecordingLevel(RecordingLevel parameters);
 
   // Retrieves the cohort number this client was assigned to, generating it if
   // doesn't already exist. The cohort should be persistent.
@@ -79,11 +91,18 @@ class RapporService {
   // from the client do not get exposed over time.
   std::string LoadSecret();
 
+  // Cancels the next call to OnLogInterval.
+  virtual void CancelNextLogRotation();
+
+  // Schedules the next call to OnLogInterval.
+  virtual void ScheduleNextLogRotation(base::TimeDelta interval);
+
   // Logs all of the collected metrics to the reports proto message and clears
   // the internal map. Exposed for tests. Returns true if any metrics were
   // recorded.
   bool ExportMetrics(RapporReports* reports);
 
+ private:
   // Records a sample of the rappor metric specified by |parameters|.
   // Creates and initializes the metric, if it doesn't yet exist.
   // Exposed for tests.
@@ -91,8 +110,7 @@ class RapporService {
                             const RapporParameters& parameters,
                             const std::string& sample);
 
- private:
-  // Check if the service has been started successfully.
+  // Checks if the service has been started successfully.
   bool IsInitialized() const;
 
   // Called whenever the logging interval elapses to generate a new log of
@@ -107,6 +125,9 @@ class RapporService {
   // A weak pointer to the PrefService used to read and write preferences.
   PrefService* pref_service_;
 
+  // A callback for testing if incognito mode is active;
+  const base::Callback<bool(void)> is_incognito_callback_;
+
   // Client-side secret used to generate fake bits.
   std::string secret_;
 
@@ -120,10 +141,10 @@ class RapporService {
   metrics::DailyEvent daily_event_;
 
   // A private LogUploader instance for sending reports to the server.
-  scoped_ptr<LogUploader> uploader_;
+  scoped_ptr<LogUploaderInterface> uploader_;
 
   // What reporting level of metrics are being reported.
-  ReportingLevel reporting_level_;
+  RecordingLevel recording_level_;
 
   // We keep all registered metrics in a map, from name to metric.
   // The map owns the metrics it contains.

@@ -56,21 +56,8 @@
 
 .indexed-db-data-view .data-view-toolbar {
     position: relative;
-    border-top: none;
-    height: 24px;
-    padding: 1px;
-}
-
-.indexed-db-data-view .data-grid-container {
-    top: 24px;
-}
-
-.indexed-db-data-view .data-view-toolbar .back-button img {
-    content: url(Images/back.png);
-}
-
-.indexed-db-data-view .data-view-toolbar .forward-button img {
-    content: url(Images/forward.png);
+    background-color: #eee;
+    border-bottom: 1px solid #ccc;
 }
 
 .indexed-db-data-view .data-view-toolbar .key-input {
@@ -80,8 +67,7 @@
 }
 
 .indexed-db-data-view .data-grid {
-    height: 100%;
-    border: 0;
+    flex: auto;
 }
 
 .indexed-db-data-view .data-grid .data-container tr:nth-child(even) {
@@ -98,6 +84,10 @@
 
 .indexed-db-data-view .data-grid .data-container tr:nth-last-child(1) td {
     border: 0;
+}
+
+.indexed-db-data-view .data-grid .data-container tr:nth-last-child(2) td {
+    border-bottom: 1px solid #aaa;
 }
 
 .indexed-db-data-view .section,

@@ -39,15 +39,16 @@ public class GCDNotificationHandler {
     private final ExecutorService mIOExecutor;
     private OAuthResult mOAuthResult;
 
-    public GCDNotificationHandler(DevToolsBridgeServer server, ApiaryClientFactory clientFactory) {
+    public GCDNotificationHandler(DevToolsBridgeServer server) {
         mServer = server;
-        mClientFactory = clientFactory;
+        mClientFactory = new ApiaryClientFactory();
         mCommandReceiver = new CommandReceiver(server);
         mIOExecutor = Executors.newSingleThreadExecutor();
     }
 
     public void dispose() {
         mIOExecutor.shutdown();
+        mClientFactory.close();
     }
 
     public boolean isNotification(Intent intent) {
@@ -63,6 +64,25 @@ public class GCDNotificationHandler {
             Log.e(TAG, "Invalid notification", e);
         }
         completionHandler.run();
+    }
+
+    public void updateCloudMessagesId(final String gcmChannelId, final Runnable completionHandler) {
+        final InstanceCredential credential = InstanceCredential.get(mServer.getPreferences());
+        if (credential == null) return;
+
+        mIOExecutor.submit(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    mClientFactory.newGCDClient(getAccessToken(credential))
+                            .patchInstanceGCMChannel(credential.id, gcmChannelId);
+                } catch (Exception e) {
+                    Log.e(TAG, "Failure when updating GCM channel id", e);
+                } finally {
+                    completionHandler.run();
+                }
+            }
+        });
     }
 
     private void handle(Notification notification, Runnable completionHandler) {
@@ -110,6 +130,16 @@ public class GCDNotificationHandler {
         }
     }
 
+    private String getAccessToken(InstanceCredential credential) throws IOException {
+        // Called on IO executor.
+        // TODO(serya): mOAuthResult should be persistent.
+        if (mOAuthResult == null) {
+            mOAuthResult = mClientFactory.newOAuthClient().authenticate(
+                    credential.secret);
+        }
+        return mOAuthResult.accessToken;
+    }
+
     private final class Responder implements Runnable {
         private final Command mCommand;
         private final InstanceCredential mCredential;
@@ -137,13 +167,8 @@ public class GCDNotificationHandler {
                 return;
             }
             try {
-                // TODO(serya): mOAuthResult should be persistent.
-                if (mOAuthResult == null) {
-                    mOAuthResult = mClientFactory.newOAuthClient().authenticate(
-                            mCredential.secret);
-                }
-                mClientFactory.newGCDClient(mOAuthResult.accessToken).patchCommand(mCommand);
-            } catch (IOException e) {
+                mClientFactory.newGCDClient(getAccessToken(mCredential)).patchCommand(mCommand);
+            } catch (Exception e) {
                 // TODO(serya): Handle authorization exception.
                 Log.e(TAG, "Failure when patching command", e);
             }

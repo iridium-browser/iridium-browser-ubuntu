@@ -84,7 +84,7 @@ class Settable {
     return set_ ? val_ : default_value;
   }
 
-  virtual void Set(T val) {
+  void Set(T val) {
     set_ = true;
     val_ = val;
   }
@@ -124,19 +124,6 @@ class Settable {
  private:
   bool set_;
   T val_;
-};
-
-class SettablePercent : public Settable<float> {
- public:
-  virtual void Set(float val) {
-    if (val < 0) {
-      val = 0;
-    }
-    if (val >  1.0) {
-      val = 1.0;
-    }
-    Settable<float>::Set(val);
-  }
 };
 
 template <class T>
@@ -327,7 +314,6 @@ struct VideoOptions {
     unsignalled_recv_stream_limit.SetFrom(change.unsignalled_recv_stream_limit);
     use_simulcast_adapter.SetFrom(change.use_simulcast_adapter);
     screencast_min_bitrate.SetFrom(change.screencast_min_bitrate);
-    use_payload_padding.SetFrom(change.use_payload_padding);
   }
 
   bool operator==(const VideoOptions& o) const {
@@ -355,8 +341,7 @@ struct VideoOptions {
            suspend_below_min_bitrate == o.suspend_below_min_bitrate &&
            unsignalled_recv_stream_limit == o.unsignalled_recv_stream_limit &&
            use_simulcast_adapter == o.use_simulcast_adapter &&
-           screencast_min_bitrate == o.screencast_min_bitrate &&
-           use_payload_padding == o.use_payload_padding;
+           screencast_min_bitrate == o.screencast_min_bitrate;
   }
 
   std::string ToString() const {
@@ -389,7 +374,6 @@ struct VideoOptions {
                          unsignalled_recv_stream_limit);
     ost << ToStringIfSet("use simulcast adapter", use_simulcast_adapter);
     ost << ToStringIfSet("screencast min bitrate", screencast_min_bitrate);
-    ost << ToStringIfSet("payload padding", use_payload_padding);
     ost << "}";
     return ost.str();
   }
@@ -431,11 +415,11 @@ struct VideoOptions {
   // Use conference mode?
   Settable<bool> conference_mode;
   // Threshhold for process cpu adaptation.  (Process limit)
-  SettablePercent process_adaptation_threshhold;
+  Settable<float> process_adaptation_threshhold;
   // Low threshhold for cpu adaptation.  (Adapt up)
-  SettablePercent system_low_adaptation_threshhold;
+  Settable<float> system_low_adaptation_threshhold;
   // High threshhold for cpu adaptation.  (Adapt down)
-  SettablePercent system_high_adaptation_threshhold;
+  Settable<float> system_high_adaptation_threshhold;
   // Specify buffered mode latency in milliseconds.
   Settable<int> buffered_mode_latency;
   // Set DSCP value for packet sent from video channel.
@@ -449,8 +433,6 @@ struct VideoOptions {
   Settable<bool> use_simulcast_adapter;
   // Force screencast to use a minimum bitrate
   Settable<int> screencast_min_bitrate;
-  // Enable payload padding.
-  Settable<bool> use_payload_padding;
 };
 
 // A class for playing out soundclips.

@@ -7,6 +7,8 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/mac/scoped_nsobject.h"
+
 // Sent when a user-initiated drag to resize the container is initiated.
 extern NSString* const kBrowserActionGrippyDragStartedNotification;
 
@@ -16,11 +18,17 @@ extern NSString* const kBrowserActionGrippyDraggingNotification;
 // Sent when a user-initiated drag to resize the container has finished.
 extern NSString* const kBrowserActionGrippyDragFinishedNotification;
 
-// Sent before the dragging will resize the container.
-extern NSString* const kBrowserActionGrippyWillDragNotification;
+// Sent when the Browser Actions container view is about to animate.
+extern NSString* const kBrowserActionsContainerWillAnimate;
 
 // Key which is used to notify the translation with delta.
 extern NSString* const kTranslationWithDelta;
+
+class BrowserActionsContainerViewSizeDelegate {
+ public:
+  virtual CGFloat GetMaxAllowedWidth() = 0;
+  virtual ~BrowserActionsContainerViewSizeDelegate() {}
+};
 
 // The view that encompasses the Browser Action buttons in the toolbar and
 // provides mechanisms for resizing.
@@ -29,10 +37,6 @@ extern NSString* const kTranslationWithDelta;
   // The frame encompasing the grippy used for resizing the container.
   NSRect grippyRect_;
 
-  // The end frame of the animation currently running for this container or
-  // NSZeroRect if none is in progress.
-  NSRect animationEndFrame_;
-
   // Used to cache the original position within the container that initiated the
   // drag.
   NSPoint initialDragPoint_;
@@ -40,8 +44,9 @@ extern NSString* const kTranslationWithDelta;
   // Used to cache the previous x-pos of the frame rect for resizing purposes.
   CGFloat lastXPos_;
 
-  // The maximum width of the container.
-  CGFloat maxWidth_;
+  // The maximum width the container could want; i.e., the width required to
+  // display all the icons.
+  CGFloat maxDesiredWidth_;
 
   // Whether the container is currently being resized by the user.
   BOOL userIsResizing_;
@@ -65,6 +70,12 @@ extern NSString* const kTranslationWithDelta;
   // as letting the container expand when the window is going from super small
   // to large.
   BOOL grippyPinned_;
+
+  // The size delegate, if any.
+  // Weak; delegate is responsible for adding/removing itself.
+  BrowserActionsContainerViewSizeDelegate* sizeDelegate_;
+
+  base::scoped_nsobject<NSViewAnimation> resizeAnimation_;
 }
 
 // Resizes the container to the given ideal width, adjusting the |lastXPos_| so
@@ -76,13 +87,23 @@ extern NSString* const kTranslationWithDelta;
 // placement of surrounding elements.
 - (CGFloat)resizeDeltaX;
 
-@property(nonatomic, readonly) NSRect animationEndFrame;
+// Returns the frame of the container after the running animation has finished.
+// If no animation is running, returns the container's current frame.
+- (NSRect)animationEndFrame;
+
+// Returns true if the view is animating.
+- (BOOL)isAnimating;
+
+// Stops any animation in progress.
+- (void)stopAnimation;
+
 @property(nonatomic) BOOL canDragLeft;
 @property(nonatomic) BOOL canDragRight;
 @property(nonatomic) BOOL grippyPinned;
 @property(nonatomic,getter=isResizable) BOOL resizable;
-@property(nonatomic) CGFloat maxWidth;
+@property(nonatomic) CGFloat maxDesiredWidth;
 @property(readonly, nonatomic) BOOL userIsResizing;
+@property(nonatomic) BrowserActionsContainerViewSizeDelegate* delegate;
 
 @end
 

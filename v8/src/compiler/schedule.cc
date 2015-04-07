@@ -13,13 +13,15 @@ namespace internal {
 namespace compiler {
 
 BasicBlock::BasicBlock(Zone* zone, Id id)
-    : ao_number_(-1),
+    : loop_number_(-1),
       rpo_number_(-1),
       deferred_(false),
+      dominator_depth_(-1),
       dominator_(NULL),
+      rpo_next_(NULL),
       loop_header_(NULL),
+      loop_end_(NULL),
       loop_depth_(0),
-      loop_end_(-1),
       control_(kNone),
       control_input_(NULL),
       nodes_(zone),
@@ -32,8 +34,9 @@ bool BasicBlock::LoopContains(BasicBlock* block) const {
   // RPO numbers must be initialized.
   DCHECK(rpo_number_ >= 0);
   DCHECK(block->rpo_number_ >= 0);
-  if (loop_end_ < 0) return false;  // This is not a loop.
-  return block->rpo_number_ >= rpo_number_ && block->rpo_number_ < loop_end_;
+  if (loop_end_ == NULL) return false;  // This is not a loop.
+  return block->rpo_number_ >= rpo_number_ &&
+         block->rpo_number_ < loop_end_->rpo_number_;
 }
 
 
@@ -60,11 +63,6 @@ void BasicBlock::set_control_input(Node* control_input) {
 }
 
 
-void BasicBlock::set_dominator(BasicBlock* dominator) {
-  dominator_ = dominator;
-}
-
-
 void BasicBlock::set_loop_depth(int32_t loop_depth) {
   loop_depth_ = loop_depth;
 }
@@ -75,7 +73,7 @@ void BasicBlock::set_rpo_number(int32_t rpo_number) {
 }
 
 
-void BasicBlock::set_loop_end(int32_t loop_end) { loop_end_ = loop_end; }
+void BasicBlock::set_loop_end(BasicBlock* loop_end) { loop_end_ = loop_end; }
 
 
 void BasicBlock::set_loop_header(BasicBlock* loop_header) {

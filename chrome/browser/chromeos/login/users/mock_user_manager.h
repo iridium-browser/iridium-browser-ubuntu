@@ -28,6 +28,8 @@ class MockUserManager : public ChromeUserManager {
   MOCK_METHOD0(Shutdown, void(void));
   MOCK_CONST_METHOD0(GetUsersAllowedForMultiProfile,
                      user_manager::UserList(void));
+  MOCK_CONST_METHOD0(GetUsersAllowedForSupervisedUsersCreation,
+                     user_manager::UserList(void));
   MOCK_CONST_METHOD0(GetLoggedInUsers, const user_manager::UserList&(void));
   MOCK_CONST_METHOD0(GetLRULoggedInUsers, const user_manager::UserList&(void));
   MOCK_METHOD3(UserLoggedIn, void(
@@ -56,8 +58,7 @@ class MockUserManager : public ChromeUserManager {
   MOCK_CONST_METHOD0(IsCurrentUserNonCryptohomeDataEphemeral, bool(void));
   MOCK_CONST_METHOD0(CanCurrentUserLock, bool(void));
   MOCK_CONST_METHOD0(IsUserLoggedIn, bool(void));
-  MOCK_CONST_METHOD0(IsLoggedInAsRegularUser, bool(void));
-  MOCK_CONST_METHOD0(IsLoggedInAsDemoUser, bool(void));
+  MOCK_CONST_METHOD0(IsLoggedInAsUserWithGaiaAccount, bool(void));
   MOCK_CONST_METHOD0(IsLoggedInAsPublicAccount, bool(void));
   MOCK_CONST_METHOD0(IsLoggedInAsGuest, bool(void));
   MOCK_CONST_METHOD0(IsLoggedInAsSupervisedUser, bool(void));
@@ -93,7 +94,6 @@ class MockUserManager : public ChromeUserManager {
   MOCK_METHOD0(DemoAccountLoggedIn, void(void));
   MOCK_METHOD1(KioskAppLoggedIn, void(const std::string&));
   MOCK_METHOD1(PublicAccountUserLoggedIn, void(user_manager::User*));
-  MOCK_METHOD0(RetailModeUserLoggedIn, void(void));
   MOCK_METHOD1(SupervisedUserLoggedIn, void(const std::string&));
 
   // You can't mock these functions easily because nobody can create

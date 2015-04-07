@@ -190,13 +190,11 @@ int32 EventDeviceInfo::GetSlotValue(unsigned int code,
 }
 
 bool EventDeviceInfo::HasAbsXY() const {
-  if (HasAbsEvent(ABS_X) && HasAbsEvent(ABS_Y))
-    return true;
+  return HasAbsEvent(ABS_X) && HasAbsEvent(ABS_Y);
+}
 
-  if (HasAbsEvent(ABS_MT_POSITION_X) && HasAbsEvent(ABS_MT_POSITION_Y))
-    return true;
-
-  return false;
+bool EventDeviceInfo::HasMTAbsXY() const {
+  return HasAbsEvent(ABS_MT_POSITION_X) && HasAbsEvent(ABS_MT_POSITION_Y);
 }
 
 bool EventDeviceInfo::HasRelXY() const {
@@ -208,14 +206,14 @@ bool EventDeviceInfo::IsMappedToScreen() const {
   if (HasProp(INPUT_PROP_DIRECT))
     return true;
 
-  // Device position moves the cursor.
-  if (HasProp(INPUT_PROP_POINTER))
-    return false;
-
   // Tablets are mapped to the screen.
   if (HasKeyEvent(BTN_TOOL_PEN) || HasKeyEvent(BTN_STYLUS) ||
       HasKeyEvent(BTN_STYLUS2))
     return true;
+
+  // Device position moves the cursor.
+  if (HasProp(INPUT_PROP_POINTER))
+    return false;
 
   // Touchpads are not mapped to the screen.
   if (HasKeyEvent(BTN_LEFT) || HasKeyEvent(BTN_MIDDLE) ||
@@ -224,6 +222,27 @@ bool EventDeviceInfo::IsMappedToScreen() const {
 
   // Touchscreens are mapped to the screen.
   return true;
+}
+
+bool EventDeviceInfo::HasKeyboard() const {
+  if (!HasEventType(EV_KEY))
+    return false;
+
+  // Check first 31 keys: If we have all of them, consider it a full
+  // keyboard. This is exactly what udev does for ID_INPUT_KEYBOARD.
+  for (int key = KEY_ESC; key <= KEY_D; ++key)
+    if (!HasKeyEvent(key))
+      return false;
+
+  return true;
+}
+
+bool EventDeviceInfo::HasMouse() const {
+  return HasRelXY();
+}
+
+bool EventDeviceInfo::HasTouchpad() const {
+  return (HasAbsXY() || HasMTAbsXY()) && !IsMappedToScreen();
 }
 
 const std::vector<int32_t>& EventDeviceInfo::GetMtSlotsForCode(int code) const {

@@ -54,10 +54,9 @@
 
 #if defined(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
-#include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/permissions_data.h"
 #endif
@@ -100,6 +99,8 @@ const content::MediaStreamDevice* FindDeviceWithId(
 // 4. TODO(smus): Airbender experiment 1.
 // 5. TODO(smus): Airbender experiment 2.
 // 6. Hotwording component extension.
+// 7. XKB input method component extension.
+// 8. M17n/T13n/CJK input method component extension.
 // Once http://crbug.com/292856 is fixed, remove this whitelist.
 bool IsMediaRequestWhitelistedForExtension(
     const extensions::Extension* extension) {
@@ -108,7 +109,9 @@ bool IsMediaRequestWhitelistedForExtension(
       extension->id() == "jokbpnebhdcladagohdnfgjcpejggllo" ||
       extension->id() == "clffjmdilanldobdnedchkdbofoimcgb" ||
       extension->id() == "nnckehldicaciogcbchegobnafnjkcne" ||
-      extension->id() == "nbpagnldghgfoolbancepceaanlmhfmd";
+      extension->id() == "nbpagnldghgfoolbancepceaanlmhfmd" ||
+      extension->id() == "jkghodnilhceideoidjikpgommlajknk" ||
+      extension->id() == "gjaehgfemfahhmlgpdfknkhdnemmolop";
 }
 
 bool IsBuiltInExtension(const GURL& origin) {
@@ -172,7 +175,7 @@ scoped_ptr<content::MediaStreamUI> GetDevicesForDesktopCapture(
   if (capture_audio) {
     // Use the special loopback device ID for system audio capture.
     devices->push_back(content::MediaStreamDevice(
-        content::MEDIA_LOOPBACK_AUDIO_CAPTURE,
+        content::MEDIA_DESKTOP_AUDIO_CAPTURE,
         media::AudioManagerBase::kLoopbackInputDeviceId, "System Audio"));
   }
 
@@ -222,10 +225,9 @@ const extensions::Extension* GetExtensionForOrigin(
   if (!security_origin.SchemeIs(extensions::kExtensionScheme))
     return NULL;
 
-  ExtensionService* extensions_service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
   const extensions::Extension* extension =
-      extensions_service->extensions()->GetByID(security_origin.host());
+      extensions::ExtensionRegistry::Get(profile)->enabled_extensions().GetByID(
+          security_origin.host());
   DCHECK(extension);
   return extension;
 }
@@ -260,8 +262,9 @@ MediaCaptureDevicesDispatcher::MediaCaptureDevicesDispatcher()
 
 #if defined(OS_MACOSX)
   // AVFoundation is used for video/audio device monitoring and video capture.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kForceQTKit)) {
-    CommandLine::ForCurrentProcess()->AppendSwitch(
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kForceQTKit)) {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnableAVFoundation);
   }
 #endif
@@ -330,7 +333,7 @@ void MediaCaptureDevicesDispatcher::ProcessMediaAccessRequest(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (request.video_type == content::MEDIA_DESKTOP_VIDEO_CAPTURE ||
-      request.audio_type == content::MEDIA_LOOPBACK_AUDIO_CAPTURE) {
+      request.audio_type == content::MEDIA_DESKTOP_AUDIO_CAPTURE) {
     ProcessDesktopCaptureAccessRequest(
         web_contents, request, callback, extension);
   } else if (request.video_type == content::MEDIA_TAB_VIDEO_CAPTURE ||
@@ -526,7 +529,7 @@ void MediaCaptureDevicesDispatcher::ProcessDesktopCaptureAccessRequest(
   // Audio is only supported for screen capture streams.
   bool capture_audio =
       (media_id.type == content::DesktopMediaID::TYPE_SCREEN &&
-       request.audio_type == content::MEDIA_LOOPBACK_AUDIO_CAPTURE &&
+       request.audio_type == content::MEDIA_DESKTOP_AUDIO_CAPTURE &&
        loopback_audio_supported);
 
   ui = GetDevicesForDesktopCapture(
@@ -571,7 +574,7 @@ void MediaCaptureDevicesDispatcher::ProcessScreenCaptureAccessRequest(
   const bool origin_is_secure =
       request.security_origin.SchemeIsSecure() ||
       request.security_origin.SchemeIs(extensions::kExtensionScheme) ||
-      CommandLine::ForCurrentProcess()->HasSwitch(
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kAllowHttpScreenCapture);
 
   // If basic conditions (screen capturing is enabled and origin is secure)
@@ -636,7 +639,7 @@ void MediaCaptureDevicesDispatcher::ProcessScreenCaptureAccessRequest(
 #endif  // !defined(OS_CHROMEOS)
 
       bool capture_audio =
-          (request.audio_type == content::MEDIA_LOOPBACK_AUDIO_CAPTURE &&
+          (request.audio_type == content::MEDIA_DESKTOP_AUDIO_CAPTURE &&
            loopback_audio_supported);
 
       // Unless we're being invoked from a component extension, register to

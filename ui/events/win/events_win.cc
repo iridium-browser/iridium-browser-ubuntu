@@ -11,7 +11,7 @@
 #include "base/win/win_util.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_code_conversion_win.h"
-#include "ui/gfx/point.h"
+#include "ui/gfx/geometry/point.h"
 #include "ui/gfx/win/dpi.h"
 
 namespace ui {
@@ -255,7 +255,7 @@ KeyboardCode KeyboardCodeFromNative(const base::NativeEvent& native_event) {
   return KeyboardCodeForWindowsKeyCode(static_cast<WORD>(native_event.wParam));
 }
 
-const char* CodeFromNative(const base::NativeEvent& native_event) {
+DomCode CodeFromNative(const base::NativeEvent& native_event) {
   const uint16 scan_code = GetScanCodeFromLParam(native_event.lParam);
   return CodeForWindowsScanCode(scan_code);
 }

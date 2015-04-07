@@ -37,23 +37,8 @@ NavigationEntryImpl* NavigationEntryImpl::FromNavigationEntry(
 }
 
 NavigationEntryImpl::NavigationEntryImpl()
-    : unique_id_(GetUniqueIDInConstructor()),
-      site_instance_(NULL),
-      bindings_(kInvalidBindings),
-      page_type_(PAGE_TYPE_NORMAL),
-      update_virtual_url_with_url_(false),
-      page_id_(-1),
-      transition_type_(ui::PAGE_TRANSITION_LINK),
-      has_post_data_(false),
-      post_id_(-1),
-      restore_type_(RESTORE_NONE),
-      is_overriding_user_agent_(false),
-      http_status_code_(0),
-      is_renderer_initiated_(false),
-      should_replace_entry_(false),
-      should_clear_history_list_(false),
-      can_load_local_resources_(false),
-      frame_tree_node_id_(-1) {
+    : NavigationEntryImpl(nullptr, -1, GURL(), Referrer(), base::string16(),
+                          ui::PAGE_TRANSITION_LINK, false) {
 }
 
 NavigationEntryImpl::NavigationEntryImpl(SiteInstanceImpl* instance,
@@ -157,6 +142,11 @@ int32 NavigationEntryImpl::GetPageID() const {
 
 void NavigationEntryImpl::set_site_instance(SiteInstanceImpl* site_instance) {
   site_instance_ = site_instance;
+}
+
+void NavigationEntryImpl::set_source_site_instance(
+    SiteInstanceImpl* source_site_instance) {
+  source_site_instance_ = source_site_instance;
 }
 
 void NavigationEntryImpl::SetBindings(int bindings) {
@@ -340,13 +330,20 @@ void NavigationEntryImpl::ClearExtraData(const std::string& key) {
 void NavigationEntryImpl::ResetForCommit() {
   // Any state that only matters when a navigation entry is pending should be
   // cleared here.
-  SetBrowserInitiatedPostData(NULL);
+  SetBrowserInitiatedPostData(nullptr);
   set_is_renderer_initiated(false);
   set_transferred_global_request_id(GlobalRequestID());
   set_should_replace_entry(false);
 
   set_should_clear_history_list(false);
   set_frame_tree_node_id(-1);
+  set_source_site_instance(nullptr);
+
+#if defined(OS_ANDROID)
+  // Reset the time stamp so that the metrics are not reported if this entry is
+  // loaded again in the future.
+  set_intent_received_timestamp(base::TimeTicks());
+#endif
 }
 
 void NavigationEntryImpl::SetScreenshotPNGData(

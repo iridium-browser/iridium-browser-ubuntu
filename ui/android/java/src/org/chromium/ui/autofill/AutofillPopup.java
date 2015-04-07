@@ -67,6 +67,7 @@ public class AutofillPopup extends DropdownPopupWindow implements AdapterView.On
 
         setOnItemClickListener(this);
         setOnDismissListener(this);
+        disableHideOnOutsideTap();
     }
 
     /**
@@ -91,13 +92,6 @@ public class AutofillPopup extends DropdownPopupWindow implements AdapterView.On
         setAdapter(new DropdownAdapter(mContext, cleanedData, separators));
         setRtl(isRtl);
         show();
-    }
-
-    /**
-     * Hides the popup.
-     */
-    public void hide() {
-        dismiss();
     }
 
     @Override

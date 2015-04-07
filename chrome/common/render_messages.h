@@ -36,8 +36,8 @@
 #include "third_party/WebKit/public/web/WebConsoleMessage.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
-#include "ui/gfx/rect.h"
 
 // Singly-included section for enums and custom IPC traits.
 #ifndef CHROME_COMMON_RENDER_MESSAGES_H_
@@ -56,6 +56,7 @@ struct ChromeViewHostMsg_GetPluginInfo_Status {
     kNPAPINotSupported,
     kOutdatedBlocked,
     kOutdatedDisallowed,
+    kPlayImportantContent,
     kUnauthorized,
   };
 
@@ -282,6 +283,9 @@ IPC_MESSAGE_ROUTED2(ChromeViewMsg_SearchBoxSubmit,
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxThemeChanged,
                     ThemeBackgroundInfo /* value */)
 
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_HistorySyncCheckResult,
+                    bool /* sync_history */)
+
 IPC_MESSAGE_ROUTED2(ChromeViewMsg_ChromeIdentityCheckResult,
                     base::string16 /* identity */,
                     bool /* identity_match */)
@@ -334,8 +338,10 @@ IPC_MESSAGE_ROUTED3(ChromeViewMsg_UpdateTopControlsState,
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetWindowFeatures,
                     blink::WebWindowFeatures /* window_features */)
 
+// Responds to the request for a thumbnail.
+// Thumbnail data will be empty is a thumbnail could not be produced.
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_RequestThumbnailForContextNode_ACK,
-                    SkBitmap /* thumbnail */,
+                    std::string /* JPEG-encoded thumbnail data */,
                     gfx::Size /* original size of the image */)
 
 // Requests application info for the page. The renderer responds back with
@@ -539,11 +545,6 @@ IPC_MESSAGE_CONTROL2(ChromeViewHostMsg_V8HeapStats,
                      int /* size of heap (allocated from the OS) */,
                      int /* bytes in use */)
 
-// Request for a DNS prefetch of the names in the array.
-// NameList is typedef'ed std::vector<std::string>
-IPC_MESSAGE_CONTROL1(ChromeViewHostMsg_DnsPrefetch,
-                     std::vector<std::string> /* hostnames */)
-
 // Request for preconnect to host providing resource specified by URL
 IPC_MESSAGE_CONTROL1(ChromeViewHostMsg_Preconnect,
                      GURL /* preconnect target url */)
@@ -606,6 +607,10 @@ IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_LogMostVisitedNavigation,
                     int /* page_seq_no */,
                     int /* position */,
                     base::string16 /* provider */)
+
+// The Instant page asks whether the user syncs its history.
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_HistorySyncCheck,
+                    int /* page_seq_no */)
 
 // The Instant page asks for Chrome identity check against |identity|.
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_ChromeIdentityCheck,

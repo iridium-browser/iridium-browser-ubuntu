@@ -75,7 +75,7 @@ bool PreventWindowFromPinning(HWND hwnd) {
     return false;
 
   return base::win::SetBooleanValueForPropertyStore(
-             pps, PKEY_AppUserModel_PreventPinning, true);
+      pps.get(), PKEY_AppUserModel_PreventPinning, true);
 }
 
 // TODO(calamity): investigate moving this out of the UI thread as COM
@@ -95,18 +95,19 @@ void SetAppDetailsForWindow(const base::string16& app_id,
       hwnd, __uuidof(*pps), reinterpret_cast<void**>(pps.Receive()));
   if (S_OK == result) {
     if (!app_id.empty())
-      base::win::SetAppIdForPropertyStore(pps, app_id.c_str());
+      base::win::SetAppIdForPropertyStore(pps.get(), app_id.c_str());
     if (!app_icon.empty()) {
       base::win::SetStringValueForPropertyStore(
-          pps, PKEY_AppUserModel_RelaunchIconResource, app_icon.c_str());
+          pps.get(), PKEY_AppUserModel_RelaunchIconResource, app_icon.c_str());
     }
     if (!relaunch_command.empty()) {
       base::win::SetStringValueForPropertyStore(
-          pps, PKEY_AppUserModel_RelaunchCommand, relaunch_command.c_str());
+          pps.get(), PKEY_AppUserModel_RelaunchCommand,
+          relaunch_command.c_str());
     }
     if (!relaunch_display_name.empty()) {
       base::win::SetStringValueForPropertyStore(
-          pps, PKEY_AppUserModel_RelaunchDisplayNameResource,
+          pps.get(), PKEY_AppUserModel_RelaunchDisplayNameResource,
           relaunch_display_name.c_str());
     }
   }
@@ -143,13 +144,13 @@ bool IsAeroGlassEnabled() {
   // user can specify this command line switch to mimic the behavior.  In this
   // mode, cross-HWND transparency is not supported and various types of
   // widgets fallback to more simplified rendering behavior.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableDwmComposition))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableDwmComposition))
     return false;
 
-  base::win::Version version = base::win::GetVersion();
-  base::debug::Alias(&version);  // TODO(scottmg): http://crbug.com/431549.
-  if (version < base::win::VERSION_VISTA)
+  // Technically Aero glass works in Vista but we want to put XP and Vista
+  // at the same feature level. See bug 426573.
+  if (base::win::GetVersion() < base::win::VERSION_WIN7)
     return false;
   // If composition is not enabled, we behave like on XP.
   BOOL enabled = FALSE;

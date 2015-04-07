@@ -23,6 +23,7 @@
 #include "chrome/browser/signin/signin_error_notifier_factory_ash.h"
 #include "chrome/browser/speech/tts_controller.h"
 #include "chrome/browser/sync/sync_error_notifier_factory_ash.h"
+#include "chrome/browser/ui/ash/accessibility/automation_manager_ash.h"
 #include "chrome/browser/ui/ash/chrome_new_window_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/media_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/session_state_delegate_chromeos.h"
@@ -32,10 +33,10 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "ui/aura/window.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if !defined(USE_ATHENA)
@@ -55,14 +56,12 @@ void InitAfterSessionStart() {
   if (!mru_list.empty())
     mru_list.front()->Focus();
 
-#if defined(USE_X11)
   // Enable magnifier scroll keys as there may be no mouse cursor in kiosk mode.
   ash::MagnifierKeyScroller::SetEnabled(chrome::IsRunningInForcedAppMode());
 
   // Enable long press action to toggle spoken feedback with hotrod
   // remote which can't handle shortcut.
   ash::SpokenFeedbackToggler::SetEnabled(chrome::IsRunningInForcedAppMode());
-#endif
 }
 
 #if !defined(USE_ATHENA)
@@ -182,6 +181,8 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
               profile, l10n_util::GetStringUTF8(IDS_A11Y_ALERT_WINDOW_NEEDED));
           SendControlAccessibilityNotification(
               ui::AX_EVENT_ALERT, &event);
+          AutomationManagerAsh::GetInstance()->HandleAlert(
+              profile, l10n_util::GetStringUTF8(IDS_A11Y_ALERT_WINDOW_NEEDED));
           break;
         }
         case ui::A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED: {
@@ -190,6 +191,9 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
                   IDS_A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED));
           SendControlAccessibilityNotification(
               ui::AX_EVENT_ALERT, &event);
+          AutomationManagerAsh::GetInstance()->HandleAlert(
+              profile, l10n_util::GetStringUTF8(
+                           IDS_A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED));
           break;
         }
         case ui::A11Y_ALERT_NONE:
@@ -219,7 +223,7 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
 }  // anonymous namespace
 
 bool ChromeShellDelegate::IsFirstRunAfterBoot() const {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
       chromeos::switches::kFirstExecAfterBoot);
 }
 

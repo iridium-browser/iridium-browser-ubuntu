@@ -26,11 +26,14 @@ try:
 except Exception:
   ports = None
 from pylib.device import device_utils  # pylint: disable=F0401
+from pylib.utils import apk_helper  # pylint: disable=F0401
 
 
 def IsAndroidSupported():
   return device_utils != None
 
+def GetPackageName(apk_path):
+  return apk_helper.GetPackageName(apk_path)
 
 def GetAttachedDevices():
   """Returns a list of attached, online android devices.
@@ -66,9 +69,7 @@ class AdbCommands(object):
     return getattr(self._device.old_interface, name)
 
   def Forward(self, local, remote):
-    ret = self._device.old_interface.Adb().SendCommand(
-        'forward %s %s' % (local, remote))
-    assert ret == ''
+    self._device.adb.Forward(local, remote)
 
   def IsUserBuild(self):
     return self._device.GetProp('ro.build.type') == 'user'

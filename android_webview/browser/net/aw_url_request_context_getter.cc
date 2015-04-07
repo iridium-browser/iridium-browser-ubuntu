@@ -13,13 +13,15 @@
 #include "android_webview/browser/net/aw_url_request_job_factory.h"
 #include "android_webview/browser/net/init_native_callback.h"
 #include "android_webview/common/aw_content_client.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/worker_pool.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_service.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_interceptor.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
@@ -176,12 +178,11 @@ scoped_ptr<net::URLRequestJobFactory> CreateJobFactory(
 
 AwURLRequestContextGetter::AwURLRequestContextGetter(
     const base::FilePath& cache_path, net::CookieStore* cookie_store,
-    scoped_ptr<data_reduction_proxy::DataReductionProxyConfigService>
-        config_service)
+    scoped_ptr<net::ProxyConfigService> config_service)
     : cache_path_(cache_path),
       cookie_store_(cookie_store),
       net_log_(new net::NetLog()) {
-  data_reduction_proxy_config_service_ = config_service.Pass();
+  proxy_config_service_ = config_service.Pass();
   // CreateSystemProxyConfigService for Android must be called on main thread.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
@@ -195,18 +196,48 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
 
   net::URLRequestContextBuilder builder;
   builder.set_user_agent(GetUserAgent());
-  AwNetworkDelegate* aw_network_delegate = new AwNetworkDelegate();
-  builder.set_network_delegate(aw_network_delegate);
+  scoped_ptr<AwNetworkDelegate> aw_network_delegate(new AwNetworkDelegate());
+
+  AwBrowserContext* browser_context = AwBrowserContext::GetDefault();
+  DCHECK(browser_context);
+
+  // Compression statistics are not gathered for WebView, so
+  // DataReductionProxyStatisticsPrefs is not instantiated and passed to the
+  // network delegate.
+  DataReductionProxySettings* data_reduction_proxy_settings =
+      browser_context->GetDataReductionProxySettings();
+  DCHECK(data_reduction_proxy_settings);
+  data_reduction_proxy_auth_request_handler_.reset(
+      new data_reduction_proxy::DataReductionProxyAuthRequestHandler(
+          data_reduction_proxy::Client::WEBVIEW_ANDROID,
+          data_reduction_proxy_settings->params(),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
+
+  data_reduction_proxy::DataReductionProxyNetworkDelegate*
+      data_reduction_proxy_network_delegate =
+          new data_reduction_proxy::DataReductionProxyNetworkDelegate(
+              aw_network_delegate.Pass(),
+              data_reduction_proxy_settings->params(),
+              data_reduction_proxy_auth_request_handler_.get(),
+              base::Bind(
+                  &data_reduction_proxy::DataReductionProxyConfigurator::
+                      GetProxyConfigOnIOThread,
+                  base::Unretained(
+                      browser_context->GetDataReductionProxyConfigurator())));
+  data_reduction_proxy_network_delegate->InitProxyConfigOverrider(
+      base::Bind(data_reduction_proxy::OnResolveProxyHandler));
+
+  builder.set_network_delegate(data_reduction_proxy_network_delegate);
 #if !defined(DISABLE_FTP_SUPPORT)
   builder.set_ftp_enabled(false);  // Android WebView does not support ftp yet.
 #endif
-  DCHECK(data_reduction_proxy_config_service_.get());
+  DCHECK(proxy_config_service_.get());
   // Android provides a local HTTP proxy that handles all the proxying.
   // Create the proxy without a resolver since we rely on this local HTTP proxy.
   // TODO(sgurun) is this behavior guaranteed through SDK?
   builder.set_proxy_service(
       net::ProxyService::CreateWithoutProxyResolver(
-          data_reduction_proxy_config_service_.release(),
+          proxy_config_service_.release(),
           net_log_.get()));
   builder.set_accept_language(net::HttpUtil::GenerateAcceptLanguageHeader(
       AwContentBrowserClient::GetAcceptLangsImpl()));
@@ -230,25 +261,6 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
           20 * 1024 * 1024,  // 20M
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)));
 
-  AwBrowserContext* browser_context = AwBrowserContext::GetDefault();
-  DCHECK(browser_context);
-  DataReductionProxySettings* data_reduction_proxy_settings =
-      browser_context->GetDataReductionProxySettings();
-  DCHECK(data_reduction_proxy_settings);
-  data_reduction_proxy_auth_request_handler_.reset(
-      new data_reduction_proxy::DataReductionProxyAuthRequestHandler(
-          data_reduction_proxy::Client::WEBVIEW_ANDROID,
-          data_reduction_proxy_settings->params(),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
-
-  // Compression statistics are not gathered for WebView, so
-  // DataReductionProxyStatisticsPrefs is not instantiated and passed to the
-  // network delegate.
-  aw_network_delegate->set_data_reduction_proxy_params(
-      data_reduction_proxy_settings->params());
-  aw_network_delegate->set_data_reduction_proxy_auth_request_handler(
-      data_reduction_proxy_auth_request_handler_.get());
-
   main_http_factory_.reset(main_cache);
   url_request_context_->set_http_transaction_factory(main_cache);
   url_request_context_->set_cookie_store(cookie_store_.get());
@@ -259,7 +271,8 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
   job_factory_.reset(new net::URLRequestInterceptingJobFactory(
       job_factory_.Pass(), make_scoped_ptr(
           new data_reduction_proxy::DataReductionProxyInterceptor(
-              data_reduction_proxy_settings->params(), NULL))));
+              data_reduction_proxy_settings->params(), NULL,
+              browser_context->GetDataReductionProxyEventStore()))));
   url_request_context_->set_job_factory(job_factory_.get());
 }
 

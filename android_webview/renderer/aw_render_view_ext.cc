@@ -64,6 +64,13 @@ blink::WebElement GetImgChild(const blink::WebElement& element) {
   return collection.firstItem();
 }
 
+GURL GetChildImageUrlFromElement(const blink::WebElement& element) {
+  const blink::WebElement child_img = GetImgChild(element);
+  if (child_img.isNull())
+    return GURL();
+  return GetAbsoluteSrcUrl(child_img);
+}
+
 bool RemovePrefixAndAssignIfMatches(const base::StringPiece& prefix,
                                     const GURL& url,
                                     std::string* dest) {
@@ -251,12 +258,7 @@ void AwRenderViewExt::FocusedNodeChanged(const blink::WebNode& node) {
   if (node.isLink())
     absolute_link_url = GetAbsoluteUrl(node, data.href);
 
-  GURL absolute_image_url;
-  const blink::WebElement child_img = GetImgChild(element);
-  if (!child_img.isNull()) {
-    absolute_image_url =
-        GetAbsoluteSrcUrl(child_img);
-  }
+  GURL absolute_image_url = GetChildImageUrlFromElement(element);
 
   PopulateHitTestData(absolute_link_url,
                       absolute_image_url,
@@ -265,22 +267,29 @@ void AwRenderViewExt::FocusedNodeChanged(const blink::WebNode& node) {
   Send(new AwViewHostMsg_UpdateHitTestData(routing_id(), data));
 }
 
-void AwRenderViewExt::OnDoHitTest(int view_x, int view_y) {
+void AwRenderViewExt::OnDoHitTest(const gfx::PointF& touch_center,
+                                  const gfx::SizeF& touch_area) {
   if (!render_view() || !render_view()->GetWebView())
     return;
 
   const blink::WebHitTestResult result =
-      render_view()->GetWebView()->hitTestResultAt(
-          blink::WebPoint(view_x, view_y));
+      render_view()->GetWebView()->hitTestResultForTap(
+          blink::WebPoint(touch_center.x(), touch_center.y()),
+          blink::WebSize(touch_area.width(), touch_area.height()));
   AwHitTestData data;
 
+  GURL absolute_image_url = result.absoluteImageURL();
   if (!result.urlElement().isNull()) {
     data.anchor_text = result.urlElement().innerText();
     data.href = GetHref(result.urlElement());
+    // If we hit an image that failed to load, Blink won't give us its URL.
+    // Fall back to walking the DOM in this case.
+    if (absolute_image_url.is_empty())
+      absolute_image_url = GetChildImageUrlFromElement(result.urlElement());
   }
 
   PopulateHitTestData(result.absoluteLinkURL(),
-                      result.absoluteImageURL(),
+                      absolute_image_url,
                       result.isContentEditable(),
                       &data);
   Send(new AwViewHostMsg_UpdateHitTestData(routing_id(), data));

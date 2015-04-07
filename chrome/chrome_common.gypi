@@ -133,8 +133,6 @@
       'common/extensions/api/extension_action/action_info.h',
       'common/extensions/api/file_browser_handlers/file_browser_handler.cc',
       'common/extensions/api/file_browser_handlers/file_browser_handler.h',
-      'common/extensions/api/i18n/default_locale_handler.cc',
-      'common/extensions/api/i18n/default_locale_handler.h',
       'common/extensions/api/input_ime/input_components_handler.cc',
       'common/extensions/api/input_ime/input_components_handler.h',
       'common/extensions/api/notifications/notification_style.cc',
@@ -169,8 +167,8 @@
       'common/extensions/command.h',
       'common/extensions/extension_constants.cc',
       'common/extensions/extension_constants.h',
-      'common/extensions/extension_file_util.cc',
-      'common/extensions/extension_file_util.h',
+      'common/extensions/extension_metrics.cc',
+      'common/extensions/extension_metrics.h',
       'common/extensions/extension_process_policy.cc',
       'common/extensions/extension_process_policy.h',
       'common/extensions/features/chrome_channel_feature_filter.cc',
@@ -179,6 +177,8 @@
       'common/extensions/features/feature_channel.h',
       'common/extensions/image_writer/image_writer_util_mac.cc',
       'common/extensions/image_writer/image_writer_util_mac.h',
+      'common/extensions/manifest_handlers/app_icon_color_info.cc',
+      'common/extensions/manifest_handlers/app_icon_color_info.h',
       'common/extensions/manifest_handlers/app_isolation_info.cc',
       'common/extensions/manifest_handlers/app_isolation_info.h',
       'common/extensions/manifest_handlers/app_launch_info.cc',
@@ -187,6 +187,8 @@
       'common/extensions/manifest_handlers/automation.h',
       'common/extensions/manifest_handlers/content_scripts_handler.cc',
       'common/extensions/manifest_handlers/content_scripts_handler.h',
+      'common/extensions/manifest_handlers/copresence_manifest.h',
+      'common/extensions/manifest_handlers/copresence_manifest.cc',
       'common/extensions/manifest_handlers/extension_action_handler.cc',
       'common/extensions/manifest_handlers/extension_action_handler.h',
       'common/extensions/manifest_handlers/mime_types_handler.cc',
@@ -311,8 +313,6 @@
         '<(DEPTH)/components/components.gyp:variations',
         '<(DEPTH)/content/content.gyp:content_common',
         '<(DEPTH)/crypto/crypto.gyp:crypto',
-        '<(DEPTH)/extensions/extensions.gyp:extensions_common_constants',
-        '<(DEPTH)/media/cast/cast.gyp:cast_net',
         '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/third_party/icu/icu.gyp:icui18n',
@@ -363,7 +363,9 @@
             '<(DEPTH)/components/components.gyp:signin_core_common',
             '<(DEPTH)/components/components.gyp:translate_content_common',
             '<(DEPTH)/components/components.gyp:visitedlink_common',
+            '<(DEPTH)/extensions/extensions.gyp:extensions_common_constants',
             '<(DEPTH)/ipc/ipc.gyp:ipc',
+            '<(DEPTH)/media/cast/cast.gyp:cast_net',
             '<(DEPTH)/third_party/re2/re2.gyp:re2',
             '<(DEPTH)/third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
           ],
@@ -400,7 +402,6 @@
         ['disable_nacl==0', {
           'dependencies': [
             '<(DEPTH)/components/nacl.gyp:nacl_common',
-            '<(DEPTH)/ppapi/native_client/src/trusted/plugin/plugin.gyp:nacl_trusted_plugin',
           ],
         }],
         ['enable_plugins==1', {
@@ -479,11 +480,6 @@
           ],
           'sources!': [
             'common/chrome_version_info_posix.cc',
-          ],
-        }],
-        ['remoting==1', {
-          'dependencies': [
-            '../remoting/remoting.gyp:remoting_client_plugin',
           ],
         }],
         ['enable_webrtc==0', {
@@ -591,7 +587,6 @@
       'sources': [
         'common/net/net_resource_provider.cc',
         'common/net/net_resource_provider.h',
-        'common/net/predictor_common.h',
         'common/net/url_util.cc',
         'common/net/url_util.h',
         'common/net/x509_certificate_model.cc',
@@ -603,12 +598,14 @@
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/chrome/chrome_resources.gyp:chrome_resources',
         '<(DEPTH)/chrome/chrome_resources.gyp:chrome_strings',
+        '<(DEPTH)/components/components.gyp:dns_prefetch_common',
         '<(DEPTH)/components/components.gyp:error_page_common',
         '<(DEPTH)/crypto/crypto.gyp:crypto',
         '<(DEPTH)/net/net.gyp:net_resources',
         '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/third_party/icu/icu.gyp:icui18n',
         '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
+        '<(DEPTH)/ui/base/ui_base.gyp:ui_base',
       ],
       'conditions': [
         ['OS != "ios"', {

@@ -19,7 +19,9 @@ class ExtensionsAPIClient;
 class ShellExtensionsBrowserClient : public ExtensionsBrowserClient {
  public:
   // |context| is the single BrowserContext used for IsValidContext() below.
-  explicit ShellExtensionsBrowserClient(content::BrowserContext* context);
+  // |pref_service| is used for GetPrefServiceForContext() below.
+  ShellExtensionsBrowserClient(content::BrowserContext* context,
+                               PrefService* pref_service);
   ~ShellExtensionsBrowserClient() override;
 
   // ExtensionsBrowserClient overrides:
@@ -69,8 +71,8 @@ class ShellExtensionsBrowserClient : public ExtensionsBrowserClient {
       ExtensionFunctionRegistry* registry) const override;
   scoped_ptr<RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
       content::BrowserContext* context) const override;
-  ComponentExtensionResourceManager* GetComponentExtensionResourceManager()
-      override;
+  const ComponentExtensionResourceManager*
+  GetComponentExtensionResourceManager() override;
   void BroadcastEventToRenderers(const std::string& event_name,
                                  scoped_ptr<base::ListValue> args) override;
   net::NetLog* GetNetLog() override;
@@ -78,15 +80,18 @@ class ShellExtensionsBrowserClient : public ExtensionsBrowserClient {
   bool IsBackgroundUpdateAllowed() override;
   bool IsMinBrowserVersionSupported(const std::string& min_version) override;
 
+  // Sets the API client.
+  void SetAPIClientForTest(ExtensionsAPIClient* api_client);
+
  private:
   // The single BrowserContext for app_shell. Not owned.
   content::BrowserContext* browser_context_;
 
+  // The PrefService for |browser_context_|. Not owned.
+  PrefService* pref_service_;
+
   // Support for extension APIs.
   scoped_ptr<ExtensionsAPIClient> api_client_;
-
-  // The PrefService for |browser_context_|.
-  scoped_ptr<PrefService> prefs_;
 
   // The extension cache used for download and installation.
   scoped_ptr<ExtensionCache> extension_cache_;

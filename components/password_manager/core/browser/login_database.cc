@@ -12,10 +12,12 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/pickle.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/affiliation_utils.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_urls.h"
@@ -27,7 +29,7 @@ using autofill::PasswordForm;
 
 namespace password_manager {
 
-static const int kCurrentVersionNumber = 9;
+const int kCurrentVersionNumber = 9;
 static const int kCompatibleVersionNumber = 1;
 
 Pickle SerializeVector(const std::vector<base::string16>& vec) {
@@ -117,6 +119,18 @@ void AddCallback(int err, sql::Statement* /*stmt*/) {
     DLOG(WARNING) << "LoginDatabase::AddLogin updated an existing form";
 }
 
+bool DoesMatchConstraints(const PasswordForm& form) {
+  if (!IsValidAndroidFacetURI(form.signon_realm) && form.origin.is_empty()) {
+    DLOG(ERROR) << "Constraint violation: form.origin is empty";
+    return false;
+  }
+  if (form.signon_realm.empty()) {
+    DLOG(ERROR) << "Constraint violation: form.signon_realm is empty";
+    return false;
+  }
+  return true;
+}
+
 // UMA_* macros assume that the name never changes. This is a helper function
 // where this assumption doesn't hold.
 void LogDynamicUMAStat(const std::string& name,
@@ -156,9 +170,15 @@ bool LoginDatabase::Init(const base::FilePath& db_path) {
   db_.set_exclusive_locking();
   db_.set_restrict_to_user();
 
-  if (!db_.Open(db_path)) {
-    LOG(WARNING) << "Unable to open the password store database.";
-    return false;
+  {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/138903 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("138903 LoginDatabase::Init db init"));
+
+    if (!db_.Open(db_path)) {
+      LOG(WARNING) << "Unable to open the password store database.";
+      return false;
+    }
   }
 
   sql::Transaction transaction(&db_);
@@ -423,6 +443,8 @@ void LoginDatabase::ReportMetrics(const std::string& sync_username,
 
 PasswordStoreChangeList LoginDatabase::AddLogin(const PasswordForm& form) {
   PasswordStoreChangeList list;
+  if (!DoesMatchConstraints(form))
+    return list;
   std::string encrypted_password;
   if (EncryptedString(form.password_value, &encrypted_password) !=
           ENCRYPTION_RESULT_SUCCESS)
@@ -532,6 +554,11 @@ PasswordStoreChangeList LoginDatabase::UpdateLogin(const PasswordForm& form) {
 }
 
 bool LoginDatabase::RemoveLogin(const PasswordForm& form) {
+  if (form.IsPublicSuffixMatch()) {
+    // Do not try to remove |form|. It is a modified copy of a password stored
+    // for a different origin, and it is not contained in the database.
+    return false;
+  }
   // Remove a login by UNIQUE-constrained fields.
   sql::Statement s(db_.GetCachedStatement(SQL_FROM_HERE,
       "DELETE FROM logins WHERE "

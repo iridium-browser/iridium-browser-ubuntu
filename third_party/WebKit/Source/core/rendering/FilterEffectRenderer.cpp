@@ -39,14 +39,12 @@
 #include "platform/FloatConversion.h"
 #include "platform/LengthFunctions.h"
 #include "platform/graphics/ColorSpace.h"
-#include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/ImageFilter.h"
 #include "platform/graphics/UnacceleratedImageBufferSurface.h"
 #include "platform/graphics/filters/FEColorMatrix.h"
 #include "platform/graphics/filters/FEComponentTransfer.h"
 #include "platform/graphics/filters/FEDropShadow.h"
 #include "platform/graphics/filters/FEGaussianBlur.h"
-#include "platform/graphics/filters/SkiaImageFilterBuilder.h"
 #include "platform/graphics/filters/SourceGraphic.h"
 #include "wtf/MathExtras.h"
 #include <algorithm>
@@ -76,20 +74,26 @@ FilterEffectRenderer::~FilterEffectRenderer()
 {
 }
 
+void FilterEffectRenderer::trace(Visitor* visitor)
+{
+    visitor->trace(m_lastEffect);
+    visitor->trace(m_referenceFilters);
+}
+
 bool FilterEffectRenderer::build(RenderObject* renderer, const FilterOperations& operations)
 {
     const RenderStyle* style = renderer->style();
     float zoom = style ? style->effectiveZoom() : 1.0f;
 
     // Create a parent filter for shorthand filters. These have already been scaled by the CSS code for page zoom, so scale is 1.0 here.
-    RefPtr<ReferenceFilter> parentFilter = ReferenceFilter::create(1.0f);
-    RefPtr<FilterEffect> previousEffect = SourceGraphic::create(parentFilter.get());
+    RefPtrWillBeRawPtr<ReferenceFilter> parentFilter = ReferenceFilter::create(1.0f);
+    RefPtrWillBeRawPtr<FilterEffect> previousEffect = SourceGraphic::create(parentFilter.get());
     for (size_t i = 0; i < operations.operations().size(); ++i) {
-        RefPtr<FilterEffect> effect;
+        RefPtrWillBeRawPtr<FilterEffect> effect = nullptr;
         FilterOperation* filterOperation = operations.operations().at(i).get();
         switch (filterOperation->type()) {
         case FilterOperation::REFERENCE: {
-            RefPtr<ReferenceFilter> referenceFilter = ReferenceFilter::create(zoom);
+            RefPtrWillBeRawPtr<ReferenceFilter> referenceFilter = ReferenceFilter::create(zoom);
             effect = ReferenceFilterBuilder::build(referenceFilter.get(), renderer, previousEffect.get(), toReferenceFilterOperation(filterOperation));
             referenceFilter->setLastEffect(effect);
             m_referenceFilters.append(referenceFilter);
@@ -254,27 +258,6 @@ void FilterEffectRenderer::clearIntermediateResults()
         m_lastEffect->clearResultsRecursive();
 }
 
-bool FilterEffectRenderer::beginFilterEffect(GraphicsContext* context, const FloatRect& filterBoxRect)
-{
-    SkiaImageFilterBuilder builder(context);
-    m_lastEffect->determineFilterPrimitiveSubregion(MapRectForward);
-    RefPtr<ImageFilter> imageFilter = builder.build(m_lastEffect.get(), ColorSpaceDeviceRGB);
-    if (!imageFilter)
-        return false;
-    context->save();
-    FloatRect boundaries = mapImageFilterRect(imageFilter.get(), filterBoxRect);
-    context->translate(filterBoxRect.x(), filterBoxRect.y());
-    boundaries.move(-filterBoxRect.x(), -filterBoxRect.y());
-    context->beginLayer(1, CompositeSourceOver, &boundaries, ColorFilterNone, imageFilter.get());
-    context->translate(-filterBoxRect.x(), -filterBoxRect.y());
-    return true;
-}
-
-void FilterEffectRenderer::endFilterEffect(GraphicsContext* context)
-{
-    context->endLayer();
-    context->restore();
-}
 
 } // namespace blink
 

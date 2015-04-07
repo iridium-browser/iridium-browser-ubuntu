@@ -5,7 +5,6 @@
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 
 #include "base/logging.h"
-#include "base/mac/mac_util.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_cocoa.h"
@@ -154,7 +153,7 @@
 }
 
 - (void)setMaxTopArrowHeight:(NSInteger)height {
-  containerCocoa_->SetMaxTopArrowHeight(height);
+  containerCocoa_->SetMaxTopArrowHeight(height, containerCocoa_.get());
 }
 
 - (CGFloat)heightOfInfoBars {

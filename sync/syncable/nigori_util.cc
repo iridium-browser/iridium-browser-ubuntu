@@ -112,7 +112,7 @@ bool VerifyDataTypeEncryptionForTest(
   while (!to_visit.empty()) {
     id_string = to_visit.front();
     to_visit.pop();
-    if (id_string.IsRoot())
+    if (id_string.IsNull())
       continue;
 
     Entry child(trans, GET_BY_ID, id_string);
@@ -243,7 +243,7 @@ void UpdateNigoriFromEncryptedTypes(ModelTypeSet encrypted_types,
                                     bool encrypt_everything,
                                     sync_pb::NigoriSpecifics* nigori) {
   nigori->set_encrypt_everything(encrypt_everything);
-  COMPILE_ASSERT(33 == MODEL_TYPE_COUNT, UpdateEncryptedTypes);
+  static_assert(34 == MODEL_TYPE_COUNT, "update encrypted types");
   nigori->set_encrypt_bookmarks(
       encrypted_types.Has(BOOKMARKS));
   nigori->set_encrypt_preferences(
@@ -279,7 +279,7 @@ ModelTypeSet GetEncryptedTypesFromNigori(
     return ModelTypeSet::All();
 
   ModelTypeSet encrypted_types;
-  COMPILE_ASSERT(33 == MODEL_TYPE_COUNT, UpdateEncryptedTypes);
+  static_assert(34 == MODEL_TYPE_COUNT, "update encrypted types");
   if (nigori.encrypt_bookmarks())
     encrypted_types.Put(BOOKMARKS);
   if (nigori.encrypt_preferences())

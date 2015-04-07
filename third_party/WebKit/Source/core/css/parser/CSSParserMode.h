@@ -31,6 +31,7 @@
 #ifndef CSSParserMode_h
 #define CSSParserMode_h
 
+#include "core/fetch/ResourceLoaderOptions.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/Referrer.h"
 
@@ -70,7 +71,7 @@ inline bool isInternalPropertyAndValueParsingEnabledForMode(CSSParserMode mode)
 
 inline bool isUnitLessLengthParsingEnabledForMode(CSSParserMode mode)
 {
-    return mode == HTMLQuirksMode || mode == HTMLAttributeMode || mode == SVGAttributeMode;
+    return mode == HTMLAttributeMode || mode == SVGAttributeMode;
 }
 
 inline bool isCSSViewportParsingEnabledForMode(CSSParserMode mode)
@@ -122,6 +123,8 @@ public:
 
     UseCounter* useCounter() const { return m_useCounter; }
 
+    ContentSecurityPolicyDisposition shouldCheckContentSecurityPolicy() const { return m_shouldCheckContentSecurityPolicy; }
+
 private:
     KURL m_baseURL;
     String m_charset;
@@ -129,6 +132,7 @@ private:
     Referrer m_referrer;
     bool m_isHTMLDocument;
     bool m_useLegacyBackgroundSizeShorthandBehavior;
+    ContentSecurityPolicyDisposition m_shouldCheckContentSecurityPolicy;
 
     UseCounter* m_useCounter;
 };

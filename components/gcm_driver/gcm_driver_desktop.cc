@@ -24,6 +24,10 @@
 #include "net/base/ip_endpoint.h"
 #include "net/url_request/url_request_context_getter.h"
 
+#if defined(OS_CHROMEOS)
+#include "components/timers/alarm_timer.h"
+#endif
+
 namespace gcm {
 
 class GCMDriverDesktop::IOWorker : public GCMClient::Delegate {
@@ -81,6 +85,7 @@ class GCMDriverDesktop::IOWorker : public GCMClient::Delegate {
   void UpdateAccountMapping(const AccountMapping& account_mapping);
   void RemoveAccountMapping(const std::string& account_id);
   void SetLastTokenFetchTime(const base::Time& time);
+  void WakeFromSuspendForHeartbeat(bool wake);
 
   // For testing purpose. Can be called from UI thread. Use with care.
   GCMClient* gcm_client_for_testing() const { return gcm_client_.get(); }
@@ -341,6 +346,20 @@ void GCMDriverDesktop::IOWorker::SetLastTokenFetchTime(const base::Time& time) {
     gcm_client_->SetLastTokenFetchTime(time);
 }
 
+void GCMDriverDesktop::IOWorker::WakeFromSuspendForHeartbeat(bool wake) {
+#if defined(OS_CHROMEOS)
+  DCHECK(io_thread_->RunsTasksOnCurrentThread());
+
+  scoped_ptr<base::Timer> timer;
+  if (wake)
+    timer.reset(new timers::AlarmTimer(true, false));
+  else
+    timer.reset(new base::Timer(true, false));
+
+  gcm_client_->UpdateHeartbeatTimer(timer.Pass());
+#endif
+}
+
 GCMDriverDesktop::GCMDriverDesktop(
     scoped_ptr<GCMClientFactory> gcm_client_factory,
     const GCMClient::ChromeBuildInfo& chrome_build_info,
@@ -369,6 +388,7 @@ GCMDriverDesktop::GCMDriverDesktop(
       last_token_fetch_time_(base::Time::Max()),
       ui_thread_(ui_thread),
       io_thread_(io_thread),
+      wake_from_suspend_enabled_(false),
       weak_ptr_factory_(this) {
   gcm_enabled_ = gcm_channel_status_syncer_->gcm_enabled();
 
@@ -405,17 +425,10 @@ void GCMDriverDesktop::Shutdown() {
 
 void GCMDriverDesktop::OnSignedIn() {
   signed_in_ = true;
-  EnsureStarted();
 }
 
 void GCMDriverDesktop::OnSignedOut() {
   signed_in_ = false;
-
-  // When sign-in enforcement is not dropped, we will stop the GCM connection
-  // when the user signs out.
-  if (!GCMDriver::IsAllowedForAllUsers()) {
-    Stop();
-  }
 }
 
 void GCMDriverDesktop::Purge() {
@@ -659,6 +672,31 @@ void GCMDriverDesktop::SetLastTokenFetchTime(const base::Time& time) {
                  time));
 }
 
+void GCMDriverDesktop::WakeFromSuspendForHeartbeat(bool wake) {
+  DCHECK(ui_thread_->RunsTasksOnCurrentThread());
+
+  wake_from_suspend_enabled_ = wake;
+  if (!IsStarted())
+    return;
+
+  if (!delayed_task_controller_->CanRunTaskWithoutDelay()) {
+    // The GCM service has started but the client is not ready yet.
+    delayed_task_controller_->AddTask(
+        base::Bind(&GCMDriverDesktop::WakeFromSuspendForHeartbeat,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   wake_from_suspend_enabled_));
+    return;
+  }
+
+  // The GCMClient is ready so we can go ahead and post this task to the
+  // IOWorker.
+  io_thread_->PostTask(
+      FROM_HERE,
+      base::Bind(&GCMDriverDesktop::IOWorker::WakeFromSuspendForHeartbeat,
+                 base::Unretained(io_worker_.get()),
+                 wake_from_suspend_enabled_));
+}
+
 void GCMDriverDesktop::SetAccountTokens(
     const std::vector<GCMClient::AccountTokenInfo>& account_tokens) {
   DCHECK(ui_thread_->RunsTasksOnCurrentThread());
@@ -681,8 +719,7 @@ GCMClient::Result GCMDriverDesktop::EnsureStarted() {
   if (!gcm_enabled_) {
     // Poll for channel status in order to find out when it is re-enabled when
     // GCM is currently disabled.
-    if (GCMDriver::IsAllowedForAllUsers())
-      gcm_channel_status_syncer_->EnsureStarted();
+    gcm_channel_status_syncer_->EnsureStarted();
 
     return GCMClient::GCM_DISABLED;
   }
@@ -691,17 +728,12 @@ GCMClient::Result GCMDriverDesktop::EnsureStarted() {
   if (app_handlers().empty())
     return GCMClient::UNKNOWN_ERROR;
 
-  // TODO(jianli): To be removed when sign-in enforcement is dropped.
-  if (!signed_in_ && !GCMDriver::IsAllowedForAllUsers())
-    return GCMClient::NOT_SIGNED_IN;
-
   DCHECK(!delayed_task_controller_);
   delayed_task_controller_.reset(new GCMDelayedTaskController);
 
   // Polling for channel status is only needed when GCM is supported for all
   // users.
-  if (GCMDriver::IsAllowedForAllUsers())
-    gcm_channel_status_syncer_->EnsureStarted();
+  gcm_channel_status_syncer_->EnsureStarted();
 
   UMA_HISTOGRAM_BOOLEAN("GCM.UserSignedIn", signed_in_);
 
@@ -714,6 +746,9 @@ GCMClient::Result GCMDriverDesktop::EnsureStarted() {
                  weak_ptr_factory_.GetWeakPtr()));
 
   gcm_started_ = true;
+  if (wake_from_suspend_enabled_)
+    WakeFromSuspendForHeartbeat(wake_from_suspend_enabled_);
+
   return GCMClient::SUCCESS;
 }
 
@@ -825,4 +860,3 @@ void GCMDriverDesktop::GetGCMStatisticsFinished(
 }
 
 }  // namespace gcm
-

@@ -16,7 +16,7 @@ class ToughCanvasCasesPage(page_module.Page):
     action_runner.WaitForJavaScriptCondition(
         "document.readyState == 'complete'")
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     action_runner.Wait(5)
 
 
@@ -41,7 +41,7 @@ class ToughCanvasCasesPageSet(page_set_module.PageSet):
       bucket=page_set_module.PARTNER_BUCKET)
 
     # Crashes on Galaxy Nexus. crbug.com/314131
-    # self.AddPage(MicrosofFirefliesPage(self))
+    # self.AddUserStory(MicrosofFirefliesPage(self))
 
     # Failing on Nexus 5 (http://crbug.com/364248):
     # 'http://geoapis.appspot.com/agdnZW9hcGlzchMLEgtFeGFtcGxlQ29kZRjh1wIM',
@@ -84,4 +84,4 @@ class ToughCanvasCasesPageSet(page_set_module.PageSet):
     ]
 
     for url in urls_list:
-      self.AddPage(ToughCanvasCasesPage(url, self))
+      self.AddUserStory(ToughCanvasCasesPage(url, self))

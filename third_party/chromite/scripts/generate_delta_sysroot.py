@@ -28,8 +28,8 @@ _CREATE_BATCH_EXCLUDE = ('--exclude=/tmp/', '--exclude=/var/cache/',
 # --delete is used to account for files that may be deleted during emerge.
 # Short version: rsync -rplgoDc --delete
 _CREATE_BATCH_ARGS = ('--recursive', '--links', '--perms', '--group',
-                     '--owner', '--devices', '--specials', '--checksum',
-                     '--delete')
+                      '--owner', '--devices', '--specials', '--checksum',
+                      '--delete')
 
 # We want to ensure that we use only binary packages. However,
 # build_packages will try to rebuild any unbuilt packages. Ignore those through
@@ -64,11 +64,11 @@ def _ParseCommandLine(argv):
   parser.add_argument('--out-dir', type=osutils.ExpandPath, required=True,
                       help='Directory to place the generated tarball.')
   parser.add_argument('--out-batch', default=constants.DELTA_SYSROOT_BATCH,
-                      help='The name to give to the batch file. Defaults to %r.'
-                            % constants.DELTA_SYSROOT_BATCH)
+                      help=('The name to give to the batch file. Defaults to '
+                            '%r.' % constants.DELTA_SYSROOT_BATCH))
   parser.add_argument('--out-file', default=constants.DELTA_SYSROOT_TAR,
-                      help='The name to give to the tarball. Defaults to %r.'
-                            % constants.DELTA_SYSROOT_TAR)
+                      help=('The name to give to the tarball. Defaults to %r.'
+                            % constants.DELTA_SYSROOT_TAR))
   parser.add_argument('--skip-tests', action='store_false', default=True,
                       dest='build_tests',
                       help='If we should not build the autotests packages.')
@@ -116,8 +116,10 @@ def GenerateSysroot(sysroot, board, build_tests, unpack_only=False):
 
 
 def main(argv):
-  """Generate a tarball containing a sysroot that can be patched over
-  extracted prebuilt package contents to create a complete sysroot.
+  """Generate the delta sysroot
+
+  Create a tarball containing a sysroot that can be patched over extracted
+  prebuilt package contents to create a complete sysroot.
 
   1. Unpack all packages for a board into an unpack_only sysroot directory.
   2. Emerge all packages for a board into a build sysroot directory.

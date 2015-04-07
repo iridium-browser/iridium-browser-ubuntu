@@ -22,11 +22,10 @@
 #include "base/synchronization/waitable_event.h"
 #include "cc/blink/web_layer_impl.h"
 #include "cc/layers/video_layer.h"
-#include "gpu/GLES2/gl2extchromium.h"
-#include "gpu/command_buffer/common/mailbox_holder.h"
+#include "gpu/blink/webgraphicscontext3d_impl.h"
 #include "media/audio/null_audio_sink.h"
-#include "media/base/audio_hardware_config.h"
 #include "media/base/bind_to_current_loop.h"
+#include "media/base/cdm_context.h"
 #include "media/base/limits.h"
 #include "media/base/media_log.h"
 #include "media/base/pipeline.h"
@@ -36,28 +35,20 @@
 #include "media/blink/encrypted_media_player_support.h"
 #include "media/blink/texttrack_impl.h"
 #include "media/blink/webaudiosourceprovider_impl.h"
+#include "media/blink/webcontentdecryptionmodule_impl.h"
 #include "media/blink/webinbandtexttrack_impl.h"
 #include "media/blink/webmediaplayer_delegate.h"
-#include "media/blink/webmediaplayer_params.h"
 #include "media/blink/webmediaplayer_util.h"
 #include "media/blink/webmediasource_impl.h"
-#include "media/filters/audio_renderer_impl.h"
 #include "media/filters/chunk_demuxer.h"
-#include "media/filters/ffmpeg_audio_decoder.h"
 #include "media/filters/ffmpeg_demuxer.h"
-#include "media/filters/ffmpeg_video_decoder.h"
-#include "media/filters/gpu_video_accelerator_factories.h"
-#include "media/filters/gpu_video_decoder.h"
-#include "media/filters/opus_audio_decoder.h"
-#include "media/filters/renderer_impl.h"
-#include "media/filters/video_renderer_impl.h"
-#include "media/filters/vpx_video_decoder.h"
 #include "third_party/WebKit/public/platform/WebMediaSource.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
+#include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/web/WebView.h"
 
@@ -88,37 +79,20 @@ namespace {
 const double kMinRate = 0.0625;
 const double kMaxRate = 16.0;
 
-class SyncPointClientImpl : public media::VideoFrame::SyncPointClient {
- public:
-  explicit SyncPointClientImpl(
-      blink::WebGraphicsContext3D* web_graphics_context)
-      : web_graphics_context_(web_graphics_context) {}
-  ~SyncPointClientImpl() override {}
-  uint32 InsertSyncPoint() override {
-    return web_graphics_context_->insertSyncPoint();
-  }
-  void WaitSyncPoint(uint32 sync_point) override {
-    web_graphics_context_->waitSyncPoint(sync_point);
-  }
-
- private:
-  blink::WebGraphicsContext3D* web_graphics_context_;
-};
-
 }  // namespace
 
 namespace media {
 
 class BufferedDataSourceHostImpl;
 
-#define COMPILE_ASSERT_MATCHING_ENUM(name) \
-  COMPILE_ASSERT(static_cast<int>(WebMediaPlayer::CORSMode ## name) == \
-                 static_cast<int>(BufferedResourceLoader::k ## name), \
-                 mismatching_enums)
-COMPILE_ASSERT_MATCHING_ENUM(Unspecified);
-COMPILE_ASSERT_MATCHING_ENUM(Anonymous);
-COMPILE_ASSERT_MATCHING_ENUM(UseCredentials);
-#undef COMPILE_ASSERT_MATCHING_ENUM
+#define STATIC_ASSERT_MATCHING_ENUM(name) \
+  static_assert(static_cast<int>(WebMediaPlayer::CORSMode ## name) == \
+                static_cast<int>(BufferedResourceLoader::k ## name), \
+                "mismatching enum values: " #name)
+STATIC_ASSERT_MATCHING_ENUM(Unspecified);
+STATIC_ASSERT_MATCHING_ENUM(Anonymous);
+STATIC_ASSERT_MATCHING_ENUM(UseCredentials);
+#undef STATIC_ASSERT_MATCHING_ENUM
 
 #define BIND_TO_RENDER_LOOP(function) \
   (DCHECK(main_task_runner_->BelongsToCurrentThread()), \
@@ -137,7 +111,8 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
     blink::WebLocalFrame* frame,
     blink::WebMediaPlayerClient* client,
     base::WeakPtr<WebMediaPlayerDelegate> delegate,
-    scoped_ptr<Renderer> renderer,
+    scoped_ptr<RendererFactory> renderer_factory,
+    scoped_ptr<CdmFactory> cdm_factory,
     const WebMediaPlayerParams& params)
     : frame_(frame),
       network_state_(WebMediaPlayer::NetworkStateEmpty),
@@ -159,20 +134,18 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
       client_(client),
       delegate_(delegate),
       defer_load_cb_(params.defer_load_cb()),
-      gpu_factories_(params.gpu_factories()),
+      context_3d_cb_(params.context_3d_cb()),
       supports_save_(true),
       chunk_demuxer_(NULL),
       compositor_task_runner_(params.compositor_task_runner()),
       compositor_(new VideoFrameCompositor(
           BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnNaturalSizeChanged),
           BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnOpacityChanged))),
-      text_track_index_(0),
       encrypted_media_support_(
-          params.CreateEncryptedMediaPlayerSupport(client)),
-      audio_hardware_config_(params.audio_hardware_config()),
-      renderer_(renderer.Pass()) {
-  DCHECK(encrypted_media_support_);
-
+          cdm_factory.Pass(),
+          client,
+          base::Bind(&WebMediaPlayerImpl::SetCdm, AsWeakPtr())),
+      renderer_factory_(renderer_factory.Pass()) {
   // Threaded compositing isn't enabled universally yet.
   if (!compositor_task_runner_.get())
     compositor_task_runner_ = base::MessageLoopProxy::current();
@@ -180,16 +153,14 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
   media_log_->AddEvent(
       media_log_->CreateEvent(MediaLogEvent::WEBMEDIAPLAYER_CREATED));
 
-  // TODO(xhwang): When we use an external Renderer, many methods won't work,
-  // e.g. GetCurrentFrameFromCompositor(). Fix this in a future CL.
-  if (renderer_)
-    return;
+  if (params.initial_cdm()) {
+    SetCdm(
+        ToWebContentDecryptionModuleImpl(params.initial_cdm())->GetCdmContext(),
+        base::Bind(&IgnoreCdmAttached));
+  }
 
-  // |gpu_factories_| requires that its entry points be called on its
-  // |GetTaskRunner()|.  Since |pipeline_| will own decoders created from the
-  // factories, require that their message loops are identical.
-  DCHECK(!gpu_factories_.get() ||
-         (gpu_factories_->GetTaskRunner() == media_task_runner_.get()));
+  // TODO(xhwang): When we use an external Renderer, many methods won't work,
+  // e.g. GetCurrentFrameFromCompositor(). See http://crbug.com/434861
 
   // Use the null sink if no sink was provided.
   audio_source_provider_ = new WebAudioSourceProviderImpl(
@@ -216,7 +187,7 @@ WebMediaPlayerImpl::~WebMediaPlayerImpl() {
     chunk_demuxer_ = NULL;
   }
 
-  gpu_factories_ = NULL;
+  renderer_factory_.reset();
 
   // Make sure to kill the pipeline so there's no more media threads running.
   // Note: stopping the pipeline might block for a long time.
@@ -302,7 +273,7 @@ void WebMediaPlayerImpl::pause() {
   pipeline_.SetPlaybackRate(0.0f);
   if (data_source_)
     data_source_->MediaIsPaused();
-  paused_time_ = pipeline_.GetMediaTime();
+  UpdatePausedTime();
 
   media_log_->AddEvent(media_log_->CreateEvent(MediaLogEvent::PAUSE));
 
@@ -316,11 +287,12 @@ bool WebMediaPlayerImpl::supportsSave() const {
 }
 
 void WebMediaPlayerImpl::seek(double seconds) {
-  DVLOG(1) << __FUNCTION__ << "(" << seconds << ")";
+  DVLOG(1) << __FUNCTION__ << "(" << seconds << "s)";
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 
   ended_ = false;
 
+  ReadyState old_state = ready_state_;
   if (ready_state_ > WebMediaPlayer::ReadyStateHaveMetadata)
     SetReadyState(WebMediaPlayer::ReadyStateHaveMetadata);
 
@@ -337,8 +309,20 @@ void WebMediaPlayerImpl::seek(double seconds) {
   media_log_->AddEvent(media_log_->CreateSeekEvent(seconds));
 
   // Update our paused time.
-  if (paused_)
-    paused_time_ = seek_time;
+  // In paused state ignore the seek operations to current time if the loading
+  // is completed and generate OnPipelineBufferingStateChanged event to
+  // eventually fire seeking and seeked events
+  if (paused_) {
+    if (paused_time_ != seek_time) {
+      paused_time_ = seek_time;
+    } else if (old_state == ReadyStateHaveEnoughData) {
+      main_task_runner_->PostTask(
+          FROM_HERE,
+          base::Bind(&WebMediaPlayerImpl::OnPipelineBufferingStateChanged,
+                     AsWeakPtr(), BUFFERING_HAVE_ENOUGH));
+      return;
+    }
+  }
 
   seeking_ = true;
 
@@ -387,14 +371,14 @@ void WebMediaPlayerImpl::setVolume(double volume) {
   pipeline_.SetVolume(volume);
 }
 
-#define COMPILE_ASSERT_MATCHING_ENUM(webkit_name, chromium_name) \
-    COMPILE_ASSERT(static_cast<int>(WebMediaPlayer::webkit_name) == \
-                   static_cast<int>(BufferedDataSource::chromium_name), \
-                   mismatching_enums)
-COMPILE_ASSERT_MATCHING_ENUM(PreloadNone, NONE);
-COMPILE_ASSERT_MATCHING_ENUM(PreloadMetaData, METADATA);
-COMPILE_ASSERT_MATCHING_ENUM(PreloadAuto, AUTO);
-#undef COMPILE_ASSERT_MATCHING_ENUM
+#define STATIC_ASSERT_MATCHING_ENUM(webkit_name, chromium_name) \
+    static_assert(static_cast<int>(WebMediaPlayer::webkit_name) == \
+                  static_cast<int>(BufferedDataSource::chromium_name), \
+                  "mismatching enum values: " #webkit_name)
+STATIC_ASSERT_MATCHING_ENUM(PreloadNone, NONE);
+STATIC_ASSERT_MATCHING_ENUM(PreloadMetaData, METADATA);
+STATIC_ASSERT_MATCHING_ENUM(PreloadAuto, AUTO);
+#undef STATIC_ASSERT_MATCHING_ENUM
 
 void WebMediaPlayerImpl::setPreload(WebMediaPlayer::Preload preload) {
   DVLOG(1) << __FUNCTION__ << "(" << preload << ")";
@@ -536,13 +520,18 @@ void WebMediaPlayerImpl::paint(blink::WebCanvas* canvas,
       GetCurrentFrameFromCompositor();
 
   gfx::Rect gfx_rect(rect);
-
-  skcanvas_video_renderer_.Paint(video_frame,
-                                 canvas,
-                                 gfx_rect,
-                                 alpha,
-                                 mode,
-                                 pipeline_metadata_.video_rotation);
+  Context3D context_3d;
+  if (video_frame.get() &&
+      video_frame->format() == VideoFrame::NATIVE_TEXTURE) {
+    if (!context_3d_cb_.is_null()) {
+      context_3d = context_3d_cb_.Run();
+    }
+    // GPU Process crashed.
+    if (!context_3d.gl)
+      return;
+  }
+  skcanvas_video_renderer_.Paint(video_frame, canvas, gfx_rect, alpha, mode,
+                                 pipeline_metadata_.video_rotation, context_3d);
 }
 
 bool WebMediaPlayerImpl::hasSingleSecurityOrigin() const {
@@ -602,43 +591,19 @@ bool WebMediaPlayerImpl::copyVideoTextureToPlatformTexture(
   scoped_refptr<VideoFrame> video_frame =
       GetCurrentFrameFromCompositor();
 
-  if (!video_frame.get())
+  if (!video_frame.get() ||
+      video_frame->format() != VideoFrame::NATIVE_TEXTURE) {
     return false;
-  if (video_frame->format() != VideoFrame::NATIVE_TEXTURE)
-    return false;
+  }
 
-  const gpu::MailboxHolder* mailbox_holder = video_frame->mailbox_holder();
-  if (mailbox_holder->texture_target != GL_TEXTURE_2D)
-    return false;
-
-  web_graphics_context->waitSyncPoint(mailbox_holder->sync_point);
-  uint32 source_texture = web_graphics_context->createAndConsumeTextureCHROMIUM(
-      GL_TEXTURE_2D, mailbox_holder->mailbox.name);
-
-  // The video is stored in a unmultiplied format, so premultiply
-  // if necessary.
-  web_graphics_context->pixelStorei(GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM,
-                                    premultiply_alpha);
-  // Application itself needs to take care of setting the right flip_y
-  // value down to get the expected result.
-  // flip_y==true means to reverse the video orientation while
-  // flip_y==false means to keep the intrinsic orientation.
-  web_graphics_context->pixelStorei(GL_UNPACK_FLIP_Y_CHROMIUM, flip_y);
-  web_graphics_context->copyTextureCHROMIUM(GL_TEXTURE_2D,
-                                            source_texture,
-                                            texture,
-                                            level,
-                                            internal_format,
-                                            type);
-  web_graphics_context->pixelStorei(GL_UNPACK_FLIP_Y_CHROMIUM, false);
-  web_graphics_context->pixelStorei(GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM,
-                                    false);
-
-  web_graphics_context->deleteTexture(source_texture);
-  web_graphics_context->flush();
-
-  SyncPointClientImpl client(web_graphics_context);
-  video_frame->UpdateReleaseSyncPoint(&client);
+  // TODO(dshwang): need more elegant way to convert WebGraphicsContext3D to
+  // GLES2Interface.
+  gpu::gles2::GLES2Interface* gl =
+      static_cast<gpu_blink::WebGraphicsContext3DImpl*>(web_graphics_context)
+          ->GetGLInterface();
+  SkCanvasVideoRenderer::CopyVideoFrameTextureToGLTexture(
+      gl, video_frame.get(), texture, level, internal_format, type,
+      premultiply_alpha, flip_y);
   return true;
 }
 
@@ -648,7 +613,7 @@ WebMediaPlayerImpl::generateKeyRequest(const WebString& key_system,
                                        unsigned init_data_length) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 
-  return encrypted_media_support_->GenerateKeyRequest(
+  return encrypted_media_support_.GenerateKeyRequest(
       frame_, key_system, init_data, init_data_length);
 }
 
@@ -661,7 +626,7 @@ WebMediaPlayer::MediaKeyException WebMediaPlayerImpl::addKey(
     const WebString& session_id) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 
-  return encrypted_media_support_->AddKey(
+  return encrypted_media_support_.AddKey(
       key_system, key, key_length, init_data, init_data_length, session_id);
 }
 
@@ -670,14 +635,7 @@ WebMediaPlayer::MediaKeyException WebMediaPlayerImpl::cancelKeyRequest(
     const WebString& session_id) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 
-  return encrypted_media_support_->CancelKeyRequest(key_system, session_id);
-}
-
-void WebMediaPlayerImpl::setContentDecryptionModule(
-    blink::WebContentDecryptionModule* cdm) {
-  DCHECK(main_task_runner_->BelongsToCurrentThread());
-
-  encrypted_media_support_->SetContentDecryptionModule(cdm);
+  return encrypted_media_support_.CancelKeyRequest(key_system, session_id);
 }
 
 void WebMediaPlayerImpl::setContentDecryptionModule(
@@ -685,7 +643,56 @@ void WebMediaPlayerImpl::setContentDecryptionModule(
     blink::WebContentDecryptionModuleResult result) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 
-  encrypted_media_support_->SetContentDecryptionModule(cdm, result);
+  // TODO(xhwang): Support setMediaKeys(0) if necessary: http://crbug.com/330324
+  if (!cdm) {
+    result.completeWithError(
+        blink::WebContentDecryptionModuleExceptionNotSupportedError, 0,
+        "Null MediaKeys object is not supported.");
+    return;
+  }
+
+  SetCdm(ToWebContentDecryptionModuleImpl(cdm)->GetCdmContext(),
+         BIND_TO_RENDER_LOOP1(&WebMediaPlayerImpl::OnCdmAttached, result));
+}
+
+void WebMediaPlayerImpl::OnEncryptedMediaInitData(
+    const std::string& init_data_type,
+    const std::vector<uint8>& init_data) {
+  DCHECK(!init_data_type.empty());
+
+  // Do not fire "encrypted" event if encrypted media is not enabled.
+  // TODO(xhwang): Handle this in |client_|.
+  if (!blink::WebRuntimeFeatures::isPrefixedEncryptedMediaEnabled() &&
+      !blink::WebRuntimeFeatures::isEncryptedMediaEnabled()) {
+    return;
+  }
+
+  // TODO(xhwang): Update this UMA name.
+  UMA_HISTOGRAM_COUNTS("Media.EME.NeedKey", 1);
+
+  encrypted_media_support_.SetInitDataType(init_data_type);
+
+  const uint8* init_data_ptr = init_data.empty() ? nullptr : &init_data[0];
+  client_->encrypted(WebString::fromUTF8(init_data_type), init_data_ptr,
+                     base::saturated_cast<unsigned int>(init_data.size()));
+}
+
+void WebMediaPlayerImpl::SetCdm(CdmContext* cdm_context,
+                                const CdmAttachedCB& cdm_attached_cb) {
+  pipeline_.SetCdm(cdm_context, cdm_attached_cb);
+}
+
+void WebMediaPlayerImpl::OnCdmAttached(
+    blink::WebContentDecryptionModuleResult result,
+    bool success) {
+  if (success) {
+    result.complete();
+    return;
+  }
+
+  result.completeWithError(
+      blink::WebContentDecryptionModuleExceptionNotSupportedError, 0,
+      "Unable to set MediaKeys object");
 }
 
 void WebMediaPlayerImpl::OnPipelineSeeked(bool time_changed,
@@ -706,7 +713,7 @@ void WebMediaPlayerImpl::OnPipelineSeeked(bool time_changed,
 
   // Update our paused time.
   if (paused_)
-    paused_time_ = pipeline_.GetMediaTime();
+    UpdatePausedTime();
 
   should_notify_time_changed_ = time_changed;
 }
@@ -737,7 +744,7 @@ void WebMediaPlayerImpl::OnPipelineError(PipelineStatus error) {
   SetNetworkState(PipelineErrorToNetworkState(error));
 
   if (error == PIPELINE_ERROR_DECRYPT)
-    encrypted_media_support_->OnPipelineDecryptError();
+    encrypted_media_support_.OnPipelineDecryptError();
 }
 
 void WebMediaPlayerImpl::OnPipelineMetadata(
@@ -807,8 +814,7 @@ void WebMediaPlayerImpl::OnAddTextTrack(
       blink::WebString::fromUTF8(config.id());
 
   scoped_ptr<WebInbandTextTrackImpl> web_inband_text_track(
-      new WebInbandTextTrackImpl(web_kind, web_label, web_language, web_id,
-                                 text_track_index_++));
+      new WebInbandTextTrackImpl(web_kind, web_label, web_language, web_id));
 
   scoped_ptr<TextTrack> text_track(new TextTrackImpl(
       main_task_runner_, client_, web_inband_text_track.Pass()));
@@ -838,52 +844,6 @@ void WebMediaPlayerImpl::NotifyDownloading(bool is_downloading) {
           "is_downloading_data", is_downloading));
 }
 
-// TODO(xhwang): Move this to a factory class so that we can create different
-// renderers.
-scoped_ptr<Renderer> WebMediaPlayerImpl::CreateRenderer() {
-  SetDecryptorReadyCB set_decryptor_ready_cb =
-      encrypted_media_support_->CreateSetDecryptorReadyCB();
-
-  // Create our audio decoders and renderer.
-  ScopedVector<AudioDecoder> audio_decoders;
-
-  audio_decoders.push_back(new media::FFmpegAudioDecoder(
-      media_task_runner_, base::Bind(&LogMediaSourceError, media_log_)));
-  audio_decoders.push_back(new media::OpusAudioDecoder(media_task_runner_));
-
-  scoped_ptr<AudioRenderer> audio_renderer(
-      new AudioRendererImpl(media_task_runner_,
-                            audio_source_provider_.get(),
-                            audio_decoders.Pass(),
-                            set_decryptor_ready_cb,
-                            audio_hardware_config_,
-                            media_log_));
-
-  // Create our video decoders and renderer.
-  ScopedVector<VideoDecoder> video_decoders;
-
-  if (gpu_factories_.get())
-    video_decoders.push_back(new GpuVideoDecoder(gpu_factories_));
-
-#if !defined(MEDIA_DISABLE_LIBVPX)
-  video_decoders.push_back(new VpxVideoDecoder(media_task_runner_));
-#endif  // !defined(MEDIA_DISABLE_LIBVPX)
-
-  video_decoders.push_back(new FFmpegVideoDecoder(media_task_runner_));
-
-  scoped_ptr<VideoRenderer> video_renderer(new VideoRendererImpl(
-      media_task_runner_,
-      video_decoders.Pass(),
-      set_decryptor_ready_cb,
-      base::Bind(&WebMediaPlayerImpl::FrameReady, base::Unretained(this)),
-      true,
-      media_log_));
-
-  // Create renderer.
-  return scoped_ptr<Renderer>(new RendererImpl(
-      media_task_runner_, audio_renderer.Pass(), video_renderer.Pass()));
-}
-
 void WebMediaPlayerImpl::StartPipeline() {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 
@@ -892,18 +852,16 @@ void WebMediaPlayerImpl::StartPipeline() {
                         (load_type_ == LoadTypeMediaSource));
 
   LogCB mse_log_cb;
-  Demuxer::NeedKeyCB need_key_cb =
-      encrypted_media_support_->CreateNeedKeyCB();
+  Demuxer::EncryptedMediaInitDataCB encrypted_media_init_data_cb =
+      BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnEncryptedMediaInitData);
 
   // Figure out which demuxer to use.
   if (load_type_ != LoadTypeMediaSource) {
     DCHECK(!chunk_demuxer_);
     DCHECK(data_source_);
 
-    demuxer_.reset(new FFmpegDemuxer(
-        media_task_runner_, data_source_.get(),
-        need_key_cb,
-        media_log_));
+    demuxer_.reset(new FFmpegDemuxer(media_task_runner_, data_source_.get(),
+                                     encrypted_media_init_data_cb, media_log_));
   } else {
     DCHECK(!chunk_demuxer_);
     DCHECK(!data_source_);
@@ -912,26 +870,23 @@ void WebMediaPlayerImpl::StartPipeline() {
 
     chunk_demuxer_ = new ChunkDemuxer(
         BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnDemuxerOpened),
-        need_key_cb,
-        mse_log_cb,
-        true);
+        encrypted_media_init_data_cb, mse_log_cb, media_log_, true);
     demuxer_.reset(chunk_demuxer_);
   }
 
   // ... and we're ready to go!
   seeking_ = true;
 
-  if (!renderer_)
-    renderer_ = CreateRenderer();
-
   pipeline_.Start(
       demuxer_.get(),
-      renderer_.Pass(),
+      renderer_factory_->CreateRenderer(media_task_runner_,
+                                        audio_source_provider_.get()),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnPipelineEnded),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnPipelineError),
       BIND_TO_RENDER_LOOP1(&WebMediaPlayerImpl::OnPipelineSeeked, false),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnPipelineMetadata),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnPipelineBufferingStateChanged),
+      base::Bind(&WebMediaPlayerImpl::FrameReady, base::Unretained(this)),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnDurationChanged),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnAddTextTrack));
 }
@@ -1036,6 +991,17 @@ WebMediaPlayerImpl::GetCurrentFrameFromCompositor() {
                                                &event));
   event.Wait();
   return video_frame;
+}
+
+void WebMediaPlayerImpl::UpdatePausedTime() {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  // pause() may be called after playback has ended and the HTMLMediaElement
+  // requires that currentTime() == duration() after ending.  We want to ensure
+  // |paused_time_| matches currentTime() in this case or a future seek() may
+  // incorrectly discard what it thinks is a seek to the existing time.
+  paused_time_ =
+      ended_ ? pipeline_.GetMediaDuration() : pipeline_.GetMediaTime();
 }
 
 }  // namespace media

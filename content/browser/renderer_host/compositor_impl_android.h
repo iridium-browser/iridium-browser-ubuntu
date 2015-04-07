@@ -12,14 +12,13 @@
 #include "base/memory/weak_ptr.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_single_thread_client.h"
-#include "content/browser/android/ui_resource_provider_impl.h"
-#include "content/browser/renderer_host/image_transport_factory_android.h"
 #include "content/common/content_export.h"
 #include "content/common/gpu/client/context_provider_command_buffer.h"
 #include "content/public/browser/android/compositor.h"
 #include "gpu/command_buffer/common/capabilities.h"
 #include "third_party/khronos/GLES2/gl2.h"
-#include "ui/base/android/system_ui_resource_manager.h"
+#include "ui/android/resources/resource_manager_impl.h"
+#include "ui/android/resources/ui_resource_provider.h"
 #include "ui/base/android/window_android_compositor.h"
 
 class SkBitmap;
@@ -28,11 +27,12 @@ struct ANativeWindow;
 namespace cc {
 class Layer;
 class LayerTreeHost;
+class SurfaceIdAllocator;
 }
 
 namespace content {
 class CompositorClient;
-class UIResourceProvider;
+class OnscreenDisplayClient;
 
 // -----------------------------------------------------------------------------
 // Browser-side compositor that manages a tree of content and UI layers.
@@ -41,7 +41,6 @@ class CONTENT_EXPORT CompositorImpl
     : public Compositor,
       public cc::LayerTreeHostClient,
       public cc::LayerTreeHostSingleThreadClient,
-      public ImageTransportFactoryAndroidObserver,
       public ui::WindowAndroidCompositor {
  public:
   CompositorImpl(CompositorClient* client, gfx::NativeWindow root_window);
@@ -60,7 +59,8 @@ class CONTENT_EXPORT CompositorImpl
   virtual void SetWindowBounds(const gfx::Size& size) override;
   virtual void SetHasTransparentBackground(bool flag) override;
   virtual void SetNeedsComposite() override;
-  virtual UIResourceProvider& GetUIResourceProvider() override;
+  virtual ui::UIResourceProvider& GetUIResourceProvider() override;
+  virtual ui::ResourceManager& GetResourceManager() override;
 
   // LayerTreeHostClient implementation.
   virtual void WillBeginMainFrame(int frame_id) override {}
@@ -70,14 +70,16 @@ class CONTENT_EXPORT CompositorImpl
   virtual void ApplyViewportDeltas(
       const gfx::Vector2d& inner_delta,
       const gfx::Vector2d& outer_delta,
+      const gfx::Vector2dF& elastic_overscroll_delta,
       float page_scale,
       float top_controls_delta) override {}
   virtual void ApplyViewportDeltas(
       const gfx::Vector2d& scroll_delta,
       float page_scale,
       float top_controls_delta) override {}
-  virtual void RequestNewOutputSurface(bool fallback) override;
-  virtual void DidInitializeOutputSurface() override {}
+  virtual void RequestNewOutputSurface() override;
+  virtual void DidInitializeOutputSurface() override;
+  virtual void DidFailToInitializeOutputSurface() override;
   virtual void WillCommit() override {}
   virtual void DidCommit() override;
   virtual void DidCommitAndDrawFrame() override {}
@@ -89,9 +91,6 @@ class CONTENT_EXPORT CompositorImpl
   virtual void DidPostSwapBuffers() override;
   virtual void DidAbortSwapBuffers() override;
 
-  // ImageTransportFactoryAndroidObserver implementation.
-  virtual void OnLostResources() override;
-
   // WindowAndroidCompositor implementation.
   virtual void AttachLayerForReadback(scoped_refptr<cc::Layer> layer) override;
   virtual void RequestCopyOfOutputOnRootLayer(
@@ -99,7 +98,6 @@ class CONTENT_EXPORT CompositorImpl
   virtual void OnVSync(base::TimeTicks frame_time,
                        base::TimeDelta vsync_period) override;
   virtual void SetNeedsAnimate() override;
-  virtual ui::SystemUIResourceManager& GetSystemUIResourceManager() override;
 
   void SetWindowSurface(ANativeWindow* window);
 
@@ -110,7 +108,7 @@ class CONTENT_EXPORT CompositorImpl
   };
   void PostComposite(CompositingTrigger trigger);
   void Composite(CompositingTrigger trigger);
-  void CreateOutputSurface(bool fallback);
+  void CreateOutputSurface();
 
   bool WillCompositeThisFrame() const {
     return current_composite_task_ &&
@@ -132,7 +130,7 @@ class CONTENT_EXPORT CompositorImpl
     composite_on_vsync_trigger_ = DO_NOT_COMPOSITE;
     will_composite_immediately_ = false;
   }
-  void OnGpuChannelEstablished();
+  void CreateLayerTreeHost();
 
   // root_layer_ is the persistent internal root layer, while subroot_layer_
   // is the one attached by the compositor client.
@@ -140,7 +138,11 @@ class CONTENT_EXPORT CompositorImpl
   scoped_refptr<cc::Layer> subroot_layer_;
 
   scoped_ptr<cc::LayerTreeHost> host_;
-  content::UIResourceProviderImpl ui_resource_provider_;
+  ui::UIResourceProvider ui_resource_provider_;
+  ui::ResourceManagerImpl resource_manager_;
+
+  scoped_ptr<OnscreenDisplayClient> display_client_;
+  scoped_ptr<cc::SurfaceIdAllocator> surface_id_allocator_;
 
   gfx::Size size_;
   bool has_transparent_background_;
@@ -180,8 +182,15 @@ class CONTENT_EXPORT CompositorImpl
   // the GPU thread.
   unsigned int pending_swapbuffers_;
 
+  size_t num_successive_context_creation_failures_;
+
   base::TimeDelta vsync_period_;
   base::TimeTicks last_vsync_;
+
+  // If set, a pending task to request or create a new OutputSurface for the
+  // current host. Cancelled when |host_| gets destroyed, so we don't call
+  // into the new LayerTreeHost with an old LTH's request.
+  scoped_ptr<base::CancelableClosure> output_surface_task_for_host_;
 
   base::WeakPtrFactory<CompositorImpl> weak_factory_;
 

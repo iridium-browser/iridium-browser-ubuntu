@@ -32,8 +32,10 @@
 #include "web/PopupContainer.h"
 
 #include "core/dom/Document.h"
+#include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/html/forms/PopupMenuClient.h"
 #include "core/page/Chrome.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
@@ -43,7 +45,6 @@
 #include "platform/PlatformScreen.h"
 #include "platform/PlatformTouchEvent.h"
 #include "platform/PlatformWheelEvent.h"
-#include "platform/PopupMenuClient.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/graphics/GraphicsContext.h"
@@ -327,8 +328,7 @@ bool PopupContainer::handleGestureEvent(const PlatformGestureEvent& gestureEvent
         handleMouseReleaseEvent(fakeMouseUp);
         return true;
     }
-    case PlatformEvent::GestureScrollUpdate:
-    case PlatformEvent::GestureScrollUpdateWithoutPropagation: {
+    case PlatformEvent::GestureScrollUpdate: {
         PlatformWheelEvent syntheticWheelEvent(gestureEvent.position(), gestureEvent.globalPosition(), gestureEvent.deltaX(), gestureEvent.deltaY(), gestureEvent.deltaX() / 120.0f, gestureEvent.deltaY() / 120.0f, ScrollByPixelWheelEvent, gestureEvent.shiftKey(), gestureEvent.ctrlKey(), gestureEvent.altKey(), gestureEvent.metaKey());
         handleWheelEvent(syntheticWheelEvent);
         return true;
@@ -420,6 +420,10 @@ void PopupContainer::showInRect(const FloatQuad& controlPosition, const IntSize&
     m_controlPosition.setP2(v->contentsToWindow(IntPoint(controlPosition.p2().x(), controlPosition.p2().y())));
     m_controlPosition.setP3(v->contentsToWindow(IntPoint(controlPosition.p3().x(), controlPosition.p3().y())));
     m_controlPosition.setP4(v->contentsToWindow(IntPoint(controlPosition.p4().x(), controlPosition.p4().y())));
+
+    FloatRect controlBounds = m_controlPosition.boundingBox();
+    controlBounds.moveBy(-v->page()->frameHost().pinchViewport().location());
+    m_controlPosition = controlBounds;
 
     m_controlSize = controlSize;
 
@@ -543,7 +547,7 @@ void PopupContainer::getPopupMenuInfo(WebPopupMenuInfo* info)
 void PopupContainer::invalidateRect(const IntRect& rect)
 {
     if (HostWindow* h = hostWindow())
-        h->invalidateContentsAndRootView(rect);
+        h->invalidateRect(rect);
 }
 
 HostWindow* PopupContainer::hostWindow() const

@@ -132,7 +132,6 @@ class SSLClientSocketPoolTest
                                 &host_resolver_,
                                 &transport_socket_pool_,
                                 NULL,
-                                NULL,
                                 NULL),
         enable_ssl_connect_job_waiting_(false) {
     scoped_refptr<SSLConfigService> ssl_config_service(
@@ -143,22 +142,15 @@ class SSLClientSocketPoolTest
   void CreatePool(bool transport_pool, bool http_proxy_pool, bool socks_pool) {
     ssl_histograms_.reset(new ClientSocketPoolHistograms("SSLUnitTest"));
     pool_.reset(new SSLClientSocketPool(
-        kMaxSockets,
-        kMaxSocketsPerGroup,
-        ssl_histograms_.get(),
-        NULL /* host_resolver */,
-        NULL /* cert_verifier */,
-        NULL /* channel_id_service */,
-        NULL /* transport_security_state */,
-        NULL /* cert_transparency_verifier */,
-        std::string() /* ssl_session_cache_shard */,
-        &socket_factory_,
+        kMaxSockets, kMaxSocketsPerGroup, ssl_histograms_.get(),
+        NULL /* host_resolver */, NULL /* cert_verifier */,
+        NULL /* channel_id_service */, NULL /* transport_security_state */,
+        NULL /* cert_transparency_verifier */, NULL /* cert_policy_enforcer */,
+        std::string() /* ssl_session_cache_shard */, &socket_factory_,
         transport_pool ? &transport_socket_pool_ : NULL,
         socks_pool ? &socks_socket_pool_ : NULL,
-        http_proxy_pool ? &http_proxy_socket_pool_ : NULL,
-        NULL,
-        enable_ssl_connect_job_waiting_,
-        NULL));
+        http_proxy_pool ? &http_proxy_socket_pool_ : NULL, NULL,
+        enable_ssl_connect_job_waiting_, NULL));
   }
 
   scoped_refptr<SSLSocketParams> SSLParams(ProxyServer::Scheme proxy,
@@ -239,8 +231,7 @@ class SSLClientSocketPoolTest
 INSTANTIATE_TEST_CASE_P(
     NextProto,
     SSLClientSocketPoolTest,
-    testing::Values(kProtoDeprecatedSPDY2,
-                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4));
+    testing::Values(kProtoSPDY31, kProtoSPDY4_14, kProtoSPDY4_15));
 
 // Tests that the final socket will connect even if all sockets
 // prior to it fail.

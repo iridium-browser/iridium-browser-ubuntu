@@ -97,7 +97,6 @@ public:
     // Paged media properties.
     short widows;
     short orphans;
-    unsigned m_hasAutoWidows : 1;
     unsigned m_hasAutoOrphans : 1;
 
     unsigned m_textStrokeColorIsCurrentColor : 1;
@@ -128,7 +127,6 @@ public:
     unsigned m_imageRendering : 3; // EImageRendering
     unsigned m_textUnderlinePosition : 1; // TextUnderlinePosition
     unsigned m_rubyPosition : 1; // RubyPosition
-    unsigned m_touchActionDelay : 1; // TouchActionDelay
 
     // Though will-change is not itself an inherited property, the intent
     // expressed by 'will-change: contents' includes descendants.

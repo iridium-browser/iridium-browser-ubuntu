@@ -18,7 +18,7 @@
 #include "ui/base/ui_base_switches.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace ui {
 namespace {
@@ -200,7 +200,7 @@ class RemoteInputMethodWin : public InputMethod,
     if (event.is_char()) {
       if (text_input_client_) {
         text_input_client_->InsertChar(
-            static_cast<base::char16>(event.key_code()),
+            event.GetCharacter(),
             ui::GetModifiersFromKeyState());
       }
       return true;
@@ -384,15 +384,15 @@ bool IsRemoteInputMethodWinRequired(gfx::AcceleratedWidget widget) {
   if (!process_handle.IsValid())
     return false;
   return base::win::IsProcessImmersive(process_handle.Get()) ||
-         CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kViewerConnect);
+         base::CommandLine::ForCurrentProcess()->HasSwitch(
+             switches::kViewerConnect);
 }
 
 RemoteInputMethodPrivateWin::RemoteInputMethodPrivateWin() {}
 
 scoped_ptr<InputMethod> CreateRemoteInputMethodWin(
     internal::InputMethodDelegate* delegate) {
-  return scoped_ptr<InputMethod>(new RemoteInputMethodWin(delegate));
+  return make_scoped_ptr(new RemoteInputMethodWin(delegate));
 }
 
 // static

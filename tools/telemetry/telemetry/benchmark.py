@@ -10,15 +10,18 @@ import sys
 import zipfile
 
 from telemetry import decorators
+from telemetry import page
 from telemetry.core import browser_finder
 from telemetry.core import command_line
 from telemetry.core import util
-from telemetry.page import page_runner
+from telemetry.user_story import user_story_runner
 from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.page import test_expectations
 from telemetry.results import results_options
 from telemetry.util import cloud_storage
+from telemetry.util import exception_formatter
+from telemetry.web_perf import timeline_based_measurement
 
 Disabled = decorators.Disabled
 Enabled = decorators.Enabled
@@ -30,19 +33,47 @@ class InvalidOptionsError(Exception):
 
 
 class BenchmarkMetadata(object):
-  def __init__(self, name):
+  def __init__(self, name, description=''):
     self._name = name
+    self._description = description
 
   @property
   def name(self):
     return self._name
 
+  @property
+  def description(self):
+      return self._description
+
+
 class Benchmark(command_line.Command):
   """Base class for a Telemetry benchmark.
 
-  A test packages a PageTest and a PageSet together.
+  A benchmark packages a measurement and a PageSet together.
+  Benchmarks default to using TBM unless you override the value of
+  Benchmark.test, or override the CreatePageTest method.
+
+  New benchmarks should override CreateUserStorySet.
   """
   options = {}
+  test = timeline_based_measurement.TimelineBasedMeasurement
+
+  def __init__(self, max_failures=None):
+    """Creates a new Benchmark.
+
+    Args:
+      max_failures: The number of user story run's failures before bailing
+          from executing subsequent page runs. If None, we never bail.
+    """
+    self._max_failures = max_failures
+    self._has_original_tbm_options = (
+        self.CreateTimelineBasedMeasurementOptions.__func__ ==
+        Benchmark.CreateTimelineBasedMeasurementOptions.__func__)
+    has_original_create_page_test = (
+        self.CreatePageTest.__func__ == Benchmark.CreatePageTest.__func__)
+    assert self._has_original_tbm_options or has_original_create_page_test, (
+        'Cannot override both CreatePageTest and '
+        'CreateTimelineBasedMeasurementOptions.')
 
   @classmethod
   def Name(cls):
@@ -55,16 +86,13 @@ class Benchmark(command_line.Command):
 
   @classmethod
   def AddCommandLineArgs(cls, parser):
-    cls.PageTestClass().AddCommandLineArgs(parser)
-
-    if hasattr(cls, 'AddTestCommandLineArgs'):
+    if hasattr(cls, 'AddBenchmarkCommandLineArgs'):
       group = optparse.OptionGroup(parser, '%s test options' % cls.Name())
-      cls.AddTestCommandLineArgs(group)
+      cls.AddBenchmarkCommandLineArgs(group)
       parser.add_option_group(group)
 
   @classmethod
   def SetArgumentDefaults(cls, parser):
-    cls.PageTestClass().SetArgumentDefaults(parser)
     default_values = parser.get_default_values()
     invalid_options = [
         o for o in cls.options if not hasattr(default_values, o)]
@@ -75,40 +103,60 @@ class Benchmark(command_line.Command):
 
   @classmethod
   def ProcessCommandLineArgs(cls, parser, args):
-    cls.PageTestClass().ProcessCommandLineArgs(parser, args)
+    pass
 
   def CustomizeBrowserOptions(self, options):
     """Add browser options that are required by this benchmark."""
 
   def GetMetadata(self):
-    return BenchmarkMetadata(self.Name())
+    return BenchmarkMetadata(self.Name(), self.__doc__)
 
   def Run(self, finder_options):
-    """Run this test with the given options."""
+    """Run this test with the given options.
+
+    Returns:
+      The number of failure values (up to 254) or 255 if there is an uncaught
+      exception.
+    """
     self.CustomizeBrowserOptions(finder_options.browser_options)
 
-    pt = self.PageTestClass()()
+    pt = self.CreatePageTest(finder_options)
     pt.__name__ = self.__class__.__name__
 
     if hasattr(self, '_disabled_strings'):
+      # pylint: disable=protected-access
       pt._disabled_strings = self._disabled_strings
     if hasattr(self, '_enabled_strings'):
+      # pylint: disable=protected-access
       pt._enabled_strings = self._enabled_strings
 
     expectations = self.CreateExpectations()
     us = self.CreateUserStorySet(finder_options)
+    if isinstance(pt, page_test.PageTest):
+      if any(not isinstance(p, page.Page) for p in us.user_stories):
+        raise Exception(
+            'PageTest must be used with UserStorySet containing only '
+            'telemetry.page.Page user stories.')
 
     self._DownloadGeneratedProfileArchive(finder_options)
 
     benchmark_metadata = self.GetMetadata()
     results = results_options.CreateResults(benchmark_metadata, finder_options)
     try:
-      page_runner.Run(pt, us, expectations, finder_options, results)
-    except page_test.TestNotSupportedOnPlatformFailure as failure:
-      logging.warning(str(failure))
+      user_story_runner.Run(pt, us, expectations, finder_options, results,
+                            max_failures=self._max_failures)
+      return_code = min(254, len(results.failures))
+    except Exception:
+      exception_formatter.PrintFormattedException()
+      return_code = 255
+
+    bucket = cloud_storage.BUCKET_ALIASES[finder_options.upload_bucket]
+    if finder_options.upload_results:
+      results.UploadTraceFilesToCloud(bucket)
+      results.UploadProfilingFilesToCloud(bucket)
 
     results.PrintSummary()
-    return len(results.failures)
+    return return_code
 
   def _DownloadGeneratedProfileArchive(self, options):
     """Download and extract profile directory archive if one exists."""
@@ -173,19 +221,42 @@ class Benchmark(command_line.Command):
         extracted_profile_dir_path)
     options.browser_options.profile_dir = extracted_profile_dir_path
 
-  @classmethod
-  def PageTestClass(cls):
-    """Get the PageTest for this Benchmark.
+  def CreateTimelineBasedMeasurementOptions(self):
+    """Return the TimelineBasedMeasurementOptions for this Benchmark.
 
-    If the Benchmark has no PageTest, raises NotImplementedError.
+    Override this method to configure a TimelineBasedMeasurement benchmark.
+    Otherwise, override CreatePageTest for PageTest tests. Do not override
+    both methods.
     """
-    if not hasattr(cls, 'test'):
-      raise NotImplementedError('This test has no "test" attribute.')
-    if not issubclass(cls.test, page_test.PageTest):
-      raise TypeError('"%s" is not a PageTest.' % cls.test.__name__)
-    return cls.test
+    return timeline_based_measurement.Options()
 
-  def CreatePageSet(self, options):  # pylint: disable=W0613
+  def CreatePageTest(self, options):  # pylint: disable=unused-argument
+    """Return the PageTest for this Benchmark.
+
+    Override this method for PageTest tests.
+    Override, override CreateTimelineBasedMeasurementOptions to configure
+    TimelineBasedMeasurement tests. Do not override both methods.
+
+    Args:
+      options: a browser_options.BrowserFinderOptions instance
+    Returns:
+      |test()| if |test| is a PageTest class.
+      Otherwise, a TimelineBasedMeasurement instance.
+    """
+    is_page_test = issubclass(self.test, page_test.PageTest)
+    is_tbm = self.test == timeline_based_measurement.TimelineBasedMeasurement
+    if not is_page_test and not is_tbm:
+      raise TypeError('"%s" is not a PageTest or a TimelineBasedMeasurement.' %
+                      self.test.__name__)
+    if is_page_test:
+      assert self._has_original_tbm_options, (
+          'Cannot override CreateTimelineBasedMeasurementOptions '
+          'with a PageTest.')
+      return self.test()  # pylint: disable=no-value-for-parameter
+    return timeline_based_measurement.TimelineBasedMeasurement(
+        self.CreateTimelineBasedMeasurementOptions())
+
+  def CreatePageSet(self, options):  # pylint: disable=unused-argument
     """Get the page set this test will run on.
 
     By default, it will create a page set from the this test's page_set
@@ -211,8 +282,8 @@ class Benchmark(command_line.Command):
 
 
 def AddCommandLineArgs(parser):
-  page_runner.AddCommandLineArgs(parser)
+  user_story_runner.AddCommandLineArgs(parser)
 
 
 def ProcessCommandLineArgs(parser, args):
-  page_runner.ProcessCommandLineArgs(parser, args)
+  user_story_runner.ProcessCommandLineArgs(parser, args)

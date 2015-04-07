@@ -2,8 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""This library is to centralize knowledge about how to create google
-storage paths for various standardized locations.
+"""Centralize knowledge about how to create standardized Google Storage paths.
 
 This includes definitions for various build flags:
 
@@ -18,6 +17,9 @@ This includes definitions for various build flags:
     gs://chromeos-releases/blah-channel/board-name/1.2.3/payloads/FINISHED_flag
     gs://chromeos-releases/blah-channel/board-name/1.2.3/payloads/LOCK_flag
 """
+
+# pylint: disable=bad-continuation
+# pylint: disable=bad-whitespace
 
 from __future__ import print_function
 
@@ -143,7 +145,7 @@ class Payload(utils.RestrictedAttrDict):
     if self.uri:
       return self.uri.split('/')[-1]
     else:
-      return ('%s -> %s (no uri)' % (self.src_image or 'any', self.tgt_image))
+      return '%s -> %s (no uri)' % (self.src_image or 'any', self.tgt_image)
 
 
 class ChromeosReleases(object):
@@ -265,8 +267,7 @@ class ChromeosReleases(object):
       The url for the specified build's payloads. Should be of the form:
       gs://chromeos-releases/blah-channel/board-name/1.2.3/payloads/SKIP_FLAG
     """
-
-    assert(flag in ChromeosReleases.FLAGS)
+    assert flag in ChromeosReleases.FLAGS
     return os.path.join(ChromeosReleases.BuildPayloadsUri(channel,
                                                           board,
                                                           version,
@@ -455,7 +456,7 @@ class ChromeosReleases(object):
     """
     if random_str is None:
       random.seed()
-      # pylint: disable-msg=E1101
+      # pylint: disable=E1101
       random_str = hashlib.md5(str(random.getrandbits(128))).hexdigest()
 
     if key is None:
@@ -556,9 +557,9 @@ class ChromeosReleases(object):
 
     # Handle FULL payload URIs.
     full_exp = (r'^gs://(?P<bucket>.*)/(?P<channel>.*)/(?P<board>.*)/'
-                 '(?P<version>.*)/payloads/chromeos_(?P<image_version>[^_]+)_'
-                 '(?P=board)_(?P<image_channel>[^_]+)_full_(?P<key>[^_]+)\.bin'
-                 '-[0-9A-Fa-f]+\.signed$')
+                r'(?P<version>.*)/payloads/chromeos_(?P<image_version>[^_]+)_'
+                r'(?P=board)_(?P<image_channel>[^_]+)_full_(?P<key>[^_]+)\.bin'
+                r'-[0-9A-Fa-f]+\.signed$')
 
     m = re.match(full_exp, payload_uri)
 
@@ -574,10 +575,10 @@ class ChromeosReleases(object):
 
     # Handle DELTA payload URIs.
     delta_exp = (r'^gs://(?P<bucket>.*)/(?P<channel>.*)/(?P<board>.*)/'
-                  '(?P<version>.*)/payloads/chromeos_(?P<src_version>[^_]+)-'
-                  '(?P<image_version>[^_]+)_(?P=board)_'
-                  '(?P<image_channel>[^_]+)_delta_(?P<key>[^_]+)\.bin'
-                  '-[0-9A-Fa-f]+\.signed$')
+                 r'(?P<version>.*)/payloads/chromeos_(?P<src_version>[^_]+)-'
+                 r'(?P<image_version>[^_]+)_(?P=board)_'
+                 r'(?P<image_channel>[^_]+)_delta_(?P<key>[^_]+)\.bin'
+                 r'-[0-9A-Fa-f]+\.signed$')
 
     m = re.match(delta_exp, payload_uri)
 

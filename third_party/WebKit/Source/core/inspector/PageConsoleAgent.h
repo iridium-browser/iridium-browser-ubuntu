@@ -36,32 +36,48 @@
 
 namespace blink {
 
+class ConsoleMessage;
 class ConsoleMessageStorage;
 class InspectorDOMAgent;
 class Page;
+class WorkerInspectorProxy;
+class WorkerGlobalScopeProxy;
 
 class PageConsoleAgent final : public InspectorConsoleAgent {
     WTF_MAKE_NONCOPYABLE(PageConsoleAgent);
 public:
-    static PassOwnPtrWillBeRawPtr<PageConsoleAgent> create(InjectedScriptManager* injectedScriptManager, InspectorDOMAgent* domAgent, InspectorTimelineAgent* timelineAgent, Page* page)
+    static PassOwnPtrWillBeRawPtr<PageConsoleAgent> create(InjectedScriptManager* injectedScriptManager, InspectorDOMAgent* domAgent, Page* page)
     {
-        return adoptPtrWillBeNoop(new PageConsoleAgent(injectedScriptManager, domAgent, timelineAgent, page));
+        return adoptPtrWillBeNoop(new PageConsoleAgent(injectedScriptManager, domAgent, page));
     }
     virtual ~PageConsoleAgent();
     virtual void trace(Visitor*) override;
 
+    virtual void enable(ErrorString*) override;
+    virtual void disable(ErrorString*) override;
+
     virtual bool isWorkerAgent() override { return false; }
+
+    void workerTerminated(WorkerInspectorProxy*);
+
+    void workerConsoleAgentEnabled(WorkerGlobalScopeProxy*);
 
 protected:
     virtual ConsoleMessageStorage* messageStorage() override;
 
+    virtual void enableStackCapturingIfNeeded() override;
+    virtual void disableStackCapturingIfNeeded() override;
+
 private:
-    PageConsoleAgent(InjectedScriptManager*, InspectorDOMAgent*, InspectorTimelineAgent*, Page*);
+    PageConsoleAgent(InjectedScriptManager*, InspectorDOMAgent*, Page*);
     virtual void clearMessages(ErrorString*) override;
     virtual void addInspectedNode(ErrorString*, int nodeId) override;
 
     RawPtrWillBeMember<InspectorDOMAgent> m_inspectorDOMAgent;
     RawPtrWillBeMember<Page> m_page;
+    HashSet<WorkerGlobalScopeProxy*> m_workersWithEnabledConsole;
+
+    static int s_enabledAgentCount;
 };
 
 } // namespace blink

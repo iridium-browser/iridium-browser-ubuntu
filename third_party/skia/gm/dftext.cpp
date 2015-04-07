@@ -68,7 +68,8 @@ protected:
         SkImageInfo info = SkImageInfo::MakeN32Premul(onISize());
         SkSurfaceProps props(SkSurfaceProps::kUseDistanceFieldFonts_Flag,
                              SkSurfaceProps::kLegacyFontHost_InitType);
-        SkAutoTUnref<SkSurface> surface(SkSurface::NewRenderTarget(ctx, info, 0, &props));
+        SkAutoTUnref<SkSurface> surface(SkSurface::NewRenderTarget(ctx, SkSurface::kNo_Budgeted,
+                                                                   info, 0, &props));
         SkCanvas* canvas = surface.get() ? surface->getCanvas() : inputCanvas;
         // init our new canvas with the old canvas's matrix
         canvas->setMatrix(inputCanvas->getTotalMatrix());
@@ -138,8 +139,8 @@ protected:
 
             canvas->scale(2.0f, 2.0f);
 
-            SkAutoTArray<SkPoint>  pos(textLen);
-            SkAutoTArray<SkScalar> widths(textLen);
+            SkAutoTArray<SkPoint>  pos(SkToInt(textLen));
+            SkAutoTArray<SkScalar> widths(SkToInt(textLen));
             paint.setTextSize(textSizes[0]);
 
             paint.getTextWidths(text, textLen, &widths[0]);

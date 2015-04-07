@@ -5,21 +5,22 @@
 import os
 import traceback
 
+from telemetry import page as page_module
 from telemetry.page import page_set
 from telemetry.results import base_test_results_unittest
 from telemetry.results import gtest_progress_reporter
 from telemetry.results import page_test_results
-from telemetry.unittest import simple_mock
+from telemetry.unittest_util import simple_mock
 from telemetry.value import failure
 from telemetry.value import skip
 
 
 def _MakePageSet():
   ps = page_set.PageSet(file_path=os.path.dirname(__file__))
-  ps.AddPageWithDefaultRunNavigate('http://www.foo.com/')
-  ps.AddPageWithDefaultRunNavigate('http://www.bar.com/')
-  ps.AddPageWithDefaultRunNavigate('http://www.baz.com/')
-  ps.AddPageWithDefaultRunNavigate('http://www.roz.com/')
+  ps.AddUserStory(page_module.Page('http://www.foo.com/', ps, ps.base_dir))
+  ps.AddUserStory(page_module.Page('http://www.bar.com/', ps, ps.base_dir))
+  ps.AddUserStory(page_module.Page('http://www.baz.com/', ps, ps.base_dir))
+  ps.AddUserStory(page_module.Page('http://www.roz.com/', ps, ps.base_dir))
   return ps
 
 

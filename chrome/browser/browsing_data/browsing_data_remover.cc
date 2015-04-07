@@ -273,11 +273,11 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
   }
   // If this fires, we added a new BrowsingDataHelper::OriginSetMask without
   // updating the user metrics above.
-  COMPILE_ASSERT(
+  static_assert(
       BrowsingDataHelper::ALL == (BrowsingDataHelper::UNPROTECTED_WEB |
                                   BrowsingDataHelper::PROTECTED_WEB |
                                   BrowsingDataHelper::EXTENSION),
-      forgotten_to_add_origin_mask_type);
+      "OriginSetMask has been updated without updating user metrics");
 
   if ((remove_mask & REMOVE_HISTORY) && may_delete_history) {
     HistoryService* history_service = HistoryServiceFactory::GetForProfile(
@@ -624,8 +624,12 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
         content::StoragePartition::REMOVE_DATA_MASK_WEBRTC_IDENTITY;
 
 #if defined(ENABLE_EXTENSIONS)
-    // Clear the ephemeral apps cache.
-    EphemeralAppService::Get(profile_)->ClearCachedApps();
+    // Clear the ephemeral apps cache. This is NULL while testing. OTR Profile
+    // has neither apps nor an ExtensionService, so ClearCachedApps fails.
+    EphemeralAppService* ephemeral_app_service =
+        EphemeralAppService::Get(profile_);
+    if (ephemeral_app_service && !profile_->IsOffTheRecord())
+      ephemeral_app_service->ClearCachedApps();
 #endif
   }
 

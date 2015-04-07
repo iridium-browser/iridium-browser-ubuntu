@@ -6,8 +6,8 @@
 
 // utilities.h: Conversion functions and other utility routines.
 
-#ifndef LIBGLESV2_UTILITIES_H
-#define LIBGLESV2_UTILITIES_H
+#ifndef COMMON_UTILITIES_H_
+#define COMMON_UTILITIES_H_
 
 #include "angle_gl.h"
 #include <string>
@@ -24,7 +24,7 @@ size_t VariableExternalSize(GLenum type);
 GLenum VariableBoolVectorType(GLenum type);
 int VariableRowCount(GLenum type);
 int VariableColumnCount(GLenum type);
-bool IsSampler(GLenum type);
+bool IsSamplerType(GLenum type);
 bool IsMatrixType(GLenum type);
 GLenum TransposeMatrixType(GLenum type);
 int VariableRegisterCount(GLenum type);
@@ -51,8 +51,8 @@ std::string getTempPath();
 void writeFile(const char* path, const void* data, size_t size);
 #endif
 
-#if defined(ANGLE_ENABLE_WINDOWS_STORE)
-void Sleep(_In_ unsigned long dwMilliseconds);
+#if defined (ANGLE_PLATFORM_WINDOWS)
+void ScheduleYield();
 #endif
 
-#endif  // LIBGLESV2_UTILITIES_H
+#endif  // COMMON_UTILITIES_H_

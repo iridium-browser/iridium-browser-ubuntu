@@ -12,23 +12,17 @@
 #include "cc/blink/web_compositor_support_impl.h"
 #include "mojo/services/html_viewer/webmimeregistry_impl.h"
 #include "mojo/services/html_viewer/webthemeengine_impl.h"
-#include "mojo/services/public/interfaces/network/network_service.mojom.h"
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebScrollbarBehavior.h"
 
-namespace mojo {
-class ApplicationImpl;
-class WebClipboardImpl;
-class WebCookieJarImpl;
+namespace html_viewer {
 
 class BlinkPlatformImpl : public blink::Platform {
  public:
-  explicit BlinkPlatformImpl(ApplicationImpl* app);
+  explicit BlinkPlatformImpl();
   virtual ~BlinkPlatformImpl();
 
   // blink::Platform methods:
-  virtual blink::WebCookieJar* cookieJar();
-  virtual blink::WebClipboard* clipboard();
   virtual blink::WebMimeRegistry* mimeRegistry();
   virtual blink::WebThemeEngine* themeEngine();
   virtual blink::WebString defaultLocale();
@@ -70,7 +64,6 @@ class BlinkPlatformImpl : public blink::Platform {
 
   static void DestroyCurrentThread(void*);
 
-  NetworkServicePtr network_service_;
   base::MessageLoop* main_loop_;
   base::OneShotTimer<BlinkPlatformImpl> shared_timer_;
   void (*shared_timer_func_)();
@@ -80,14 +73,12 @@ class BlinkPlatformImpl : public blink::Platform {
   base::ThreadLocalStorage::Slot current_thread_slot_;
   cc_blink::WebCompositorSupportImpl compositor_support_;
   WebThemeEngineImpl theme_engine_;
-  scoped_ptr<WebCookieJarImpl> cookie_jar_;
-  scoped_ptr<WebClipboardImpl> clipboard_;
   WebMimeRegistryImpl mime_registry_;
   blink::WebScrollbarBehavior scrollbar_behavior_;
 
   DISALLOW_COPY_AND_ASSIGN(BlinkPlatformImpl);
 };
 
-}  // namespace mojo
+}  // namespace html_viewer
 
 #endif  // MOJO_SERVICES_HTML_VIEWER_BLINK_PLATFORM_IMPL_H_

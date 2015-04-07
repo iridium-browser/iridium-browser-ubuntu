@@ -73,6 +73,7 @@ svn diff "${LLVM_DIR}/projects/libcxxabi" 2>&1 | tee -a buildlog.txt
 echo "Starting build" | tee -a buildlog.txt
 
 set -exu
+set -o pipefail
 
 # Do a clobber build.
 rm -rf "${LLVM_BOOTSTRAP_DIR}"
@@ -86,7 +87,7 @@ fi
     ${extra_flags} 2>&1 | tee -a buildlog.txt
 
 R=$("${LLVM_BIN_DIR}/clang" --version | \
-     sed -ne 's/clang version .*(\([0-9]*\))/\1/p')
+     sed -ne 's/clang version .*(trunk \([0-9]*\))/\1/p')
 
 PDIR=clang-$R
 rm -rf $PDIR

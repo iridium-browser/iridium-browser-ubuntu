@@ -13,7 +13,7 @@
 #include "gpu/config/gpu_info.h"
 #include "ipc/ipc_listener.h"
 #include "media/video/video_encode_accelerator.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace base {
 
@@ -60,14 +60,20 @@ class GpuVideoEncodeAccelerator
   // Static query for supported profiles.  This query calls the appropriate
   // platform-specific version.
   static std::vector<gpu::VideoEncodeAcceleratorSupportedProfile>
-  GetSupportedProfiles();
+      GetSupportedProfiles();
   static std::vector<gpu::VideoEncodeAcceleratorSupportedProfile>
-  ConvertMediaToGpuProfiles(const std::vector<
-      media::VideoEncodeAccelerator::SupportedProfile>& media_profiles);
+      ConvertMediaToGpuProfiles(const std::vector<
+          media::VideoEncodeAccelerator::SupportedProfile>& media_profiles);
 
  private:
-  // Create the appropriate platform-specific VEA.
-  static scoped_ptr<media::VideoEncodeAccelerator> CreateEncoder();
+  typedef scoped_ptr<media::VideoEncodeAccelerator>(*CreateVEAFp)();
+
+  // Return a set of VEA Create function pointers applicable to the current
+  // platform.
+  static std::vector<CreateVEAFp> CreateVEAFps();
+  static scoped_ptr<media::VideoEncodeAccelerator> CreateV4L2VEA();
+  static scoped_ptr<media::VideoEncodeAccelerator> CreateVaapiVEA();
+  static scoped_ptr<media::VideoEncodeAccelerator> CreateAndroidVEA();
 
   // IPC handlers, proxying media::VideoEncodeAccelerator for the renderer
   // process.

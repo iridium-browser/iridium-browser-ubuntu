@@ -8,7 +8,6 @@
 #include "gm.h"
 #include "SkSurface.h"
 #include "SkCanvas.h"
-#include "SkDecodingImageGenerator.h"
 #include "SkStream.h"
 #include "SkData.h"
 
@@ -24,8 +23,7 @@ static void drawJpeg(SkCanvas* canvas, const SkISize& size) {
     if (NULL == data.get()) {
         return;
     }
-    SkImage* image = SkImage::NewFromGenerator(
-                SkDecodingImageGenerator::Create(data, SkDecodingImageGenerator::Options()));
+    SkImage* image = SkImage::NewFromData(data);
     if (image) {
         SkAutoCanvasRestore acr(canvas, true);
         canvas->scale(size.width() * 1.0f / image->width(),
@@ -179,7 +177,8 @@ protected:
 #if SK_SUPPORT_GPU
         GrContext* ctx = canvas->getGrContext();
 
-        SkAutoTUnref<SkSurface> surf4(SkSurface::NewRenderTarget(ctx, info));
+        SkAutoTUnref<SkSurface> surf4(SkSurface::NewRenderTarget(
+            ctx, SkSurface::kNo_Budgeted, info));
 #endif
 
         test_surface(canvas, surf0, true);

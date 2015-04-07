@@ -6,16 +6,19 @@
 
 #include <gestures/gestures.h>
 #include <libevdev/libevdev.h>
+#include <linux/input.h>
 
 #include "base/strings/stringprintf.h"
 #include "base/timer/timer.h"
 #include "ui/events/event.h"
 #include "ui/events/ozone/evdev/cursor_delegate_evdev.h"
+#include "ui/events/ozone/evdev/event_device_info.h"
 #include "ui/events/ozone/evdev/event_device_util.h"
 #include "ui/events/ozone/evdev/event_modifiers_evdev.h"
 #include "ui/events/ozone/evdev/keyboard_evdev.h"
 #include "ui/events/ozone/evdev/libgestures_glue/gesture_property_provider.h"
 #include "ui/events/ozone/evdev/libgestures_glue/gesture_timer_provider.h"
+#include "ui/events/ozone/evdev/mouse_button_map_evdev.h"
 #include "ui/gfx/geometry/point_f.h"
 
 namespace ui {
@@ -35,6 +38,24 @@ GestureInterpreterDeviceClass GestureDeviceClass(Evdev* evdev) {
       return GESTURES_DEVCLASS_TOUCHSCREEN;
     default:
       return GESTURES_DEVCLASS_UNKNOWN;
+  }
+}
+
+// Convert Linux button code to libgestures button code.
+int GetGestureButton(const MouseButtonMapEvdev::Button code) {
+  switch (code) {
+    case BTN_LEFT:
+      return GESTURES_BUTTON_LEFT;
+    case BTN_RIGHT:
+      return GESTURES_BUTTON_RIGHT;
+    case BTN_MIDDLE:
+      return GESTURES_BUTTON_MIDDLE;
+    case BTN_FORWARD:
+      return GESTURES_BUTTON_FORWARD;
+    case BTN_BACK:
+      return GESTURES_BUTTON_BACK;
+    default:
+      return GESTURES_BUTTON_NONE;
   }
 }
 
@@ -86,12 +107,15 @@ const int kGestureSwipeFingerCount = 3;
 GestureInterpreterLibevdevCros::GestureInterpreterLibevdevCros(
     int id,
     EventModifiersEvdev* modifiers,
+    MouseButtonMapEvdev* button_map,
     CursorDelegateEvdev* cursor,
     KeyboardEvdev* keyboard,
     GesturePropertyProvider* property_provider,
     const EventDispatchCallback& callback)
     : id_(id),
+      is_mouse_(false),
       modifiers_(modifiers),
+      button_map_(button_map),
       cursor_(cursor),
       keyboard_(keyboard),
       property_provider_(property_provider),
@@ -134,6 +158,7 @@ void GestureInterpreterLibevdevCros::OnLibEvdevCrosOpen(
   HardwareProperties hwprops =
       GestureHardwareProperties(evdev, device_properties_.get());
   GestureInterpreterDeviceClass devclass = GestureDeviceClass(evdev);
+  is_mouse_ = property_provider_->IsDeviceIdOfType(id_, DT_MOUSE);
 
   // Create & initialize GestureInterpreter.
   DCHECK(!interpreter_);
@@ -191,12 +216,21 @@ void GestureInterpreterLibevdevCros::OnLibEvdevCrosEvent(Evdev* evdev,
   hwstate.fingers = fingers;
 
   // Buttons.
-  if (Event_Get_Button_Left(evdev))
-    hwstate.buttons_down |= GESTURES_BUTTON_LEFT;
-  if (Event_Get_Button_Middle(evdev))
-    hwstate.buttons_down |= GESTURES_BUTTON_MIDDLE;
-  if (Event_Get_Button_Right(evdev))
-    hwstate.buttons_down |= GESTURES_BUTTON_RIGHT;
+  //
+  // We do button mapping for physical clicks only when the device is
+  // mouse-like (e.g., normal mouse and multi-touch mouse).
+  if (Event_Get_Button_Left(evdev)) {
+    hwstate.buttons_down |= GetGestureButton(
+        is_mouse_ ? button_map_->GetMappedButton(BTN_LEFT) : BTN_LEFT);
+  }
+  if (Event_Get_Button_Middle(evdev)) {
+    hwstate.buttons_down |= GetGestureButton(
+        is_mouse_ ? button_map_->GetMappedButton(BTN_MIDDLE) : BTN_MIDDLE);
+  }
+  if (Event_Get_Button_Right(evdev)) {
+    hwstate.buttons_down |= GetGestureButton(
+        is_mouse_ ? button_map_->GetMappedButton(BTN_RIGHT) : BTN_RIGHT);
+  }
 
   GestureInterpreterPushHardwareState(interpreter_, &hwstate);
 }
@@ -251,8 +285,8 @@ void GestureInterpreterLibevdevCros::OnGestureMove(const Gesture* gesture,
   // TODO(spang): Use move->ordinal_dx, move->ordinal_dy
   // TODO(spang): Use move->start_time, move->end_time
   Dispatch(make_scoped_ptr(new MouseEvent(ET_MOUSE_MOVED,
-                                          cursor_->location(),
-                                          cursor_->location(),
+                                          cursor_->GetLocation(),
+                                          cursor_->GetLocation(),
                                           modifiers_->GetModifierFlags(),
                                           /* changed_button_flags */ 0)));
 }
@@ -268,17 +302,26 @@ void GestureInterpreterLibevdevCros::OnGestureScroll(
   if (!cursor_)
     return;  // No cursor!
 
-  // TODO(spang): Support SetNaturalScroll
   // TODO(spang): Use scroll->start_time
-  Dispatch(make_scoped_ptr(new ScrollEvent(ET_SCROLL,
-                                           cursor_->location(),
-                                           StimeToTimedelta(gesture->end_time),
-                                           modifiers_->GetModifierFlags(),
-                                           scroll->dx,
-                                           scroll->dy,
-                                           scroll->ordinal_dx,
-                                           scroll->ordinal_dy,
-                                           kGestureScrollFingerCount)));
+  if (is_mouse_) {
+    Dispatch(make_scoped_ptr(new MouseWheelEvent(
+        gfx::Vector2d(scroll->dx, scroll->dy),
+        cursor_->GetLocation(),
+        cursor_->GetLocation(),
+        modifiers_->GetModifierFlags(),
+        0)));
+  } else {
+    Dispatch(make_scoped_ptr(new ScrollEvent(
+        ET_SCROLL,
+        cursor_->GetLocation(),
+        StimeToTimedelta(gesture->end_time),
+        modifiers_->GetModifierFlags(),
+        scroll->dx,
+        scroll->dy,
+        scroll->ordinal_dx,
+        scroll->ordinal_dy,
+        kGestureScrollFingerCount)));
+  }
 }
 
 void GestureInterpreterLibevdevCros::OnGestureButtonsChange(
@@ -290,14 +333,6 @@ void GestureInterpreterLibevdevCros::OnGestureButtonsChange(
 
   if (!cursor_)
     return;  // No cursor!
-
-  // HACK for disabling TTC (actually, all clicks) on hidden cursor.
-  // This is normally plumbed via properties and can be removed soon.
-  // TODO(spang): Remove this.
-  if (buttons->down == GESTURES_BUTTON_LEFT &&
-      buttons->up == GESTURES_BUTTON_LEFT &&
-      !cursor_->IsCursorVisible())
-    return;
 
   // TODO(spang): Use buttons->start_time, buttons->end_time
   if (buttons->down & GESTURES_BUTTON_LEFT)
@@ -338,7 +373,7 @@ void GestureInterpreterLibevdevCros::OnGestureFling(const Gesture* gesture,
 
   // Fling is like 2-finger scrolling but with velocity instead of displacement.
   Dispatch(make_scoped_ptr(new ScrollEvent(type,
-                                           cursor_->location(),
+                                           cursor_->GetLocation(),
                                            StimeToTimedelta(gesture->end_time),
                                            modifiers_->GetModifierFlags(),
                                            fling->vx,
@@ -361,7 +396,7 @@ void GestureInterpreterLibevdevCros::OnGestureSwipe(const Gesture* gesture,
 
   // Swipe is 3-finger scrolling.
   Dispatch(make_scoped_ptr(new ScrollEvent(ET_SCROLL,
-                                           cursor_->location(),
+                                           cursor_->GetLocation(),
                                            StimeToTimedelta(gesture->end_time),
                                            modifiers_->GetModifierFlags(),
                                            swipe->dx,
@@ -383,7 +418,7 @@ void GestureInterpreterLibevdevCros::OnGestureSwipeLift(
   // TODO(spang): Figure out why and put it in this comment.
 
   Dispatch(make_scoped_ptr(new ScrollEvent(ET_SCROLL_FLING_START,
-                                           cursor_->location(),
+                                           cursor_->GetLocation(),
                                            StimeToTimedelta(gesture->end_time),
                                            modifiers_->GetModifierFlags(),
                                            /* x_offset */ 0,
@@ -420,12 +455,12 @@ void GestureInterpreterLibevdevCros::Dispatch(scoped_ptr<Event> event) {
 
 void GestureInterpreterLibevdevCros::DispatchMouseButton(unsigned int modifier,
                                                          bool down) {
-  const gfx::PointF& loc = cursor_->location();
+  const gfx::PointF location = cursor_->GetLocation();
   int flag = modifiers_->GetEventFlagFromModifier(modifier);
   EventType type = (down ? ET_MOUSE_PRESSED : ET_MOUSE_RELEASED);
   modifiers_->UpdateModifier(modifier, down);
   Dispatch(make_scoped_ptr(new MouseEvent(
-      type, loc, loc, modifiers_->GetModifierFlags() | flag, flag)));
+      type, location, location, modifiers_->GetModifierFlags() | flag, flag)));
 }
 
 void GestureInterpreterLibevdevCros::DispatchChangedKeys(Evdev* evdev,

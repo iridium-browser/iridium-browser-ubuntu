@@ -161,7 +161,6 @@ class IndexedDBBrowserTest : public ContentBrowserTest {
   }
 
   virtual void DidGetDiskUsage(int64 bytes) {
-    EXPECT_GT(bytes, 0);
     disk_usage_ = bytes;
   }
 
@@ -263,7 +262,7 @@ class IndexedDBBrowserTestWithGCExposed : public IndexedDBBrowserTest {
  public:
   IndexedDBBrowserTestWithGCExposed() {}
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitchASCII(switches::kJavaScriptFlags, "--expose-gc");
   }
 
@@ -335,6 +334,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithVersion123456Schema,
   EXPECT_GT(original_size, 0);
   SimpleTest(GetTestUrl("indexeddb", "open_bad_db.html"));
   int64 new_size = RequestDiskUsage();
+  EXPECT_GT(new_size, 0);
   EXPECT_NE(original_size, new_size);
 }
 
@@ -349,6 +349,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithVersion987654SSVData,
   EXPECT_GT(original_size, 0);
   SimpleTest(GetTestUrl("indexeddb", "open_bad_db.html"));
   int64 new_size = RequestDiskUsage();
+  EXPECT_GT(new_size, 0);
   EXPECT_NE(original_size, new_size);
 }
 
@@ -363,6 +364,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithCorruptLevelDB,
   EXPECT_GT(original_size, 0);
   SimpleTest(GetTestUrl("indexeddb", "open_bad_db.html"));
   int64 new_size = RequestDiskUsage();
+  EXPECT_GT(new_size, 0);
   EXPECT_NE(original_size, new_size);
 }
 
@@ -377,6 +379,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithMissingSSTFile,
   EXPECT_GT(original_size, 0);
   SimpleTest(GetTestUrl("indexeddb", "open_missing_table.html"));
   int64 new_size = RequestDiskUsage();
+  EXPECT_GT(new_size, 0);
   EXPECT_NE(original_size, new_size);
 }
 
@@ -399,6 +402,26 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CanDeleteWhenOverQuotaTest) {
   EXPECT_GT(size, kQuotaKilobytes * 1024);
   SetQuota(kQuotaKilobytes);
   SimpleTest(GetTestUrl("indexeddb", "delete_over_quota.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, BlobsCountAgainstQuota) {
+  SimpleTest(GetTestUrl("indexeddb", "blobs_use_quota.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, DeleteForOriginDeletesBlobs) {
+  SimpleTest(GetTestUrl("indexeddb", "write_20mb_blob.html"));
+  int64 size = RequestDiskUsage();
+  // This assertion assumes that we do not compress blobs.
+  EXPECT_GT(size, 20 << 20 /* 20 MB */);
+  GetContext()->TaskRunner()->PostTask(
+      FROM_HERE, base::Bind(&IndexedDBContextImpl::DeleteForOrigin,
+                            GetContext(), GURL("file:///")));
+  scoped_refptr<base::ThreadTestHelper> helper(
+      new base::ThreadTestHelper(BrowserMainLoop::GetInstance()
+                                     ->indexed_db_thread()
+                                     ->message_loop_proxy()));
+  ASSERT_TRUE(helper->Run());
+  EXPECT_EQ(0, RequestDiskUsage());
 }
 
 namespace {
@@ -431,31 +454,33 @@ static void CorruptIndexedDBDatabase(
 
   int numFiles = 0;
   int numErrors = 0;
-  base::FilePath idb_data_path = context->GetFilePath(origin_url);
   const bool recursive = false;
-  base::FileEnumerator enumerator(
-      idb_data_path, recursive, base::FileEnumerator::FILES);
-  for (base::FilePath idb_file = enumerator.Next(); !idb_file.empty();
-       idb_file = enumerator.Next()) {
-    int64 size(0);
-    GetFileSize(idb_file, &size);
+  for (const base::FilePath& idb_data_path :
+       context->GetStoragePaths(origin_url)) {
+    base::FileEnumerator enumerator(
+        idb_data_path, recursive, base::FileEnumerator::FILES);
+    for (base::FilePath idb_file = enumerator.Next(); !idb_file.empty();
+         idb_file = enumerator.Next()) {
+      int64 size(0);
+      GetFileSize(idb_file, &size);
 
-    if (idb_file.Extension() == FILE_PATH_LITERAL(".ldb")) {
-      numFiles++;
-      base::File file(idb_file,
-                      base::File::FLAG_WRITE | base::File::FLAG_OPEN_TRUNCATED);
-      if (file.IsValid()) {
-        // Was opened truncated, expand back to the original
-        // file size and fill with zeros (corrupting the file).
-        file.SetLength(size);
-      } else {
-        numErrors++;
+      if (idb_file.Extension() == FILE_PATH_LITERAL(".ldb")) {
+        numFiles++;
+        base::File file(
+            idb_file, base::File::FLAG_WRITE | base::File::FLAG_OPEN_TRUNCATED);
+        if (file.IsValid()) {
+          // Was opened truncated, expand back to the original
+          // file size and fill with zeros (corrupting the file).
+          file.SetLength(size);
+        } else {
+          numErrors++;
+        }
       }
     }
+    VLOG(0) << "There were " << numFiles << " in " << idb_data_path.value()
+            << " with " << numErrors << " errors";
   }
 
-  VLOG(0) << "There were " << numFiles << " in " << idb_data_path.value()
-          << " with " << numErrors << " errors";
   signal_when_finished->Signal();
 }
 
@@ -686,8 +711,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ConnectionsClosedOnTabClose) {
   base::string16 expected_title16(ASCIIToUTF16("setVersion(3) complete"));
   TitleWatcher title_watcher(new_shell->web_contents(), expected_title16);
 
-  base::KillProcess(
-      shell()->web_contents()->GetRenderProcessHost()->GetHandle(), 0, true);
+  shell()->web_contents()->GetRenderProcessHost()->Shutdown(0, true);
   shell()->Close();
 
   EXPECT_EQ(expected_title16, title_watcher.WaitAndGetTitle());
@@ -713,7 +737,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ForceCloseEventTest) {
 
 class IndexedDBBrowserTestSingleProcess : public IndexedDBBrowserTest {
  public:
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kSingleProcess);
   }
 };

@@ -49,6 +49,7 @@ Maaaring hindi available ang ilang tampok at hindi mase-save ang mga pagbabago s
 <translation id="568643307450491754">Hanapin ang iyong mga bookmark sa Chrome menu o sa bookmarks bar.</translation>
 <translation id="8556340503434111824">May available na bagong bersyon ng Google Chrome, at mas mabilis ito kaysa sa dati.</translation>
 <translation id="8987477933582888019">Web Browser</translation>
+<translation id="3749644715096758981">Hindi makapag-update ang Chrome sa pinakabagong bersyon, kaya hindi mo magagamit ang mga bagong feature at pag-aayos sa seguridad. Kailangan mong i-update ang Chrome.</translation>
 <translation id="4728575227883772061">Nabigo ang pag-install dahil sa hindi natukoy na error. Kung kasalukuyang tumatakbo ang Google Chrome, paki-sara ito at subukang muli.</translation>
 <translation id="3080151273017101988">Magpatuloy sa pagpapatakbo ng apps sa background kapag nakasara ang Google Chrome</translation>
 <translation id="4149882025268051530">Nabigo ang installer sa pag-uncompress ng archive. Paki-download muli ang Google Chrome.</translation>
@@ -89,6 +90,7 @@ Maaaring hindi available ang ilang tampok at hindi mase-save ang mga pagbabago s
 <translation id="225614027745146050">Maligayang pagdating</translation>
 <translation id="7473891865547856676">Hindi, Salamat</translation>
 <translation id="3149510190863420837">Chrome Apps</translation>
+<translation id="8851136666856101339">main</translation>
 <translation id="7473136999113284234">Awtomatikong nag-a-update ang Chrome upang palagi kang may pinakabagong bersyon.</translation>
 <translation id="7084448929020576097">Nakakahamak ang <ph name="FILE_NAME"/>, at na-block ito ng Chrome.</translation>
 <translation id="6368958679917195344">Ginagawang posible ang Chrome OS ng karagdagang <ph name="BEGIN_LINK_CROS_OSS"/>open source na software<ph name="END_LINK_CROS_OSS"/>.</translation>
@@ -151,7 +153,6 @@ Kapag nag-sign in ka pa rin, isasama sa <ph name="ACCOUNT_EMAIL_NEW"/> ang impor
 <translation id="5855036575689098185">Hindi tumutugma ang software na tumatakbo sa iyong computer sa Google Chrome.</translation>
 <translation id="7164397146364144019">Makakatulong ka na gawing mas ligtas at mas madaling gamitin ang Chrome sa pamamagitan ng awtomatikong pag-uulat ng mga detalye ng mga posibleng isyu sa seguridad sa Google.</translation>
 <translation id="8008534537613507642">Muling i-install ang Chrome</translation>
-<translation id="2044287590254833138">Toolbar ng Google Chrome</translation>
 <translation id="8862326446509486874">Wala kang naaangkop na mga karapatan para sa pag-install sa antas ng system. Subukan muling patakbuhin ang installer bilang Administrator.</translation>
 <translation id="2874156562296220396">Ang Google Chrome ay ginawang posible ng <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> open source project at iba pang <ph name="BEGIN_LINK_OSS"/>open source software<ph name="END_LINK_OSS"/>.</translation>
 <translation id="7191567847629796517">Hindi sinusuportahan ng Google Chrome OS ang paglulunsad ng external na application upang mangasiwa ng mga link ng <ph name="SCHEME"/>. Ang hiniling na link ay <ph name="PROTOLINK"/>.</translation>
@@ -163,6 +164,7 @@ Kapag nag-sign in ka pa rin, isasama sa <ph name="ACCOUNT_EMAIL_NEW"/> ang impor
 <translation id="2290095356545025170">Sigurado ka bang nais mong i-uninstall ang Google Chrome?</translation>
 <translation id="7062966102157262887">Kasalukuyang ginagawa ang pag-download. Gusto mo bang lumabas ng Chromium at kanselahin ang pag-download?</translation>
 <translation id="4273752058983339720">Na-configure ang Google Chrome upang awtomatikong malunsad kapag binuksan mo ang iyong computer.</translation>
+<translation id="2316129865977710310">Hindi, salamat</translation>
 <translation id="415994390253732730">May Kakaiba Ba Sa Chrome?</translation>
 <translation id="1104959162601287462">Tungkol sa &amp;Chrome OS</translation>
 <translation id="5328989068199000832">Mga Google Chrome Binary</translation>
@@ -265,6 +267,7 @@ Kapag nag-sign in ka pa rin, isasama sa <ph name="ACCOUNT_EMAIL_NEW"/> ang impor
 <translation id="6626317981028933585">Nakalulungkot, ang iyong mga setting ng Mozilla Firefox ay hindi magagamit habang tumatakbo ang browser. Upang mai-import ang mga setting sa Google Chrome, i-save ang iyong ginagawa at isara ang lahat ng mga window ng Firefox. Pagkatapos i-click ang Ipagpatuloy.</translation>
 <translation id="7242029209006116544">Nagsa-sign in ka gamit ang isang pinamamahalaang account at nagbibigay sa administrator nito ng kontrol sa iyong profile sa Google Chrome. Permanenteng mauugnay ang iyong data sa Chrome, gaya ng iyong apps, mga bookmark, kasaysayan, password, at iba pang setting sa <ph name="USER_NAME"/>. Matatanggal mo ang data na ito sa Google Accounts Dashboard, ngunit hindi mo maiuugnay ang data na ito sa isa pang account. Maaari ka ring gumawa ng bagong profile upang ihiwalay ang iyong umiiral na data sa Chrome. <ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">Kinokontrol din nito kung anong pahina ang ipinapakita kapag sinimulan mo ang Chrome o naghanap mula sa Omnibox.</translation>
+<translation id="1553358976309200471">I-update ang Chrome</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Copyright <ph name="YEAR"/> Google Inc. Nakalaan ang lahat ng karapatan.</translation>
 <translation id="1698376642261615901">Ang Google Chrome ay isang web browser na nagpapatakbo ng mga webpage at application nang kasingbilis ng kidlat. Mabilis ito, matatag, at madaling gamitin. I-browse ang web nang mas ligtas na may proteksyon sa malware at phishing na isinama sa Google Chrome.</translation>

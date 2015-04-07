@@ -6,13 +6,15 @@
 #include "core/paint/HTMLCanvasPainter.h"
 
 #include "core/html/HTMLCanvasElement.h"
+#include "core/paint/RenderDrawingRecorder.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderHTMLCanvas.h"
 #include "platform/geometry/LayoutPoint.h"
+#include "platform/graphics/paint/ClipRecorder.h"
 
 namespace blink {
 
-void HTMLCanvasPainter::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void HTMLCanvasPainter::paintReplaced(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     GraphicsContext* context = paintInfo.context;
 
@@ -23,25 +25,19 @@ void HTMLCanvasPainter::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& p
 
     bool clip = !contentRect.contains(paintRect);
     if (clip) {
-        // Not allowed to overflow the content box.
-        paintInfo.context->save();
-        paintInfo.context->clip(pixelSnappedIntRect(contentRect));
+        context->save();
+        context->clip(contentRect);
     }
 
     // FIXME: InterpolationNone should be used if ImageRenderingOptimizeContrast is set.
     // See bug for more details: crbug.com/353716.
     InterpolationQuality interpolationQuality = m_renderHTMLCanvas.style()->imageRendering() == ImageRenderingOptimizeContrast ? InterpolationLow : CanvasDefaultInterpolationQuality;
-
-    HTMLCanvasElement* canvas = toHTMLCanvasElement(m_renderHTMLCanvas.node());
-    LayoutSize layoutSize = contentRect.size();
-    if (m_renderHTMLCanvas.style()->imageRendering() == ImageRenderingPixelated
-        && (layoutSize.width() > canvas->width() || layoutSize.height() > canvas->height() || layoutSize == canvas->size())) {
+    if (m_renderHTMLCanvas.style()->imageRendering() == ImageRenderingPixelated)
         interpolationQuality = InterpolationNone;
-    }
 
     InterpolationQuality previousInterpolationQuality = context->imageInterpolationQuality();
     context->setImageInterpolationQuality(interpolationQuality);
-    canvas->paint(context, paintRect);
+    toHTMLCanvasElement(m_renderHTMLCanvas.node())->paint(context, paintRect);
     context->setImageInterpolationQuality(previousInterpolationQuality);
 
     if (clip)

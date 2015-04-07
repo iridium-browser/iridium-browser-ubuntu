@@ -237,8 +237,9 @@ class SearchProviderTest : public testing::Test,
 
   void ResetFieldTrialList();
 
-  // Create a field trial, with ZeroSuggest activation based on |enabled|.
-  base::FieldTrial* CreateZeroSuggestFieldTrial(bool enabled);
+  // Enable or disable the specified Omnibox field trial rule.
+  base::FieldTrial* CreateFieldTrial(const char* field_trial_rule,
+                                     bool enabled);
 
   void ClearAllResults();
 
@@ -343,7 +344,7 @@ void SearchProviderTest::RunTest(TestData* cases,
                             metrics::OmniboxEventProto::INVALID_SPEC, false,
                             prefer_keyword, true, true,
                             ChromeAutocompleteSchemeClassifier(&profile_));
-    provider_->Start(input, false);
+    provider_->Start(input, false, false);
     matches = provider_->matches();
     SCOPED_TRACE(
         ASCIIToUTF16("Input was: ") +
@@ -388,7 +389,7 @@ void SearchProviderTest::QueryForInput(const base::string16& text,
                           metrics::OmniboxEventProto::INVALID_SPEC,
                           prevent_inline_autocomplete, prefer_keyword, true,
                           true, ChromeAutocompleteSchemeClassifier(&profile_));
-  provider_->Start(input, false);
+  provider_->Start(input, false, false);
 
   // RunUntilIdle so that the task scheduled by SearchProvider to create the
   // URLFetchers runs.
@@ -553,11 +554,11 @@ void SearchProviderTest::ResetFieldTrialList() {
       "AutocompleteDynamicTrial_0", "DefaultGroup");
   trial->group();
 }
-
-base::FieldTrial* SearchProviderTest::CreateZeroSuggestFieldTrial(
+base::FieldTrial* SearchProviderTest::CreateFieldTrial(
+    const char* field_trial_rule,
     bool enabled) {
   std::map<std::string, std::string> params;
-  params[std::string(OmniboxFieldTrial::kZeroSuggestRule)] = enabled ?
+  params[std::string(field_trial_rule)] = enabled ?
       "true" : "false";
   variations::AssociateVariationParams(
       OmniboxFieldTrial::kBundledExperimentFieldTrialName, "A", params);
@@ -896,6 +897,75 @@ TEST_F(SearchProviderTest, ScoreNewerSearchesHigher) {
   EXPECT_TRUE(wyt_match.allowed_to_be_default_match);
 }
 
+// If ScoreHistoryResults doesn't properly clear its output vector it can skip
+// scoring the actual results and just return results from a previous run.
+TEST_F(SearchProviderTest, ResetResultsBetweenRuns) {
+  GURL term_url_a(AddSearchToHistory(default_t_url_,
+                                     ASCIIToUTF16("games"), 1));
+  GURL term_url_b(AddSearchToHistory(default_t_url_,
+                                     ASCIIToUTF16("gangnam style"), 1));
+  GURL term_url_c(AddSearchToHistory(default_t_url_,
+                                     ASCIIToUTF16("gundam"), 1));
+  profile_.BlockUntilHistoryProcessesPendingRequests();
+
+  AutocompleteMatch wyt_match;
+  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("f"),
+                                                      &wyt_match));
+  ASSERT_EQ(1u, provider_->matches().size());
+
+  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("g"),
+                                                      &wyt_match));
+  ASSERT_EQ(4u, provider_->matches().size());
+
+  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("ga"),
+                                                      &wyt_match));
+  ASSERT_EQ(3u, provider_->matches().size());
+
+  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("gan"),
+                                                      &wyt_match));
+  ASSERT_EQ(2u, provider_->matches().size());
+
+  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("gans"),
+                                                      &wyt_match));
+  ASSERT_EQ(1u, provider_->matches().size());
+}
+
+// This test is identical to the previous one except that it enables the Answers
+// in Suggest field trial which triggers a different code path in
+// SearchProvider. When Answers launches, this can be removed.
+TEST_F(SearchProviderTest, ResetResultsBetweenRunsAnswersInSuggestEnabled) {
+  CreateFieldTrial(OmniboxFieldTrial::kAnswersInSuggestRule, true);
+
+  GURL term_url_a(AddSearchToHistory(default_t_url_,
+                                     ASCIIToUTF16("games"), 1));
+  GURL term_url_b(AddSearchToHistory(default_t_url_,
+                                     ASCIIToUTF16("gangnam style"), 1));
+  GURL term_url_c(AddSearchToHistory(default_t_url_,
+                                     ASCIIToUTF16("gundam"), 1));
+  profile_.BlockUntilHistoryProcessesPendingRequests();
+
+  AutocompleteMatch wyt_match;
+  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("f"),
+                                                      &wyt_match));
+  ASSERT_EQ(1u, provider_->matches().size());
+
+  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("g"),
+                                                      &wyt_match));
+  ASSERT_EQ(4u, provider_->matches().size());
+
+  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("ga"),
+                                                      &wyt_match));
+  ASSERT_EQ(3u, provider_->matches().size());
+
+  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("gan"),
+                                                      &wyt_match));
+  ASSERT_EQ(2u, provider_->matches().size());
+
+  ASSERT_NO_FATAL_FAILURE(QueryForInputAndSetWYTMatch(ASCIIToUTF16("gans"),
+                                                      &wyt_match));
+  ASSERT_EQ(1u, provider_->matches().size());
+}
+
 // An autocompleted multiword search should not be replaced by a different
 // autocompletion while the user is still typing a valid prefix unless the
 // user has typed the prefix as a query before.
@@ -1159,9 +1229,9 @@ TEST_F(SearchProviderTest, CommandLineOverrides) {
   turl_model->Add(default_t_url_);
   turl_model->SetUserSelectedDefaultSearchProvider(default_t_url_);
 
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(switches::kGoogleBaseURL,
-                                                      "http://www.bar.com/");
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kGoogleBaseURL, "http://www.bar.com/");
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kExtraSearchQueryParams, "a=b");
 
   TestData cases[] = {
@@ -3113,7 +3183,7 @@ TEST_F(SearchProviderTest, CanSendURL) {
   TemplateURL google_template_url(template_url_data);
 
   // Create field trial.
-  CreateZeroSuggestFieldTrial(true);
+  CreateFieldTrial(OmniboxFieldTrial::kZeroSuggestRule, true);
 
   ChromeAutocompleteProviderClient client(&profile_);
 
@@ -3133,13 +3203,13 @@ TEST_F(SearchProviderTest, CanSendURL) {
 
   // Not in field trial.
   ResetFieldTrialList();
-  CreateZeroSuggestFieldTrial(false);
+  CreateFieldTrial(OmniboxFieldTrial::kZeroSuggestRule, false);
   EXPECT_FALSE(SearchProvider::CanSendURL(
       GURL("http://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), &client));
   ResetFieldTrialList();
-  CreateZeroSuggestFieldTrial(true);
+  CreateFieldTrial(OmniboxFieldTrial::kZeroSuggestRule, true);
 
   // Invalid page URL.
   EXPECT_FALSE(SearchProvider::CanSendURL(
@@ -3325,9 +3395,6 @@ TEST_F(SearchProviderTest, CheckDuplicateMatchesSaved) {
 }
 
 TEST_F(SearchProviderTest, SuggestQueryUsesToken) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableAnswersInSuggest);
-
   TemplateURLService* turl_model =
       TemplateURLServiceFactory::GetForProfile(&profile_);
 
@@ -3470,4 +3537,14 @@ TEST_F(SearchProviderTest, RemoveExtraAnswers) {
   EXPECT_TRUE(matches[4].answer_contents.empty());
   EXPECT_TRUE(matches[4].answer_type.empty());
   EXPECT_FALSE(matches[4].answer);
+}
+
+TEST_F(SearchProviderTest, DoesNotProvideOnFocus) {
+  AutocompleteInput input(base::ASCIIToUTF16("f"), base::string16::npos,
+                          std::string(), GURL(),
+                          metrics::OmniboxEventProto::INVALID_SPEC, false,
+                          true, true, true,
+                          ChromeAutocompleteSchemeClassifier(&profile_));
+  provider_->Start(input, false, true);
+  EXPECT_TRUE(provider_->matches().empty());
 }

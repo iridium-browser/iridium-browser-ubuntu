@@ -36,10 +36,12 @@
 #include "core/dom/SandboxFlags.h"
 #include "core/dom/SecurityContext.h"
 #include "core/fetch/ResourceLoaderOptions.h"
+#include "core/frame/FrameTypes.h"
 #include "core/loader/FrameLoaderStateMachine.h"
 #include "core/loader/FrameLoaderTypes.h"
 #include "core/loader/HistoryItem.h"
 #include "core/loader/MixedContentChecker.h"
+#include "core/loader/NavigationPolicy.h"
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
 #include "platform/network/ResourceRequest.h"
@@ -51,10 +53,8 @@ namespace blink {
 
 class DocumentLoader;
 class FetchContext;
-class FormState;
 class Frame;
 class FrameLoaderClient;
-class NavigationAction;
 class ProgressTracker;
 class ResourceError;
 class SerializedScriptValue;
@@ -75,10 +75,9 @@ public:
 
     void init();
 
-    MixedContentChecker* mixedContentChecker() const { return &m_mixedContentChecker; }
     ProgressTracker& progress() const { return *m_progressTracker; }
 
-    // These functions start a load. All eventually call into loadWithNavigationAction() or loadInSameDocument().
+    // These functions start a load. All eventually call into startLoad() or loadInSameDocument().
     void load(const FrameLoadRequest&); // The entry point for non-reload, non-history loads.
     void reload(ReloadPolicy, const KURL& overrideURL = KURL(), ClientRedirectPolicy = NotClientRedirect);
     void loadHistoryItem(HistoryItem*, FrameLoadType = FrameLoadTypeBackForward,
@@ -115,7 +114,7 @@ public:
     FrameState state() const { return m_state; }
     FetchContext& fetchContext() const { return *m_fetchContext; }
 
-    void receivedMainResourceError(const ResourceError&);
+    void receivedMainResourceError(DocumentLoader*, const ResourceError&);
 
     bool isLoadingMainFrame() const;
 
@@ -149,6 +148,8 @@ public:
     void forceSandboxFlags(SandboxFlags flags) { m_forcedSandboxFlags |= flags; }
     SandboxFlags effectiveSandboxFlags() const;
 
+    bool shouldEnforceStrictMixedContentChecking() const;
+
     Frame* opener();
     void setOpener(LocalFrame*);
 
@@ -161,8 +162,6 @@ public:
     void commitProvisionalLoad();
 
     FrameLoaderStateMachine* stateMachine() const { return &m_stateMachine; }
-
-    LocalFrame* findFrameForNavigation(const AtomicString& name, Document* activeDocument);
 
     void applyUserAgent(ResourceRequest&);
 
@@ -184,10 +183,10 @@ public:
 
     void trace(Visitor*);
 
+    bool checkLoadCompleteForThisFrame();
+
 private:
     bool allChildrenAreComplete() const; // immediate children, not all descendants
-
-    void completed();
 
     void checkTimerFired(Timer<FrameLoader>*);
     void didAccessInitialDocumentTimerFired(Timer<FrameLoader>*);
@@ -202,11 +201,7 @@ private:
     bool shouldPerformFragmentNavigation(bool isFormSubmission, const String& httpMethod, FrameLoadType, const KURL&);
     void scrollToFragmentWithParentBoundary(const KURL&);
 
-    bool checkLoadCompleteForThisFrame();
-
-    // Calls continueLoadAfterNavigationPolicy
-    void loadWithNavigationAction(const NavigationAction&, FrameLoadType, PassRefPtrWillBeRawPtr<FormState>,
-        const SubstituteData&, ContentSecurityPolicyCheck shouldCheckMainWorldContentSecurityPolicy, ClientRedirectPolicy = NotClientRedirect);
+    void startLoad(FrameLoadRequest&, FrameLoadType, NavigationPolicy);
 
     bool validateTransitionNavigationMode();
     bool dispatchNavigationTransitionData();
@@ -223,7 +218,6 @@ private:
     // header dependencies unless performance testing proves otherwise.
     // Some of these could be lazily created for memory savings on devices.
     mutable FrameLoaderStateMachine m_stateMachine;
-    mutable MixedContentChecker m_mixedContentChecker;
 
     OwnPtrWillBeMember<ProgressTracker> m_progressTracker;
 

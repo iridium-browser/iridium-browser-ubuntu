@@ -27,8 +27,8 @@ def _GetDirAbove(dirname):
 
 # Manually check for the command-line flag. (This isn't quite right, since it
 # ignores, e.g., "--", but it's close enough.)
-if "--use_chromium_bundled_pylibs" in sys.argv[1:]:
-  sys.path.insert(0, os.path.join(_GetDirAbove("mojo"), "third_party"))
+if "--use_bundled_pylibs" in sys.argv[1:]:
+  sys.path.insert(0, os.path.join(_GetDirAbove("public"), "public/third_party"))
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "pylib"))
@@ -50,6 +50,9 @@ def LoadGenerators(generators_string):
     if generator_name.lower() == "c++":
       generator_name = os.path.join(script_dir, "generators",
                                     "mojom_cpp_generator.py")
+    if generator_name.lower() == "dart":
+      generator_name = os.path.join(script_dir, "generators",
+                                    "mojom_dart_generator.py")
     elif generator_name.lower() == "javascript":
       generator_name = os.path.join(script_dir, "generators",
                                     "mojom_js_generator.py")
@@ -90,36 +93,19 @@ class MojomProcessor(object):
   def __init__(self, should_generate):
     self._should_generate = should_generate
     self._processed_files = {}
+    self._parsed_files = {}
 
-  def ProcessFile(self, args, remaining_args, generator_modules, filename,
-                  _imported_filename_stack=None):
-    # Memoized results.
+  def ProcessFile(self, args, remaining_args, generator_modules, filename):
+    self._ParseFileAndImports(filename, args.import_directories, [])
+
+    return self._GenerateModule(args, remaining_args, generator_modules,
+        filename)
+
+  def _GenerateModule(self, args, remaining_args, generator_modules, filename):
+    # Return the already-generated module.
     if filename in self._processed_files:
       return self._processed_files[filename]
-
-    if _imported_filename_stack is None:
-      _imported_filename_stack = []
-
-    # Ensure we only visit each file once.
-    if filename in _imported_filename_stack:
-      print "%s: Error: Circular dependency" % filename + \
-          MakeImportStackMessage(_imported_filename_stack + [filename])
-      sys.exit(1)
-
-    try:
-      with open(filename) as f:
-        source = f.read()
-    except IOError as e:
-      print "%s: Error: %s" % (e.filename, e.strerror) + \
-          MakeImportStackMessage(_imported_filename_stack + [filename])
-      sys.exit(1)
-
-    try:
-      tree = Parse(source, filename)
-    except Error as e:
-      full_stack = _imported_filename_stack + [filename]
-      print str(e) + MakeImportStackMessage(full_stack)
-      sys.exit(1)
+    tree = self._parsed_files[filename]
 
     dirname, name = os.path.split(filename)
     mojom = Translate(tree, name)
@@ -132,9 +118,8 @@ class MojomProcessor(object):
       import_filename = FindImportFile(dirname,
                                        import_data['filename'],
                                        args.import_directories)
-      import_data['module'] = self.ProcessFile(
-          args, remaining_args, generator_modules, import_filename,
-          _imported_filename_stack=_imported_filename_stack + [filename])
+      import_data['module'] = self._GenerateModule(
+          args, remaining_args, generator_modules, import_filename)
 
     module = OrderedModuleFromData(mojom)
 
@@ -159,6 +144,42 @@ class MojomProcessor(object):
     self._processed_files[filename] = module
     return module
 
+  def _ParseFileAndImports(self, filename, import_directories,
+      imported_filename_stack):
+    # Ignore already-parsed files.
+    if filename in self._parsed_files:
+      return
+
+    if filename in imported_filename_stack:
+      print "%s: Error: Circular dependency" % filename + \
+          MakeImportStackMessage(imported_filename_stack + [filename])
+      sys.exit(1)
+
+    try:
+      with open(filename) as f:
+        source = f.read()
+    except IOError as e:
+      print "%s: Error: %s" % (e.filename, e.strerror) + \
+          MakeImportStackMessage(imported_filename_stack + [filename])
+      sys.exit(1)
+
+    try:
+      tree = Parse(source, filename)
+    except Error as e:
+      full_stack = imported_filename_stack + [filename]
+      print str(e) + MakeImportStackMessage(full_stack)
+      sys.exit(1)
+
+    dirname = os.path.split(filename)[0]
+    for imp_entry in tree.import_list:
+      import_filename = FindImportFile(dirname,
+          imp_entry.import_filename, import_directories)
+      self._ParseFileAndImports(import_filename, import_directories,
+          imported_filename_stack + [filename])
+
+    self._parsed_files[filename] = tree
+
+
 def main():
   parser = argparse.ArgumentParser(
       description="Generate bindings from mojom files.")
@@ -170,15 +191,15 @@ def main():
                       help="output directory for generated files")
   parser.add_argument("-g", "--generators", dest="generators_string",
                       metavar="GENERATORS",
-                      default="c++,javascript,java,python",
+                      default="c++,dart,javascript,java,python",
                       help="comma-separated list of generators")
   parser.add_argument("--debug_print_intermediate", action="store_true",
                       help="print the intermediate representation")
   parser.add_argument("-I", dest="import_directories", action="append",
                       metavar="directory", default=[],
                       help="add a directory to be searched for import files")
-  parser.add_argument("--use_chromium_bundled_pylibs", action="store_true",
-                      help="use Python modules bundled in the Chromium source")
+  parser.add_argument("--use_bundled_pylibs", action="store_true",
+                      help="use Python modules bundled in the SDK")
   (args, remaining_args) = parser.parse_known_args()
 
   generator_modules = LoadGenerators(args.generators_string)

@@ -30,7 +30,7 @@
 #include "core/html/HTMLDimension.h"
 #include "core/html/HTMLFrameSetElement.h"
 #include "core/page/EventHandler.h"
-#include "core/rendering/GraphicsContextAnnotator.h"
+#include "core/paint/FrameSetPainter.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderFrame.h"
 #include "core/rendering/RenderView.h"
@@ -62,101 +62,14 @@ RenderFrameSet::GridAxis::GridAxis()
 {
 }
 
-inline HTMLFrameSetElement* RenderFrameSet::frameSet() const
+HTMLFrameSetElement* RenderFrameSet::frameSet() const
 {
     return toHTMLFrameSetElement(node());
 }
 
-static Color borderStartEdgeColor()
+void RenderFrameSet::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    return Color(170, 170, 170);
-}
-
-static Color borderEndEdgeColor()
-{
-    return Color::black;
-}
-
-static Color borderFillColor()
-{
-    return Color(208, 208, 208);
-}
-
-void RenderFrameSet::paintColumnBorder(const PaintInfo& paintInfo, const IntRect& borderRect)
-{
-    if (!paintInfo.rect.intersects(borderRect))
-        return;
-
-    // FIXME: We should do something clever when borders from distinct framesets meet at a join.
-
-    // Fill first.
-    GraphicsContext* context = paintInfo.context;
-    context->fillRect(borderRect, frameSet()->hasBorderColor() ? resolveColor(CSSPropertyBorderLeftColor) : borderFillColor());
-
-    // Now stroke the edges but only if we have enough room to paint both edges with a little
-    // bit of the fill color showing through.
-    if (borderRect.width() >= 3) {
-        context->fillRect(IntRect(borderRect.location(), IntSize(1, height())), borderStartEdgeColor());
-        context->fillRect(IntRect(IntPoint(borderRect.maxX() - 1, borderRect.y()), IntSize(1, height())), borderEndEdgeColor());
-    }
-}
-
-void RenderFrameSet::paintRowBorder(const PaintInfo& paintInfo, const IntRect& borderRect)
-{
-    if (!paintInfo.rect.intersects(borderRect))
-        return;
-
-    // FIXME: We should do something clever when borders from distinct framesets meet at a join.
-
-    // Fill first.
-    GraphicsContext* context = paintInfo.context;
-    context->fillRect(borderRect, frameSet()->hasBorderColor() ? resolveColor(CSSPropertyBorderLeftColor) : borderFillColor());
-
-    // Now stroke the edges but only if we have enough room to paint both edges with a little
-    // bit of the fill color showing through.
-    if (borderRect.height() >= 3) {
-        context->fillRect(IntRect(borderRect.location(), IntSize(width(), 1)), borderStartEdgeColor());
-        context->fillRect(IntRect(IntPoint(borderRect.x(), borderRect.maxY() - 1), IntSize(width(), 1)), borderEndEdgeColor());
-    }
-}
-
-void RenderFrameSet::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
-{
-    ANNOTATE_GRAPHICS_CONTEXT(paintInfo, this);
-
-    if (paintInfo.phase != PaintPhaseForeground)
-        return;
-
-    RenderObject* child = firstChild();
-    if (!child)
-        return;
-
-    LayoutPoint adjustedPaintOffset = paintOffset + location();
-
-    size_t rows = m_rows.m_sizes.size();
-    size_t cols = m_cols.m_sizes.size();
-    LayoutUnit borderThickness = frameSet()->border();
-
-    LayoutUnit yPos = 0;
-    for (size_t r = 0; r < rows; r++) {
-        LayoutUnit xPos = 0;
-        for (size_t c = 0; c < cols; c++) {
-            child->paint(paintInfo, adjustedPaintOffset);
-            xPos += m_cols.m_sizes[c];
-            if (borderThickness && m_cols.m_allowBorder[c + 1]) {
-                paintColumnBorder(paintInfo, pixelSnappedIntRect(LayoutRect(adjustedPaintOffset.x() + xPos, adjustedPaintOffset.y() + yPos, borderThickness, height())));
-                xPos += borderThickness;
-            }
-            child = child->nextSibling();
-            if (!child)
-                return;
-        }
-        yPos += m_rows.m_sizes[r];
-        if (borderThickness && m_rows.m_allowBorder[r + 1]) {
-            paintRowBorder(paintInfo, pixelSnappedIntRect(LayoutRect(adjustedPaintOffset.x(), adjustedPaintOffset.y() + yPos, width(), borderThickness)));
-            yPos += borderThickness;
-        }
-    }
+    FrameSetPainter(*this).paint(paintInfo, paintOffset);
 }
 
 void RenderFrameSet::computePreferredLogicalWidths()
@@ -466,8 +379,8 @@ void RenderFrameSet::layout()
     }
 
     LayoutUnit borderThickness = frameSet()->border();
-    layOutAxis(m_rows, frameSet()->rowLengths(), height() - (rows - 1) * borderThickness);
-    layOutAxis(m_cols, frameSet()->colLengths(), width() - (cols - 1) * borderThickness);
+    layOutAxis(m_rows, frameSet()->rowLengths(), size().height() - (rows - 1) * borderThickness);
+    layOutAxis(m_cols, frameSet()->colLengths(), size().width() - (cols - 1) * borderThickness);
 
     positionFrames();
 
@@ -499,30 +412,30 @@ void RenderFrameSet::positionFrames()
     int rows = frameSet()->totalRows();
     int cols = frameSet()->totalCols();
 
-    int yPos = 0;
     int borderThickness = frameSet()->border();
+    LayoutSize size;
+    LayoutPoint position;
     for (int r = 0; r < rows; r++) {
-        int xPos = 0;
-        int height = m_rows.m_sizes[r];
+        position.setX(0);
+        size.setHeight(m_rows.m_sizes[r]);
         for (int c = 0; c < cols; c++) {
-            child->setLocation(IntPoint(xPos, yPos));
-            int width = m_cols.m_sizes[c];
+            child->setLocation(position);
+            size.setWidth(m_cols.m_sizes[c]);
 
             // has to be resized and itself resize its contents
-            if (width != child->width() || height != child->height()) {
-                child->setWidth(width);
-                child->setHeight(height);
+            if (size != child->size()) {
+                child->setSize(size);
                 child->setNeedsLayoutAndFullPaintInvalidation();
                 child->layout();
             }
 
-            xPos += width + borderThickness;
+            position.setX(position.x() + size.width() + borderThickness);
 
             child = child->nextSiblingBox();
             if (!child)
                 return;
         }
-        yPos += height + borderThickness;
+        position.setY(position.y() + size.height() + borderThickness);
     }
 
     // All the remaining frames are hidden to avoid ugly spurious unflowed frames.
@@ -561,7 +474,7 @@ bool RenderFrameSet::userResize(MouseEvent* evt)
         if (needsLayout())
             return false;
         if (evt->type() == EventTypeNames::mousedown && evt->button() == LeftButton) {
-            FloatPoint localPos = absoluteToLocal(evt->absoluteLocation(), UseTransforms);
+            FloatPoint localPos = absoluteToLocal(FloatPoint(evt->absoluteLocation()), UseTransforms);
             startResizing(m_cols, localPos.x());
             startResizing(m_rows, localPos.y());
             if (m_cols.m_splitBeingResized != noSplit || m_rows.m_splitBeingResized != noSplit) {
@@ -571,7 +484,7 @@ bool RenderFrameSet::userResize(MouseEvent* evt)
         }
     } else {
         if (evt->type() == EventTypeNames::mousemove || (evt->type() == EventTypeNames::mouseup && evt->button() == LeftButton)) {
-            FloatPoint localPos = absoluteToLocal(evt->absoluteLocation(), UseTransforms);
+            FloatPoint localPos = absoluteToLocal(FloatPoint(evt->absoluteLocation()), UseTransforms);
             continueResizing(m_cols, localPos.x());
             continueResizing(m_rows, localPos.y());
             if (evt->type() == EventTypeNames::mouseup && evt->button() == LeftButton) {

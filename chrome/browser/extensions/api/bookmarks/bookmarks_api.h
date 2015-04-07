@@ -39,7 +39,7 @@ struct CreateDetails;
 
 // Observes BookmarkModel and then routes the notifications as events to
 // the extension system.
-class BookmarkEventRouter : public BookmarkModelObserver {
+class BookmarkEventRouter : public bookmarks::BookmarkModelObserver {
  public:
   explicit BookmarkEventRouter(Profile* profile);
   ~BookmarkEventRouter() override;
@@ -114,7 +114,7 @@ class BookmarksAPI : public BrowserContextKeyedAPI,
 };
 
 class BookmarksFunction : public ChromeAsyncExtensionFunction,
-                          public BaseBookmarkModelObserver {
+                          public bookmarks::BaseBookmarkModelObserver {
  public:
   // AsyncExtensionFunction:
   bool RunAsync() override;
@@ -159,7 +159,7 @@ class BookmarksFunction : public ChromeAsyncExtensionFunction,
   bool CanBeModified(const BookmarkNode* node);
 
  private:
-  // BaseBookmarkModelObserver:
+  // bookmarks::BaseBookmarkModelObserver:
   void BookmarkModelChanged() override;
   void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override;
 
@@ -303,7 +303,9 @@ class BookmarksIOFunction : public BookmarksFunction,
  public:
   BookmarksIOFunction();
 
-  virtual void FileSelected(const base::FilePath& path, int index, void* params) = 0;
+  void FileSelected(const base::FilePath& path,
+                    int index,
+                    void* params) override = 0;
 
   // ui::SelectFileDialog::Listener:
   void MultiFilesSelected(const std::vector<base::FilePath>& files,

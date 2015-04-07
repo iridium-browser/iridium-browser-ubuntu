@@ -53,8 +53,14 @@ const std::string& ExtensionActionViewController::GetId() const {
 
 void ExtensionActionViewController::SetDelegate(
     ToolbarActionViewDelegate* delegate) {
-  view_delegate_ = delegate;
-  platform_delegate_->OnDelegateSet();
+  DCHECK((delegate == nullptr) ^ (view_delegate_ == nullptr));
+  if (delegate) {
+    view_delegate_ = delegate;
+    platform_delegate_->OnDelegateSet();
+  } else {
+    platform_delegate_.reset();
+    view_delegate_ = nullptr;
+  }
 }
 
 gfx::Image ExtensionActionViewController::GetIcon(
@@ -106,7 +112,15 @@ bool ExtensionActionViewController::IsEnabled(
     return false;
 
   return extension_action_->GetIsVisible(
-      SessionTabHelper::IdForTab(web_contents));
+      SessionTabHelper::IdForTab(web_contents)) ||
+      extensions::ExtensionActionAPI::Get(browser_->profile())->
+          ExtensionWantsToRun(extension(), web_contents);
+}
+
+bool ExtensionActionViewController::WantsToRun(
+    content::WebContents* web_contents) const {
+  return extensions::ExtensionActionAPI::Get(browser_->profile())->
+      ExtensionWantsToRun(extension(), web_contents);
 }
 
 bool ExtensionActionViewController::HasPopup(
@@ -137,6 +151,13 @@ bool ExtensionActionViewController::CanDrag() const {
 
 bool ExtensionActionViewController::ExecuteAction(bool by_user) {
   return ExecuteAction(SHOW_POPUP, by_user);
+}
+
+void ExtensionActionViewController::UpdateState() {
+  if (!ExtensionIsValid())
+    return;
+
+  view_delegate_->UpdateState();
 }
 
 bool ExtensionActionViewController::ExecuteAction(PopupShowAction show_action,
@@ -200,10 +221,10 @@ bool ExtensionActionViewController::GetExtensionCommand(
   CommandService* command_service = CommandService::Get(browser_->profile());
   if (extension_action_->action_type() == ActionInfo::TYPE_PAGE) {
     return command_service->GetPageActionCommand(
-        extension_->id(), CommandService::ACTIVE_ONLY, command, NULL);
+        extension_->id(), CommandService::ACTIVE, command, NULL);
   }
   return command_service->GetBrowserActionCommand(
-      extension_->id(), CommandService::ACTIVE_ONLY, command, NULL);
+      extension_->id(), CommandService::ACTIVE, command, NULL);
 }
 
 bool ExtensionActionViewController::ShowPopupWithUrl(

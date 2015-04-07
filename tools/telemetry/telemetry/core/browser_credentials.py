@@ -10,8 +10,7 @@ from telemetry.core import util
 from telemetry.core.backends import codepen_credentials_backend
 from telemetry.core.backends import facebook_credentials_backend
 from telemetry.core.backends import google_credentials_backend
-from telemetry.page.actions import action_runner
-from telemetry.unittest import options_for_unittests
+from telemetry.unittest_util import options_for_unittests
 
 
 class CredentialsError(Exception):
@@ -19,7 +18,7 @@ class CredentialsError(Exception):
 
 
 class BrowserCredentials(object):
-  def __init__(self, backends = None):
+  def __init__(self, backends=None):
     self._credentials = {}
     self._credentials_path = None
     self._extra_credentials = {}
@@ -59,6 +58,7 @@ class BrowserCredentials(object):
           'Unrecognized credentials type: %s', credentials_type)
     if credentials_type not in self._credentials:
       return False
+    from telemetry.page.actions import action_runner
     runner = action_runner.ActionRunner(tab)
     return self._backends[credentials_type].LoginNeeded(
       tab, runner, self._credentials[credentials_type])
@@ -125,7 +125,7 @@ class BrowserCredentials(object):
         self._credentials[k] = self._extra_credentials[k]
 
   def WarnIfMissingCredentials(self, page):
-    if (page.credentials and not self.CanLogin(page.credentials)):
+    if page.credentials and not self.CanLogin(page.credentials):
       files_to_tweak = []
       if page.credentials_path:
         files_to_tweak.append(page.credentials_path)

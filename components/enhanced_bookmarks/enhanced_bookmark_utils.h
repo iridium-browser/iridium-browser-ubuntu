@@ -14,11 +14,22 @@ class BookmarkNode;
 
 namespace enhanced_bookmarks {
 
-// Returns an ordered vector of bookmarks that are urls that match |query|.
-// |query| must be UTF8 encoded.
-std::vector<const BookmarkNode*> FindBookmarksWithQuery(
-    BookmarkModel* bookmark_model,
-    const std::string& query);
+static const char kLaunchLocationUMA[] = "Stars.LaunchLocation";
+
+// Possible locations where a bookmark can be opened from.
+// Please sync with the corresponding histograms.xml.
+//
+// A Java counterpart will be generated for this enum.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.enhancedbookmark
+enum LaunchLocation {
+  ALL_ITEMS = 0,
+  UNCATEGORIZED = 1,  // Deprecated.
+  FOLDER = 2,
+  FILTER = 3,
+  SEARCH = 4,
+  BOOKMARK_EDITOR = 5,
+  COUNT = 6,
+};
 
 // The vector is sorted in place.
 // All of the bookmarks in |nodes| must be urls.

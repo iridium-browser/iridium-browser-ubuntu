@@ -23,7 +23,7 @@ class ToughCompositorScrollPage(ToughCompositorPage):
   def __init__(self, url, page_set):
     super(ToughCompositorScrollPage, self).__init__(url=url, page_set=page_set)
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     # Make the scroll longer to reduce noise.
     interaction = action_runner.BeginGestureInteraction(
         'ScrollAction', is_smooth=True)
@@ -35,7 +35,7 @@ class ToughCompositorWaitPage(ToughCompositorPage):
   def __init__(self, url, page_set):
     super(ToughCompositorWaitPage, self).__init__(url=url, page_set=page_set)
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     # We scroll back and forth a few times to reduce noise in the tests.
     action_runner.Wait(8)
 
@@ -68,10 +68,12 @@ class ToughCompositorCasesPageSet(page_set_module.PageSet):
       'http://jsbin.com/giqafofe/1/quiet?JS_POSTER_CIRCLE',
       # Why: JS invalidation does lots of uploads """
       'http://jsbin.com/beqojupo/1/quiet?JS_FULL_SCREEN_INVALIDATION',
+      # Why: Creates a large number of new tilings """
+      'http://jsbin.com/covoqi/1/quiet?NEW_TILINGS',
     ]
 
     for url in scroll_urls_list:
-      self.AddPage(ToughCompositorScrollPage(url, self))
+      self.AddUserStory(ToughCompositorScrollPage(url, self))
 
     for url in wait_urls_list:
-      self.AddPage(ToughCompositorWaitPage(url, self))
+      self.AddUserStory(ToughCompositorWaitPage(url, self))

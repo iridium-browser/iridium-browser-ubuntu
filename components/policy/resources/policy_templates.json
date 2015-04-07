@@ -123,7 +123,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 281
+#   For your editing convenience: highest ID currently used: 284
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -793,14 +793,55 @@
         'dynamic_refresh': True,
         'per_profile': True,
       },
+      'deprecated': True,
       'example_value': False,
       'id': 162,
       'caption': '''Force SafeSearch''',
-      'desc': '''Forces queries in Google Web Search to be done with SafeSearch set to active and prevents users from changing this setting. This setting also forces Safety Mode on YouTube.
+      'desc': '''This policy is deprecated, please use ForceGoogleSafeSearch and ForceYouTubeSafetyMode instead.
+
+      Forces queries in Google Web Search to be done with SafeSearch set to active and prevents users from changing this setting. This setting also forces Safety Mode on YouTube.
 
       If you enable this setting, SafeSearch in Google Search and YouTube is always active.
 
       If you disable this setting or do not set a value, SafeSearch in Google Search and YouTube is not enforced.''',
+    },
+    {
+      'name': 'ForceGoogleSafeSearch',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:41-', 'chrome_os:41-', 'android:41-'],
+      'features': {
+        'can_be_recommended': False,
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': False,
+      'id': 282,
+      'caption': '''Force Google SafeSearch''',
+      'desc': '''Forces queries in Google Web Search to be done with SafeSearch set to active and prevents users from changing this setting.
+
+      If you enable this setting, SafeSearch in Google Search is always active.
+
+      If you disable this setting or do not set a value, SafeSearch in Google Search is not enforced.''',
+    },
+    {
+      'name': 'ForceYouTubeSafetyMode',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:41-', 'chrome_os:41-', 'android:41-'],
+      'features': {
+        'can_be_recommended': False,
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': False,
+      'id': 283,
+      'caption': '''Force YouTube Safety Mode''',
+      'desc': '''Forces YouTube Safety Mode to active and prevents users from changing this setting.
+
+      If you enable this setting, Safety Mode on YouTube is always active.
+
+      If you disable this setting or do not set a value, Safety Mode on YouTube is not enforced.''',
     },
     {
       'name': 'SafeBrowsingEnabled',
@@ -1069,10 +1110,14 @@
         'dynamic_refresh': False,
         'per_profile': False,
       },
+      'deprecated': True,
       'example_value': False,
       'id': 265,
       'caption': '''Enables the old web-based signin''',
       'desc': '''Enables the old web-based signin flow.
+
+      This setting should no longer be needed as of Chrome 41 and support will be removed entirely in Chrome 43.
+      This setting will be renamed in Chrome 42 as part of the deprecation process.
 
       This setting is useful for enterprise customers who are using SSO solutions that are not compatible with the new inline signin flow yet.
       If you enable this setting, the old web-based signin flow would be used.
@@ -1761,6 +1806,10 @@
                   'allowed_permissions': {
                     '$ref': 'ListOfPermissions',
                   },
+                  'minimum_version_required': {
+                    'type': 'string',
+                    'pattern': '^[0-9]+([.][0-9]+)*$',
+                  },
                 },
               },
               '^update_url:': {
@@ -1810,6 +1859,7 @@
             'abcdefghijklmnopabcdefghijklmnop' : {
               'installation_mode': 'allowed',
               'blocked_permissions': ['history'],
+              'minimum_version_required': '1.0.1',
             },
             'bcdefghijklmnopabcdefghijklmnopa' : {
               'installation_mode': 'force_installed',
@@ -1849,6 +1899,8 @@
           "blocked_permissions": maps to a list of strings indicating the blocked API permissions for the extension. The permissions names are same as the permission strings declared in manifest of extension as described at <ph name="LINK_TO_EXTENSION_DOC3">https://developer.chrome.com/extensions/declare_permissions</ph>. This setting also can be configured for "*" extension. If the extension requires a permission which is on the blocklist, it will not be allowed to load. If it contains a blocked permission as optional requirement, it will be handled in the normal way, but requesting conflicting permissions will be declined automatically at runtime.
 
           "allowed_permissions": similar to "blocked_permissions", but instead explicitly allow some permissions which might be blocked by global blocked permission list, thus can not be configured for "*" extension. Note that this setting doesn't give granted permissions to extensions automatically.
+
+          "minimum_version_required": maps to a version string. The format of the version string is the same as the one used in extension manifest, as described at <ph name="LINK_TO_EXTENSION_DOC4">https://developer.chrome.com/apps/manifest/version</ph>. An extension with a version older than the specified minimum version will be disabled. This applies to force-installed extensions as well.
 
           The following settings can be used only for the default "*" configuration:
 
@@ -6892,7 +6944,9 @@
       'example_value': 'ssl3',
       'id': 279,
       'caption': '''Minimum SSL version enabled''',
-      'desc': '''If this policy is not configured then <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will use a default minimum version, which is SSLv3 in Chrome 39 but may be TLS 1.0 in Chrome 40.
+      'desc': '''Warning: SSLv3 support will be entirely removed from Chrome after version 43 (around July 2015) after which the setting "ssl3" will be ignored and the default of "tls1" used instead.
+
+      If this policy is not configured then <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> uses a default minimum version which is SSLv3 in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> 39 and TLS 1.0 in later versions.
 
       Otherwise it may be set to one of the following values: "sslv3", "tls1", "tls1.1" or "tls1.2". When set, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will not use SSL/TLS versions less than the specified version. An unrecognized value will be ignored.
 
@@ -6945,15 +6999,17 @@
       'example_value': 'tls1',
       'id': 280,
       'caption': '''Minimum SSL version to fallback to''',
-      'desc': '''When an SSL/TLS handshake fails, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will retry the connection with a lesser version of SSL/TLS in order to work around bugs in HTTPS servers. This setting configures the version at which this fallback process will stop. If a server performs version negotiation correctly (i.e. without breaking the connection) then this setting doesn't apply. Regardless, the resulting connection must still comply with SSLVersionMin.
+      'desc': '''Warning: SSLv3 support will be entirely removed from Chrome after version 43 (around July 2015) after which the setting "ssl3" will be ignored and the default of "tls1" used instead.
 
-      If this policy is not configured then <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will use a default minimum version, which was SSLv3 in Chrome 38 but is TLS 1.0 in Chrome 39.
+      When an SSL/TLS handshake fails, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will retry the connection with a lesser version of SSL/TLS in order to work around bugs in HTTPS servers. This setting configures the version at which this fallback process will stop. If a server performs version negotiation correctly (i.e. without breaking the connection) then this setting doesn't apply. Regardless, the resulting connection must still comply with SSLVersionMin.
+
+      If this policy is not configured then <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> uses a default minimum version which is SSLv3 in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> 38 and TLS 1.0 in later versions.
 
       Otherwise it may be set to one of the following values: "sslv3", "tls1", "tls1.1" or "tls1.2". A setting of "tls1" protects against attacks on SSLv3 but is already the default. A more likely situation is that compatibility with a buggy server must be maintained and thus this needs to be set to "sslv3". That potentially opens up all connections to SSLv3 attacks since a network attacker can induce fallbacks. Thus this is a stopgap measure and the server should be rapidly fixed.
 
       A setting of "tls1.2" disables all fallback but this may have a significant compatibility impact.
 
-      Note that, despite the number, "sslv3" is an earier version than "tls1".''',
+      Note that, despite the number, "sslv3" is an earlier version than "tls1".''',
     },
     {
       'name': 'ContextualSearchEnabled',
@@ -6976,6 +7032,21 @@
       If you disable this setting, Touch to Search will be disabled completely.
 
       If this policy is left not set, it is equivalent to being enabled, see description above.''',
+    },
+    {
+      'name': 'DeviceRebootOnShutdown',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome_os:41-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': True,
+      },
+      'example_value': True,
+      'id': 284,
+      'caption': '''Automatic reboot on device shutdown''',
+      'desc': '''If this policy is set to false or not configured, <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> will allow the user to shut down the device.
+      If this policy is set to true, <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> will trigger a reboot when the user shuts down the device. <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> replaces all occurrences of shutdown buttons in the UI by reboot buttons. If the user shuts down the device using the power button, it will not automatically reboot, even if the policy is enabled.''',
     },
   ],
   'messages': {

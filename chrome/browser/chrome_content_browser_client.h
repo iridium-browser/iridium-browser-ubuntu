@@ -172,7 +172,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void SelectClientCertificate(
       int render_process_id,
       int render_frame_id,
-      const net::HttpNetworkSession* network_session,
       net::SSLCertRequestInfo* cert_request_info,
       const base::Callback<void(net::X509Certificate*)>& callback) override;
   void AddCertificate(net::CertificateMimeType cert_type,
@@ -181,16 +180,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                       int render_process_id,
                       int render_frame_id) override;
   content::MediaObserver* GetMediaObserver() override;
-  blink::WebNotificationPermission CheckDesktopNotificationPermission(
-      const GURL& source_origin,
-      content::ResourceContext* context,
-      int render_process_id) override;
-  void ShowDesktopNotification(
-      const content::ShowDesktopNotificationHostMsgParams& params,
-      content::BrowserContext* browser_context,
-      int render_process_id,
-      scoped_ptr<content::DesktopNotificationDelegate> delegate,
-      base::Closure* cancel_callback) override;
+  content::PlatformNotificationService* GetPlatformNotificationService()
+      override;
   void RequestPermission(
       content::PermissionType permission,
       content::WebContents* web_contents,
@@ -198,6 +189,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const GURL& requesting_frame,
       bool user_gesture,
       const base::Callback<void(bool)>& result_callback) override;
+  content::PermissionStatus GetPermissionStatus(
+      content::PermissionType permission,
+      content::BrowserContext* browser_context,
+      const GURL& requesting_origin,
+      const GURL& embedding_origin) override;
   void CancelPermissionRequest(content::PermissionType permission,
                                content::WebContents* web_contents,
                                int bridge_id,
@@ -222,7 +218,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                        bool* no_javascript_access) override;
   void ResourceDispatcherHostCreated() override;
   content::SpeechRecognitionManagerDelegate*
-  GetSpeechRecognitionManagerDelegate() override;
+  CreateSpeechRecognitionManagerDelegate() override;
   net::NetLog* GetNetLog() override;
   content::AccessTokenStore* CreateAccessTokenStore() override;
   bool IsFastShutdownPossible() override;

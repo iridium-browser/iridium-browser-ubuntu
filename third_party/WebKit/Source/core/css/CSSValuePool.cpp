@@ -42,6 +42,7 @@ CSSValuePool::CSSValuePool()
     : m_inheritedValue(CSSInheritedValue::create())
     , m_implicitInitialValue(CSSInitialValue::createImplicit())
     , m_explicitInitialValue(CSSInitialValue::createExplicit())
+    , m_unsetValue(CSSUnsetValue::create())
     , m_colorTransparent(CSSPrimitiveValue::createColor(Color::transparent))
     , m_colorWhite(CSSPrimitiveValue::createColor(Color::white))
     , m_colorBlack(CSSPrimitiveValue::createColor(Color::black))
@@ -155,6 +156,7 @@ void CSSValuePool::trace(Visitor* visitor)
     visitor->trace(m_inheritedValue);
     visitor->trace(m_implicitInitialValue);
     visitor->trace(m_explicitInitialValue);
+    visitor->trace(m_unsetValue);
     visitor->trace(m_identifierValueCache);
     visitor->trace(m_colorValueCache);
     visitor->trace(m_colorTransparent);

@@ -191,9 +191,10 @@ class PrerenderManager::OnCloseWebContentsDeleter
     ScheduleWebContentsForDeletion(false);
   }
 
-  bool ShouldSuppressDialogs() override {
+  bool ShouldSuppressDialogs(WebContents* source) override {
     // Use this as a proxy for getting statistics on how often we fail to honor
     // the beforeunload event.
+    DCHECK_EQ(tab_, source);
     suppressed_dialog_ = true;
     return true;
   }
@@ -355,8 +356,7 @@ PrerenderHandle* PrerenderManager::AddPrerenderFromLinkRelPrerender(
             .GetDefaultSessionStorageNamespace();
   }
 
-  return AddPrerender(origin, process_id, url, referrer, size,
-                      session_storage_namespace);
+  return AddPrerender(origin, url, referrer, size, session_storage_namespace);
 }
 
 PrerenderHandle* PrerenderManager::AddPrerenderFromOmnibox(
@@ -365,7 +365,7 @@ PrerenderHandle* PrerenderManager::AddPrerenderFromOmnibox(
     const gfx::Size& size) {
   if (!IsOmniboxEnabled(profile_))
     return NULL;
-  return AddPrerender(ORIGIN_OMNIBOX, -1, url, content::Referrer(), size,
+  return AddPrerender(ORIGIN_OMNIBOX, url, content::Referrer(), size,
                       session_storage_namespace);
 }
 
@@ -373,7 +373,7 @@ PrerenderHandle* PrerenderManager::AddPrerenderFromLocalPredictor(
     const GURL& url,
     SessionStorageNamespace* session_storage_namespace,
     const gfx::Size& size) {
-  return AddPrerender(ORIGIN_LOCAL_PREDICTOR, -1, url, content::Referrer(),
+  return AddPrerender(ORIGIN_LOCAL_PREDICTOR, url, content::Referrer(),
                       size, session_storage_namespace);
 }
 
@@ -382,7 +382,7 @@ PrerenderHandle* PrerenderManager::AddPrerenderFromExternalRequest(
     const content::Referrer& referrer,
     SessionStorageNamespace* session_storage_namespace,
     const gfx::Size& size) {
-  return AddPrerender(ORIGIN_EXTERNAL_REQUEST, -1, url, referrer, size,
+  return AddPrerender(ORIGIN_EXTERNAL_REQUEST, url, referrer, size,
                       session_storage_namespace);
 }
 
@@ -391,7 +391,7 @@ PrerenderHandle* PrerenderManager::AddPrerenderForInstant(
     content::SessionStorageNamespace* session_storage_namespace,
     const gfx::Size& size) {
   DCHECK(chrome::ShouldPrefetchSearchResults());
-  return AddPrerender(ORIGIN_INSTANT, -1, url, content::Referrer(), size,
+  return AddPrerender(ORIGIN_INSTANT, url, content::Referrer(), size,
                       session_storage_namespace);
 }
 
@@ -1080,8 +1080,12 @@ void PrerenderManager::PendingSwap::BeginSwap() {
       this, &PrerenderManager::PendingSwap::OnMergeTimeout);
 }
 
-void PrerenderManager::PendingSwap::AboutToNavigateRenderView(
-    RenderViewHost* render_view_host) {
+void PrerenderManager::PendingSwap::AboutToNavigateRenderFrame(
+    RenderFrameHost* render_frame_host) {
+  // TODO(davidben): Update prerendering for --site-per-process.
+  if (render_frame_host->GetParent())
+    return;
+
   if (seen_target_route_id_) {
     // A second navigation began browser-side.
     prerender_data_->ClearPendingSwap();
@@ -1090,8 +1094,8 @@ void PrerenderManager::PendingSwap::AboutToNavigateRenderView(
 
   seen_target_route_id_ = true;
   target_route_id_ = PrerenderTracker::ChildRouteIdPair(
-      render_view_host->GetMainFrame()->GetProcess()->GetID(),
-      render_view_host->GetMainFrame()->GetRoutingID());
+      render_frame_host->GetProcess()->GetID(),
+      render_frame_host->GetRoutingID());
   manager_->prerender_tracker()->AddPrerenderPendingSwap(
       target_route_id_, url_);
 }
@@ -1240,7 +1244,6 @@ net::URLRequestContextGetter* PrerenderManager::GetURLRequestContext() {
 // private
 PrerenderHandle* PrerenderManager::AddPrerender(
     Origin origin,
-    int process_id,
     const GURL& url_arg,
     const content::Referrer& referrer,
     const gfx::Size& size,
@@ -1339,7 +1342,7 @@ PrerenderHandle* PrerenderManager::AddPrerender(
   net::URLRequestContextGetter* request_context =
       (IsPrerenderCookieStoreEnabled() ? GetURLRequestContext() : NULL);
 
-  prerender_contents->StartPrerendering(process_id, contents_size,
+  prerender_contents->StartPrerendering(contents_size,
                                         session_storage_namespace,
                                         request_context);
 

@@ -7,7 +7,7 @@
 #include "base/numerics/safe_math.h"
 #include "base/stl_util.h"
 #include "content/child/webcrypto/crypto_data.h"
-#include "content/child/webcrypto/nss/aes_key_nss.h"
+#include "content/child/webcrypto/nss/aes_algorithm_nss.h"
 #include "content/child/webcrypto/nss/key_nss.h"
 #include "content/child/webcrypto/nss/util_nss.h"
 #include "content/child/webcrypto/status.h"
@@ -76,19 +76,15 @@ Status AesCbcEncryptDecrypt(EncryptOrDecrypt mode,
   unsigned char* buffer_data = vector_as_array(buffer);
 
   int output_len;
-  if (SECSuccess != PK11_CipherOp(context.get(),
-                                  buffer_data,
-                                  &output_len,
-                                  buffer->size(),
-                                  data.bytes(),
+  if (SECSuccess != PK11_CipherOp(context.get(), buffer_data, &output_len,
+                                  buffer->size(), data.bytes(),
                                   data.byte_length())) {
     return Status::OperationError();
   }
 
   unsigned int final_output_chunk_len;
   if (SECSuccess !=
-      PK11_DigestFinal(context.get(),
-                       buffer_data + output_len,
+      PK11_DigestFinal(context.get(), buffer_data + output_len,
                        &final_output_chunk_len,
                        (output_max_len - output_len).ValueOrDie())) {
     return Status::OperationError();

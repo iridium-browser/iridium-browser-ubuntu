@@ -30,7 +30,7 @@ class PolymerCalculatorPage(PolymerPage):
           'demo.html'),
       page_set=page_set)
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     self.TapButton(action_runner)
     self.SlidePanel(action_runner)
 
@@ -82,7 +82,7 @@ class PolymerShadowPage(PolymerPage):
       url='http://www.polymer-project.org/components/paper-shadow/demo.html',
       page_set=page_set)
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     action_runner.ExecuteJavaScript(
         "document.getElementById('fab').scrollIntoView()")
     action_runner.Wait(5)
@@ -129,7 +129,7 @@ class PolymerSampler(PolymerPage):
     action_runner.WaitForJavaScriptCondition(
         'window.__polymer_ready')
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     #TODO(wiltzius) Add interactions for input elements and shadow pages
     if self.scrolling_page:
       # Only bother scrolling the page if its been marked as worthwhile
@@ -210,8 +210,8 @@ class PolymerPageSet(page_set_module.PageSet):
       archive_data_file='data/polymer.json',
       bucket=page_set_module.PUBLIC_BUCKET)
 
-    self.AddPage(PolymerCalculatorPage(self))
-    self.AddPage(PolymerShadowPage(self))
+    self.AddUserStory(PolymerCalculatorPage(self))
+    self.AddUserStory(PolymerShadowPage(self))
 
     # Polymer Sampler subpages that are interesting to tap / swipe elements on
     TAPPABLE_PAGES = [
@@ -228,11 +228,11 @@ class PolymerPageSet(page_set_module.PageSet):
         'paper-toggle-button',
         ]
     for p in TAPPABLE_PAGES:
-      self.AddPage(PolymerSampler(self, p))
+      self.AddUserStory(PolymerSampler(self, p))
 
     # Polymer Sampler subpages that are interesting to scroll
     SCROLLABLE_PAGES = [
         'core-scroll-header-panel',
         ]
     for p in SCROLLABLE_PAGES:
-      self.AddPage(PolymerSampler(self, p, scrolling_page=True))
+      self.AddUserStory(PolymerSampler(self, p, scrolling_page=True))

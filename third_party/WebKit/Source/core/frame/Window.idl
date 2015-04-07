@@ -30,7 +30,7 @@
 [
     CheckSecurity=Frame,
     Custom=ToV8,
-    ImplementedAs=LocalDOMWindow,
+    ImplementedAs=DOMWindow,
     PrimaryGlobal,
 ] interface Window : EventTarget {
     // DOM Level 0
@@ -80,7 +80,7 @@
                  [Default=Undefined] optional boolean searchInFrames,
                  [Default=Undefined] optional boolean showDialog);
 
-    [Replaceable, MeasureAs=WindowOffscreenBuffering] readonly attribute boolean offscreenBuffering;
+    [Replaceable, MeasureAs=WindowOffscreenBuffering, NotEnumerable] readonly attribute boolean offscreenBuffering;
 
     [Replaceable] readonly attribute long outerHeight;
     [Replaceable] readonly attribute long outerWidth;
@@ -95,14 +95,12 @@
     readonly attribute double pageXOffset;
     readonly attribute double pageYOffset;
 
-    // Overloading can be replaced by optional if RuntimeEnabled is removed, by
-    // changing the third argument to *optional* Dictionary scrollOptions
     void scrollBy(double x, double y);
-    [RuntimeEnabled=CSSOMSmoothScroll, RaisesException] void scrollBy(double x, double y, ScrollOptions scrollOptions);
+    [RuntimeEnabled=CSSOMSmoothScroll] void scrollBy([Default=Undefined] optional ScrollToOptions scrollToOptions);
     void scrollTo(double x, double y);
-    [RuntimeEnabled=CSSOMSmoothScroll, RaisesException] void scrollTo(double x, double y, ScrollOptions scrollOptions);
+    [RuntimeEnabled=CSSOMSmoothScroll] void scrollTo([Default=Undefined] optional ScrollToOptions scrollToOptions);
     void scroll(double x, double y);
-    [RuntimeEnabled=CSSOMSmoothScroll, RaisesException] void scroll(double x, double y, ScrollOptions scrollOptions);
+    [RuntimeEnabled=CSSOMSmoothScroll] void scroll([Default=Undefined] optional ScrollToOptions scrollOptions);
     void moveBy([Default=Undefined] optional float x, [Default=Undefined] optional float y); // FIXME: this should take longs not floats.
     void moveTo([Default=Undefined] optional float x, [Default=Undefined] optional float y); // FIXME: this should take longs not floats.
     void resizeBy([Default=Undefined] optional float x, [Default=Undefined] optional float y); // FIXME: this should take longs not floats.
@@ -135,15 +133,14 @@
     MediaQueryList matchMedia(DOMString query);
 
     // styleMedia has been removed from the CSSOM View specification.
-    readonly attribute StyleMedia styleMedia;
+    [MeasureAs=StyleMedia] readonly attribute StyleMedia styleMedia;
 
     // DOM Level 2 Style Interface
-    CSSStyleDeclaration getComputedStyle([Default=Undefined] optional Element element,
-                                         [TreatUndefinedAs=NullString, Default=Undefined] optional DOMString? pseudoElement);
+    [TypeChecking=Interface] CSSStyleDeclaration getComputedStyle(Element element, optional DOMString? pseudoElt = null);
 
     // WebKit extensions
-    [MeasureAs=GetMatchedCSSRules] CSSRuleList getMatchedCSSRules([Default=Undefined] optional Element element,
-                                                                  [TreatUndefinedAs=NullString, Default=Undefined] optional DOMString? pseudoElement);
+    [DeprecateAs=GetMatchedCSSRules] CSSRuleList getMatchedCSSRules([Default=Undefined] optional Element element,
+                                                                    [TreatUndefinedAs=NullString, Default=Undefined] optional DOMString? pseudoElement);
 
     [Replaceable] readonly attribute double devicePixelRatio;
 
@@ -195,14 +192,14 @@
     // Additional constructors.
     [MeasureAs=PrefixedTransitionEventConstructor] attribute TransitionEventConstructor WebKitTransitionEvent;
     [RuntimeEnabled=CSSAnimationUnprefixed] attribute WebKitAnimationEventConstructor AnimationEvent;
-    [MeasureAs=PrefixedWindowURL] attribute URLConstructor webkitURL; // FIXME: deprecate this.
+    [DeprecateAs=PrefixedWindowURL] attribute URLConstructor webkitURL;
     [MeasureAs=PrefixedMutationObserverConstructor] attribute MutationObserverConstructor WebKitMutationObserver;
 
     // window.toString() requires special handling in V8
     [DoNotCheckSignature, DoNotCheckSecurity, Custom, NotEnumerable] stringifier;
 
-    [NotEnumerable] getter Window (unsigned long index);
-    [Custom, NotEnumerable] getter Window (DOMString name);
+    [NotEnumerable, DoNotCheckSecurity] getter Window (unsigned long index);
+    [Custom, NotEnumerable, DoNotCheckSecurity] getter Window (DOMString name);
 };
 
 // http://www.whatwg.org/specs/web-apps/current-work/#transferable-objects

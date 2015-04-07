@@ -5,7 +5,7 @@
 
 """Archives a set of files or directories to an Isolate Server."""
 
-__version__ = '0.3.4'
+__version__ = '0.4'
 
 import functools
 import logging
@@ -94,6 +94,11 @@ DEFAULT_BLACKLIST = (
   # .git or .svn directory.
   r'^(?:.+' + re.escape(os.path.sep) + r'|)\.(?:git|svn)$',
 )
+
+
+# A class to use to communicate with the server by default. Can be changed by
+# 'set_storage_api_class'. Default is IsolateServer.
+_storage_api_cls = None
 
 
 class Error(Exception):
@@ -346,11 +351,7 @@ class Storage(object):
 
   @property
   def location(self):
-    """Location of a backing store that this class is using.
-
-    Exact meaning depends on the storage_api type. For IsolateServer it is
-    an URL of isolate server, for FileSystem is it a path in file system.
-    """
+    """URL of the backing store that this class is using."""
     return self._storage_api.location
 
   @property
@@ -829,11 +830,7 @@ class StorageApi(object):
 
   @property
   def location(self):
-    """Location of a backing store that this class is using.
-
-    Exact meaning depends on the type. For IsolateServer it is an URL of isolate
-    server, for FileSystem is it a path in file system.
-    """
+    """URL of the backing store that this class is using."""
     raise NotImplementedError()
 
   @property
@@ -929,7 +926,7 @@ class IsolateServer(StorageApi):
 
   def __init__(self, base_url, namespace):
     super(IsolateServer, self).__init__()
-    assert base_url.startswith('http'), base_url
+    assert file_path.is_url(base_url), base_url
     self._base_url = base_url.rstrip('/')
     self._namespace = namespace
     self._lock = threading.Lock()
@@ -1009,11 +1006,7 @@ class IsolateServer(StorageApi):
     source_url = self.get_fetch_url(digest)
     logging.debug('download_file(%s, %d)', source_url, offset)
 
-    connection = net.url_open(
-        source_url,
-        read_timeout=DOWNLOAD_READ_TIMEOUT,
-        headers={'Range': 'bytes=%d-' % offset} if offset else None)
-
+    connection = self.do_fetch(source_url, offset)
     if not connection:
       raise IOError('Request failed - %s' % source_url)
 
@@ -1072,19 +1065,9 @@ class IsolateServer(StorageApi):
     # This push operation may be a retry after failed finalization call below,
     # no need to reupload contents in that case.
     if not push_state.uploaded:
-      # A cheezy way to avoid memcpy of (possibly huge) file, until streaming
-      # upload support is implemented.
-      if isinstance(content, list) and len(content) == 1:
-        content = content[0]
-      else:
-        content = ''.join(content)
       # PUT file to |upload_url|.
-      response = net.url_read(
-          url=push_state.upload_url,
-          data=content,
-          content_type='application/octet-stream',
-          method='PUT')
-      if response is None:
+      success = self.do_push(push_state.upload_url, content)
+      if not success:
         raise IOError('Failed to upload a file %s to %s' % (
             item.digest, push_state.upload_url))
       push_state.uploaded = True
@@ -1098,7 +1081,7 @@ class IsolateServer(StorageApi):
       # send it to isolated server. That way isolate server can verify that
       # the data safely reached Google Storage (GS provides MD5 and CRC32C of
       # stored files).
-      # TODO(maruel): Fix the server to accept propery data={} so
+      # TODO(maruel): Fix the server to accept properly data={} so
       # url_read_json() can be used.
       response = net.url_read(
           url=push_state.finalize_url,
@@ -1155,55 +1138,49 @@ class IsolateServer(StorageApi):
         len(items), len(items) - len(missing_items))
     return missing_items
 
+  def do_fetch(self, url, offset):
+    """Fetches isolated data from the URL.
 
-class FileSystem(StorageApi):
-  """StorageApi implementation that fetches data from the file system.
+    Used only for fetching files, not for API calls. Can be overridden in
+    subclasses.
 
-  The common use case is a NFS/CIFS file server that is mounted locally that is
-  used to fetch the file on a local partition.
-  """
+    Args:
+      url: URL to fetch the data from, can possibly return http redirect.
+      offset: byte offset inside the file to start fetching from.
 
-  # Used for push_state instead of None. That way caller is forced to
-  # call 'contains' before 'push'. Naively passing None in 'push' will not work.
-  _DUMMY_PUSH_STATE = object()
+    Returns:
+      net.HttpResponse compatible object, with 'read' and 'get_header' calls.
+    """
+    return net.url_open(
+        url,
+        read_timeout=DOWNLOAD_READ_TIMEOUT,
+        headers={'Range': 'bytes=%d-' % offset} if offset else None)
 
-  def __init__(self, base_path, namespace):
-    super(FileSystem, self).__init__()
-    self._base_path = base_path
-    self._namespace = namespace
+  def do_push(self, url, content):
+    """Uploads isolated file to the URL.
 
-  @property
-  def location(self):
-    return self._base_path
+    Used only for storing files, not for API calls. Can be overridden in
+    subclasses.
 
-  @property
-  def namespace(self):
-    return self._namespace
+    Args:
+      url: URL to upload the data to.
+      content: an iterable that yields 'str' chunks.
 
-  def get_fetch_url(self, digest):
-    return None
-
-  def fetch(self, digest, offset=0):
-    assert isinstance(digest, basestring)
-    return file_read(os.path.join(self._base_path, digest), offset=offset)
-
-  def push(self, item, push_state, content=None):
-    assert isinstance(item, Item)
-    assert item.digest is not None
-    assert item.size is not None
-    assert push_state is self._DUMMY_PUSH_STATE
-    content = item.content() if content is None else content
-    if isinstance(content, basestring):
-      assert not isinstance(content, unicode), 'Unicode string is not allowed'
-      content = [content]
-    file_write(os.path.join(self._base_path, item.digest), content)
-
-  def contains(self, items):
-    assert all(i.digest is not None and i.size is not None for i in items)
-    return dict(
-        (item, self._DUMMY_PUSH_STATE) for item in items
-        if not os.path.exists(os.path.join(self._base_path, item.digest))
-    )
+    Returns:
+      True on success, False on failure.
+    """
+    # A cheezy way to avoid memcpy of (possibly huge) file, until streaming
+    # upload support is implemented.
+    if isinstance(content, list) and len(content) == 1:
+      content = content[0]
+    else:
+      content = ''.join(content)
+    response = net.url_read(
+          url=url,
+          data=content,
+          content_type='application/octet-stream',
+          method='PUT')
+    return response is not None
 
 
 class LocalCache(object):
@@ -1710,7 +1687,15 @@ class IsolatedBundle(object):
       self.relative_cwd = node.data['relative_cwd']
 
 
-def get_storage_api(file_or_url, namespace):
+def set_storage_api_class(cls):
+  """Replaces StorageApi implementation used by default."""
+  global _storage_api_cls
+  assert _storage_api_cls is None
+  assert issubclass(cls, StorageApi)
+  _storage_api_cls = cls
+
+
+def get_storage_api(url, namespace):
   """Returns an object that implements low-level StorageApi interface.
 
   It is used by Storage to work with single isolate |namespace|. It should
@@ -1718,8 +1703,7 @@ def get_storage_api(file_or_url, namespace):
   a better alternative.
 
   Arguments:
-    file_or_url: a file path to use file system based storage, or URL of isolate
-        service to use shared cloud based storage.
+    url: URL of isolate service to use shared cloud based storage.
     namespace: isolate namespace to operate in, also defines hashing and
         compression scheme used, i.e. namespace names that end with '-gzip'
         store compressed data.
@@ -1727,18 +1711,15 @@ def get_storage_api(file_or_url, namespace):
   Returns:
     Instance of StorageApi subclass.
   """
-  if file_path.is_url(file_or_url):
-    return IsolateServer(file_or_url, namespace)
-  else:
-    return FileSystem(file_or_url, namespace)
+  cls = _storage_api_cls or IsolateServer
+  return cls(url, namespace)
 
 
-def get_storage(file_or_url, namespace):
+def get_storage(url, namespace):
   """Returns Storage class that can upload and download from |namespace|.
 
   Arguments:
-    file_or_url: a file path to use file system based storage, or URL of isolate
-        service to use shared cloud based storage.
+    url: URL of isolate service to use shared cloud based storage.
     namespace: isolate namespace to operate in, also defines hashing and
         compression scheme used, i.e. namespace names that end with '-gzip'
         store compressed data.
@@ -1746,7 +1727,7 @@ def get_storage(file_or_url, namespace):
   Returns:
     Instance of Storage.
   """
-  return Storage(get_storage_api(file_or_url, namespace))
+  return Storage(get_storage_api(url, namespace))
 
 
 def upload_tree(base_url, infiles, namespace):
@@ -1876,7 +1857,7 @@ def directory_to_metadata(root, algo, blacklist):
       root, '.' + os.path.sep, blacklist, sys.platform != 'win32')
   metadata = {
     relpath: isolated_format.file_to_metadata(
-        os.path.join(root, relpath), {}, False, algo)
+        os.path.join(root, relpath), {}, 0, algo)
     for relpath in paths
   }
   for v in metadata.itervalues():
@@ -1989,12 +1970,10 @@ def CMDarchive(parser, args):
   directories, the .isolated generated for the directory is listed as the
   directory entry itself.
   """
-  add_isolate_server_options(parser, False)
+  add_isolate_server_options(parser)
   add_archive_options(parser)
   options, files = parser.parse_args(args)
-  process_isolate_server_options(parser, options)
-  if file_path.is_url(options.isolate_server):
-    auth.ensure_logged_in(options.isolate_server)
+  process_isolate_server_options(parser, options, True)
   try:
     archive(options.isolate_server, options.namespace, files, options.blacklist)
   except Error as e:
@@ -2008,7 +1987,7 @@ def CMDdownload(parser, args):
   It can either download individual files or a complete tree from a .isolated
   file.
   """
-  add_isolate_server_options(parser, True)
+  add_isolate_server_options(parser)
   parser.add_option(
       '-i', '--isolated', metavar='HASH',
       help='hash of an isolated file, .isolated file content is discarded, use '
@@ -2021,20 +2000,16 @@ def CMDdownload(parser, args):
       help='destination directory')
   add_cache_options(parser)
   options, args = parser.parse_args(args)
-  process_isolate_server_options(parser, options)
   if args:
     parser.error('Unsupported arguments: %s' % args)
+
+  process_isolate_server_options(parser, options, True)
   if bool(options.isolated) == bool(options.file):
     parser.error('Use one of --isolated or --file, and only one.')
 
   cache = process_cache_options(options)
   options.target = os.path.abspath(options.target)
-
-  remote = options.isolate_server or options.indir
-  if file_path.is_url(remote):
-    auth.ensure_logged_in(remote)
-
-  with get_storage(remote, options.namespace) as storage:
+  with get_storage(options.isolate_server, options.namespace) as storage:
     # Fetching individual files.
     if options.file:
       # TODO(maruel): Enable cache in this case too.
@@ -2079,11 +2054,8 @@ def add_archive_options(parser):
            'directories')
 
 
-def add_isolate_server_options(parser, add_indir):
-  """Adds --isolate-server and --namespace options to parser.
-
-  Includes --indir if desired.
-  """
+def add_isolate_server_options(parser):
+  """Adds --isolate-server and --namespace options to parser."""
   parser.add_option(
       '-I', '--isolate-server',
       metavar='URL', default=os.environ.get('ISOLATE_SERVER', ''),
@@ -2093,51 +2065,25 @@ def add_isolate_server_options(parser, add_indir):
   parser.add_option(
       '--namespace', default='default-gzip',
       help='The namespace to use on the Isolate Server, default: %default')
-  if add_indir:
-    parser.add_option(
-        '--indir', metavar='DIR',
-        help='Directory used to store the hashtable instead of using an '
-             'isolate server.')
 
 
-def process_isolate_server_options(parser, options):
-  """Processes the --isolate-server and --indir options and aborts if neither is
-  specified.
+def process_isolate_server_options(parser, options, set_exception_handler):
+  """Processes the --isolate-server option and aborts if not specified.
+
+  Returns the identity as determined by the server.
   """
-  has_indir = hasattr(options, 'indir')
   if not options.isolate_server:
-    if not has_indir:
-      parser.error('--isolate-server is required.')
-    elif not options.indir:
-      parser.error('Use one of --indir or --isolate-server.')
-  else:
-    if has_indir and options.indir:
-      parser.error('Use only one of --indir or --isolate-server.')
-
-  if options.isolate_server:
-    parts = urlparse.urlparse(options.isolate_server, 'https')
-    if parts.query:
-      parser.error('--isolate-server doesn\'t support query parameter.')
-    if parts.fragment:
-      parser.error('--isolate-server doesn\'t support fragment in the url.')
-    # urlparse('foo.com') will result in netloc='', path='foo.com', which is not
-    # what is desired here.
-    new = list(parts)
-    if not new[1] and new[2]:
-      new[1] = new[2].rstrip('/')
-      new[2] = ''
-    new[2] = new[2].rstrip('/')
-    options.isolate_server = urlparse.urlunparse(new)
+    parser.error('--isolate-server is required.')
+  try:
+    options.isolate_server = net.fix_url(options.isolate_server)
+  except ValueError as e:
+    parser.error('--isolate-server %s' % e)
+  if set_exception_handler:
     on_error.report_on_exception_exit(options.isolate_server)
-    return
-
-  if file_path.is_url(options.indir):
-    parser.error('Can\'t use an URL for --indir.')
-  options.indir = unicode(options.indir).replace('/', os.path.sep)
-  options.indir = os.path.abspath(
-      os.path.normpath(os.path.join(os.getcwd(), options.indir)))
-  if not os.path.isdir(options.indir):
-    parser.error('Path given to --indir must exist.')
+  try:
+    return auth.ensure_logged_in(options.isolate_server)
+  except ValueError as e:
+    parser.error(str(e))
 
 
 def add_cache_options(parser):

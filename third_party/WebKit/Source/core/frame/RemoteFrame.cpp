@@ -5,6 +5,8 @@
 #include "config.h"
 #include "core/frame/RemoteFrame.h"
 
+#include "core/dom/RemoteSecurityContext.h"
+#include "core/frame/RemoteDOMWindow.h"
 #include "core/frame/RemoteFrameClient.h"
 #include "core/frame/RemoteFrameView.h"
 #include "core/html/HTMLFrameOwnerElement.h"
@@ -14,6 +16,9 @@ namespace blink {
 
 inline RemoteFrame::RemoteFrame(RemoteFrameClient* client, FrameHost* host, FrameOwner* owner)
     : Frame(client, host, owner)
+    , m_securityContext(RemoteSecurityContext::create())
+    , m_domWindow(RemoteDOMWindow::create(*this))
+    , m_isLoading(false)
 {
 }
 
@@ -30,7 +35,13 @@ RemoteFrame::~RemoteFrame()
 void RemoteFrame::trace(Visitor* visitor)
 {
     visitor->trace(m_view);
+    visitor->trace(m_domWindow);
     Frame::trace(visitor);
+}
+
+DOMWindow* RemoteFrame::domWindow() const
+{
+    return m_domWindow.get();
 }
 
 void RemoteFrame::navigate(Document& originDocument, const KURL& url, bool lockBackForwardList)
@@ -42,12 +53,34 @@ void RemoteFrame::navigate(Document& originDocument, const KURL& url, bool lockB
     remoteFrameClient()->navigate(request, lockBackForwardList);
 }
 
+void RemoteFrame::reload(ReloadPolicy reloadPolicy, ClientRedirectPolicy clientRedirectPolicy)
+{
+    remoteFrameClient()->reload(reloadPolicy, clientRedirectPolicy);
+}
+
 void RemoteFrame::detach()
 {
     detachChildren();
     if (!client())
         return;
     Frame::detach();
+}
+
+RemoteSecurityContext* RemoteFrame::securityContext() const
+{
+    return m_securityContext.get();
+}
+
+bool RemoteFrame::checkLoadComplete()
+{
+    if (m_isLoading)
+        return false;
+
+    bool allChildrenAreDoneLoading = true;
+    for (RefPtrWillBeRawPtr<Frame> child = tree().firstChild(); child; child = child->tree().nextSibling()) {
+        allChildrenAreDoneLoading &= child->checkLoadComplete();
+    }
+    return allChildrenAreDoneLoading;
 }
 
 void RemoteFrame::forwardInputEvent(Event* event)

@@ -15,6 +15,7 @@ namespace mojo {
 namespace system {
 
 class Core;
+class Awakable;
 
 namespace test {
 
@@ -58,9 +59,12 @@ class CoreTestBase_MockHandleInfo {
   unsigned GetReadDataCallCount() const;
   unsigned GetBeginReadDataCallCount() const;
   unsigned GetEndReadDataCallCount() const;
-  unsigned GetAddWaiterCallCount() const;
-  unsigned GetRemoveWaiterCallCount() const;
-  unsigned GetCancelAllWaitersCallCount() const;
+  unsigned GetAddAwakableCallCount() const;
+  unsigned GetRemoveAwakableCallCount() const;
+  unsigned GetCancelAllAwakablesCallCount() const;
+
+  size_t GetAddedAwakableSize() const;
+  Awakable* GetAddedAwakableAt(unsigned i) const;
 
   // For use by |MockDispatcher|:
   void IncrementCtorCallCount();
@@ -74,9 +78,13 @@ class CoreTestBase_MockHandleInfo {
   void IncrementReadDataCallCount();
   void IncrementBeginReadDataCallCount();
   void IncrementEndReadDataCallCount();
-  void IncrementAddWaiterCallCount();
-  void IncrementRemoveWaiterCallCount();
-  void IncrementCancelAllWaitersCallCount();
+  void IncrementAddAwakableCallCount();
+  void IncrementRemoveAwakableCallCount();
+  void IncrementCancelAllAwakablesCallCount();
+
+  void AllowAddAwakable(bool alllow);
+  bool IsAddAwakableAllowed() const;
+  void AwakableWasAdded(Awakable*);
 
  private:
   mutable base::Lock lock_;  // Protects the following members.
@@ -91,9 +99,12 @@ class CoreTestBase_MockHandleInfo {
   unsigned read_data_call_count_;
   unsigned begin_read_data_call_count_;
   unsigned end_read_data_call_count_;
-  unsigned add_waiter_call_count_;
-  unsigned remove_waiter_call_count_;
-  unsigned cancel_all_waiters_call_count_;
+  unsigned add_awakable_call_count_;
+  unsigned remove_awakable_call_count_;
+  unsigned cancel_all_awakables_call_count_;
+
+  bool add_awakable_allowed_;
+  std::vector<Awakable*> added_awakables_;
 
   DISALLOW_COPY_AND_ASSIGN(CoreTestBase_MockHandleInfo);
 };

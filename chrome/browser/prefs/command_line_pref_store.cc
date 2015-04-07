@@ -24,10 +24,6 @@
 const CommandLinePrefStore::StringSwitchToPreferenceMapEntry
     CommandLinePrefStore::string_switch_map_[] = {
       { switches::kLang, prefs::kApplicationLocale },
-      { switches::kAuthSchemes, prefs::kAuthSchemes },
-      { switches::kAuthServerWhitelist, prefs::kAuthServerWhitelist },
-      { switches::kAuthNegotiateDelegateWhitelist,
-          prefs::kAuthNegotiateDelegateWhitelist },
       { switches::kGSSAPILibraryName, prefs::kGSSAPILibraryName },
       { data_reduction_proxy::switches::kDataReductionProxy,
           data_reduction_proxy::prefs::kDataReductionProxy },
@@ -76,7 +72,8 @@ const CommandLinePrefStore::IntegerSwitchToPreferenceMapEntry
       { switches::kMediaCacheSize, prefs::kMediaCacheSize },
     };
 
-CommandLinePrefStore::CommandLinePrefStore(const CommandLine* command_line)
+CommandLinePrefStore::CommandLinePrefStore(
+    const base::CommandLine* command_line)
     : command_line_(command_line) {
   ApplySimpleSwitches();
   ApplyProxyMode();

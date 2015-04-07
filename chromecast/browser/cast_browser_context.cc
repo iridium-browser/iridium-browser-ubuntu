@@ -27,15 +27,15 @@ class CastBrowserContext::CastResourceContext :
   explicit CastResourceContext(
       URLRequestContextFactory* url_request_context_factory) :
     url_request_context_factory_(url_request_context_factory) {}
-  virtual ~CastResourceContext() {}
+  ~CastResourceContext() override {}
 
   // ResourceContext implementation:
-  virtual net::HostResolver* GetHostResolver() override {
+  net::HostResolver* GetHostResolver() override {
     return url_request_context_factory_->GetMainGetter()->
         GetURLRequestContext()->host_resolver();
   }
 
-  virtual net::URLRequestContext* GetRequestContext() override {
+  net::URLRequestContext* GetRequestContext() override {
     return url_request_context_factory_->GetMainGetter()->
         GetURLRequestContext();
   }
@@ -77,6 +77,12 @@ void CastBrowserContext::InitWhileIOAllowed() {
 #endif  // defined(OS_ANDROID)
 }
 
+scoped_ptr<content::ZoomLevelDelegate>
+CastBrowserContext::CreateZoomLevelDelegate(
+    const base::FilePath& partition_path) {
+  return nullptr;
+}
+
 base::FilePath CastBrowserContext::GetPath() const {
   return path_;
 }
@@ -108,6 +114,10 @@ net::URLRequestContextGetter*
 CastBrowserContext::GetMediaRequestContextForStoragePartition(
     const base::FilePath& partition_path, bool in_memory) {
   return GetMediaRequestContext();
+}
+
+net::URLRequestContextGetter* CastBrowserContext::GetSystemRequestContext() {
+  return url_request_context_factory_->GetSystemGetter();
 }
 
 content::ResourceContext* CastBrowserContext::GetResourceContext() {

@@ -4,6 +4,8 @@
 
 """Common Google Storage interface library."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import base64
@@ -251,7 +253,7 @@ def RunGsutilCommand(args,
     raise failed_exception('%r failed' % cmd if headers else e)
 
   if headers is not None and result is not None:
-    assert (redirect_stdout if get_headers_from_stdout else redirect_stderr)
+    assert redirect_stdout if get_headers_from_stdout else redirect_stderr
     # Parse headers that look like this:
     # header: x-goog-generation: 1359148994758000
     # header: x-goog-metageneration: 1
@@ -473,7 +475,7 @@ def Move(src_path, dest_path, **kwargs):
   args = ['mv', src_path, dest_path]
   RunGsutilCommand(args, failed_exception=MoveFail, **kwargs)
 
-# pylint: disable-msg=C9011
+# pylint: disable=C9011
 
 @RetryGSLib
 def Remove(*paths, **kwargs):

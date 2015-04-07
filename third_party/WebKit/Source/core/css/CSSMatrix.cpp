@@ -34,11 +34,18 @@
 #include "core/css/parser/CSSParser.h"
 #include "core/css/resolver/TransformBuilder.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/frame/UseCounter.h"
 #include "core/rendering/style/RenderStyle.h"
 #include "core/rendering/style/StyleInheritedData.h"
 #include "wtf/MathExtras.h"
 
 namespace blink {
+
+PassRefPtrWillBeRawPtr<CSSMatrix> CSSMatrix::create(ExecutionContext* executionContext, const String& s, ExceptionState& exceptionState)
+{
+    UseCounter::count(executionContext, UseCounter::WebKitCSSMatrix);
+    return adoptRefWillBeNoop(new CSSMatrix(s, exceptionState));
+}
 
 CSSMatrix::CSSMatrix(const TransformationMatrix& m)
     : m_matrix(m)
@@ -64,7 +71,7 @@ void CSSMatrix::setMatrixValue(const String& string, ExceptionState& exceptionSt
         // FIXME: This has a null pointer crash if we use ex units (crbug.com/414145)
         DEFINE_STATIC_REF(RenderStyle, defaultStyle, RenderStyle::createDefaultStyle());
         TransformOperations operations;
-        if (!TransformBuilder::createTransformOperations(value.get(), CSSToLengthConversionData(defaultStyle, defaultStyle, 0, 0, 1.0f), operations)) {
+        if (!TransformBuilder::createTransformOperations(value.get(), CSSToLengthConversionData(defaultStyle, defaultStyle, nullptr, 1.0f), operations)) {
             exceptionState.throwDOMException(SyntaxError, "Failed to interpret '" + string + "' as a transformation operation.");
             return;
         }

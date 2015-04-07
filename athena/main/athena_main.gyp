@@ -16,13 +16,10 @@
         '../resources/athena_resources.gyp:athena_resources',
         '../../components/components.gyp:component_metrics_proto',
         '../../components/components.gyp:history_core_browser',
-        # infobars_test_support is required to declare some symbols used in the
-        # search_engines and its dependencies. See crbug.com/386171
-        # TODO(mukai): declare those symbols for Athena.
-        '../../components/components.gyp:infobars_test_support',
         '../../components/components.gyp:omnibox',
         '../../components/components.gyp:pdf_renderer',
         '../../components/components.gyp:search_engines',
+        '../../extensions/shell/app_shell.gyp:app_shell_lib',
         '../../pdf/pdf.gyp:pdf',
         '../../skia/skia.gyp:skia',
         '../../ui/app_list/app_list.gyp:app_list',

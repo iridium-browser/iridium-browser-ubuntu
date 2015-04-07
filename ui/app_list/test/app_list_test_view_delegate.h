@@ -7,6 +7,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
@@ -78,6 +79,8 @@ class AppListTestViewDelegate : public AppListViewDelegate {
   views::View* CreateStartPageWebView(const gfx::Size& size) override;
   std::vector<views::View*> CreateCustomPageWebViews(
       const gfx::Size& size) override;
+  void CustomLauncherPageAnimationChanged(double progress) override {}
+  void CustomLauncherPagePopSubpage() override {}
 #endif
   bool IsSpeechRecognitionEnabled() override;
   const Users& GetUsers() const override;

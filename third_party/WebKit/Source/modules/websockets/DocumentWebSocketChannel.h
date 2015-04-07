@@ -39,7 +39,6 @@
 #include "platform/weborigin/KURL.h"
 #include "public/platform/WebSocketHandle.h"
 #include "public/platform/WebSocketHandleClient.h"
-#include "wtf/ArrayBuffer.h"
 #include "wtf/Deque.h"
 #include "wtf/FastAllocBase.h"
 #include "wtf/OwnPtr.h"
@@ -49,6 +48,7 @@
 #include "wtf/Vector.h"
 #include "wtf/text/CString.h"
 #include "wtf/text/WTFString.h"
+#include <stdint.h>
 
 namespace blink {
 
@@ -60,6 +60,7 @@ class WebSocketHandshakeResponseInfo;
 // This class is a WebSocketChannel subclass that works with a Document in a
 // DOMWindow (i.e. works in the main thread).
 class DocumentWebSocketChannel final : public WebSocketChannel, public WebSocketHandleClient, public ContextLifecycleObserver {
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(DocumentWebSocketChannel);
 public:
     // You can specify the source file and the line number information
     // explicitly by passing the last parameter.
@@ -75,7 +76,7 @@ public:
     // WebSocketChannel functions.
     virtual bool connect(const KURL&, const String& protocol) override;
     virtual void send(const String& message) override;
-    virtual void send(const ArrayBuffer&, unsigned byteOffset, unsigned byteLength) override;
+    virtual void send(const DOMArrayBuffer&, unsigned byteOffset, unsigned byteLength) override;
     virtual void send(PassRefPtr<BlobDataHandle>) override;
     virtual void send(PassOwnPtr<Vector<char> > data) override;
     // Start closing handshake. Use the CloseEventCodeNotSpecified for the code
@@ -83,9 +84,6 @@ public:
     virtual void close(int code, const String& reason) override;
     virtual void fail(const String& reason, MessageLevel, const String&, unsigned lineNumber) override;
     virtual void disconnect() override;
-
-    virtual void suspend() override;
-    virtual void resume() override;
 
     virtual void trace(Visitor*) override;
 
@@ -101,7 +99,7 @@ private:
     struct Message {
         explicit Message(const String&);
         explicit Message(PassRefPtr<BlobDataHandle>);
-        explicit Message(PassRefPtr<ArrayBuffer>);
+        explicit Message(PassRefPtr<DOMArrayBuffer>);
         explicit Message(PassOwnPtr<Vector<char> >);
         Message(unsigned short code, const String& reason);
 
@@ -109,7 +107,7 @@ private:
 
         CString text;
         RefPtr<BlobDataHandle> blobDataHandle;
-        RefPtr<ArrayBuffer> arrayBuffer;
+        RefPtr<DOMArrayBuffer> arrayBuffer;
         OwnPtr<Vector<char> > vectorData;
         unsigned short code;
         String reason;
@@ -141,24 +139,8 @@ private:
     virtual void didStartClosingHandshake(WebSocketHandle*) override;
 
     // Methods for BlobLoader.
-    void didFinishLoadingBlob(PassRefPtr<ArrayBuffer>);
+    void didFinishLoadingBlob(PassRefPtr<DOMArrayBuffer>);
     void didFailLoadingBlob(FileError::ErrorCode);
-
-    // LifecycleObserver functions.
-    virtual void contextDestroyed() override
-    {
-        // In oilpan we cannot assume this channel's finalizer has been called
-        // before the document it is observing is dead and finalized since there
-        // is no eager finalization. Instead the finalization happens at the
-        // next GC which could be long enough after the Peer::destroy call for
-        // the context (ie. Document) to be dead too. If the context's finalizer
-        // is run first this method gets called. Instead we assert the channel
-        // has been disconnected which happens in Peer::destroy.
-        ASSERT(!m_handle);
-        ASSERT(!m_client);
-        ASSERT(!m_identifier);
-        ContextLifecycleObserver::contextDestroyed();
-    }
 
     // m_handle is a handle of the connection.
     // m_handle == 0 means this channel is closed.
@@ -175,15 +157,15 @@ private:
     Vector<char> m_receivingMessageData;
 
     bool m_receivingMessageTypeIsText;
-    int64_t m_sendingQuota;
-    int64_t m_receivedDataSizeForFlowControl;
+    uint64_t m_sendingQuota;
+    uint64_t m_receivedDataSizeForFlowControl;
     size_t m_sentSizeOfTopMessage;
 
     String m_sourceURLAtConstruction;
     unsigned m_lineNumberAtConstruction;
     RefPtr<WebSocketHandshakeRequest> m_handshakeRequest;
 
-    static const int64_t receivedDataSizeForFlowControlHighWaterMark = 1 << 15;
+    static const uint64_t receivedDataSizeForFlowControlHighWaterMark = 1 << 15;
 };
 
 } // namespace blink

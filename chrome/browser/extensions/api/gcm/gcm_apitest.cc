@@ -61,7 +61,7 @@ class GcmApiTest : public ExtensionApiTest {
   GcmApiTest() : fake_gcm_profile_service_(NULL) {}
 
  protected:
-  void SetUpCommandLine(CommandLine* command_line) override;
+  void SetUpCommandLine(base::CommandLine* command_line) override;
   void SetUpOnMainThread() override;
 
   void StartCollecting();
@@ -74,7 +74,7 @@ class GcmApiTest : public ExtensionApiTest {
   gcm::FakeGCMProfileService* fake_gcm_profile_service_;
 };
 
-void GcmApiTest::SetUpCommandLine(CommandLine* command_line) {
+void GcmApiTest::SetUpCommandLine(base::CommandLine* command_line) {
   // We now always create the GCMProfileService instance in
   // ProfileSyncServiceFactory that is called when a profile is being
   // initialized. In order to prevent it from being created, we add the switch
@@ -200,11 +200,20 @@ IN_PROC_BROWSER_TEST_F(GcmApiTest, OnMessage) {
   gcm::GCMClient::IncomingMessage message;
   message.data["property1"] = "value1";
   message.data["property2"] = "value2";
-  // First message is sent without a collapse key.
+  // First message is sent without from and collapse key.
   app_handler.OnMessage(extension->id(), message);
 
-  // Second message carries the same data and a collapse key.
+  // Second message is send with from.
+  message.sender_id = "12345678";
+  app_handler.OnMessage(extension->id(), message);
+
+  // Third message is send with a collapse key.
+  message.sender_id.clear();
   message.collapse_key = "collapseKeyValue";
+  app_handler.OnMessage(extension->id(), message);
+
+  // Fourth message carries the same data, from and collapse key.
+  message.sender_id = "12345678";
   app_handler.OnMessage(extension->id(), message);
 
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();

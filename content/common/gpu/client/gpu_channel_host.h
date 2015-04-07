@@ -23,9 +23,9 @@
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/message_filter.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/size.h"
 #include "ui/gl/gpu_preference.h"
 
 class GURL;
@@ -129,6 +129,9 @@ class GpuChannelHost : public IPC::Sender,
 
   // Destroy a command buffer created by this channel.
   void DestroyCommandBuffer(CommandBufferProxyImpl* command_buffer);
+
+  // Destroy this channel.
+  void DestroyChannel();
 
   // Add a route for the current message loop.
   void AddRoute(int route_id, base::WeakPtr<IPC::Listener> listener);

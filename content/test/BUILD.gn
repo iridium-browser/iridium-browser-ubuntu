@@ -4,13 +4,16 @@
 
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
+import("//build/module_args/v8.gni")
 
-content_tests_gypi_values = exec_script(
-    "//build/gypi_to_gn.py",
-    [ rebase_path("../content_tests.gypi"),
-      "--replace=<(SHARED_INTERMEDIATE_DIR)=$root_gen_dir" ],
-    "scope",
-    [ "../content_tests.gypi" ])
+content_tests_gypi_values =
+    exec_script("//build/gypi_to_gn.py",
+                [
+                  rebase_path("../content_tests.gypi"),
+                  "--replace=<(SHARED_INTERMEDIATE_DIR)=$root_gen_dir",
+                ],
+                "scope",
+                [ "../content_tests.gypi" ])
 
 # GYP version //content/content_tests.gypi:test_support_content
 static_library("test_support") {
@@ -40,12 +43,12 @@ static_library("test_support") {
   ]
 
   if (!is_ios) {
-    sources = rebase_path(content_tests_gypi_values.test_support_content_sources,
-                          ".", "//content")
+    sources =
+        rebase_path(content_tests_gypi_values.test_support_content_sources,
+                    ".",
+                    "//content")
 
-    public_deps += [
-      "//third_party/WebKit/public:blink",
-    ]
+    public_deps += [ "//third_party/WebKit/public:blink" ]
     deps += [
       "//content/browser/speech/proto",
       "//content/public/child:child_sources",
@@ -55,6 +58,7 @@ static_library("test_support") {
       "//content/shell:pak",
       "//cc",
       "//cc:test_support",
+      "//ipc/mojo",
       "//media",
       "//ppapi:ppapi_host",
       "//ppapi:ppapi_proxy",
@@ -112,6 +116,10 @@ static_library("test_support") {
       deps += [ "//ui/compositor" ]
     }
 
+    if (use_ozone) {
+      deps += [ "//ui/ozone" ]
+    }
+
     if (is_win) {
       deps += [ "//third_party/iaccessible2" ]
     }
@@ -121,13 +129,16 @@ static_library("test_support") {
     }
 
     if (is_android) {
-      deps += [ "//ui/shell_dialogs" ]
+      deps += [
+        "//ui/android",
+        "//ui/shell_dialogs",
+      ]
     }
 
     if (is_win) {
       deps += [ "//sandbox" ]
     }
-  } else { # is_ios
+  } else {  # is_ios
     sources = [
       "public/test/content_test_suite_base.cc",
       "public/test/mock_notification_observer.cc",
@@ -142,15 +153,19 @@ static_library("test_support") {
       "test/test_content_client.cc",
     ]
   }
+  if (v8_use_external_startup_data) {
+    deps += [ "//gin:gin" ]
+  }
 }
 
 if (!is_ios) {
-
   # GYP version //content/content_tests.gypi:layouttest_support_content
   static_library("layouttest_support") {
     testonly = true
-    sources = rebase_path(content_tests_gypi_values.layouttest_support_content_sources,
-                          ".", "//content")
+    sources = rebase_path(
+            content_tests_gypi_values.layouttest_support_content_sources,
+            ".",
+            "//content")
 
     deps = [
       ":test_support",
@@ -171,11 +186,11 @@ if (!is_ios) {
     import("//build/config/android/rules.gni")
 
     generate_jni("jni") {
-      sources = [ "../public/test/android/javatests/src/org/chromium/content/browser/test/NestedSystemMessageHandler.java" ]
+      sources = [
+        "../public/test/android/javatests/src/org/chromium/content/browser/test/NestedSystemMessageHandler.java",
+      ]
       jni_package = "content/public/test"
     }
   }
 }  # !is_ios
-
 # TODO(GYP): Unit test targets
-

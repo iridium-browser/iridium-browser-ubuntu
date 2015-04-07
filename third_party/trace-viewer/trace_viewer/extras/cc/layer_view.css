@@ -1,0 +1,61 @@
+/* Copyright (c) 2013 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
+layer-view {
+  -webkit-flex-direction: column;
+  display:  -webkit-flex;
+  left: 0;
+  position: relative;
+  top: 0;
+}
+
+layer-view > layer-tree-quad-stack-view {
+  -webkit-flex: 1 1 100%;
+  -webkit-flex-direction: column;
+  display: -webkit-flex;
+  width: 100%;
+}
+
+layer-view > layer-view-analysis {
+  height: 150px; /* fixed height given by drag control */
+  overflow-y: auto;
+}
+
+layer-view > layer-view-analysis * {
+  -webkit-user-select: text;
+}
+
+.labeled-checkbox {
+  white-space: nowrap;
+}
+
+.labeled-option-group {
+  -webkit-flex: 0 0 auto;
+  -webkit-flex-direction: column;
+  -webkit-align-items: left;
+  display: -webkit-flex;
+}
+
+.labeled-option {
+  border-top: 5px solid white;
+  border-bottom: 5px solid white;
+}
+
+.edit-categories {
+  padding-left: 6px;
+}
+
+.edit-categories:after {
+  padding-left: 15px;
+  font-size: 125%;
+}
+
+.labeled-option-group:not(.categories-expanded) .edit-categories:after {
+  content: '\25B8'; /* Right triangle */
+}
+
+.labeled-option-group.categories-expanded .edit-categories:after {
+  content: '\25BE'; /* Down triangle */
+}

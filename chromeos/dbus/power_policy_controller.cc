@@ -8,11 +8,12 @@
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
 
 namespace chromeos {
 
 namespace {
+
+PowerPolicyController* g_power_policy_controller = nullptr;
 
 // Appends a description of |field|, a field within |delays|, a
 // power_manager::PowerManagementPolicy::Delays object, to |str|, an
@@ -87,7 +88,8 @@ PowerPolicyController::PrefValues::PrefValues()
       enable_auto_screen_lock(false),
       presentation_screen_dim_delay_factor(1.0),
       user_activity_screen_dim_delay_factor(1.0),
-      wait_for_initial_user_activity(false) {}
+      wait_for_initial_user_activity(false),
+      force_nonzero_brightness_for_user_activity(true) {}
 
 // static
 std::string PowerPolicyController::GetPolicyDebugString(
@@ -127,29 +129,38 @@ std::string PowerPolicyController::GetPolicyDebugString(
     str += base::StringPrintf("wait_for_initial_user_activity=%d ",
         policy.wait_for_initial_user_activity());
   }
+  if (policy.has_force_nonzero_brightness_for_user_activity()) {
+    str += base::StringPrintf("force_nonzero_brightness_for_user_activity=%d ",
+        policy.force_nonzero_brightness_for_user_activity());
+  }
   if (policy.has_reason())
     str += base::StringPrintf("reason=\"%s\" ", policy.reason().c_str());
   base::TrimWhitespace(str, base::TRIM_TRAILING, &str);
   return str;
 }
 
-PowerPolicyController::PowerPolicyController()
-    : client_(NULL),
-      prefs_were_set_(false),
-      honor_screen_wake_locks_(true),
-      next_wake_lock_id_(1) {
+// static
+void PowerPolicyController::Initialize(PowerManagerClient* client) {
+  DCHECK(!IsInitialized());
+  g_power_policy_controller = new PowerPolicyController(client);
 }
 
-PowerPolicyController::~PowerPolicyController() {
-  if (client_) {
-    client_->RemoveObserver(this);
-    client_ = NULL;
-  }
+// static
+bool PowerPolicyController::IsInitialized() {
+  return g_power_policy_controller;
 }
 
-void PowerPolicyController::Init(DBusThreadManager* manager) {
-  client_ = manager->GetPowerManagerClient();
-  client_->AddObserver(this);
+// static
+void PowerPolicyController::Shutdown() {
+  DCHECK(IsInitialized());
+  delete g_power_policy_controller;
+  g_power_policy_controller = nullptr;
+}
+
+// static
+PowerPolicyController* PowerPolicyController::Get() {
+  DCHECK(IsInitialized());
+  return g_power_policy_controller;
 }
 
 void PowerPolicyController::ApplyPrefs(const PrefValues& values) {
@@ -204,6 +215,8 @@ void PowerPolicyController::ApplyPrefs(const PrefValues& values) {
       values.user_activity_screen_dim_delay_factor);
   prefs_policy_.set_wait_for_initial_user_activity(
       values.wait_for_initial_user_activity);
+  prefs_policy_.set_force_nonzero_brightness_for_user_activity(
+      values.force_nonzero_brightness_for_user_activity);
 
   honor_screen_wake_locks_ = values.allow_screen_wake_locks;
 
@@ -234,6 +247,19 @@ void PowerPolicyController::RemoveWakeLock(int id) {
 
 void PowerPolicyController::PowerManagerRestarted() {
   SendCurrentPolicy();
+}
+
+PowerPolicyController::PowerPolicyController(PowerManagerClient* client)
+    : client_(client),
+      prefs_were_set_(false),
+      honor_screen_wake_locks_(true),
+      next_wake_lock_id_(1) {
+  DCHECK(client_);
+  client_->AddObserver(this);
+}
+
+PowerPolicyController::~PowerPolicyController() {
+  client_->RemoveObserver(this);
 }
 
 void PowerPolicyController::SendCurrentPolicy() {

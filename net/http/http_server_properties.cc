@@ -7,6 +7,8 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/stringprintf.h"
+#include "net/socket/ssl_client_socket.h"
+#include "net/ssl/ssl_config.h"
 
 namespace net {
 
@@ -20,7 +22,8 @@ const char* const kAlternateProtocolStrings[] = {
   "npn-spdy/2",
   "npn-spdy/3",
   "npn-spdy/3.1",
-  "npn-h2-14",  // HTTP/2 draft 14. Called SPDY4 internally.
+  "npn-h2-14",  // HTTP/2 draft-14. Called SPDY4 internally.
+  "npn-h2-15",  // HTTP/2 draft-15. Called SPDY4 internally.
   "quic"
 };
 
@@ -51,7 +54,8 @@ const char* AlternateProtocolToString(AlternateProtocol protocol) {
     case DEPRECATED_NPN_SPDY_2:
     case NPN_SPDY_3:
     case NPN_SPDY_3_1:
-    case NPN_SPDY_4:
+    case NPN_SPDY_4_14:
+    case NPN_SPDY_4_15:
     case QUIC:
       DCHECK(IsAlternateProtocolValid(protocol));
       return kAlternateProtocolStrings[
@@ -81,8 +85,10 @@ AlternateProtocol AlternateProtocolFromNextProto(NextProto next_proto) {
       return NPN_SPDY_3;
     case kProtoSPDY31:
       return NPN_SPDY_3_1;
-    case kProtoSPDY4:
-      return NPN_SPDY_4;
+    case kProtoSPDY4_14:
+      return NPN_SPDY_4_14;
+    case kProtoSPDY4_15:
+      return NPN_SPDY_4_15;
     case kProtoQUIC1SPDY3:
       return QUIC;
 
@@ -100,6 +106,12 @@ std::string AlternateProtocolInfo::ToString() const {
                             AlternateProtocolToString(protocol),
                             probability,
                             is_broken ? " (broken)" : "");
+}
+
+// static
+void HttpServerProperties::ForceHTTP11(SSLConfig* ssl_config) {
+  ssl_config->next_protos.clear();
+  ssl_config->next_protos.push_back(kProtoHTTP11);
 }
 
 }  // namespace net

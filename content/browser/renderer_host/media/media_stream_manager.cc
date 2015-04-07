@@ -93,7 +93,7 @@ void ParseStreamType(const StreamOptions& options,
        if (audio_stream_source == kMediaStreamSourceTab) {
          *audio_type = content::MEDIA_TAB_AUDIO_CAPTURE;
        } else if (audio_stream_source == kMediaStreamSourceSystem) {
-         *audio_type = content::MEDIA_LOOPBACK_AUDIO_CAPTURE;
+         *audio_type = content::MEDIA_DESKTOP_AUDIO_CAPTURE;
        }
      } else {
        // This is normal audio device capture.
@@ -131,6 +131,27 @@ void FilterAudioEffects(const StreamOptions& options, int* effects) {
   if (options.GetFirstAudioConstraintByName(
           kMediaStreamAudioDucking, &value, NULL) && value == "false") {
     *effects &= ~media::AudioParameters::DUCKING;
+  }
+}
+
+// Unlike other effects, hotword is off by default, so turn it on if it's
+// requested and available.
+void EnableHotwordEffect(const StreamOptions& options, int* effects) {
+  DCHECK(effects);
+  std::string value;
+  if (options.GetFirstAudioConstraintByName(
+          kMediaStreamAudioHotword, &value, NULL) && value == "true") {
+#if defined(OS_CHROMEOS)
+    chromeos::AudioDeviceList devices;
+    chromeos::CrasAudioHandler::Get()->GetAudioDevices(&devices);
+    // Only enable if a hotword device exists.
+    for (size_t i = 0; i < devices.size(); ++i) {
+      if (devices[i].type == chromeos::AUDIO_TYPE_AOKR) {
+        DCHECK(devices[i].is_input);
+        *effects |= media::AudioParameters::HOTWORD;
+      }
+    }
+#endif
   }
 }
 
@@ -473,7 +494,7 @@ void MediaStreamManager::GenerateStream(MediaStreamRequester* requester,
                                         bool user_gesture) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DVLOG(1) << "GenerateStream()";
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kUseFakeUIForMediaStream)) {
     UseFakeUI(scoped_ptr<FakeMediaStreamUIProxy>());
   }
@@ -1333,7 +1354,7 @@ bool MediaStreamManager::SetupTabCaptureRequest(DeviceRequest* request) {
 }
 
 bool MediaStreamManager::SetupScreenCaptureRequest(DeviceRequest* request) {
-  DCHECK(request->audio_type() == MEDIA_LOOPBACK_AUDIO_CAPTURE ||
+  DCHECK(request->audio_type() == MEDIA_DESKTOP_AUDIO_CAPTURE ||
          request->video_type() == MEDIA_DESKTOP_VIDEO_CAPTURE);
 
   // For screen capture we only support two valid combinations:
@@ -1341,7 +1362,7 @@ bool MediaStreamManager::SetupScreenCaptureRequest(DeviceRequest* request) {
   // (2) screen video capture with loopback audio capture.
   if (request->video_type() != MEDIA_DESKTOP_VIDEO_CAPTURE ||
       (request->audio_type() != MEDIA_NO_SERVICE &&
-       request->audio_type() != MEDIA_LOOPBACK_AUDIO_CAPTURE)) {
+       request->audio_type() != MEDIA_DESKTOP_AUDIO_CAPTURE)) {
     LOG(ERROR) << "Invalid screen capture request.";
     return false;
   }
@@ -1412,6 +1433,8 @@ bool MediaStreamManager::FindExistingRequestedDeviceInfo(
           // is set to and not what the capabilities are.
           FilterAudioEffects(request->options,
               &existing_device_info->device.input.effects);
+          EnableHotwordEffect(request->options,
+                              &existing_device_info->device.input.effects);
           *existing_request_state = request->state(device_it->device.type);
           return true;
         }
@@ -1593,8 +1616,8 @@ void MediaStreamManager::InitializeDeviceManagersOnIOThread() {
   io_loop_ = base::MessageLoop::current();
   io_loop_->AddDestructionObserver(this);
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kUseFakeDeviceForMediaStream)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kUseFakeDeviceForMediaStream)) {
     audio_input_device_manager()->UseFakeDevice();
   }
 
@@ -1651,6 +1674,8 @@ void MediaStreamManager::Opened(MediaStreamType stream_type,
             // request asks for.
             FilterAudioEffects(request->options,
                 &device_it->device.input.effects);
+            EnableHotwordEffect(request->options,
+                                &device_it->device.input.effects);
 
             device_it->device.matched_output = info->device.matched_output;
           }

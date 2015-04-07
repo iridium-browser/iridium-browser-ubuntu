@@ -49,7 +49,9 @@ private:
         SkCanvas playbackCanvas(fResultBitmap);
         playbackCanvas.clear(SK_ColorGREEN);
         SkPictureRecorder recorder;
-        SkCanvas* recordCanvas = recorder.beginRecording(SkIntToScalar(fPictureWidth), SkIntToScalar(fPictureHeight), factory);
+        SkCanvas* recordCanvas = recorder.beginRecording(SkIntToScalar(fPictureWidth),
+                                                         SkIntToScalar(fPictureHeight),
+                                                         factory);
         this->doTest(playbackCanvas, *recordCanvas);
         SkAutoTUnref<SkPicture> picture(recorder.endRecording());
         playbackCanvas.drawPicture(picture);
@@ -61,7 +63,7 @@ private:
 };
 
 // Test to verify the playback of an empty picture
-// 
+//
 class DrawEmptyPictureBBHTest : public PictureBBHTestBase {
 public:
     DrawEmptyPictureBBHTest()
@@ -76,7 +78,7 @@ public:
 //
 class EmptyClipPictureBBHTest : public PictureBBHTestBase {
 public:
-    EmptyClipPictureBBHTest() 
+    EmptyClipPictureBBHTest()
         : PictureBBHTestBase(2, 2, 3, 3) { }
 
     virtual void doTest(SkCanvas& playbackCanvas, SkCanvas& recordingCanvas) SK_OVERRIDE {

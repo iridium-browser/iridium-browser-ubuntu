@@ -23,7 +23,7 @@ namespace net {
 namespace tools {
 
 // static
-IPAddressNumber QuicSocketUtils::GetAddressFromMsghdr(struct msghdr *hdr) {
+IPAddressNumber QuicSocketUtils::GetAddressFromMsghdr(struct msghdr* hdr) {
   if (hdr->msg_controllen > 0) {
     for (cmsghdr* cmsg = CMSG_FIRSTHDR(hdr);
          cmsg != nullptr;
@@ -51,10 +51,10 @@ IPAddressNumber QuicSocketUtils::GetAddressFromMsghdr(struct msghdr *hdr) {
 }
 
 // static
-bool QuicSocketUtils::GetOverflowFromMsghdr(struct msghdr *hdr,
-                                            uint32 *dropped_packets) {
+bool QuicSocketUtils::GetOverflowFromMsghdr(struct msghdr* hdr,
+                                            QuicPacketCount* dropped_packets) {
   if (hdr->msg_controllen > 0) {
-    struct cmsghdr *cmsg;
+    struct cmsghdr* cmsg;
     for (cmsg = CMSG_FIRSTHDR(hdr);
          cmsg != nullptr;
          cmsg = CMSG_NXTHDR(hdr, cmsg)) {
@@ -99,10 +99,10 @@ bool QuicSocketUtils::SetReceiveBufferSize(int fd, size_t size) {
 
 // static
 int QuicSocketUtils::ReadPacket(int fd, char* buffer, size_t buf_len,
-                                uint32* dropped_packets,
+                                QuicPacketCount* dropped_packets,
                                 IPAddressNumber* self_address,
                                 IPEndPoint* peer_address) {
-  CHECK(peer_address != nullptr);
+  DCHECK(peer_address != nullptr);
   const int kSpaceForOverflowAndIp =
       CMSG_SPACE(sizeof(int)) + CMSG_SPACE(sizeof(in6_pktinfo));
   char cbuf[kSpaceForOverflowAndIp];
@@ -118,7 +118,7 @@ int QuicSocketUtils::ReadPacket(int fd, char* buffer, size_t buf_len,
   hdr.msg_iovlen = 1;
   hdr.msg_flags = 0;
 
-  struct cmsghdr *cmsg = (struct cmsghdr *) cbuf;
+  struct cmsghdr* cmsg = (struct cmsghdr*)cbuf;
   cmsg->cmsg_len = arraysize(cbuf);
   hdr.msg_control = cmsg;
   hdr.msg_controllen = arraysize(cbuf);
@@ -208,7 +208,7 @@ WriteResult QuicSocketUtils::WritePacket(int fd,
   } else {
     hdr.msg_control = cbuf;
     hdr.msg_controllen = kSpaceForIp;
-    cmsghdr *cmsg = CMSG_FIRSTHDR(&hdr);
+    cmsghdr* cmsg = CMSG_FIRSTHDR(&hdr);
     SetIpInfoInCmsg(self_address, cmsg);
     hdr.msg_controllen = cmsg->cmsg_len;
   }

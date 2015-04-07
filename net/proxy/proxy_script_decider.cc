@@ -10,6 +10,7 @@
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -79,14 +80,12 @@ ProxyScriptDecider::ProxyScriptDecider(
     ProxyScriptFetcher* proxy_script_fetcher,
     DhcpProxyScriptFetcher* dhcp_proxy_script_fetcher,
     NetLog* net_log)
-    : resolver_(NULL),
-      proxy_script_fetcher_(proxy_script_fetcher),
+    : proxy_script_fetcher_(proxy_script_fetcher),
       dhcp_proxy_script_fetcher_(dhcp_proxy_script_fetcher),
       current_pac_source_index_(0u),
       pac_mandatory_(false),
       next_state_(STATE_NONE),
-      net_log_(BoundNetLog::Make(
-          net_log, NetLog::SOURCE_PROXY_SCRIPT_DECIDER)),
+      net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_PROXY_SCRIPT_DECIDER)),
       fetch_pac_bytes_(false),
       quick_check_enabled_(true) {
   if (proxy_script_fetcher &&
@@ -164,6 +163,11 @@ ProxyScriptDecider::PacSourceList ProxyScriptDecider::
 }
 
 void ProxyScriptDecider::OnIOCompletion(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436634 ProxyScriptDecider::OnIOCompletion"));
+
   DCHECK_NE(STATE_NONE, next_state_);
   int rv = DoLoop(result);
   if (rv != ERR_IO_PENDING) {

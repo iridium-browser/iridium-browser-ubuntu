@@ -120,8 +120,10 @@ source_set("sender") {
     "sender/frame_sender.h",
     "sender/software_video_encoder.h",
     "sender/video_encoder.h",
+    "sender/video_encoder.cc",
     "sender/video_encoder_impl.h",
     "sender/video_encoder_impl.cc",
+    "sender/video_frame_factory.h",
     "sender/video_sender.h",
     "sender/video_sender.cc",
     "sender/vp8_encoder.cc",
@@ -152,6 +154,14 @@ source_set("sender") {
       "sender/video_encoder_impl.cc",
       "sender/vp8_encoder.cc",
       "sender/vp8_encoder.h",
+    ]
+  }
+
+  # iOS and OS X encoders
+  if (is_ios || is_mac) {
+    sources += [
+      "sender/h264_vt_encoder.cc",
+      "sender/h264_vt_encoder.h",
     ]
   }
 }
@@ -193,9 +203,9 @@ source_set("receiver") {
 source_set("test_support") {
   testonly = true
   sources = [
-# TODO(hclam): FFmpeg.
-#    "test/fake_media_source.cc",
-#    "test/fake_media_source.h",
+    # TODO(hclam): FFmpeg.
+    #    "test/fake_media_source.cc",
+    #    "test/fake_media_source.h",
     "test/fake_single_thread_task_runner.cc",
     "test/fake_single_thread_task_runner.h",
     "test/skewed_single_thread_task_runner.cc",
@@ -229,8 +239,9 @@ source_set("test_support") {
     ":receiver",
     "//base/test:test_support",
     "//testing/gtest",
-# TODO(hclam): Does not build on ARM yet.
-#    "//third_party/ffmpeg",
+
+    # TODO(hclam): Does not build on ARM yet.
+    #    "//third_party/ffmpeg",
     "//third_party/libyuv",
     "//third_party/mt19937ar",
     "//ui/gfx",
@@ -248,6 +259,8 @@ test("cast_unittests") {
     "logging/simple_event_subscriber_unittest.cc",
     "logging/stats_event_subscriber_unittest.cc",
     "net/cast_transport_sender_impl_unittest.cc",
+    "net/mock_cast_transport_sender.cc",
+    "net/mock_cast_transport_sender.h",
     "net/pacing/mock_paced_packet_sender.cc",
     "net/pacing/mock_paced_packet_sender.h",
     "net/pacing/paced_sender_unittest.cc",
@@ -255,7 +268,8 @@ test("cast_unittests") {
     "net/rtcp/rtcp_unittest.cc",
     "net/rtcp/rtcp_utility_unittest.cc",
     "net/rtcp/receiver_rtcp_event_subscriber_unittest.cc",
-# TODO(miu): The following two are test utility modules.  Rename/move the files.
+
+    # TODO(miu): The following two are test utility modules.  Rename/move the files.
     "net/rtcp/test_rtcp_packet_builder.cc",
     "net/rtcp/test_rtcp_packet_builder.h",
     "net/rtp/cast_message_builder_unittest.cc",
@@ -300,6 +314,23 @@ test("cast_unittests") {
     "//testing/gmock",
     "//testing/gtest",
   ]
+}
+
+if (is_ios || is_mac) {
+  test("cast_h264_vt_encoder_unittests") {
+    sources = [
+      "sender/h264_vt_encoder_unittest.cc",
+    ]
+    deps = [
+      ":common",
+      ":sender",
+      ":test_support",
+      "//base/test:test_support",
+      "//testing/gmock",
+      "//testing/gtest",
+      "//third_party/ffmpeg",
+    ]
+  }
 }
 
 executable("generate_barcode_video") {

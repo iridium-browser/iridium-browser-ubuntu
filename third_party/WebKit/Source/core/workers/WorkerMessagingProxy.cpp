@@ -97,6 +97,7 @@ WorkerMessagingProxy::WorkerMessagingProxy(Worker* workerObject, PassOwnPtrWillB
     ASSERT(m_workerObject);
     ASSERT((m_executionContext->isDocument() && isMainThread())
         || (m_executionContext->isWorkerGlobalScope() && toWorkerGlobalScope(m_executionContext.get())->thread()->isCurrentThread()));
+    m_workerInspectorProxy->setWorkerGlobalScopeProxy(this);
 }
 
 WorkerMessagingProxy::~WorkerMessagingProxy()
@@ -164,7 +165,7 @@ void WorkerMessagingProxy::postTaskToLoader(PassOwnPtr<ExecutionContextTask> tas
     m_executionContext->postTask(task);
 }
 
-void WorkerMessagingProxy::reportException(const String& errorMessage, int lineNumber, int columnNumber, const String& sourceURL)
+void WorkerMessagingProxy::reportException(const String& errorMessage, int lineNumber, int columnNumber, const String& sourceURL, int exceptionId)
 {
     if (!m_workerObject)
         return;
@@ -174,8 +175,8 @@ void WorkerMessagingProxy::reportException(const String& errorMessage, int lineN
 
     RefPtrWillBeRawPtr<ErrorEvent> event = ErrorEvent::create(errorMessage, sourceURL, lineNumber, columnNumber, nullptr);
     bool errorHandled = !m_workerObject->dispatchEvent(event);
-    if (!errorHandled)
-        m_executionContext->reportException(event, 0, nullptr, NotSharableCrossOrigin);
+
+    postTaskToWorkerGlobalScope(createCrossThreadTask(&WorkerGlobalScope::exceptionHandled, m_workerThread->workerGlobalScope(), exceptionId, errorHandled));
 }
 
 void WorkerMessagingProxy::reportConsoleMessage(MessageSource source, MessageLevel level, const String& message, int lineNumber, const String& sourceURL)
@@ -253,6 +254,15 @@ void WorkerMessagingProxy::postMessageToPageInspector(const String& message)
     WorkerInspectorProxy::PageInspector* pageInspector = m_workerInspectorProxy->pageInspector();
     if (pageInspector)
         pageInspector->dispatchMessageFromWorker(message);
+}
+
+void WorkerMessagingProxy::postWorkerConsoleAgentEnabled()
+{
+    if (!m_workerInspectorProxy)
+        return;
+    WorkerInspectorProxy::PageInspector* pageInspector = m_workerInspectorProxy->pageInspector();
+    if (pageInspector)
+        pageInspector->workerConsoleAgentEnabled(this);
 }
 
 WorkerInspectorProxy* WorkerMessagingProxy::workerInspectorProxy()

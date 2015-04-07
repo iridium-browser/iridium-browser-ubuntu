@@ -31,6 +31,12 @@ public class UrlUtilities {
             "data", "filesystem", "http", "https");
 
     /**
+     * URI schemes that are internal to Chrome.
+     */
+    private static final HashSet<String> INTERNAL_SCHEMES = CollectionUtil.newHashSet(
+            "chrome", "chrome-native", "about");
+
+    /**
      * URI schemes that can be handled in Intent fallback navigation.
      */
     private static final HashSet<String> FALLBACK_VALID_SCHEMES = CollectionUtil.newHashSet(
@@ -103,6 +109,15 @@ public class UrlUtilities {
     }
 
     /**
+     * @param uri A URI.
+     *
+     * @return Whether the URI's scheme is for a internal chrome page.
+     */
+    public static boolean isInternalScheme(URI uri) {
+        return INTERNAL_SCHEMES.contains(uri.getScheme());
+    }
+
+    /**
      * @param uri A URI to repair.
      *
      * @return A String representation of a URI that will be valid for loading in a ContentView.
@@ -147,6 +162,7 @@ public class UrlUtilities {
      * "//mail.google.com:/", this function prepends "file" while the other one prepends "http".
      */
     public static String fixupUrl(String uri) {
+        if (TextUtils.isEmpty(uri)) return uri;
         return nativeFixupUrl(uri, null);
     }
 
@@ -222,16 +238,8 @@ public class UrlUtilities {
      * identifier.
      */
     public static String getDomainAndRegistry(String uri, boolean includePrivateRegistries) {
+        if (TextUtils.isEmpty(uri)) return uri;
         return nativeGetDomainAndRegistry(uri, includePrivateRegistries);
-    }
-
-    /**
-     * @param url A URL.
-     * @return Whether a given URL is one of [...]google.TLD or [...]youtube.TLD URLs.
-     */
-    public static boolean isGooglePropertyUrl(String url) {
-        if (TextUtils.isEmpty(url)) return false;
-        return nativeIsGooglePropertyUrl(url);
     }
 
     private static native boolean nativeSameDomainOrHost(String primaryUrl, String secondaryUrl,
@@ -240,6 +248,5 @@ public class UrlUtilities {
             boolean includePrivateRegistries);
     public static native boolean nativeIsGoogleSearchUrl(String url);
     public static native boolean nativeIsGoogleHomePageUrl(String url);
-    public static native String nativeFixupUrl(String url, String desiredTld);
-    private static native boolean nativeIsGooglePropertyUrl(String url);
+    private static native String nativeFixupUrl(String url, String desiredTld);
 }

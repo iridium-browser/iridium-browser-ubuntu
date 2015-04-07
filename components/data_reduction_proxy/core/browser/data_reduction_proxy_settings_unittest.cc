@@ -8,6 +8,7 @@
 #include "base/md5.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/test_simple_task_runner.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
@@ -28,6 +29,8 @@ const char kProbeURLWithNoResponse[] = "http://no.org/";
 
 namespace data_reduction_proxy {
 
+class DataReductionProxyStatisticsPrefs;
+
 class DataReductionProxySettingsTest
     : public ConcreteDataReductionProxySettingsTest<
           DataReductionProxySettings> {
@@ -41,7 +44,7 @@ TEST_F(DataReductionProxySettingsTest, TestGetDataReductionProxyOrigin) {
 }
 
 TEST_F(DataReductionProxySettingsTest, TestGetDataReductionProxyDevOrigin) {
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kDataReductionProxyDev, expected_params_->DefaultDevOrigin());
   ResetSettings(true, true, false, true, false);
   std::string result =
@@ -76,12 +79,12 @@ TEST_F(DataReductionProxySettingsTest, TestSetProxyConfigs) {
       TestDataReductionProxyParams::HAS_EVERYTHING &
       ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
       ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN);
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kDataReductionProxyAlt, drp_params.DefaultAltOrigin());
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kDataReductionProxyAltFallback,
       drp_params.DefaultAltFallbackOrigin());
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kDataReductionSSLProxy, drp_params.DefaultSSLOrigin());
   ResetSettings(true, true, true, true, false);
   TestDataReductionProxyConfig* config =
@@ -377,7 +380,7 @@ TEST_F(DataReductionProxySettingsTest, TestEnableProxyFromCommandLine) {
   MockSettings* settings = static_cast<MockSettings*>(settings_.get());
   EXPECT_CALL(*settings, RecordStartupState(PROXY_ENABLED));
 
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableDataReductionProxy);
   CheckInitDataReductionProxy(true);
 }
@@ -401,7 +404,7 @@ TEST_F(DataReductionProxySettingsTest, CheckInitMetricsWhenNotAllowed) {
   // should be unavailable.
   base::MessageLoopForUI loop;
   // Clear the command line. Setting flags can force the proxy to be allowed.
-  CommandLine::ForCurrentProcess()->InitFromArgv(0, NULL);
+  base::CommandLine::ForCurrentProcess()->InitFromArgv(0, NULL);
 
   ResetSettings(false, false, false, false, false);
   MockSettings* settings = static_cast<MockSettings*>(settings_.get());
@@ -409,13 +412,19 @@ TEST_F(DataReductionProxySettingsTest, CheckInitMetricsWhenNotAllowed) {
   EXPECT_CALL(*settings, RecordStartupState(PROXY_NOT_AVAILABLE));
 
   scoped_ptr<DataReductionProxyConfigurator> configurator(
-      new TestDataReductionProxyConfig());
+      new TestDataReductionProxyConfig(
+          scoped_refptr<base::TestSimpleTaskRunner>(
+              new base::TestSimpleTaskRunner()), &net_log_,
+              event_store_.get()));
   settings_->SetProxyConfigurator(configurator.get());
   scoped_refptr<net::TestURLRequestContextGetter> request_context =
       new net::TestURLRequestContextGetter(base::MessageLoopProxy::current());
   settings_->InitDataReductionProxySettings(
       &pref_service_,
-      request_context.get());
+      scoped_ptr<DataReductionProxyStatisticsPrefs>(),
+      request_context.get(),
+      &net_log_,
+      event_store_.get());
   settings_->SetOnDataReductionEnabledCallback(
       base::Bind(&DataReductionProxySettingsTestBase::
                  RegisterSyntheticFieldTrialCallback,

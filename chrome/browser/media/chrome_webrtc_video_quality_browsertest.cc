@@ -107,7 +107,7 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
     ASSERT_TRUE(temp_working_dir_.CreateUniqueTempDir());
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     // Set up the command line option with the expected file name. We will check
     // its existence in HasAllRequiredResources().
     webrtc_reference_video_y4m_ = test::GetReferenceFilesDir()
@@ -166,7 +166,7 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
       return false;
     }
 
-    CommandLine converter_command(path_to_converter);
+    base::CommandLine converter_command(path_to_converter);
     converter_command.AppendSwitchPath("--frames_dir", GetWorkingDir());
     converter_command.AppendSwitchPath("--output_file",
                                        captured_video_filename);
@@ -219,7 +219,7 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
 
     // Note: don't append switches to this command since it will mess up the
     // -u in the python invocation!
-    CommandLine compare_command(CommandLine::NO_PROGRAM);
+    base::CommandLine compare_command(base::CommandLine::NO_PROGRAM);
     EXPECT_TRUE(GetPythonCommand(&compare_command));
 
     compare_command.AppendArgPath(path_to_compare_script);
@@ -240,10 +240,17 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
     DVLOG(0) << "Running " << compare_command.GetCommandLineString();
     std::string output;
     bool ok = base::GetAppOutput(compare_command, &output);
+
     // Print to stdout to ensure the perf numbers are parsed properly by the
-    // buildbot step.
+    // buildbot step. The tool should print a handful RESULT lines.
     printf("Output was:\n\n%s\n", output.c_str());
-    return ok;
+    bool has_result_lines = output.find("RESULT") != std::string::npos;
+    if (!ok || !has_result_lines) {
+      LOG(ERROR) << "Failed to compare videos; see output above to see what "
+                 << "the error was.";
+      return false;
+    }
+    return true;
   }
 
  protected:

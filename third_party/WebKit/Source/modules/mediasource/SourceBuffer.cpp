@@ -83,6 +83,7 @@ SourceBuffer::SourceBuffer(PassOwnPtr<WebSourceBuffer> webSourceBuffer, MediaSou
     : ActiveDOMObject(source->executionContext())
     , m_webSourceBuffer(webSourceBuffer)
     , m_source(source)
+    , m_trackDefaults(TrackDefaultList::create())
     , m_asyncEventQueue(asyncEventQueue)
     , m_mode(segmentsKeyword())
     , m_updating(false)
@@ -366,6 +367,22 @@ void SourceBuffer::remove(double start, double end, ExceptionState& exceptionSta
     m_removeAsyncPartRunner.runAsync();
 }
 
+void SourceBuffer::setTrackDefaults(TrackDefaultList* trackDefaults, ExceptionState& exceptionState)
+{
+    // Per 02 Dec 2014 Editor's Draft
+    // http://w3c.github.io/media-source/#widl-SourceBuffer-trackDefaults
+    // 1. If this object has been removed from the sourceBuffers attribute of
+    //    the parent media source, then throw an InvalidStateError exception
+    //    and abort these steps.
+    // 2. If the updating attribute equals true, then throw an InvalidStateError
+    //    exception and abort these steps.
+    if (throwExceptionIfRemovedOrUpdating(isRemoved(), m_updating, exceptionState))
+        return;
+
+    // 3. Update the attribute to the new value.
+    m_trackDefaults = trackDefaults;
+}
+
 void SourceBuffer::abortIfUpdating()
 {
     // Section 3.2 abort() method step 3 substeps.
@@ -419,7 +436,7 @@ void SourceBuffer::removedFromMediaSource()
     m_webSourceBuffer->removedFromMediaSource();
     m_webSourceBuffer.clear();
     m_source = nullptr;
-    m_asyncEventQueue = 0;
+    m_asyncEventQueue = nullptr;
 }
 
 void SourceBuffer::initializationSegmentReceived()
@@ -746,7 +763,10 @@ void SourceBuffer::trace(Visitor* visitor)
 {
     visitor->trace(m_source);
     visitor->trace(m_stream);
-    EventTargetWithInlineData::trace(visitor);
+    visitor->trace(m_trackDefaults);
+    visitor->trace(m_asyncEventQueue);
+    RefCountedGarbageCollectedEventTargetWithInlineData<SourceBuffer>::trace(visitor);
+    ActiveDOMObject::trace(visitor);
 }
 
 } // namespace blink

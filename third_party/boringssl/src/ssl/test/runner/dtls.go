@@ -66,9 +66,16 @@ func (c *Conn) dtlsDoReadRecord(want recordType) (recordType, *block, error) {
 	}
 	typ := recordType(b.data[0])
 	vers := wireToVersion(uint16(b.data[1])<<8|uint16(b.data[2]), c.isDTLS)
-	if c.haveVers && vers != c.vers {
-		c.sendAlert(alertProtocolVersion)
-		return 0, nil, c.in.setErrorLocked(fmt.Errorf("dtls: received record with version %x when expecting version %x", vers, c.vers))
+	if c.haveVers {
+		if vers != c.vers {
+			c.sendAlert(alertProtocolVersion)
+			return 0, nil, c.in.setErrorLocked(fmt.Errorf("dtls: received record with version %x when expecting version %x", vers, c.vers))
+		}
+	} else {
+		if expect := c.config.Bugs.ExpectInitialRecordVersion; expect != 0 && vers != expect {
+			c.sendAlert(alertProtocolVersion)
+			return 0, nil, c.in.setErrorLocked(fmt.Errorf("dtls: received record with version %x when expecting version %x", vers, expect))
+		}
 	}
 	seq := b.data[3:11]
 	// For test purposes, we assume a reliable channel. Require
@@ -301,13 +308,9 @@ func (c *Conn) dtlsDoReadHandshake() ([]byte, error) {
 // The configuration config must be non-nil and must have
 // at least one certificate.
 func DTLSServer(conn net.Conn, config *Config) *Conn {
-	return &Conn{
-		config: config,
-		isDTLS: true,
-		conn:   conn,
-		in:     halfConn{isDTLS: true},
-		out:    halfConn{isDTLS: true},
-	}
+	c := &Conn{config: config, isDTLS: true, conn: conn}
+	c.init()
+	return c
 }
 
 // DTLSClient returns a new DTLS client side connection
@@ -315,12 +318,7 @@ func DTLSServer(conn net.Conn, config *Config) *Conn {
 // The config cannot be nil: users must set either ServerHostname or
 // InsecureSkipVerify in the config.
 func DTLSClient(conn net.Conn, config *Config) *Conn {
-	return &Conn{
-		config:   config,
-		isClient: true,
-		isDTLS:   true,
-		conn:     conn,
-		in:       halfConn{isDTLS: true},
-		out:      halfConn{isDTLS: true},
-	}
+	c := &Conn{config: config, isClient: true, isDTLS: true, conn: conn}
+	c.init()
+	return c
 }

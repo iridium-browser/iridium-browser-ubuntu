@@ -21,7 +21,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestInterfaceEventTarget::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceEventTarget::domTemplate, V8TestInterfaceEventTarget::refObject, V8TestInterfaceEventTarget::derefObject, V8TestInterfaceEventTarget::trace, 0, V8TestInterfaceEventTarget::toEventTarget, 0, V8TestInterfaceEventTarget::installConditionallyEnabledMethods, V8TestInterfaceEventTarget::installConditionallyEnabledProperties, &V8EventTarget::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::WillBeGarbageCollectedObject };
+const WrapperTypeInfo V8TestInterfaceEventTarget::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceEventTarget::domTemplate, V8TestInterfaceEventTarget::refObject, V8TestInterfaceEventTarget::derefObject, V8TestInterfaceEventTarget::trace, 0, 0, V8TestInterfaceEventTarget::installConditionallyEnabledMethods, V8TestInterfaceEventTarget::installConditionallyEnabledProperties, &V8EventTarget::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::InheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::WillBeGarbageCollectedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterfaceEventTarget.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -32,7 +32,7 @@ namespace TestInterfaceEventTargetV8Internal {
 
 } // namespace TestInterfaceEventTargetV8Internal
 
-const WrapperTypeInfo V8TestInterfaceEventTargetConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceEventTargetConstructor::domTemplate, V8TestInterfaceEventTarget::refObject, V8TestInterfaceEventTarget::derefObject, V8TestInterfaceEventTarget::trace, 0, V8TestInterfaceEventTarget::toEventTarget, 0, V8TestInterfaceEventTarget::installConditionallyEnabledMethods, V8TestInterfaceEventTarget::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::WillBeGarbageCollectedObject };
+const WrapperTypeInfo V8TestInterfaceEventTargetConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceEventTargetConstructor::domTemplate, V8TestInterfaceEventTarget::refObject, V8TestInterfaceEventTarget::derefObject, V8TestInterfaceEventTarget::trace, 0, 0, V8TestInterfaceEventTarget::installConditionallyEnabledMethods, V8TestInterfaceEventTarget::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::InheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::WillBeGarbageCollectedObject };
 
 static void V8TestInterfaceEventTargetConstructorCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
@@ -47,12 +47,12 @@ static void V8TestInterfaceEventTargetConstructorCallback(const v8::FunctionCall
     }
     Document& document = *toDocument(currentExecutionContext(info.GetIsolate()));
     RefPtrWillBeRawPtr<TestInterfaceEventTarget> impl = TestInterfaceEventTarget::createForJSConstructor(document);
-    v8::Handle<v8::Object> wrapper = info.Holder();
-    impl->associateWithWrapper(&V8TestInterfaceEventTargetConstructor::wrapperTypeInfo, wrapper, info.GetIsolate());
+    v8::Local<v8::Object> wrapper = info.Holder();
+    impl->associateWithWrapper(info.GetIsolate(), &V8TestInterfaceEventTargetConstructor::wrapperTypeInfo, wrapper);
     v8SetReturnValue(info, wrapper);
 }
 
-v8::Handle<v8::FunctionTemplate> V8TestInterfaceEventTargetConstructor::domTemplate(v8::Isolate* isolate)
+v8::Local<v8::FunctionTemplate> V8TestInterfaceEventTargetConstructor::domTemplate(v8::Isolate* isolate)
 {
     static int domTemplateKey; // This address is used for a key to look up the dom template.
     V8PerIsolateData* data = V8PerIsolateData::from(isolate);
@@ -70,16 +70,15 @@ v8::Handle<v8::FunctionTemplate> V8TestInterfaceEventTargetConstructor::domTempl
     return result;
 }
 
-static void installV8TestInterfaceEventTargetTemplate(v8::Handle<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+static void installV8TestInterfaceEventTargetTemplate(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
 {
     functionTemplate->ReadOnlyPrototype();
 
     v8::Local<v8::Signature> defaultSignature;
-    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(functionTemplate, "TestInterfaceEventTarget", V8EventTarget::domTemplate(isolate), V8TestInterfaceEventTarget::internalFieldCount,
+    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "TestInterfaceEventTarget", V8EventTarget::domTemplate(isolate), V8TestInterfaceEventTarget::internalFieldCount,
         0, 0,
         0, 0,
-        0, 0,
-        isolate);
+        0, 0);
     v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
     ALLOW_UNUSED_LOCAL(instanceTemplate);
     v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
@@ -89,49 +88,38 @@ static void installV8TestInterfaceEventTargetTemplate(v8::Handle<v8::FunctionTem
     functionTemplate->Set(v8AtomicString(isolate, "toString"), V8PerIsolateData::from(isolate)->toStringTemplate());
 }
 
-v8::Handle<v8::FunctionTemplate> V8TestInterfaceEventTarget::domTemplate(v8::Isolate* isolate)
+v8::Local<v8::FunctionTemplate> V8TestInterfaceEventTarget::domTemplate(v8::Isolate* isolate)
 {
     return V8DOMConfiguration::domClassTemplate(isolate, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestInterfaceEventTargetTemplate);
 }
 
-bool V8TestInterfaceEventTarget::hasInstance(v8::Handle<v8::Value> v8Value, v8::Isolate* isolate)
+bool V8TestInterfaceEventTarget::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
 {
     return V8PerIsolateData::from(isolate)->hasInstance(&wrapperTypeInfo, v8Value);
 }
 
-v8::Handle<v8::Object> V8TestInterfaceEventTarget::findInstanceInPrototypeChain(v8::Handle<v8::Value> v8Value, v8::Isolate* isolate)
+v8::Local<v8::Object> V8TestInterfaceEventTarget::findInstanceInPrototypeChain(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
 {
     return V8PerIsolateData::from(isolate)->findInstanceInPrototypeChain(&wrapperTypeInfo, v8Value);
 }
 
-TestInterfaceEventTarget* V8TestInterfaceEventTarget::toImplWithTypeCheck(v8::Isolate* isolate, v8::Handle<v8::Value> value)
+TestInterfaceEventTarget* V8TestInterfaceEventTarget::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
-    return hasInstance(value, isolate) ? blink::toScriptWrappableBase(v8::Handle<v8::Object>::Cast(value))->toImpl<TestInterfaceEventTarget>() : 0;
+    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
 }
 
-EventTarget* V8TestInterfaceEventTarget::toEventTarget(v8::Handle<v8::Object> object)
-{
-    return toImpl(object);
-}
-
-void V8TestInterfaceEventTarget::refObject(ScriptWrappableBase* scriptWrappableBase)
+void V8TestInterfaceEventTarget::refObject(ScriptWrappable* scriptWrappable)
 {
 #if !ENABLE(OILPAN)
-    scriptWrappableBase->toImpl<TestInterfaceEventTarget>()->ref();
+    scriptWrappable->toImpl<TestInterfaceEventTarget>()->ref();
 #endif
 }
 
-void V8TestInterfaceEventTarget::derefObject(ScriptWrappableBase* scriptWrappableBase)
+void V8TestInterfaceEventTarget::derefObject(ScriptWrappable* scriptWrappable)
 {
 #if !ENABLE(OILPAN)
-    scriptWrappableBase->toImpl<TestInterfaceEventTarget>()->deref();
+    scriptWrappable->toImpl<TestInterfaceEventTarget>()->deref();
 #endif
-}
-
-template<>
-v8::Handle<v8::Value> toV8NoInline(TestInterfaceEventTarget* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-{
-    return toV8(impl, creationContext, isolate);
 }
 
 } // namespace blink

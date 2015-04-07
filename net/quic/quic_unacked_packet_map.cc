@@ -53,6 +53,9 @@ void QuicUnackedPacketMap::AddSentPacket(
                         packet.sequence_number_length,
                         transmission_type,
                         sent_time);
+  DCHECK(packet.packet != nullptr);
+  info.is_fec_packet = packet.packet->is_fec_packet();
+
   if (old_sequence_number == 0) {
     if (packet.retransmittable_frames != nullptr &&
         packet.retransmittable_frames->HasCryptoHandshake() == IS_HANDSHAKE) {
@@ -179,7 +182,7 @@ bool QuicUnackedPacketMap::HasRetransmittableFrames(
 }
 
 void QuicUnackedPacketMap::NackPacket(QuicPacketSequenceNumber sequence_number,
-                                      size_t min_nacks) {
+                                      QuicPacketCount min_nacks) {
   DCHECK_GE(sequence_number, least_unacked_);
   DCHECK_LT(sequence_number, least_unacked_ + unacked_packets_.size());
   unacked_packets_[sequence_number - least_unacked_].nack_count =

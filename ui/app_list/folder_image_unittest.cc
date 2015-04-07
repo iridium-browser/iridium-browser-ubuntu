@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <string>
+
 #include "ui/app_list/folder_image.h"
 
 #include "base/macros.h"
@@ -54,9 +56,9 @@ class FolderImageTest : public testing::Test {
  public:
   FolderImageTest() : folder_image_(app_list_model_.top_level_item_list()) {}
 
-  ~FolderImageTest() {}
+  ~FolderImageTest() override {}
 
-  void SetUp() {
+  void SetUp() override {
     // Populate the AppListModel with three items (to test that the FolderImage
     // correctly supports having fewer than four icons).
     AddAppWithColoredIcon("app1", SK_ColorRED);
@@ -67,7 +69,7 @@ class FolderImageTest : public testing::Test {
     folder_image_.AddObserver(&observer_);
   }
 
-  void TearDown() { folder_image_.RemoveObserver(&observer_); }
+  void TearDown() override { folder_image_.RemoveObserver(&observer_); }
 
  protected:
   void AddAppWithColoredIcon(const std::string& id, SkColor icon_color) {
@@ -83,6 +85,7 @@ class FolderImageTest : public testing::Test {
 
   TestFolderImageObserver observer_;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(FolderImageTest);
 };
 

@@ -50,13 +50,9 @@ class VideoRendererImplTest : public ::testing::Test {
     ScopedVector<VideoDecoder> decoders;
     decoders.push_back(decoder_);
 
-    renderer_.reset(new VideoRendererImpl(
-        message_loop_.message_loop_proxy(),
-        decoders.Pass(),
-        media::SetDecryptorReadyCB(),
-        base::Bind(&StrictMock<MockCB>::Display, base::Unretained(&mock_cb_)),
-        true,
-        new MediaLog()));
+    renderer_.reset(new VideoRendererImpl(message_loop_.message_loop_proxy(),
+                                          decoders.Pass(), true,
+                                          new MediaLog()));
 
     demuxer_stream_.set_video_decoder_config(TestVideoConfig::Normal());
 
@@ -94,18 +90,18 @@ class VideoRendererImplTest : public ::testing::Test {
   void CallInitialize(const PipelineStatusCB& status_cb,
                       bool low_delay,
                       PipelineStatus decoder_status) {
+    if (low_delay)
+      demuxer_stream_.set_liveness(DemuxerStream::LIVENESS_LIVE);
     EXPECT_CALL(*decoder_, Initialize(_, _, _, _)).WillOnce(
         DoAll(SaveArg<3>(&output_cb_), RunCallback<2>(decoder_status)));
     renderer_->Initialize(
-        &demuxer_stream_,
-        low_delay,
-        status_cb,
+        &demuxer_stream_, status_cb, media::SetDecryptorReadyCB(),
         base::Bind(&VideoRendererImplTest::OnStatisticsUpdate,
                    base::Unretained(this)),
         base::Bind(&StrictMock<MockCB>::BufferingStateChange,
                    base::Unretained(&mock_cb_)),
-        ended_event_.GetClosure(),
-        error_event_.GetPipelineStatusCB(),
+        base::Bind(&StrictMock<MockCB>::Display, base::Unretained(&mock_cb_)),
+        ended_event_.GetClosure(), error_event_.GetPipelineStatusCB(),
         base::Bind(&VideoRendererImplTest::GetTime, base::Unretained(this)));
   }
 

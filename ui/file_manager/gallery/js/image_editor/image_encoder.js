@@ -8,14 +8,17 @@
 function ImageEncoder() {}
 
 /**
- * @type {Array.<Object>}
+ * Metadata encoders.
+ * @type {!Object.<string,function(new:ImageEncoder.MetadataEncoder,!Object)>}
+ * @const
  */
 ImageEncoder.metadataEncoders = {};
 
 /**
- * @param {function(new:ImageEncoder.MetadataEncoder)} constructor
- *     // TODO(JSDOC).
- * @param {string} mimeType  // TODO(JSDOC).
+ * Registers metadata encoder.
+ * @param {function(new:ImageEncoder.MetadataEncoder,!Object)} constructor
+ *     Constructor of a metadata encoder.
+ * @param {string} mimeType Mime type of the metadata encoder.
  */
 ImageEncoder.registerMetadataEncoder = function(constructor, mimeType) {
   ImageEncoder.metadataEncoders[mimeType] = constructor;
@@ -26,8 +29,8 @@ ImageEncoder.registerMetadataEncoder = function(constructor, mimeType) {
  *
  * The encoder will own and modify a copy of the original metadata.
  *
- * @param {Object} metadata Original metadata.
- * @return {ImageEncoder.MetadataEncoder} Created metadata encoder.
+ * @param {!Object} metadata Original metadata.
+ * @return {!ImageEncoder.MetadataEncoder} Created metadata encoder.
  */
 ImageEncoder.createMetadataEncoder = function(metadata) {
   var constructor =
@@ -36,44 +39,38 @@ ImageEncoder.createMetadataEncoder = function(metadata) {
   return new constructor(metadata);
 };
 
-
 /**
  * Create a metadata encoder object holding a copy of metadata
  * modified according to the properties of the supplied image.
  *
- * @param {Object} metadata Original metadata.
- * @param {HTMLCanvasElement} canvas Canvas to use for metadata.
- * @param {number} quality Encoding quality (defaults to 1).
- * @return {ImageEncoder.MetadataEncoder} Encoder with encoded metadata.
+ * @param {!Object} metadata Original metadata.
+ * @param {!HTMLCanvasElement} canvas Canvas to use for metadata.
+ * @param {number} thumbnailQuality Encoding quality of a thumbnail.
+ * @param {Date=} opt_modificationDateTime Modification date time of an image.
+ * @return {!ImageEncoder.MetadataEncoder} Encoder with encoded metadata.
  */
-ImageEncoder.encodeMetadata = function(metadata, canvas, quality) {
+ImageEncoder.encodeMetadata = function(
+    metadata, canvas, thumbnailQuality, opt_modificationDateTime) {
   var encoder = ImageEncoder.createMetadataEncoder(metadata);
-  encoder.setImageData(canvas);
-  encoder.setThumbnailData(ImageEncoder.createThumbnail(canvas), quality || 1);
+  encoder.setImageData(canvas, opt_modificationDateTime);
+  encoder.setThumbnailData(ImageEncoder.createThumbnail(canvas),
+      thumbnailQuality);
   return encoder;
 };
 
-
 /**
  * Return a blob with the encoded image with metadata inserted.
- * @param {HTMLCanvasElement} canvas The canvas with the image to be encoded.
- * @param {ImageEncoder.MetadataEncoder} metadataEncoder Encoder to use.
- * @param {number} quality (0..1], Encoding quality, defaults to 0.9.
- * @return {Blob} encoded data.
+ * @param {!HTMLCanvasElement} canvas The canvas with the image to be encoded.
+ * @param {!ImageEncoder.MetadataEncoder} metadataEncoder Encoder to use.
+ * @param {number} imageQuality (0..1], Encoding quality of an image.
+ * @return {!Blob} encoded data.
  */
-ImageEncoder.getBlob = function(canvas, metadataEncoder, quality) {
-  // Contrary to what one might think 1.0 is not a good default. Opening and
-  // saving an typical photo taken with consumer camera increases its file size
-  // by 50-100%.
-  // Experiments show that 0.9 is much better. It shrinks some photos a bit,
-  // keeps others about the same size, but does not visibly lower the quality.
-  quality = quality || 0.9;
-
+ImageEncoder.getBlob = function(canvas, metadataEncoder, imageQuality) {
   ImageUtil.trace.resetTimer('dataurl');
   // WebKit does not support canvas.toBlob yet so canvas.toDataURL is
   // the only way to use the Chrome built-in image encoder.
-  var dataURL =
-      canvas.toDataURL(metadataEncoder.getMetadata().media.mimeType, quality);
+  var dataURL = canvas.toDataURL(metadataEncoder.getMetadata().media.mimeType,
+      imageQuality);
   ImageUtil.trace.reportTimer('dataurl');
 
   var encodedImage = ImageEncoder.decodeDataURL(dataURL);
@@ -120,15 +117,15 @@ ImageEncoder.getBlob = function(canvas, metadataEncoder, quality) {
 ImageEncoder.decodeDataURL = function(dataURL) {
   // Skip the prefix ('data:image/<type>;base64,')
   var base64string = dataURL.substring(dataURL.indexOf(',') + 1);
-  return atob(base64string);
+  return window.atob(base64string);
 };
 
 /**
  * Return a thumbnail for an image.
- * @param {HTMLCanvasElement} canvas Original image.
+ * @param {!HTMLCanvasElement} canvas Original image.
  * @param {number=} opt_shrinkage Thumbnail should be at least this much smaller
  *     than the original image (in each dimension).
- * @return {HTMLCanvasElement} Thumbnail canvas.
+ * @return {!HTMLCanvasElement} Thumbnail canvas.
  */
 ImageEncoder.createThumbnail = function(canvas, opt_shrinkage) {
   var MAX_THUMBNAIL_DIMENSION = 320;
@@ -137,7 +134,8 @@ ImageEncoder.createThumbnail = function(canvas, opt_shrinkage) {
                            canvas.width / MAX_THUMBNAIL_DIMENSION,
                            canvas.height / MAX_THUMBNAIL_DIMENSION);
 
-  var thumbnailCanvas = canvas.ownerDocument.createElement('canvas');
+  var thumbnailCanvas = assertInstanceof(
+      canvas.ownerDocument.createElement('canvas'), HTMLCanvasElement);
   thumbnailCanvas.width = Math.round(canvas.width / opt_shrinkage);
   thumbnailCanvas.height = Math.round(canvas.height / opt_shrinkage);
 
@@ -150,11 +148,11 @@ ImageEncoder.createThumbnail = function(canvas, opt_shrinkage) {
 };
 
 /**
- * TODO(JSDOC)
- * @param {string} string  // TODO(JSDOC).
- * @param {number} from  // TODO(JSDOC).
- * @param {number} to  // TODO(JSDOC).
- * @return {ArrayBuffer}  // TODO(JSDOC).
+ * Converts string to an array buffer.
+ * @param {string} string A string.
+ * @param {number} from Start index.
+ * @param {number} to End index.
+ * @return {!ArrayBuffer}  A created array buffer is returned.
  */
 ImageEncoder.stringToArrayBuffer = function(string, from, to) {
   var size = to - from;
@@ -171,37 +169,67 @@ ImageEncoder.stringToArrayBuffer = function(string, from, to) {
  * Serves as a default metadata encoder for images that none of the metadata
  * parsers recognized.
  *
- * @param {Object} original_metadata Starting metadata.
+ * @param {!Object} original_metadata Starting metadata.
  * @constructor
+ * @struct
  */
 ImageEncoder.MetadataEncoder = function(original_metadata) {
   this.metadata_ = MetadataCache.cloneMetadata(original_metadata) || {};
-  if (this.metadata_.media.mimeType !== 'image/jpeg') {
+  if (ImageEncoder.MetadataEncoder.getMimeType_(this.metadata_) !==
+      'image/jpeg') {
     // Chrome can only encode JPEG and PNG. Force PNG mime type so that we
     // can save to file and generate a thumbnail.
+    // TODO(yawano) Change this not to modify metadata. Mime type comes from
+    // different fields depending on the conditions. Just overriding
+    // media.mimeType and use the modified metadata could cause a problem.
     this.metadata_.media.mimeType = 'image/png';
   }
 };
 
 /**
- * TODO(JSDOC)
- * @return {Object}   // TODO(JSDOC).
+ * Gets mime type from metadata. It reads media.mimeType at first, and if it
+ * fails, it falls back to external.contentMimeType. If both fields are
+ * undefined, it means that metadata is broken. Then it throws an exception.
+ *
+ * @param {!Object} metadata Metadata.
+ * @return {string} Mime type.
+ * @private
+ */
+ImageEncoder.MetadataEncoder.getMimeType_ = function(metadata) {
+  if (metadata.media.mimeType)
+    return metadata.media.mimeType;
+  else if (metadata.external.contentMimeType)
+    return metadata.external.contentMimeType;
+
+  assertNotReached();
+};
+
+/**
+ * Returns metadata.
+ * @return {!Object} A metadata.
+ *
+ * TODO(yawano): MetadataEncoder.getMetadata seems not to be used anymore.
+ *     Investigate this, and remove if possible. Should not modify a metadata by
+ *     using an encoder.
  */
 ImageEncoder.MetadataEncoder.prototype.getMetadata = function() {
   return this.metadata_;
 };
 
 /**
- * @param {HTMLCanvasElement|Object} canvas Canvas or or anything with
- *                                          width and height properties.
+ * Sets an image data.
+ * @param {!HTMLCanvasElement} canvas Canvas or anything with width and height
+ *     properties.
+ * @param {Date=} opt_modificationDateTime Modification date time of an image.
  */
-ImageEncoder.MetadataEncoder.prototype.setImageData = function(canvas) {
+ImageEncoder.MetadataEncoder.prototype.setImageData =
+    function(canvas, opt_modificationDateTime) {
   this.metadata_.width = canvas.width;
   this.metadata_.height = canvas.height;
 };
 
 /**
- * @param {HTMLCanvasElement} canvas Canvas to use as thumbnail.
+ * @param {!HTMLCanvasElement} canvas Canvas to use as thumbnail.
  * @param {number} quality Thumbnail quality.
  */
 ImageEncoder.MetadataEncoder.prototype.setThumbnailData =
@@ -212,17 +240,17 @@ ImageEncoder.MetadataEncoder.prototype.setThumbnailData =
 };
 
 /**
- * Return a range where the metadata is (or should be) located.
- * @param {string} encodedImage // TODO(JSDOC).
- * @return {Object} An object with from and to properties.
+ * Returns a range where the metadata is (or should be) located.
+ * @param {string} encodedImage An encoded image.
+ * @return {{from:number, to:number}} An object with from and to properties.
  */
 ImageEncoder.MetadataEncoder.prototype.
     findInsertionRange = function(encodedImage) { return {from: 0, to: 0}; };
 
 /**
- * Return serialized metadata ready to write to an image file.
+ * Returns serialized metadata ready to write to an image file.
  * The return type is optimized for passing to Blob.append.
- * @return {ArrayBuffer} // TODO(JSDOC).
+ * @return {!ArrayBuffer} Serialized metadata.
  */
 ImageEncoder.MetadataEncoder.prototype.encode = function() {
   return new Uint8Array(0).buffer;

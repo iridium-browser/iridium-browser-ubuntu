@@ -12,7 +12,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/infobars/simple_alert_infobar_delegate.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/metrics/metrics_services_manager.h"
 #include "chrome/browser/plugins/plugin_finder.h"
@@ -25,6 +24,7 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
+#include "components/infobars/core/simple_alert_infobar_delegate.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -150,7 +150,7 @@ void ReloadPluginInfoBarDelegate::Create(
     content::NavigationController* controller,
     const base::string16& message) {
   infobar_service->AddInfoBar(
-      ConfirmInfoBarDelegate::CreateInfoBar(scoped_ptr<ConfirmInfoBarDelegate>(
+      infobar_service->CreateConfirmInfoBar(scoped_ptr<ConfirmInfoBarDelegate>(
           new ReloadPluginInfoBarDelegate(controller, message))));
 }
 

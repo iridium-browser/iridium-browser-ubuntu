@@ -56,7 +56,7 @@ public:
    uint8_t send_payload_type;
    uint32_t frequency_hz;
    uint32_t packets_sent;
-   uint32_t media_bytes_sent;
+   size_t media_bytes_sent;
    uint32_t send_bitrate;
 
    uint32_t last_rr_ntp_secs;
@@ -69,45 +69,45 @@ public:
    // Used when generating TMMBR.
    ModuleRtpRtcpImpl* module;
  };
-    RTCPSender(const int32_t id, const bool audio,
-               Clock* clock,
-               ReceiveStatistics* receive_statistics);
+ RTCPSender(int32_t id,
+            bool audio,
+            Clock* clock,
+            ReceiveStatistics* receive_statistics);
     virtual ~RTCPSender();
 
     int32_t RegisterSendTransport(Transport* outgoingTransport);
 
     RTCPMethod Status() const;
-    int32_t SetRTCPStatus(const RTCPMethod method);
+    void SetRTCPStatus(RTCPMethod method);
 
     bool Sending() const;
     int32_t SetSendingStatus(const FeedbackState& feedback_state,
                              bool enabled);  // combine the functions
 
-    int32_t SetNackStatus(const bool enable);
+    int32_t SetNackStatus(bool enable);
 
     void SetStartTimestamp(uint32_t start_timestamp);
 
     void SetLastRtpTime(uint32_t rtp_timestamp,
                         int64_t capture_time_ms);
 
-    void SetSSRC( const uint32_t ssrc);
+    void SetSSRC(uint32_t ssrc);
 
     void SetRemoteSSRC(uint32_t ssrc);
 
-    int32_t SetCameraDelay(const int32_t delayMS);
+    int32_t SetCameraDelay(int32_t delayMS);
 
     int32_t SetCNAME(const char cName[RTCP_CNAME_SIZE]);
 
-    int32_t AddMixedCNAME(const uint32_t SSRC,
-                          const char cName[RTCP_CNAME_SIZE]);
+    int32_t AddMixedCNAME(uint32_t SSRC, const char cName[RTCP_CNAME_SIZE]);
 
-    int32_t RemoveMixedCNAME(const uint32_t SSRC);
+    int32_t RemoveMixedCNAME(uint32_t SSRC);
 
-    uint32_t SendTimeOfSendReport(const uint32_t sendReport);
+    uint32_t SendTimeOfSendReport(uint32_t sendReport);
 
     bool SendTimeOfXrRrReport(uint32_t mid_ntp, int64_t* time_ms) const;
 
-    bool TimeToSendRTCPReport(const bool sendKeyframeBeforeRTP = false) const;
+    bool TimeToSendRTCPReport(bool sendKeyframeBeforeRTP = false) const;
 
     uint32_t LastSendReport(uint32_t& lastRTCPTime);
 
@@ -130,37 +130,34 @@ public:
     */
     bool REMB() const;
 
-    int32_t SetREMBStatus(const bool enable);
+    void SetREMBStatus(bool enable);
 
-    int32_t SetREMBData(const uint32_t bitrate,
-                        const uint8_t numberOfSSRC,
-                        const uint32_t* SSRC);
+    void SetREMBData(uint32_t bitrate, const std::vector<uint32_t>& ssrcs);
 
     /*
     *   TMMBR
     */
     bool TMMBR() const;
 
-    int32_t SetTMMBRStatus(const bool enable);
+    void SetTMMBRStatus(bool enable);
 
-    int32_t SetTMMBN(const TMMBRSet* boundingSet,
-                     const uint32_t maxBitrateKbit);
+    int32_t SetTMMBN(const TMMBRSet* boundingSet, uint32_t maxBitrateKbit);
 
     /*
     *   Extended jitter report
     */
     bool IJ() const;
 
-    int32_t SetIJStatus(const bool enable);
+    void SetIJStatus(bool enable);
 
     /*
     *
     */
 
-    int32_t SetApplicationSpecificData(const uint8_t subType,
-                                       const uint32_t name,
+    int32_t SetApplicationSpecificData(uint8_t subType,
+                                       uint32_t name,
                                        const uint8_t* data,
-                                       const uint16_t length);
+                                       uint16_t length);
 
     int32_t SetRTCPVoIPMetrics(const RTCPVoIPMetric* VoIPMetric);
 
@@ -168,24 +165,21 @@ public:
 
     bool RtcpXrReceiverReferenceTime() const;
 
-    int32_t SetCSRCs(const uint32_t arrOfCSRC[kRtpCsrcSize],
-                     const uint8_t arrLength);
-
-    int32_t SetCSRCStatus(const bool include);
+    void SetCsrcs(const std::vector<uint32_t>& csrcs);
 
     void SetTargetBitrate(unsigned int target_bitrate);
 
     void GetPacketTypeCounter(RtcpPacketTypeCounter* packet_counter) const;
 
 private:
-    int32_t SendToNetwork(const uint8_t* dataBuffer, const uint16_t length);
+ int32_t SendToNetwork(const uint8_t* dataBuffer, size_t length);
 
-    int32_t WriteAllReportBlocksToBuffer(uint8_t* rtcpbuffer,
-                            int pos,
-                            uint8_t& numberOfReportBlocks,
-                            const uint32_t NTPsec,
-                            const uint32_t NTPfrac)
-        EXCLUSIVE_LOCKS_REQUIRED(_criticalSectionRTCPSender);
+ int32_t WriteAllReportBlocksToBuffer(uint8_t* rtcpbuffer,
+                                      int pos,
+                                      uint8_t& numberOfReportBlocks,
+                                      uint32_t NTPsec,
+                                      uint32_t NTPfrac)
+     EXCLUSIVE_LOCKS_REQUIRED(_criticalSectionRTCPSender);
 
     int32_t WriteReportBlocksToBuffer(
         uint8_t* rtcpbuffer,
@@ -211,8 +205,8 @@ private:
 
     int32_t BuildRR(uint8_t* rtcpbuffer,
                     int& pos,
-                    const uint32_t NTPsec,
-                    const uint32_t NTPfrac)
+                    uint32_t NTPsec,
+                    uint32_t NTPfrac)
         EXCLUSIVE_LOCKS_REQUIRED(_criticalSectionRTCPSender);
 
     int PrepareRTCP(
@@ -227,10 +221,9 @@ private:
 
     bool ShouldSendReportBlocks(uint32_t rtcp_packet_type) const;
 
-    int32_t BuildExtendedJitterReport(
-        uint8_t* rtcpbuffer,
-        int& pos,
-        const uint32_t jitterTransmissionTimeOffset)
+    int32_t BuildExtendedJitterReport(uint8_t* rtcpbuffer,
+                                      int& pos,
+                                      uint32_t jitterTransmissionTimeOffset)
         EXCLUSIVE_LOCKS_REQUIRED(_criticalSectionRTCPSender);
 
     int32_t BuildSDEC(uint8_t* rtcpbuffer, int& pos)
@@ -251,17 +244,17 @@ private:
         EXCLUSIVE_LOCKS_REQUIRED(_criticalSectionRTCPSender);
     int32_t BuildFIR(uint8_t* rtcpbuffer, int& pos, bool repeat)
         EXCLUSIVE_LOCKS_REQUIRED(_criticalSectionRTCPSender);
-    int32_t BuildSLI(uint8_t* rtcpbuffer, int& pos, const uint8_t pictureID)
+    int32_t BuildSLI(uint8_t* rtcpbuffer, int& pos, uint8_t pictureID)
         EXCLUSIVE_LOCKS_REQUIRED(_criticalSectionRTCPSender);
     int32_t BuildRPSI(uint8_t* rtcpbuffer,
                       int& pos,
-                      const uint64_t pictureID,
-                      const uint8_t payloadType)
+                      uint64_t pictureID,
+                      uint8_t payloadType)
         EXCLUSIVE_LOCKS_REQUIRED(_criticalSectionRTCPSender);
 
     int32_t BuildNACK(uint8_t* rtcpbuffer,
                       int& pos,
-                      const int32_t nackSize,
+                      int32_t nackSize,
                       const uint16_t* nackList,
                       std::string* nackString)
         EXCLUSIVE_LOCKS_REQUIRED(_criticalSectionRTCPSender);
@@ -326,18 +319,14 @@ private:
         GUARDED_BY(_criticalSectionRTCPSender);
 
     // send CSRCs
-    uint8_t         _CSRCs GUARDED_BY(_criticalSectionRTCPSender);
-    uint32_t        _CSRC[kRtpCsrcSize] GUARDED_BY(_criticalSectionRTCPSender);
-    bool                _includeCSRCs GUARDED_BY(_criticalSectionRTCPSender);
+    std::vector<uint32_t> csrcs_ GUARDED_BY(_criticalSectionRTCPSender);
 
     // Full intra request
     uint8_t         _sequenceNumberFIR GUARDED_BY(_criticalSectionRTCPSender);
 
     // REMB
-    uint8_t       _lengthRembSSRC GUARDED_BY(_criticalSectionRTCPSender);
-    uint8_t       _sizeRembSSRC GUARDED_BY(_criticalSectionRTCPSender);
-    uint32_t*     _rembSSRC GUARDED_BY(_criticalSectionRTCPSender);
     uint32_t      _rembBitrate GUARDED_BY(_criticalSectionRTCPSender);
+    std::vector<uint32_t>  remb_ssrcs_ GUARDED_BY(_criticalSectionRTCPSender);
 
     TMMBRHelp           _tmmbrHelp GUARDED_BY(_criticalSectionRTCPSender);
     uint32_t      _tmmbr_Send GUARDED_BY(_criticalSectionRTCPSender);

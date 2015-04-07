@@ -33,6 +33,7 @@
 
 #include "bindings/core/v8/ScriptPromise.h"
 #include "modules/serviceworkers/ExtendableEvent.h"
+#include "modules/serviceworkers/InstallEventInit.h"
 #include "wtf/Forward.h"
 
 namespace blink {
@@ -41,9 +42,8 @@ class InstallEvent final : public ExtendableEvent {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<InstallEvent> create();
-    static PassRefPtrWillBeRawPtr<InstallEvent> create(const AtomicString& type, const EventInit&, WaitUntilObserver*);
-
-    void replace();
+    static PassRefPtrWillBeRawPtr<InstallEvent> create(const AtomicString& type, const InstallEventInit&);
+    static PassRefPtrWillBeRawPtr<InstallEvent> create(const AtomicString& type, const InstallEventInit&, WaitUntilObserver*);
 
     virtual const AtomicString& interfaceName() const override;
 
@@ -51,7 +51,8 @@ public:
 
 private:
     InstallEvent();
-    InstallEvent(const AtomicString& type, const EventInit&, WaitUntilObserver*);
+    InstallEvent(const AtomicString& type, const InstallEventInit&);
+    InstallEvent(const AtomicString& type, const InstallEventInit&, WaitUntilObserver*);
 };
 
 } // namespace blink

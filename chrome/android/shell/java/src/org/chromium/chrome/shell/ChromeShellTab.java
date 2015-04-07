@@ -11,8 +11,8 @@ import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.UrlUtilities;
 import org.chromium.chrome.browser.contextmenu.ChromeContextMenuPopulator;
 import org.chromium.chrome.browser.contextmenu.ContextMenuPopulator;
-import org.chromium.chrome.browser.infobar.AutoLoginProcessor;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
+import org.chromium.content.browser.ContentVideoView;
 import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
@@ -25,25 +25,25 @@ import org.chromium.ui.base.WindowAndroid;
  * and extends {@link Tab}.
  */
 public class ChromeShellTab extends Tab {
+    private final TabManager mTabManager;
+
     // Tab state
     private boolean mIsLoading;
     private boolean mIsFullscreen = false;
-    private TabManager mTabManager;
 
     /**
      * @param context           The Context the view is running in.
-     * @param url               The URL to start this tab with.
+     * @param params            Parameters for the page the tab should immediately load.
      * @param window            The WindowAndroid should represent this tab.
      * @param contentViewClient The client for the {@link ContentViewCore}s of this Tab.
      */
-    public ChromeShellTab(Context context, String url, WindowAndroid window,
+    public ChromeShellTab(Context context, LoadUrlParams params, WindowAndroid window,
             ContentViewClient contentViewClient, TabManager tabManager) {
         super(false, context, window);
-        initialize();
-        initContentViewCore();
-        setContentViewClient(contentViewClient);
-        loadUrlWithSanitization(url);
+        initialize(0, null, false);
         mTabManager = tabManager;
+        setContentViewClient(contentViewClient);
+        loadUrl(params);
     }
 
     /**
@@ -94,25 +94,8 @@ public class ChromeShellTab extends Tab {
     }
 
     @Override
-    protected AutoLoginProcessor createAutoLoginProcessor() {
-        return new AutoLoginProcessor() {
-            @Override
-            public void processAutoLoginResult(String accountName,
-                    String authToken, boolean success, String result) {
-                getInfoBarContainer().processAutoLogin(accountName, authToken,
-                        success, result);
-            }
-        };
-    }
-
-    @Override
     protected ContextMenuPopulator createContextMenuPopulator() {
         return new ChromeContextMenuPopulator(new TabChromeContextMenuItemDelegate() {
-            @Override
-            public void onOpenImageUrl(String url, Referrer referrer) {
-                loadUrlWithSanitization(url);
-            }
-
             @Override
             public void onOpenInNewTab(String url, Referrer referrer) {
                 mTabManager.createTab(url, TabLaunchType.FROM_LINK);
@@ -129,23 +112,46 @@ public class ChromeShellTab extends Tab {
             extends TabChromeWebContentsDelegateAndroid {
         @Override
         public void onLoadStarted() {
+            mTabManager.hideTabSwitcher();
             mIsLoading = true;
+            super.onLoadStarted();
         }
 
         @Override
         public void onLoadStopped() {
             mIsLoading = false;
+            super.onLoadStopped();
         }
 
         @Override
         public void toggleFullscreenModeForTab(boolean enterFullscreen) {
             mIsFullscreen = enterFullscreen;
             super.toggleFullscreenModeForTab(enterFullscreen);
+
+            if (!mIsFullscreen) {
+                ContentVideoView videoView = ContentVideoView.getContentVideoView();
+                if (videoView != null) videoView.exitFullscreen(false);
+            }
+
         }
 
         @Override
         public boolean isFullscreenForTabOrPending() {
             return mIsFullscreen;
         }
+
+        @Override
+        public void webContentsCreated(long sourceWebContents, long openerRenderFrameId,
+                String frameName, String targetUrl, long newWebContents) {
+            mTabManager.createTab(targetUrl, TabLaunchType.FROM_LINK);
+            super.webContentsCreated(
+                    sourceWebContents, openerRenderFrameId, frameName, targetUrl, newWebContents);
+        }
+    }
+
+    @Override
+    protected void openNewTab(
+            LoadUrlParams params, TabLaunchType launchType, Tab parentTab, boolean incognito) {
+        mTabManager.openNewTab(params, launchType, parentTab, incognito);
     }
 }

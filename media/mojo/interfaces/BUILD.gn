@@ -4,15 +4,16 @@
 
 import("//mojo/public/tools/bindings/mojom.gni")
 
-# GYP version: media/media.gyp:mojo_media_bindings
 mojom("interfaces") {
   sources = [
-    "media_types.mojom",
-    "media_renderer.mojom",
+    "content_decryption_module.mojom",
+    "decryptor.mojom",
     "demuxer_stream.mojom",
+    "media_renderer.mojom",
+    "media_types.mojom",
   ]
 
   deps = [
-    "//mojo/services/public/interfaces/geometry",
+    "//mojo/services/geometry/public/interfaces",
   ]
 }

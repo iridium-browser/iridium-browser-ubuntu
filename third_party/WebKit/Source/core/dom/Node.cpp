@@ -30,8 +30,8 @@
 #include "bindings/core/v8/V8DOMWrapper.h"
 #include "core/HTMLNames.h"
 #include "core/XMLNames.h"
-#include "core/accessibility/AXObjectCache.h"
 #include "core/css/resolver/StyleResolver.h"
+#include "core/dom/AXObjectCache.h"
 #include "core/dom/Attr.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/ChildListMutationScope.h"
@@ -75,6 +75,7 @@
 #include "core/events/UIEvent.h"
 #include "core/events/WheelEvent.h"
 #include "core/frame/EventHandlerRegistry.h"
+#include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLAnchorElement.h"
@@ -84,7 +85,6 @@
 #include "core/page/ContextMenuController.h"
 #include "core/page/EventHandler.h"
 #include "core/page/Page.h"
-#include "core/rendering/FlowThreadController.h"
 #include "core/rendering/RenderBox.h"
 #include "core/svg/graphics/SVGImage.h"
 #include "platform/EventDispatchForbiddenScope.h"
@@ -107,7 +107,7 @@ struct SameSizeAsNode : NODE_BASE_CLASSES {
     void* m_pointer[5];
 };
 
-COMPILE_ASSERT(sizeof(Node) <= sizeof(SameSizeAsNode), Node_should_stay_small);
+static_assert(sizeof(Node) <= sizeof(SameSizeAsNode), "Node should stay small");
 
 #if !ENABLE(OILPAN)
 void* Node::operator new(size_t size)
@@ -756,7 +756,7 @@ bool Node::shouldHaveFocusAppearance() const
 bool Node::isInert() const
 {
     const HTMLDialogElement* dialog = document().activeModalDialog();
-    if (dialog && this != document() && !NodeRenderingTraversal::contains(dialog, this))
+    if (dialog && this != document() && !NodeRenderingTraversal::contains(*dialog, *this))
         return true;
     return document().ownerElement() && document().ownerElement()->isInert();
 }
@@ -953,17 +953,11 @@ void Node::detach(const AttachContext& context)
 #endif
 }
 
-void Node::reattachWhitespaceSiblings(Text* start)
+void Node::reattachWhitespaceSiblingsIfNeeded(Text* start)
 {
     for (Node* sibling = start; sibling; sibling = sibling->nextSibling()) {
         if (sibling->isTextNode() && toText(sibling)->containsOnlyWhitespace()) {
-            bool hadRenderer = !!sibling->renderer();
-            sibling->reattach();
-            // If the reattach didn't toggle the visibility of the whitespace we don't
-            // need to continue reattaching siblings since they won't toggle visibility
-            // either.
-            if (hadRenderer == !!sibling->renderer())
-                return;
+            toText(sibling)->reattachIfNeeded();
         } else if (sibling->renderer()) {
             return;
         }
@@ -1049,6 +1043,11 @@ bool Node::canStartSelection() const
             return false;
     }
     return parentOrShadowHostNode() ? parentOrShadowHostNode()->canStartSelection() : true;
+}
+
+bool Node::canParticipateInComposedTree() const
+{
+    return !isShadowRoot() && !isActiveInsertionPoint(*this);
 }
 
 Element* Node::shadowHost() const
@@ -1401,11 +1400,14 @@ void Node::setTextContent(const String& text)
                 return;
 
             ChildListMutationScope mutation(*this);
-            container->removeChildren();
             // Note: This API will not insert empty text nodes:
             // http://dom.spec.whatwg.org/#dom-node-textcontent
-            if (!text.isEmpty())
+            if (text.isEmpty()) {
+                container->removeChildren(DispatchSubtreeModifiedEvent);
+            } else {
+                container->removeChildren(OmitSubtreeModifiedEvent);
                 container->appendChild(document().createTextNode(text), ASSERT_NO_EXCEPTION);
+            }
             return;
         }
         case DOCUMENT_NODE:
@@ -1418,7 +1420,7 @@ void Node::setTextContent(const String& text)
 
 bool Node::offsetInCharacters() const
 {
-    return false;
+    return isCharacterDataNode();
 }
 
 unsigned short Node::compareDocumentPosition(const Node* otherNode, ShadowTreesTreatment treatment) const
@@ -1683,6 +1685,8 @@ static void traverseTreeAndMark(const String& baseIndent, const Node* rootNode, 
                 traverseTreeAndMark(indent.toString(), pseudo, markedNode1, markedLabel1, markedNode2, markedLabel2);
             if (Element* pseudo = element.pseudoElement(AFTER))
                 traverseTreeAndMark(indent.toString(), pseudo, markedNode1, markedLabel1, markedNode2, markedLabel2);
+            if (Element* pseudo = element.pseudoElement(FIRST_LETTER))
+                traverseTreeAndMark(indent.toString(), pseudo, markedNode1, markedLabel1, markedNode2, markedLabel2);
             if (Element* pseudo = element.pseudoElement(BACKDROP))
                 traverseTreeAndMark(indent.toString(), pseudo, markedNode1, markedLabel1, markedNode2, markedLabel2);
         }
@@ -1762,7 +1766,7 @@ void Node::showTreeForThisAcrossFrame() const
 
 Element* Node::enclosingLinkEventParentOrSelf()
 {
-    for (Node* node = this; node; node = NodeRenderingTraversal::parent(node)) {
+    for (Node* node = this; node; node = NodeRenderingTraversal::parent(*node)) {
         // For imagemaps, the enclosing link node is the associated area element not the image itself.
         // So we don't let images be the enclosingLinkNode, even though isLink sometimes returns true
         // for them.
@@ -2033,15 +2037,15 @@ void Node::notifyMutationObserversNodeWillDetach()
     }
 }
 
-void Node::handleLocalEvents(Event* event)
+void Node::handleLocalEvents(Event& event)
 {
     if (!hasEventTargetData())
         return;
 
-    if (isDisabledFormControl(this) && event->isMouseEvent())
+    if (isDisabledFormControl(this) && event.isMouseEvent())
         return;
 
-    fireEventListeners(event);
+    fireEventListeners(&event);
 }
 
 void Node::dispatchScopedEvent(PassRefPtrWillBeRawPtr<Event> event)
@@ -2051,16 +2055,16 @@ void Node::dispatchScopedEvent(PassRefPtrWillBeRawPtr<Event> event)
 
 void Node::dispatchScopedEventDispatchMediator(PassRefPtrWillBeRawPtr<EventDispatchMediator> eventDispatchMediator)
 {
-    EventDispatcher::dispatchScopedEvent(this, eventDispatchMediator);
+    EventDispatcher::dispatchScopedEvent(*this, eventDispatchMediator);
 }
 
 bool Node::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
 {
     if (event->isMouseEvent())
-        return EventDispatcher::dispatchEvent(this, MouseEventDispatchMediator::create(static_pointer_cast<MouseEvent>(event), MouseEventDispatchMediator::SyntheticMouseEvent));
+        return EventDispatcher::dispatchEvent(*this, MouseEventDispatchMediator::create(static_pointer_cast<MouseEvent>(event), MouseEventDispatchMediator::SyntheticMouseEvent));
     if (event->isTouchEvent())
         return dispatchTouchEvent(static_pointer_cast<TouchEvent>(event));
-    return EventDispatcher::dispatchEvent(this, EventDispatchMediator::create(event));
+    return EventDispatcher::dispatchEvent(*this, EventDispatchMediator::create(event));
 }
 
 void Node::dispatchSubtreeModifiedEvent()
@@ -2087,13 +2091,13 @@ bool Node::dispatchDOMActivateEvent(int detail, PassRefPtrWillBeRawPtr<Event> un
 
 bool Node::dispatchKeyEvent(const PlatformKeyboardEvent& event)
 {
-    return EventDispatcher::dispatchEvent(this, KeyboardEventDispatchMediator::create(KeyboardEvent::create(event, document().domWindow())));
+    return EventDispatcher::dispatchEvent(*this, KeyboardEventDispatchMediator::create(KeyboardEvent::create(event, document().domWindow())));
 }
 
 bool Node::dispatchMouseEvent(const PlatformMouseEvent& event, const AtomicString& eventType,
     int detail, Node* relatedTarget)
 {
-    return EventDispatcher::dispatchEvent(this, MouseEventDispatchMediator::create(MouseEvent::create(eventType, document().domWindow(), event, detail, relatedTarget)));
+    return EventDispatcher::dispatchEvent(*this, MouseEventDispatchMediator::create(MouseEvent::create(eventType, document().domWindow(), event, detail, relatedTarget)));
 }
 
 bool Node::dispatchGestureEvent(const PlatformGestureEvent& event)
@@ -2101,22 +2105,22 @@ bool Node::dispatchGestureEvent(const PlatformGestureEvent& event)
     RefPtrWillBeRawPtr<GestureEvent> gestureEvent = GestureEvent::create(document().domWindow(), event);
     if (!gestureEvent.get())
         return false;
-    return EventDispatcher::dispatchEvent(this, GestureEventDispatchMediator::create(gestureEvent));
+    return EventDispatcher::dispatchEvent(*this, GestureEventDispatchMediator::create(gestureEvent));
 }
 
 bool Node::dispatchTouchEvent(PassRefPtrWillBeRawPtr<TouchEvent> event)
 {
-    return EventDispatcher::dispatchEvent(this, TouchEventDispatchMediator::create(event));
+    return EventDispatcher::dispatchEvent(*this, TouchEventDispatchMediator::create(event));
 }
 
 void Node::dispatchSimulatedClick(Event* underlyingEvent, SimulatedClickMouseEventOptions eventOptions)
 {
-    EventDispatcher::dispatchSimulatedClick(this, underlyingEvent, eventOptions);
+    EventDispatcher::dispatchSimulatedClick(*this, underlyingEvent, eventOptions);
 }
 
 bool Node::dispatchWheelEvent(const PlatformWheelEvent& event)
 {
-    return EventDispatcher::dispatchEvent(this, WheelEventDispatchMediator::create(event, document().domWindow()));
+    return EventDispatcher::dispatchEvent(*this, WheelEventDispatchMediator::create(event, document().domWindow()));
 }
 
 void Node::dispatchInputEvent()
@@ -2427,15 +2431,15 @@ v8::Handle<v8::Object> Node::wrap(v8::Handle<v8::Object> creationContext, v8::Is
 
     const WrapperTypeInfo* wrapperType = wrapperTypeInfo();
 
-    v8::Handle<v8::Object> wrapper = V8DOMWrapper::createWrapper(creationContext, wrapperType, toScriptWrappableBase(), isolate);
+    v8::Handle<v8::Object> wrapper = V8DOMWrapper::createWrapper(isolate, creationContext, wrapperType, this);
     if (UNLIKELY(wrapper.IsEmpty()))
         return wrapper;
 
     wrapperType->installConditionallyEnabledProperties(wrapper, isolate);
-    return associateWithWrapper(wrapperType, wrapper, isolate);
+    return associateWithWrapper(isolate, wrapperType, wrapper);
 }
 
-v8::Handle<v8::Object> Node::associateWithWrapper(const WrapperTypeInfo* wrapperType, v8::Handle<v8::Object> wrapper, v8::Isolate* isolate)
+v8::Handle<v8::Object> Node::associateWithWrapper(v8::Isolate* isolate, const WrapperTypeInfo* wrapperType, v8::Handle<v8::Object> wrapper)
 {
     return V8DOMWrapper::associateObjectWithWrapper(isolate, this, wrapperType, wrapper);
 }

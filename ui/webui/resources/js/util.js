@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-<include src="assert.js">
+// <include src="assert.js">
 
 /**
  * Alias for document.getElementById.
@@ -383,7 +383,7 @@ function ensureTransitionEndEvent(el, timeOut) {
   });
   window.setTimeout(function() {
     if (!fired)
-      cr.dispatchSimpleEvent(el, 'webkitTransitionEnd');
+      cr.dispatchSimpleEvent(el, 'webkitTransitionEnd', true);
   }, timeOut);
 }
 

@@ -34,7 +34,6 @@
 #include "core/dom/ContainerNode.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
-#include "core/dom/NodeRenderStyle.h"
 #include "core/html/HTMLIFrameElement.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLPlugInElement.h"
@@ -157,8 +156,8 @@ void StyleAdjuster::adjustRenderStyle(RenderStyle* style, RenderStyle* parentSty
     ASSERT(parentStyle);
 
     if (style->display() != NONE) {
-        if (e)
-            adjustStyleForTagName(style, parentStyle, *e);
+        if (e && e->isHTMLElement())
+            adjustStyleForHTMLElement(style, parentStyle, toHTMLElement(*e));
 
         // Per the spec, position 'static' and 'relative' in the top layer compute to 'absolute'.
         if (isInTopLayer(e, style) && (style->position() == StaticPosition || style->position() == RelativePosition))
@@ -168,7 +167,13 @@ void StyleAdjuster::adjustRenderStyle(RenderStyle* style, RenderStyle* parentSty
         if (style->hasOutOfFlowPosition() || style->isFloating() || (e && e->document().documentElement() == e))
             style->setDisplay(equivalentBlockDisplay(style->display(), style->isFloating(), !m_useQuirksModeStyles));
 
+        // We don't adjust the first letter style earlier because we may change the display setting in
+        // adjustStyeForTagName() above.
+        adjustStyleForFirstLetter(style);
+
         adjustStyleForDisplay(style, parentStyle);
+    } else {
+        adjustStyleForFirstLetter(style);
     }
 
     // Make sure our z-index value is only applied if the object is positioned.
@@ -233,16 +238,24 @@ void StyleAdjuster::adjustRenderStyle(RenderStyle* style, RenderStyle* parentSty
         // SVG text layout code expects us to be a block-level style element.
         if ((isSVGForeignObjectElement(*e) || isSVGTextElement(*e)) && style->isDisplayInlineType())
             style->setDisplay(BLOCK);
-    }
 
-    if (e && e->renderStyle() && e->renderStyle()->textAutosizingMultiplier() != 1) {
-        // Preserve the text autosizing multiplier on style recalc.
-        // (The autosizer will update it during layout if it needs to be changed.)
-        style->setTextAutosizingMultiplier(e->renderStyle()->textAutosizingMultiplier());
-        style->setUnique();
+        // Columns don't apply to svg text elements.
+        if (isSVGTextElement(*e))
+            style->clearMultiCol();
     }
-
     adjustStyleForAlignment(*style, *parentStyle);
+}
+
+void StyleAdjuster::adjustStyleForFirstLetter(RenderStyle* style)
+{
+    if (style->styleType() != FIRST_LETTER)
+        return;
+
+    // Force inline display (except for floating first-letters).
+    style->setDisplay(style->isFloating() ? BLOCK : INLINE);
+
+    // CSS2 says first-letter can't be positioned.
+    style->setPosition(StaticPosition);
 }
 
 void StyleAdjuster::adjustStyleForAlignment(RenderStyle& style, const RenderStyle& parentStyle)
@@ -310,7 +323,7 @@ void StyleAdjuster::adjustStyleForAlignment(RenderStyle& style, const RenderStyl
     }
 }
 
-void StyleAdjuster::adjustStyleForTagName(RenderStyle* style, RenderStyle* parentStyle, Element& element)
+void StyleAdjuster::adjustStyleForHTMLElement(RenderStyle* style, RenderStyle* parentStyle, HTMLElement& element)
 {
     // <div> and <span> are the most common elements on the web, we skip all the work for them.
     if (isHTMLDivElement(element) || isHTMLSpanElement(element))

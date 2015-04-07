@@ -137,28 +137,28 @@ public:
 private:
     enum ForTextEmphasisOrNot { NotForTextEmphasis, ForTextEmphasis };
 
-    // Returns the initial in-stream advance.
+    // Returns the total advance.
     float buildGlyphBuffer(const TextRunPaintInfo&, GlyphBuffer&, ForTextEmphasisOrNot = NotForTextEmphasis) const;
-    PassTextBlobPtr buildTextBlob(const GlyphBuffer&, float initialAdvance, const FloatRect& bounds,
-        bool couldUseLCD) const;
-
+    PassTextBlobPtr buildTextBlob(const GlyphBuffer&, const FloatRect& bounds) const;
     SkPaint textFillPaint(GraphicsContext*, const SimpleFontData*) const;
     SkPaint textStrokePaint(GraphicsContext*, const SimpleFontData*, bool isFilling) const;
     void paintGlyphs(GraphicsContext*, const SimpleFontData*, const Glyph glyphs[], unsigned numGlyphs,
         const SkPoint pos[], const FloatRect& textRect) const;
     void paintGlyphsHorizontal(GraphicsContext*, const SimpleFontData*, const Glyph glyphs[], unsigned numGlyphs,
         const SkScalar xpos[], SkScalar constY, const FloatRect& textRect) const;
+    void paintGlyphsVertical(GraphicsContext*, const SimpleFontData*, const GlyphBuffer&,
+        unsigned from, unsigned numGlyphs, const FloatPoint&, const FloatRect&) const;
     void drawGlyphs(GraphicsContext*, const SimpleFontData*, const GlyphBuffer&, unsigned from, unsigned numGlyphs, const FloatPoint&, const FloatRect& textRect) const;
     void drawTextBlob(GraphicsContext*, const SkTextBlob*, const SkPoint& origin) const;
-    float drawGlyphBuffer(GraphicsContext*, const TextRunPaintInfo&, const GlyphBuffer&, const FloatPoint&) const;
+    void drawGlyphBuffer(GraphicsContext*, const TextRunPaintInfo&, const GlyphBuffer&, const FloatPoint&) const;
     void drawEmphasisMarks(GraphicsContext*, const TextRunPaintInfo&, const GlyphBuffer&, const AtomicString&, const FloatPoint&) const;
-    float floatWidthForSimpleText(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts = 0, IntRectExtent* glyphBounds = 0) const;
+    float floatWidthForSimpleText(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts = 0, IntRectOutsets* glyphBounds = 0) const;
     int offsetForPositionForSimpleText(const TextRun&, float position, bool includePartialGlyphs) const;
     FloatRect selectionRectForSimpleText(const TextRun&, const FloatPoint&, int h, int from, int to, bool accountForGlyphBounds) const;
 
     bool getEmphasisMarkGlyphData(const AtomicString&, GlyphData&) const;
 
-    float floatWidthForComplexText(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts, IntRectExtent* glyphBounds) const;
+    float floatWidthForComplexText(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts, IntRectOutsets* glyphBounds) const;
     int offsetForPositionForComplexText(const TextRun&, float position, bool includePartialGlyphs) const;
     FloatRect selectionRectForComplexText(const TextRun&, const FloatPoint&, int h, int from, int to) const;
 
@@ -171,12 +171,12 @@ public:
 
     void willUseFontData(UChar32) const;
 
-private:
     bool loadingCustomFonts() const
     {
         return m_fontFallbackList && m_fontFallbackList->loadingCustomFonts();
     }
 
+private:
     bool shouldSkipDrawing() const
     {
         return m_fontFallbackList && m_fontFallbackList->shouldSkipDrawing();

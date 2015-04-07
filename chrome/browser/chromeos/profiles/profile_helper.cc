@@ -176,7 +176,7 @@ void ProfileHelper::ProfileStartup(Profile* profile, bool process_startup) {
   // Add observer so we can see when the first profile's session restore is
   // completed. After that, we won't need the default profile anymore.
   if (!IsSigninProfile(profile) &&
-      user_manager::UserManager::Get()->IsLoggedInAsRegularUser() &&
+      user_manager::UserManager::Get()->IsLoggedInAsUserWithGaiaAccount() &&
       !user_manager::UserManager::Get()->IsLoggedInAsStub()) {
     chromeos::OAuth2LoginManager* login_manager =
         chromeos::OAuth2LoginManagerFactory::GetInstance()->GetForProfile(
@@ -295,7 +295,7 @@ user_manager::User* ProfileHelper::GetUserByProfile(Profile* profile) {
   // Now these tests will specify special flag to continue working.
   // In future those tests can get a proper CrOS configuration i.e. register
   // and login several users if they want to work with an additional profile.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kIgnoreUserProfileMappingForTests)) {
     return user_manager->GetActiveUser();
   }

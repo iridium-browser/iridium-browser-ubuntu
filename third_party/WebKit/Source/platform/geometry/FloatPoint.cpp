@@ -52,6 +52,11 @@ FloatPoint::FloatPoint(const LayoutPoint& p)
 {
 }
 
+FloatPoint::FloatPoint(const LayoutSize& size)
+    : m_x(size.width().toFloat()), m_y(size.height().toFloat())
+{
+}
+
 void FloatPoint::normalize()
 {
     float tempLength = length();
@@ -93,17 +98,6 @@ SkPoint FloatPoint::data() const
 FloatPoint FloatPoint::narrowPrecision(double x, double y)
 {
     return FloatPoint(narrowPrecisionToFloat(x), narrowPrecisionToFloat(y));
-}
-
-float findSlope(const FloatPoint& p1, const FloatPoint& p2, float& c)
-{
-    if (p2.x() == p1.x())
-        return std::numeric_limits<float>::infinity();
-
-    // y = mx + c
-    float slope = (p2.y() - p1.y()) / (p2.x() - p1.x());
-    c = p1.y() - slope * p1.x();
-    return slope;
 }
 
 bool findIntersection(const FloatPoint& p1, const FloatPoint& p2, const FloatPoint& d1, const FloatPoint& d2, FloatPoint& intersection)

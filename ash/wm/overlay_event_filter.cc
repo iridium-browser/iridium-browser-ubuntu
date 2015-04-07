@@ -4,7 +4,6 @@
 
 #include "ash/wm/overlay_event_filter.h"
 
-#include "ash/wm/partial_screenshot_view.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/events/event.h"
@@ -63,16 +62,18 @@ void OverlayEventFilter::Activate(Delegate* delegate) {
 
 void OverlayEventFilter::Deactivate(Delegate* delegate) {
   if (delegate_ == delegate)
-    delegate_ = NULL;
+    delegate_ = nullptr;
 }
 
 void OverlayEventFilter::Cancel() {
-  if (delegate_)
+  if (delegate_) {
     delegate_->Cancel();
+    delegate_ = nullptr;
+  }
 }
 
 bool OverlayEventFilter::IsActive() {
-  return delegate_ != NULL;
+  return delegate_ != nullptr;
 }
 
 }  // namespace ash

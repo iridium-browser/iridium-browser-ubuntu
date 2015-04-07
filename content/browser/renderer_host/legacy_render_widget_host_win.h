@@ -13,7 +13,7 @@
 #include "base/basictypes.h"
 #include "base/win/scoped_comptr.h"
 #include "content/common/content_export.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace ui {
 class WindowEventTarget;
@@ -91,7 +91,7 @@ class CONTENT_EXPORT LegacyRenderWidgetHostHWND
   void UpdateParent(HWND parent);
   HWND GetParent();
 
-  IAccessible* window_accessible() { return window_accessible_; }
+  IAccessible* window_accessible() { return window_accessible_.get(); }
 
   // Functions to show and hide the window.
   void Show();

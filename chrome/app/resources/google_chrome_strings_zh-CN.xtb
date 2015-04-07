@@ -45,6 +45,7 @@
 <translation id="568643307450491754">在 Chrome 菜单或书签栏中查找您的书签。</translation>
 <translation id="8556340503434111824">Google Chrome 浏览器现已推出速度更快的新版本。</translation>
 <translation id="8987477933582888019">网络浏览器</translation>
+<translation id="3749644715096758981">Chrome 无法更新到最新版本，因此其中缺少一些新功能并且未更正某些安全性问题。您需要更新 Chrome。</translation>
 <translation id="4728575227883772061">未知错误导致安装失败。如果 Google Chrome 浏览器正在运行，请将其关闭，然后重试。</translation>
 <translation id="3080151273017101988">关闭 Google Chrome 后继续运行后台应用</translation>
 <translation id="4149882025268051530">安装程序无法解压缩存档文件。请重新下载 Google Chrome。</translation>
@@ -83,6 +84,7 @@
 <translation id="225614027745146050">欢迎</translation>
 <translation id="7473891865547856676">不，谢谢</translation>
 <translation id="3149510190863420837">Chrome 应用</translation>
+<translation id="8851136666856101339">主体内容</translation>
 <translation id="7473136999113284234">Chrome会自动更新，因此您使用的始终都是最新版本。</translation>
 <translation id="7084448929020576097"><ph name="FILE_NAME"/> 是恶意文件，Chrome 已将其拦截。</translation>
 <translation id="6368958679917195344">Chrome 操作系统的问世还有其他<ph name="BEGIN_LINK_CROS_OSS"/>开放源代码软件<ph name="END_LINK_CROS_OSS"/>的一份功劳。</translation>
@@ -129,7 +131,6 @@
 <translation id="5855036575689098185">您计算机上运行的软件与 Google Chrome 不兼容。</translation>
 <translation id="7164397146364144019">您可以选择自动向Google报告可能出现的安全事件详情，以帮助我们提高Chrome的安全性和易用性。</translation>
 <translation id="8008534537613507642">重新安装Chrome</translation>
-<translation id="2044287590254833138">Google Chrome 浏览器工具栏</translation>
 <translation id="8862326446509486874">您的权限不足，无法进行系统级安装。请尝试以管理员身份再次运行安装程序。</translation>
 <translation id="2874156562296220396">Google Chrome 的诞生离不开 <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> 开源项目以及其他<ph name="BEGIN_LINK_OSS"/>开源软件<ph name="END_LINK_OSS"/>。</translation>
 <translation id="7191567847629796517">Google Chrome操作系统不支持启动外部应用来处理<ph name="SCHEME"/>链接。请求的链接是<ph name="PROTOLINK"/>。</translation>
@@ -141,6 +142,7 @@
 <translation id="2290095356545025170">确定要卸载 Google Chrome 浏览器吗？</translation>
 <translation id="7062966102157262887">正在进行一项下载。您希望退出 Google Chrome 浏览器并取消该下载吗？</translation>
 <translation id="4273752058983339720">Google Chrome 浏览器已配置为在计算机启动时自动启动。</translation>
+<translation id="2316129865977710310">不用了，谢谢</translation>
 <translation id="415994390253732730">Chrome 存在异常？</translation>
 <translation id="1104959162601287462">关于 Chrome 操作系统(&amp;C)</translation>
 <translation id="5328989068199000832">Google Chrome 二进制文件</translation>
@@ -219,7 +221,7 @@
 <translation id="3360895254066713204">Chrome 浏览器帮助应用</translation>
 <translation id="1877026089748256423">Chrome版本太旧</translation>
 <translation id="7592736734348559088">由于您的帐户登录详细信息已过期，Google Chrome无法同步您的数据。</translation>
-<translation id="7810280330588098283">Chrome 会将此密码存储在 |Google 保存的密码| 中，并会在您下次需要时自动填充此密码。</translation>
+<translation id="7810280330588098283">Chrome 会将此密码存储在 |Google 保存的密码|中，并会在您下次需要时自动填充此密码。</translation>
 <translation id="6991142834212251086">将我的 Chrome 数据与此帐户关联</translation>
 <translation id="3451115285585441894">正在添加到 Chrome 浏览器...</translation>
 <translation id="3047079729301751317">取消与<ph name="USERNAME"/>的关联将会清除您的历史记录、书签、设置以及存储在此设备上的其他Chrome数据。您的Google帐户中存储的数据将不会被清除，并且您可以通过<ph name="GOOGLE_DASHBOARD_LINK"/>Google信息中心<ph name="END_GOOGLE_DASHBOARD_LINK"/>管理这些数据。</translation>
@@ -228,6 +230,7 @@
 <translation id="6626317981028933585">抱歉，无法在 Mozilla Firefox 浏览器运行时获取其设置。要将其设置导入 Google Chrome 浏览器，请保存您手头的工作并关闭所有 Firefox 窗口，然后点击“继续”。</translation>
 <translation id="7242029209006116544">您目前登录的帐户是一个托管帐户，该帐户的管理员将能够控制您的 Google Chrome 个人资料。您的 Chrome 数据（例如您的应用、书签、历史记录、密码和其他设置）将永远与 <ph name="USER_NAME"/> 相关联。您可以通过 Google 帐户信息中心删除这些数据，但无法将这些数据与其他帐户相关联。您可以选择创建新的个人资料来单独存储现有的 Chrome 数据。<ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">它还能够控制您启动Chrome后或通过多功能框进行搜索时系统显示的页面。</translation>
+<translation id="1553358976309200471">更新 Chrome</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">版权所有<ph name="YEAR"/> Google Inc. 保留所有权利。</translation>
 <translation id="1698376642261615901">Google Chrome 浏览器是一款可高速运行网页和应用的网络浏览器。它快捷、稳定且易于使用。Google Chrome 浏览器内置的恶意软件和网上诱骗防护功能可让您更安全地浏览网页。</translation>

@@ -14,6 +14,7 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/session_storage_namespace.h"
+#include "content/public/browser/site_instance.h"
 #include "content/public/common/referrer.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
@@ -104,6 +105,10 @@ class NavigationController {
     // The url to load. This field is required.
     GURL url;
 
+    // SiteInstance of the frame that initiated the navigation or null if we
+    // don't know it.
+    scoped_refptr<SiteInstance> source_site_instance;
+
     // See LoadURLType comments above.
     LoadURLType load_type;
 
@@ -168,6 +173,13 @@ class NavigationController {
     // The clearing is done asynchronously, and completes when this navigation
     // commits.
     bool should_clear_history_list;
+
+#if defined(OS_ANDROID)
+    // On Android, for a load triggered by an intent, the time Chrome received
+    // the original intent that prompted the load (in milliseconds active time
+    // since boot).
+    int64 intent_received_timestamp;
+#endif
 
     explicit LoadURLParams(const GURL& url);
     ~LoadURLParams();

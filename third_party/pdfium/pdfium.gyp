@@ -4,11 +4,13 @@
   },
   'target_defaults': {
     'defines' : [
-      'FOXIT_CHROME_BUILD',
-      '_FXFT_VERSION_=2501',
+      'FT2_BUILD_LIBRARY',
       '_FPDFSDK_LIB',
       '_NO_GDIPLUS_',  # workaround text rendering issues on Windows
       'OPJ_STATIC',
+    ],
+    'include_dirs': [
+      'third_party/freetype/include',
     ],
     'conditions': [
       ['pdf_use_skia==1', {
@@ -35,7 +37,9 @@
       'target_name': 'pdfium',
       'type': 'static_library',
       'dependencies': [
-        'safemath',
+        'third_party/third_party.gyp:bigint',
+        'third_party/third_party.gyp:freetype',
+        'third_party/third_party.gyp:safemath',
         'fdrm',
         'fpdfdoc',
         'fpdfapi',
@@ -54,7 +58,6 @@
         'fpdfsdk/include/fpdfdoc.h',
         'fpdfsdk/include/fpdfedit.h',
         'fpdfsdk/include/fpdfformfill.h',
-        'fpdfsdk/include/fpdfoom.h',
         'fpdfsdk/include/fpdftext.h',
         'fpdfsdk/include/fpdfview.h',
         'fpdfsdk/include/fpdf_dataavail.h',
@@ -72,7 +75,6 @@
         'fpdfsdk/src/fpdfeditimg.cpp',
         'fpdfsdk/src/fpdfeditpage.cpp',
         'fpdfsdk/src/fpdfformfill.cpp',
-        'fpdfsdk/src/fpdfoom.cpp',
         'fpdfsdk/src/fpdfppo.cpp',
         'fpdfsdk/src/fpdfsave.cpp',
         'fpdfsdk/src/fpdftext.cpp',
@@ -122,19 +124,6 @@
           }],
         ],
       },
-    },
-    {
-      'target_name': 'safemath',
-      'type': 'none',
-      'sources': [
-        'third_party/logging.h',
-        'third_party/macros.h',
-        'third_party/template_util.h',
-        'third_party/numerics/safe_conversions.h',
-        'third_party/numerics/safe_conversions_impl.h',
-        'third_party/numerics/safe_math.h',
-        'third_party/numerics/safe_math_impl.h',
-      ],
     },
     {
       'target_name': 'fdrm',
@@ -276,7 +265,6 @@
         'core/src/fpdfapi/fpdf_page/fpdf_page_graph_state.cpp',
         'core/src/fpdfapi/fpdf_page/fpdf_page_image.cpp',
         'core/src/fpdfapi/fpdf_page/fpdf_page_parser.cpp',
-        'core/src/fpdfapi/fpdf_page/fpdf_page_parser_new.cpp',
         'core/src/fpdfapi/fpdf_page/fpdf_page_parser_old.cpp',
         'core/src/fpdfapi/fpdf_page/fpdf_page_path.cpp',
         'core/src/fpdfapi/fpdf_page/fpdf_page_pattern.cpp',
@@ -320,6 +308,13 @@
       'include_dirs': [
       ],
       'ldflags': [ '-L<(PRODUCT_DIR)',],
+      'msvs_settings': {
+        'VCCLCompilerTool': {
+          # Unresolved warnings in fx_codec_jpx_opj.cpp
+          # https://code.google.com/p/pdfium/issues/detail?id=100
+          'WarnAsError': 'false',
+        },
+      },
       'sources': [
         'core/include/fxcodec/fx_codec.h',
         'core/include/fxcodec/fx_codec_def.h',
@@ -599,34 +594,7 @@
         'core/src/fxge/fontdata/chromefontdata/FoxitSerifItalic.c',
         'core/src/fxge/fontdata/chromefontdata/FoxitSerifMM.c',
         'core/src/fxge/fontdata/chromefontdata/FoxitSymbol.c',
-        'core/src/fxge/fx_freetype/include/fxft_cffobjs.h',
-        'core/src/fxge/fx_freetype/include/fxft_cfftypes.h',
-        'core/src/fxge/fx_freetype/include/fxft_freetype.h',
-        'core/src/fxge/fx_freetype/include/fxft_ft2build.h',
-        'core/src/fxge/fx_freetype/include/fxft_ftmm.h',
-        'core/src/fxge/fx_freetype/include/fxft_ftobjs.h',
-        'core/src/fxge/fx_freetype/include/fxft_ftotval.h',
-        'core/src/fxge/fx_freetype/include/fxft_ftoutln.h',
-        'core/src/fxge/fx_freetype/include/fxft_ftstream.h',
-        'core/src/fxge/fx_freetype/include/fxft_tttables.h',
-        'core/src/fxge/fx_freetype/include/fxft_tttypes.h',
-        'core/src/fxge/fx_freetype/src/fxft_cff.c',
-        'core/src/fxge/fx_freetype/src/fxft_ftbase.c',
-        'core/src/fxge/fx_freetype/src/fxft_ftbitmap.c',
-        'core/src/fxge/fx_freetype/src/fxft_ftglyph.c',
-        'core/src/fxge/fx_freetype/src/fxft_ftinit.c',
-        'core/src/fxge/fx_freetype/src/fxft_ftlcdfil.c',
-        'core/src/fxge/fx_freetype/src/fxft_ftmm.c',
-        'core/src/fxge/fx_freetype/src/fxft_ftsystem.c',
-        'core/src/fxge/fx_freetype/src/fxft_psaux.c',
-        'core/src/fxge/fx_freetype/src/fxft_pshinter.c',
-        'core/src/fxge/fx_freetype/src/fxft_psmodule.c',
-        'core/src/fxge/fx_freetype/src/fxft_raster.c',
-        'core/src/fxge/fx_freetype/src/fxft_sfnt.c',
-        'core/src/fxge/fx_freetype/src/fxft_smooth.c',
-        'core/src/fxge/fx_freetype/src/fxft_truetype.c',
-        'core/src/fxge/fx_freetype/src/fxft_type1.c',
-        'core/src/fxge/fx_freetype/src/fxft_type1cid.c',
+        'core/src/fxge/freetype/fx_freetype.c',
         'core/src/fxge/ge/fx_ge.cpp',
         'core/src/fxge/ge/fx_ge_device.cpp',
         'core/src/fxge/ge/fx_ge_font.cpp',
@@ -839,6 +807,23 @@
         'fpdfsdk/src/formfiller/FFL_RadioButton.cpp',
         'fpdfsdk/src/formfiller/FFL_TextField.cpp',
         'fpdfsdk/src/formfiller/FFL_Utils.cpp',
+      ],
+    },
+    {
+      'target_name': 'pdfium_unittests',
+      'type': 'executable',
+      'dependencies': [
+        '<(DEPTH)/testing/gtest.gyp:gtest_main',
+        '<(DEPTH)/testing/gtest.gyp:gtest',
+        'pdfium',
+      ],
+      'include_dirs': [
+        '<(DEPTH)'
+      ],
+      'sources': [
+        'testing/fx_string_testhelpers.h',
+        'testing/fx_string_testhelpers.cpp',
+        'core/src/fxcrt/fx_basic_bstring_unittest.cpp',
       ],
     },
   ],

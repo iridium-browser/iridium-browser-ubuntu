@@ -11,13 +11,9 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Vibrator;
 import android.speech.tts.TextToSpeech;
-import android.util.Log;
 import android.view.View;
 import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
-
-import com.googlecode.eyesfree.braille.selfbraille.SelfBrailleClient;
-import com.googlecode.eyesfree.braille.selfbraille.WriteData;
 
 import org.apache.http.NameValuePair;
 import org.apache.http.client.utils.URLEncodedUtils;
@@ -39,8 +35,6 @@ import java.util.List;
  * Responsible for accessibility injection and management of a {@link ContentViewCore}.
  */
 public class AccessibilityInjector extends WebContentsObserver {
-    private static final String TAG = "AccessibilityInjector";
-
     // The ContentView this injector is responsible for managing.
     protected ContentViewCore mContentViewCore;
 
@@ -95,10 +89,12 @@ public class AccessibilityInjector extends WebContentsObserver {
      * @return An instance of a {@link AccessibilityInjector}.
      */
     public static AccessibilityInjector newInstance(ContentViewCore view) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
-            return new AccessibilityInjector(view);
-        } else {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            return new LollipopAccessibilityInjector(view);
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
             return new JellyBeanAccessibilityInjector(view);
+        } else {
+            return new AccessibilityInjector(view);
         }
     }
 
@@ -275,7 +271,7 @@ public class AccessibilityInjector extends WebContentsObserver {
         if (context != null) {
             // Enabled, we should try to add if we have to.
             if (mTextToSpeech == null) {
-                mTextToSpeech = new TextToSpeechWrapper(mContentViewCore.getContainerView(),
+                mTextToSpeech = createTextToSpeechWrapper(mContentViewCore.getContainerView(),
                         context);
                 mContentViewCore.addJavascriptInterface(mTextToSpeech,
                         ALIAS_ACCESSIBILITY_JS_INTERFACE);
@@ -390,19 +386,20 @@ public class AccessibilityInjector extends WebContentsObserver {
         }
     }
 
+    protected TextToSpeechWrapper createTextToSpeechWrapper(View view, Context context) {
+        return new TextToSpeechWrapper(view, context);
+    }
+
     /**
      * Used to protect the TextToSpeech class, only exposing the methods we want to expose.
      */
-    private static class TextToSpeechWrapper {
-        private final TextToSpeech mTextToSpeech;
-        private final SelfBrailleClient mSelfBrailleClient;
+    protected static class TextToSpeechWrapper {
+        protected final TextToSpeech mTextToSpeech;
         private final View mView;
 
-        public TextToSpeechWrapper(View view, Context context) {
+        protected TextToSpeechWrapper(View view, Context context) {
             mView = view;
             mTextToSpeech = new TextToSpeech(context, null, null);
-            mSelfBrailleClient = new SelfBrailleClient(context, CommandLine.getInstance().hasSwitch(
-                    ContentSwitches.ACCESSIBILITY_DEBUG_BRAILLE_SERVICE));
         }
 
         @JavascriptInterface
@@ -412,7 +409,7 @@ public class AccessibilityInjector extends WebContentsObserver {
         }
 
         @JavascriptInterface
-        @SuppressWarnings("unused")
+        @SuppressWarnings({"unused", "deprecation"})
         public int speak(String text, int queueMode, String jsonParams) {
             // Try to pull the params from the JSON string.
             HashMap<String, String> params = null;
@@ -449,23 +446,13 @@ public class AccessibilityInjector extends WebContentsObserver {
         @JavascriptInterface
         @SuppressWarnings("unused")
         public void braille(String jsonString) {
-            try {
-                JSONObject jsonObj = new JSONObject(jsonString);
-
-                WriteData data = WriteData.forView(mView);
-                data.setText(jsonObj.getString("text"));
-                data.setSelectionStart(jsonObj.getInt("startIndex"));
-                data.setSelectionEnd(jsonObj.getInt("endIndex"));
-                mSelfBrailleClient.write(data);
-            } catch (JSONException ex) {
-                Log.w(TAG, "Error parsing JS JSON object", ex);
-            }
+            // This is here because AndroidVox depends on the existence
+            // of this method.
         }
 
         @SuppressWarnings("unused")
         protected void shutdownInternal() {
             mTextToSpeech.shutdown();
-            mSelfBrailleClient.shutdown();
         }
     }
 }

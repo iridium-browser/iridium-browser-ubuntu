@@ -6,40 +6,32 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_power_manager_client.h"
-#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-using ::testing::_;
-using ::testing::SaveArg;
 
 namespace chromeos {
 
 class PowerPolicyControllerTest : public testing::Test {
  public:
-  PowerPolicyControllerTest() {}
+  PowerPolicyControllerTest()
+      : fake_power_client_(new FakePowerManagerClient) {}
+
   virtual ~PowerPolicyControllerTest() {}
 
   virtual void SetUp() override {
-    scoped_ptr<DBusThreadManagerSetter> dbus_setter =
-        chromeos::DBusThreadManager::GetSetterForTesting();
-    fake_power_client_ = new FakePowerManagerClient;
-    dbus_setter->SetPowerManagerClient(
-        scoped_ptr<PowerManagerClient>(fake_power_client_));
-
-    policy_controller_.reset(new PowerPolicyController);
-    policy_controller_->Init(DBusThreadManager::Get());
+    PowerPolicyController::Initialize(fake_power_client_.get());
+    ASSERT_TRUE(PowerPolicyController::IsInitialized());
+    policy_controller_ = PowerPolicyController::Get();
   }
 
   virtual void TearDown() override {
-    policy_controller_.reset();
-    DBusThreadManager::Shutdown();
+    if (PowerPolicyController::IsInitialized())
+      PowerPolicyController::Shutdown();
   }
 
  protected:
-  FakePowerManagerClient* fake_power_client_;
-  scoped_ptr<PowerPolicyController> policy_controller_;
+  scoped_ptr<FakePowerManagerClient> fake_power_client_;
+  PowerPolicyController* policy_controller_;
   base::MessageLoop message_loop_;
 };
 
@@ -62,6 +54,7 @@ TEST_F(PowerPolicyControllerTest, Prefs) {
   prefs.presentation_screen_dim_delay_factor = 3.0;
   prefs.user_activity_screen_dim_delay_factor = 2.0;
   prefs.wait_for_initial_user_activity = true;
+  prefs.force_nonzero_brightness_for_user_activity = false;
   policy_controller_->ApplyPrefs(prefs);
 
   power_manager::PowerManagementPolicy expected_policy;
@@ -88,6 +81,7 @@ TEST_F(PowerPolicyControllerTest, Prefs) {
   expected_policy.set_presentation_screen_dim_delay_factor(3.0);
   expected_policy.set_user_activity_screen_dim_delay_factor(2.0);
   expected_policy.set_wait_for_initial_user_activity(true);
+  expected_policy.set_force_nonzero_brightness_for_user_activity(false);
   expected_policy.set_reason("Prefs");
   EXPECT_EQ(PowerPolicyController::GetPolicyDebugString(expected_policy),
             PowerPolicyController::GetPolicyDebugString(
@@ -98,12 +92,14 @@ TEST_F(PowerPolicyControllerTest, Prefs) {
   prefs.battery_idle_warning_delay_ms = 400000;
   prefs.lid_closed_action = PowerPolicyController::ACTION_SUSPEND;
   prefs.ac_brightness_percent = -1.0;
+  prefs.force_nonzero_brightness_for_user_activity = true;
   policy_controller_->ApplyPrefs(prefs);
   expected_policy.mutable_ac_delays()->set_idle_warning_ms(700000);
   expected_policy.mutable_battery_delays()->set_idle_warning_ms(400000);
   expected_policy.set_lid_closed_action(
       power_manager::PowerManagementPolicy_Action_SUSPEND);
   expected_policy.clear_ac_brightness_percent();
+  expected_policy.set_force_nonzero_brightness_for_user_activity(true);
   EXPECT_EQ(PowerPolicyController::GetPolicyDebugString(expected_policy),
             PowerPolicyController::GetPolicyDebugString(
                 fake_power_client_->policy()));
@@ -210,7 +206,7 @@ TEST_F(PowerPolicyControllerTest, AvoidSendingEmptyPolicies) {
   // Check that empty policies aren't sent when PowerPolicyController is created
   // or destroyed.
   EXPECT_EQ(0, fake_power_client_->num_set_policy_calls());
-  policy_controller_.reset();
+  PowerPolicyController::Shutdown();
   EXPECT_EQ(0, fake_power_client_->num_set_policy_calls());
 }
 

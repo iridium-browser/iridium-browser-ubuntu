@@ -177,7 +177,7 @@ const OncFieldSignature ipconfig_fields[] = {
     { ::onc::ipconfig::kIPAddress, &kStringSignature},
     { ::onc::ipconfig::kNameServers, &kStringListSignature},
     { ::onc::ipconfig::kRoutingPrefix, &kIntegerSignature},
-    { ::onc::network_config::kSearchDomains, &kStringListSignature},
+    { ::onc::ipconfig::kSearchDomains, &kStringListSignature},
     { ::onc::ipconfig::kType, &kStringSignature},
     { ::onc::ipconfig::kWebProxyAutoDiscoveryUrl, &kStringSignature},
     {NULL}};
@@ -206,6 +206,7 @@ const OncFieldSignature wifi_fields[] = {
     { ::onc::wifi::kAllowGatewayARPPolling, &kBoolSignature},
     { ::onc::wifi::kAutoConnect, &kBoolSignature},
     { ::onc::wifi::kEAP, &kEAPSignature},
+    { ::onc::wifi::kHexSSID, &kStringSignature},
     { ::onc::wifi::kHiddenSSID, &kBoolSignature},
     { ::onc::wifi::kPassphrase, &kStringSignature},
     { ::onc::wifi::kSSID, &kStringSignature},
@@ -300,20 +301,13 @@ const OncFieldSignature network_configuration_fields[] = {
     { ::onc::network_config::kCellular, &kCellularSignature},
     { ::onc::network_config::kEthernet, &kEthernetSignature},
     { ::onc::network_config::kGUID, &kStringSignature},
-
+    { ::onc::network_config::kIPAddressConfigType, &kStringSignature},
     { ::onc::network_config::kName, &kStringSignature},
-
-    // Not supported, yet.
-    { ::onc::network_config::kNameServers, &kStringListSignature},
-
+    { ::onc::network_config::kNameServersConfigType, &kStringSignature},
     { ::onc::network_config::kPriority, &kIntegerSignature},
     { ::onc::network_config::kProxySettings, &kProxySettingsSignature},
     { ::onc::kRecommended, &kRecommendedSignature},
     { ::onc::kRemove, &kBoolSignature},
-
-    // Not supported, yet.
-    { ::onc::network_config::kSearchDomains, &kStringListSignature},
-
     { ::onc::network_config::kStaticIPConfig, &kStaticIPConfigSignature},
     { ::onc::network_config::kType, &kStringSignature},
     { ::onc::network_config::kVPN, &kVPNSignature},

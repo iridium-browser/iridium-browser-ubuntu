@@ -67,9 +67,9 @@ void WorkerObjectProxy::reportPendingActivity(bool hasPendingActivity)
     m_executionContext->postTask(createCrossThreadTask(&WorkerMessagingProxy::reportPendingActivity, m_messagingProxy, hasPendingActivity));
 }
 
-void WorkerObjectProxy::reportException(const String& errorMessage, int lineNumber, int columnNumber, const String& sourceURL)
+void WorkerObjectProxy::reportException(const String& errorMessage, int lineNumber, int columnNumber, const String& sourceURL, int exceptionId)
 {
-    m_executionContext->postTask(createCrossThreadTask(&WorkerMessagingProxy::reportException, m_messagingProxy, errorMessage, lineNumber, columnNumber, sourceURL));
+    m_executionContext->postTask(createCrossThreadTask(&WorkerMessagingProxy::reportException, m_messagingProxy, errorMessage, lineNumber, columnNumber, sourceURL, exceptionId));
 }
 
 void WorkerObjectProxy::reportConsoleMessage(PassRefPtrWillBeRawPtr<ConsoleMessage> consoleMessage)
@@ -81,6 +81,12 @@ void WorkerObjectProxy::postMessageToPageInspector(const String& message)
 {
     if (m_executionContext->isDocument())
         toDocument(m_executionContext)->postInspectorTask(createCrossThreadTask(&WorkerMessagingProxy::postMessageToPageInspector, m_messagingProxy, message));
+}
+
+void WorkerObjectProxy::postWorkerConsoleAgentEnabled()
+{
+    if (m_executionContext->isDocument())
+        toDocument(m_executionContext)->postInspectorTask(createCrossThreadTask(&WorkerMessagingProxy::postWorkerConsoleAgentEnabled, m_messagingProxy));
 }
 
 void WorkerObjectProxy::workerGlobalScopeClosed()

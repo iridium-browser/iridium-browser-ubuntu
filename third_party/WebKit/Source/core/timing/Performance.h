@@ -48,14 +48,12 @@ namespace blink {
 
 class Document;
 class ExceptionState;
-class ResourceRequest;
-class ResourceResponse;
 class ResourceTimingInfo;
 class UserTiming;
 
 using PerformanceEntryVector = WillBeHeapVector<RefPtrWillBeMember<PerformanceEntry>>;
 
-class Performance final : public RefCountedWillBeGarbageCollectedFinalized<Performance>, public DOMWindowProperty, public EventTargetWithInlineData {
+class Performance final : public EventTargetWithInlineData, public RefCountedWillBeNoBase<Performance>, public DOMWindowProperty {
     DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(Performance);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Performance);

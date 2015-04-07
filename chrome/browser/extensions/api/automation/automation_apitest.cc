@@ -156,6 +156,7 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopActions) {
       << message_;
 }
 
+// http://crbug.com/435449
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopLoadTabs) {
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/desktop", "load_tabs.html"))
       << message_;
@@ -179,6 +180,19 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, QuerySelector) {
       RunExtensionSubtest("automation/tests/tabs", "queryselector.html"))
       << message_;
 }
+
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, Find) {
+  StartEmbeddedTestServer();
+  ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "find.html"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, Mixins) {
+  StartEmbeddedTestServer();
+  ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "mixins.html"))
+      << message_;
+}
+
 
 static const int kPid = 1;
 static const int kTab0Rid = 1;

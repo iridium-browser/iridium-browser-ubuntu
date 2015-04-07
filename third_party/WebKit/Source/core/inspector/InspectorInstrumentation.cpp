@@ -118,9 +118,7 @@ void willDestroyResourceImpl(Resource* cachedResource)
 {
     if (!instrumentingAgentsSet)
         return;
-    HashSet<InstrumentingAgents*>::iterator end = instrumentingAgentsSet->end();
-    for (HashSet<InstrumentingAgents*>::iterator it = instrumentingAgentsSet->begin(); it != end; ++it) {
-        InstrumentingAgents* instrumentingAgents = *it;
+    for (InstrumentingAgents* instrumentingAgents: *instrumentingAgentsSet) {
         if (InspectorResourceAgent* inspectorResourceAgent = instrumentingAgents->inspectorResourceAgent())
             inspectorResourceAgent->willDestroyResource(cachedResource);
     }
@@ -167,12 +165,6 @@ bool consoleAgentEnabled(ExecutionContext* executionContext)
     InstrumentingAgents* instrumentingAgents = instrumentingAgentsFor(executionContext);
     InspectorConsoleAgent* consoleAgent = instrumentingAgents ? instrumentingAgents->inspectorConsoleAgent() : 0;
     return consoleAgent && consoleAgent->enabled();
-}
-
-bool timelineAgentEnabled(ExecutionContext* executionContext)
-{
-    InstrumentingAgents* instrumentingAgents = instrumentingAgentsFor(executionContext);
-    return instrumentingAgents && instrumentingAgents->inspectorTimelineAgent();
 }
 
 void registerInstrumentingAgents(InstrumentingAgents* instrumentingAgents)
@@ -245,7 +237,6 @@ InstrumentingAgents* instrumentingAgentsForNonDocumentContext(ExecutionContext* 
 
 namespace InstrumentationEvents {
 const char PaintSetup[] = "PaintSetup";
-const char RasterTask[] = "RasterTask";
 const char Paint[] = "Paint";
 const char Layer[] = "Layer";
 const char RequestMainThreadFrame[] = "RequestMainThreadFrame";

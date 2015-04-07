@@ -9,6 +9,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/timer/mock_timer.h"
+#include "sync/internal_api/public/attachments/attachment_util.h"
 #include "sync/internal_api/public/attachments/fake_attachment_downloader.h"
 #include "sync/internal_api/public/attachments/fake_attachment_uploader.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
@@ -22,6 +23,9 @@ class MockAttachmentStore : public AttachmentStore,
                             public base::SupportsWeakPtr<MockAttachmentStore> {
  public:
   MockAttachmentStore() {}
+
+  void Init(const InitCallback& callback) override {
+  }
 
   void Read(const AttachmentIdList& ids,
             const ReadCallback& callback) override {
@@ -40,6 +44,15 @@ class MockAttachmentStore : public AttachmentStore,
     NOTREACHED();
   }
 
+  void ReadMetadata(const AttachmentIdList& ids,
+                    const ReadMetadataCallback& callback) override {
+    NOTREACHED();
+  }
+
+  void ReadAllMetadata(const ReadMetadataCallback& callback) override {
+    NOTREACHED();
+  }
+
   // Respond to Read request. Attachments found in local_attachments should be
   // returned, everything else should be reported unavailable.
   void RespondToRead(const AttachmentIdSet& local_attachments) {
@@ -55,7 +68,9 @@ class MockAttachmentStore : public AttachmentStore,
     for (AttachmentIdList::const_iterator iter = ids.begin(); iter != ids.end();
          ++iter) {
       if (local_attachments.find(*iter) != local_attachments.end()) {
-        Attachment attachment = Attachment::CreateWithId(*iter, data);
+        uint32_t crc32c = ComputeCrc32c(data);
+        Attachment attachment =
+            Attachment::CreateFromParts(*iter, data, crc32c);
         attachments->insert(std::make_pair(*iter, attachment));
       } else {
         unavailable_attachments->push_back(*iter);
@@ -112,7 +127,9 @@ class MockAttachmentDownloader
     scoped_ptr<Attachment> attachment;
     if (result == DOWNLOAD_SUCCESS) {
       scoped_refptr<base::RefCountedString> data = new base::RefCountedString();
-      attachment.reset(new Attachment(Attachment::CreateWithId(id, data)));
+      uint32_t crc32c = ComputeCrc32c(data);
+      attachment.reset(
+          new Attachment(Attachment::CreateFromParts(id, data, crc32c)));
     }
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
@@ -159,14 +176,14 @@ class AttachmentServiceImplTest : public testing::Test,
  protected:
   AttachmentServiceImplTest() {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     network_change_notifier_.reset(net::NetworkChangeNotifier::CreateMock());
     InitializeAttachmentService(make_scoped_ptr(new MockAttachmentUploader()),
                                 make_scoped_ptr(new MockAttachmentDownloader()),
                                 this);
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     attachment_service_.reset();
     ASSERT_FALSE(attachment_store_);
     ASSERT_FALSE(attachment_uploader_);
@@ -307,8 +324,9 @@ TEST_F(AttachmentServiceImplTest, GetOrDownload_Local) {
 }
 
 TEST_F(AttachmentServiceImplTest, GetOrDownload_LocalRemoteUnavailable) {
-  // Create attachment list with 3 ids.
+  // Create attachment list with 4 ids.
   AttachmentIdList attachment_ids;
+  attachment_ids.push_back(AttachmentId::Create());
   attachment_ids.push_back(AttachmentId::Create());
   attachment_ids.push_back(AttachmentId::Create());
   attachment_ids.push_back(AttachmentId::Create());
@@ -318,13 +336,13 @@ TEST_F(AttachmentServiceImplTest, GetOrDownload_LocalRemoteUnavailable) {
   // Ensure AttachmentStore is called.
   EXPECT_FALSE(store()->read_ids.empty());
 
-  // make AttachmentStore return only attachment 0.
+  // Make AttachmentStore return only attachment 0.
   AttachmentIdSet local_attachments;
   local_attachments.insert(attachment_ids[0]);
   store()->RespondToRead(local_attachments);
   RunLoop();
   // Ensure Downloader called with right attachment ids
-  EXPECT_EQ(2U, downloader()->download_requests.size());
+  EXPECT_EQ(3U, downloader()->download_requests.size());
 
   // Make downloader return attachment 1.
   downloader()->RespondToDownload(attachment_ids[1],
@@ -332,11 +350,29 @@ TEST_F(AttachmentServiceImplTest, GetOrDownload_LocalRemoteUnavailable) {
   RunLoop();
   // Ensure consumer callback is not called.
   EXPECT_TRUE(download_results().empty());
-
-  // Make downloader fail attachment 2.
-  downloader()->RespondToDownload(
-      attachment_ids[2], AttachmentDownloader::DOWNLOAD_UNSPECIFIED_ERROR);
+  // Make AttachmentStore acknowledge writing attachment 1.
+  store()->RespondToWrite(AttachmentStore::SUCCESS);
   RunLoop();
+  // Ensure consumer callback is not called.
+  EXPECT_TRUE(download_results().empty());
+
+  // Make downloader return attachment 2.
+  downloader()->RespondToDownload(attachment_ids[2],
+                                  AttachmentDownloader::DOWNLOAD_SUCCESS);
+  RunLoop();
+  // Ensure consumer callback is not called.
+  EXPECT_TRUE(download_results().empty());
+  // Make AttachmentStore fail writing attachment 2.
+  store()->RespondToWrite(AttachmentStore::UNSPECIFIED_ERROR);
+  RunLoop();
+  // Ensure consumer callback is not called.
+  EXPECT_TRUE(download_results().empty());
+
+  // Make downloader fail attachment 3.
+  downloader()->RespondToDownload(
+      attachment_ids[3], AttachmentDownloader::DOWNLOAD_UNSPECIFIED_ERROR);
+  RunLoop();
+
   // Ensure callback is called
   EXPECT_FALSE(download_results().empty());
   // There should be only two attachments returned, 0 and 1.
@@ -346,6 +382,8 @@ TEST_F(AttachmentServiceImplTest, GetOrDownload_LocalRemoteUnavailable) {
   EXPECT_TRUE(last_download_attachments().find(attachment_ids[1]) !=
               last_download_attachments().end());
   EXPECT_TRUE(last_download_attachments().find(attachment_ids[2]) ==
+              last_download_attachments().end());
+  EXPECT_TRUE(last_download_attachments().find(attachment_ids[3]) ==
               last_download_attachments().end());
 }
 

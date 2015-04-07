@@ -22,7 +22,6 @@ namespace cc {
 
 namespace {
 
-const ResourceFormat kYUVResourceFormat = LUMINANCE_8;
 const ResourceFormat kRGBResourceFormat = RGBA_8888;
 
 class SyncPointClientImpl : public media::VideoFrame::SyncPointClient {
@@ -150,6 +149,7 @@ bool VideoResourceUpdater::VerifyFrame(
 #if defined(VIDEO_HOLE)
     case media::VideoFrame::HOLE:
 #endif  // defined(VIDEO_HOLE)
+    case media::VideoFrame::ARGB:
       return true;
 
     // Unacceptable inputs. ¯\(°_o)/¯
@@ -164,14 +164,12 @@ bool VideoResourceUpdater::VerifyFrame(
 // each plane in the frame.
 static gfx::Size SoftwarePlaneDimension(
     const scoped_refptr<media::VideoFrame>& input_frame,
-    ResourceFormat output_resource_format,
+    bool software_compositor,
     size_t plane_index) {
-  if (output_resource_format == kYUVResourceFormat) {
+  if (!software_compositor) {
     return media::VideoFrame::PlaneSize(
         input_frame->format(), plane_index, input_frame->coded_size());
   }
-
-  DCHECK_EQ(output_resource_format, kRGBResourceFormat);
   return input_frame->coded_size();
 }
 
@@ -201,7 +199,8 @@ VideoFrameExternalResources VideoResourceUpdater::CreateForSoftwarePlanes(
 
   bool software_compositor = context_provider_ == NULL;
 
-  ResourceFormat output_resource_format = kYUVResourceFormat;
+  ResourceFormat output_resource_format =
+      resource_provider_->yuv_resource_format();
   size_t output_plane_count = media::VideoFrame::NumPlanes(input_frame_format);
 
   // TODO(skaslev): If we're in software compositing mode, we do the YUV -> RGB
@@ -225,7 +224,7 @@ VideoFrameExternalResources VideoResourceUpdater::CreateForSoftwarePlanes(
   std::vector<ResourceList::iterator> plane_resources;
   for (size_t i = 0; i < output_plane_count; ++i) {
     gfx::Size output_plane_resource_size =
-        SoftwarePlaneDimension(video_frame, output_resource_format, i);
+        SoftwarePlaneDimension(video_frame, software_compositor, i);
     if (output_plane_resource_size.IsEmpty() ||
         output_plane_resource_size.width() > max_resource_size ||
         output_plane_resource_size.height() > max_resource_size) {
@@ -294,7 +293,8 @@ VideoFrameExternalResources VideoResourceUpdater::CreateForSoftwarePlanes(
 
       ResourceProvider::ScopedWriteLockSoftware lock(
           resource_provider_, plane_resource.resource_id);
-      video_renderer_->Copy(video_frame, lock.sk_canvas());
+      SkCanvas canvas(lock.sk_bitmap());
+      video_renderer_->Copy(video_frame, &canvas);
       SetPlaneResourceUniqueId(video_frame.get(), 0, &plane_resource);
     }
 
@@ -308,7 +308,8 @@ VideoFrameExternalResources VideoResourceUpdater::CreateForSoftwarePlanes(
   for (size_t i = 0; i < plane_resources.size(); ++i) {
     PlaneResource& plane_resource = *plane_resources[i];
     // Update each plane's resource id with its content.
-    DCHECK_EQ(plane_resource.resource_format, kYUVResourceFormat);
+    DCHECK_EQ(plane_resource.resource_format,
+              resource_provider_->yuv_resource_format());
 
     if (!PlaneResourceMatchesUniqueID(plane_resource, video_frame.get(), i)) {
       // We need to transfer data from |video_frame| to the plane resource.

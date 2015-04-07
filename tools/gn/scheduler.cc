@@ -8,14 +8,16 @@
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
 #include "tools/gn/standard_out.h"
+#include "tools/gn/switches.h"
 
-Scheduler* g_scheduler = NULL;
+Scheduler* g_scheduler = nullptr;
 
 namespace {
 
 int GetThreadCount() {
   std::string thread_count =
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII("threads");
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kThreads);
 
   int result;
   if (thread_count.empty() || !base::StringToInt(thread_count, &result))
@@ -38,7 +40,7 @@ Scheduler::Scheduler()
 Scheduler::~Scheduler() {
   if (!has_been_shutdown_)
     pool_->Shutdown();
-  g_scheduler = NULL;
+  g_scheduler = nullptr;
 }
 
 bool Scheduler::Run() {

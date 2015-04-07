@@ -36,7 +36,7 @@
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/crx_file/id_util.h"
-#include "components/omaha_query_params/omaha_query_params.h"
+#include "components/update_client/update_query_params.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -76,7 +76,7 @@
 using base::Time;
 using base::TimeDelta;
 using content::BrowserThread;
-using omaha_query_params::OmahaQueryParams;
+using update_client::UpdateQueryParams;
 using testing::DoAll;
 using testing::Invoke;
 using testing::InvokeWithoutArgs;
@@ -457,10 +457,6 @@ class ServiceForManifestTests : public MockService {
     return registry_->disabled_extensions().GetByID(id);
   }
 
-  const ExtensionSet* extensions() const override {
-    return &registry_->enabled_extensions();
-  }
-
   PendingExtensionManager* pending_extension_manager() override {
     return &pending_extension_manager_;
   }
@@ -622,7 +618,7 @@ static void VerifyQueryAndExtractParameters(
   std::map<std::string, std::string> params;
   ExtractParameters(query, &params);
 
-  std::string omaha_params = OmahaQueryParams::Get(OmahaQueryParams::CRX);
+  std::string omaha_params = UpdateQueryParams::Get(UpdateQueryParams::CRX);
   std::map<std::string, std::string> expected;
   ExtractParameters(omaha_params, &expected);
 
@@ -1493,12 +1489,9 @@ class ExtensionUpdaterTest : public testing::Test {
     // service, not on our mock |service|.  This allows us to fake
     // the CrxInstaller actions we want.
     TestingProfile profile;
-    static_cast<TestExtensionSystem*>(
-        ExtensionSystem::Get(&profile))->
-        CreateExtensionService(
-            CommandLine::ForCurrentProcess(),
-            base::FilePath(),
-            false);
+    static_cast<TestExtensionSystem*>(ExtensionSystem::Get(&profile))
+        ->CreateExtensionService(base::CommandLine::ForCurrentProcess(),
+                                 base::FilePath(), false);
     ExtensionService* extension_service =
         ExtensionSystem::Get(&profile)->extension_service();
     extension_service->set_extensions_enabled(true);
@@ -1903,10 +1896,8 @@ class ExtensionUpdaterTest : public testing::Test {
   scoped_ptr<TestExtensionPrefs> prefs_;
 
   ManifestFetchData* CreateManifestFetchData(const GURL& update_url) {
-    return new ManifestFetchData(update_url,
-                                 0,
-                                 "",
-                                 OmahaQueryParams::Get(OmahaQueryParams::CRX),
+    return new ManifestFetchData(update_url, 0, "",
+                                 UpdateQueryParams::Get(UpdateQueryParams::CRX),
                                  ManifestFetchData::PING);
   }
 
@@ -2194,9 +2185,11 @@ TEST_F(ExtensionUpdaterTest, TestStartUpdateCheckMemory) {
   MockExtensionDownloaderDelegate delegate;
   ExtensionDownloader downloader(&delegate, service.request_context());
 
-  StartUpdateCheck(&downloader, CreateManifestFetchData(GURL()));
+  StartUpdateCheck(&downloader,
+                   CreateManifestFetchData(GURL("http://localhost/foo")));
   // This should delete the newly-created ManifestFetchData.
-  StartUpdateCheck(&downloader, CreateManifestFetchData(GURL()));
+  StartUpdateCheck(&downloader,
+                   CreateManifestFetchData(GURL("http://localhost/foo")));
   // This should add into |manifests_pending_|.
   StartUpdateCheck(&downloader,
                    CreateManifestFetchData(GURL("http://www.google.com")));

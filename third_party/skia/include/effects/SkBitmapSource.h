@@ -22,14 +22,12 @@ public:
     }
     virtual void computeFastBounds(const SkRect& src, SkRect* dst) const SK_OVERRIDE;
 
+    SK_TO_STRING_OVERRIDE()
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkBitmapSource)
 
 protected:
     explicit SkBitmapSource(const SkBitmap& bitmap);
     SkBitmapSource(const SkBitmap& bitmap, const SkRect& srcRect, const SkRect& dstRect);
-#ifdef SK_SUPPORT_LEGACY_DEEPFLATTENING
-    explicit SkBitmapSource(SkReadBuffer& buffer);
-#endif
     virtual void flatten(SkWriteBuffer&) const SK_OVERRIDE;
 
     virtual bool onFilterImage(Proxy*, const SkBitmap& src, const Context&,

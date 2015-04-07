@@ -18,7 +18,7 @@
 #define VPX_CODEC_DISABLE_COMPAT 1
 #include "third_party/libvpx/source/libvpx/vpx/vp8dx.h"
 #include "third_party/libvpx/source/libvpx/vpx/vpx_decoder.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace media {
 namespace cast {
@@ -44,8 +44,8 @@ class VideoDecoder::ImplBase
                    const DecodeFrameCallback& callback) {
     DCHECK_EQ(cast_initialization_status_, STATUS_VIDEO_INITIALIZED);
 
-    COMPILE_ASSERT(sizeof(encoded_frame->frame_id) == sizeof(last_frame_id_),
-                   size_of_frame_id_types_do_not_match);
+    static_assert(sizeof(encoded_frame->frame_id) == sizeof(last_frame_id_),
+                  "size of frame_id types do not match");
     bool is_continuous = true;
     if (seen_first_frame_) {
       const uint32 frames_ahead = encoded_frame->frame_id - last_frame_id_;

@@ -6,6 +6,7 @@ import("//build/config/allocator.gni")
 import("//build/config/crypto.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
+import("//build/module_args/v8.gni")
 
 declare_args() {
   # When set, turns off the (normally-on) iterator debugging and related stuff
@@ -30,8 +31,8 @@ declare_args() {
 config("feature_flags") {
   # TODO(brettw) most of these need to be parameterized.
   defines = [
-      "CHROMIUM_BUILD",
-      "V8_DEPRECATION_WARNINGS",  # Don't use deprecated V8 APIs anywhere.
+    "CHROMIUM_BUILD",
+    "V8_DEPRECATION_WARNINGS",  # Don't use deprecated V8 APIs anywhere.
   ]
 
   if (cld_version > 0) {
@@ -121,9 +122,6 @@ config("feature_flags") {
   }
   if (use_x11) {
     defines += [ "USE_X11=1" ]
-    if (use_xi2_mt > 0) {
-      defines += [ "USE_XI2_MT=$use_xi2_mt" ]
-    }
   }
   if (use_allocator != "tcmalloc") {
     defines += [ "NO_TCMALLOC" ]
@@ -174,8 +172,8 @@ config("feature_flags") {
   if (enable_settings_app) {
     defines += [ "ENABLE_SETTINGS_APP=1" ]
   }
-  if (enable_managed_users) {
-    defines += [ "ENABLE_MANAGED_USERS=1" ]
+  if (enable_supervised_users) {
+    defines += [ "ENABLE_SUPERVISED_USERS=1" ]
   }
   if (enable_service_discovery) {
     defines += [ "ENABLE_SERVICE_DISCOVERY=1" ]
@@ -207,6 +205,12 @@ config("feature_flags") {
   if (proprietary_codecs) {
     defines += [ "USE_PROPRIETARY_CODECS" ]
   }
+  if (enable_hangout_services_extension) {
+    defines += [ "ENABLE_HANGOUT_SERVICES_EXTENSION=1" ]
+  }
+  if (v8_use_external_startup_data) {
+    defines += [ "V8_USE_EXTERNAL_STARTUP_DATA" ]
+  }
 }
 
 # Debug/release ----------------------------------------------------------------
@@ -234,9 +238,7 @@ config("debug") {
 }
 
 config("release") {
-  defines = [
-    "NDEBUG",
-  ]
+  defines = [ "NDEBUG" ]
 }
 
 # Default libraries ------------------------------------------------------------
@@ -271,6 +273,7 @@ config("default_libs") {
       "winmm.lib",
       "winspool.lib",
       "ws2_32.lib",
+
       # Please don't add more stuff here. We should actually be making this
       # list smaller, since all common things should be covered. If you need
       # some extra libraries, please just add a libs = [ "foo.lib" ] to your
@@ -287,7 +290,7 @@ config("default_libs") {
       #   '<!(<(android_toolchain)/*-gcc -print-libgcc-file-name)',
       "c",
       "dl",
-      "m"
+      "m",
     ]
   } else if (is_mac) {
     libs = [
@@ -308,8 +311,6 @@ config("default_libs") {
       "UIKit.framework",
     ]
   } else if (is_linux) {
-    libs = [
-      "dl",
-    ]
+    libs = [ "dl" ]
   }
 }

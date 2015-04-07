@@ -251,6 +251,44 @@
       string.
     </dd>
 
+    <dt class="field">IPAddressConfigType</dt>
+    <dd>
+      <span class="field_meta">
+        (optional if <span class="field">Remove</span> is
+        <span class="value">false</span>, otherwise ignored. Defaults to
+        <span class="value">DHCP</span> if
+        <span class="field">NameServersConfigType</span> is specified)
+        <span class="type">string</span>
+      </span>
+      <span class="rule">
+        <span class="rule_id"></span>
+        Allowed values are <span class="value">DHCP</span> and
+        <span class="value">Static</span>.
+      </span>
+      Determines whether the IP Address configuration is statically configured,
+      see <span class="field">StaticIPConfig</span>, or automatically configured
+      using DHCP.
+    </dd>
+
+    <dt class="field">NameServersConfigType</dt>
+    <dd>
+      <span class="field_meta">
+        (optional if <span class="field">Remove</span> is
+        <span class="value">false</span>, otherwise ignored. Defaults to
+        <span class="value">DHCP</span> if
+        <span class="field">IPAddressConfigType</span> is specified)
+        <span class="type">string</span>
+      </span>
+      <span class="rule">
+        <span class="rule_id"></span>
+        Allowed values are <span class="value">DHCP</span> and
+        <span class="value">Static</span>.
+      </span>
+      Determines whether the NameServers configuration is statically configured,
+      see <span class="field">StaticIPConfig</span>, or automatically configured
+      using DHCP.
+    </dd>
+
     <dt class="field">IPConfigs</dt>
     <dd>
       <span class="field_meta">
@@ -263,12 +301,19 @@
     <dt class="field">StaticIPConfig</dt>
     <dd>
       <span class="field_meta">
-        (optional if <span class="field">Remove</span> is
-        <span class="value">false</span>, otherwise ignored)
+        (required if <span class="field">IPAddressConfigType</span> or
+        <span class="field">NameServersConfigType</span> is set to
+        <span class="value">Static</span>)
         <span class="type">IPConfig</span>
       </span>
       Each property set in this IPConfig object overrides the respective
       parameter received over DHCP.
+      If <span class="field">IPAddressConfigType</span> is set to
+      <span class="value">Static</span>, <span class="field">IPAddress</span>
+      and <span class="field">Gateway</span> are required.
+      If <span class="field">NameServersConfigType</span> is set to
+      <span class="value">Static</span>, <span class="field">NameServers</span>
+      is required.
     </dd>
 
     <dt class="field">SavedIPConfig</dt>
@@ -310,30 +355,6 @@
         <span class="type">ProxySettings</span>
       </span>
       Proxy settings for this network
-    </dd>
-
-    <dt class="field">NameServers</dt>
-    <dd>
-      <span class="field_meta">
-        (optional if <span class="field">Remove</span> is
-        <span class="value">false</span>, otherwise ignored)
-        <span class="type">array of string</span>
-      </span>
-      Array of addresses to use for name servers. If not specified, DHCP values
-      will be used.
-    </dd>
-
-    <dt class="field">SearchDomains</dt>
-    <dd>
-      <span class="field_meta">
-        (optional if <span class="field">Remove</span> is
-        <span class="value">false</span>, otherwise ignored)
-        <span class="type">array of string</span>
-      </span>
-      Array of strings to append to names for resolution. Items in this array
-      should not start with a dot. Example:
-      <span class="snippet">["corp.acme.org", "acme.org"]</span>. If not
-      specified, DHCP values will be used.
     </dd>
 
     <dt class="field">VPN</dt>
@@ -530,12 +551,13 @@
 </section>
 
 <section>
-  <h1>IP Config</h1>
+  <h1>IPConfig</h1>
   <p>
-    Field <span class="field">IPConfigs</span> is an array
-    of <span class="type">IPConfig</span>
-    objects. Each <span class="type">IPConfig</span> object describes a
-    particular static IP configuration and contains the following fields:
+    Objects of type <span class="type">IPConfig</span> are used to report the
+    actual IP configuration of a connected network (see
+    <span class="field">IPConfigs</span>), the IP configuration received from
+    DHCP (see <span class="field">SavedIPConfig</span>) and to configure a 
+    static IP configuration (see <span class="field">StaticIPConfig</span>).
   </p>
 
   <dl class="field_list">
@@ -556,7 +578,7 @@
     <dt class="field">IPAddress</dt>
     <dd>
       <span class="field_meta">
-        (required)
+        (optional)
         <span class="type">string</span>
       </span>
       Describes the IPv4 or IPv6 address of a connection, depending on the value
@@ -567,7 +589,8 @@
     <dt class="field">RoutingPrefix</dt>
     <dd>
       <span class="field_meta">
-        (required)
+        (required if <span class="field">IPAddress</span> is set. Otherwise
+        ignored.)
         <span class="type">integer</span>
       </span>
       <span class="rule">
@@ -581,7 +604,8 @@
     <dt class="field">Gateway</dt>
     <dd>
       <span class="field_meta">
-        (optional)
+        (required if <span class="field">IPAddress</span> is set. Otherwise
+        ignored.)
         <span class="type">string</span>
       </span>
       Describes the gateway address to use for the configuration. Must match
@@ -596,9 +620,8 @@
         <span class="type">array of string</span>
       </span>
       Array of addresses to use for name servers. Address format must match that
-      specified in the <span class="field">Type</span> field. Overrides values
-      in the top level NameServers field for this configuration. If not
-      specified, top level values will be used.
+      specified in the <span class="field">Type</span> field. If not specified,
+      DHCP values will be used.
     </dd>
 
     <dt class="field">SearchDomains</dt>
@@ -609,15 +632,14 @@
       </span>
       Array of strings to append to names for resolution. Items in this array
       should not start with a dot. Example: <span class="snippet">[
-      "corp.acme.org", "acme.org" ]</span>. Overrides values in the top level
-      SearchDomains field for this configuration. If not specified, top level
-      values will be used.
+      "corp.acme.org", "acme.org" ]</span>. If not specified, DHCP values will
+      be used.
     </dd>
 
     <dt class="field">WebProxyAutoDiscoveryUrl</dt>
     <dd>
       <span class="field_meta">
-        (optional if part of <span class="field">IPConfigs</span>)
+        (optional if part of <span class="field">IPConfigs</span>, read-only)
         <span class="type">string</span>
       </span>
       The Web Proxy Auto-Discovery URL for this network as reported over DHCP.
@@ -669,6 +691,21 @@
       EAP settings.
     </dd>
 
+    <dt class="field">HexSSID</dt>
+    <dd>
+      <span class="field_meta">
+        (optional if <span class="field">SSID</span> is set, if so defaults to
+        a hex representation of <span class="field">SSID</span>)
+        <span class="type">string</span>
+      </span>
+      Hex representation of the network's SSID. If the
+      <span class="field">SSID</span> field is set, but
+      <span class="field">HexSSID</span> is not, converts the contents of the
+      <span class="field">SSID</span> field to UTF-8 encoding,
+      creates the hex representation and assigns the result to
+      <span class="field">HexSSID</span>.
+    </dd>
+
     <dt class="field">HiddenSSID</dt>
     <dd>
       <span class="field_meta">
@@ -711,10 +748,12 @@
     <dt class="field">SSID</dt>
     <dd>
       <span class="field_meta">
-        (required)
+        (optional if <span class="field">HexSSID</span> is set)
         <span class="type">string</span>
       </span>
-      SSID of the network.
+      SSID of the network. This field can only used for unicode strings in the
+      UTF-8 encoding. For non-UTF-8 encodings the
+      <span class="field">HexSSID</span> field must be used.
     </dd>
 
     <dt class="field">SignalStrength</dt>
@@ -728,6 +767,14 @@
       be set to '0' or not present.
     </dd>
   </dl>
+  <span class="rule">
+    <span class="rule_id"></span>
+      At least one of the fields <span class="field">HexSSID</span> or
+      <span class="field">SSID</span> must be present. If both
+      <span class="field">HexSSID</span> and <span class="field">SSID</span>
+      are set, the values must be consistent.
+    </span>
+  </span>
 </section>
 
 <section>

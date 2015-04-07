@@ -4,6 +4,8 @@
 
 #include "remoting/protocol/libjingle_transport_factory.h"
 
+#include <algorithm>
+
 #include "base/callback.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
@@ -31,6 +33,22 @@ const int kReconnectDelaySeconds = 15;
 
 // Get fresh STUN/Relay configuration every hour.
 const int kJingleInfoUpdatePeriodSeconds = 3600;
+
+// Utility function to map a cricket::Candidate string type to a
+// TransportRoute::RouteType enum value.
+TransportRoute::RouteType CandidateTypeToTransportRouteType(
+    const std::string& candidate_type) {
+  if (candidate_type == "local") {
+    return TransportRoute::DIRECT;
+  } else if (candidate_type == "stun") {
+    return TransportRoute::STUN;
+  } else if (candidate_type == "relay") {
+    return TransportRoute::RELAY;
+  } else {
+    LOG(FATAL) << "Unknown candidate type: " << candidate_type;
+    return TransportRoute::DIRECT;
+  }
+}
 
 class LibjingleTransport
     : public Transport,
@@ -97,7 +115,7 @@ LibjingleTransport::LibjingleTransport(cricket::PortAllocator* port_allocator,
                                        const NetworkSettings& network_settings)
     : port_allocator_(port_allocator),
       network_settings_(network_settings),
-      event_handler_(NULL),
+      event_handler_(nullptr),
       ice_username_fragment_(
           rtc::CreateRandomString(cricket::ICE_UFRAG_LENGTH)),
       ice_password_(rtc::CreateRandomString(cricket::ICE_PWD_LENGTH)),
@@ -160,7 +178,7 @@ void LibjingleTransport::DoStart() {
   // Create P2PTransportChannel, attach signal handlers and connect it.
   // TODO(sergeyu): Specify correct component ID for the channel.
   channel_.reset(new cricket::P2PTransportChannel(
-      std::string(), 0, NULL, port_allocator_));
+      std::string(), 0, nullptr, port_allocator_));
   channel_->SetIceProtocolType(cricket::ICEPROTO_GOOGLE);
   channel_->SetIceCredentials(ice_username_fragment_, ice_password_);
   channel_->SignalRequestSignaling.connect(
@@ -242,22 +260,26 @@ void LibjingleTransport::OnRouteChange(
     const cricket::Candidate& candidate) {
   TransportRoute route;
 
-  if (candidate.type() == "local") {
-    route.type = TransportRoute::DIRECT;
-  } else if (candidate.type() == "stun") {
-    route.type = TransportRoute::STUN;
-  } else if (candidate.type() == "relay") {
-    route.type = TransportRoute::RELAY;
-  } else {
-    LOG(FATAL) << "Unknown candidate type: " << candidate.type();
-  }
+  DCHECK(channel_->best_connection());
+  const cricket::Connection* connection = channel_->best_connection();
+
+  // A connection has both a local and a remote candidate. For our purposes, the
+  // route type is determined by the most indirect candidate type. For example:
+  // it's possible for the local candidate be a "relay" type, while the remote
+  // candidate is "local". In this case, we still want to report a RELAY route
+  // type.
+  static_assert(TransportRoute::DIRECT < TransportRoute::STUN &&
+                TransportRoute::STUN < TransportRoute::RELAY,
+                "Route type enum values are ordered by 'indirectness'");
+  route.type = std::max(
+      CandidateTypeToTransportRouteType(connection->local_candidate().type()),
+      CandidateTypeToTransportRouteType(connection->remote_candidate().type()));
 
   if (!jingle_glue::SocketAddressToIPEndPoint(
           candidate.address(), &route.remote_address)) {
     LOG(FATAL) << "Failed to convert peer IP address.";
   }
 
-  DCHECK(channel_->best_connection());
   const cricket::Candidate& local_candidate =
       channel_->best_connection()->local_candidate();
   if (!jingle_glue::SocketAddressToIPEndPoint(

@@ -10,10 +10,20 @@ namespace switches {
 
 // All switches in alphabetical order. The switches should be documented
 // alongside the definition of their values in the .cc file.
+extern const char kDisableCreditCardScan[];
+extern const char kDisableFillOnAccountSelect[];
 extern const char kDisablePasswordGeneration[];
+extern const char kDisableSingleClickAutofill[];
+extern const char kEnableCreditCardScan[];
+extern const char kEnableFillOnAccountSelect[];
+extern const char kEnableFillOnAccountSelectNoHighlighting[];
 extern const char kEnablePasswordGeneration[];
+extern const char kEnablePasswordSaveOnInPageNavigation[];
+extern const char kEnableSingleClickAutofill[];
+extern const char kEnableWalletCardImport[];
 extern const char kIgnoreAutocompleteOffForAutofill[];
 extern const char kLocalHeuristicsOnlyForPasswordGeneration[];
+extern const char kRespectAutocompleteOffForAutofill[];
 extern const char kShowAutofillTypePredictions[];
 extern const char kWalletSecureServiceUrl[];
 extern const char kWalletServiceUrl[];

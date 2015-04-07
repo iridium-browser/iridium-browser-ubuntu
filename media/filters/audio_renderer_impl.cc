@@ -44,16 +44,13 @@ AudioRendererImpl::AudioRendererImpl(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
     media::AudioRendererSink* sink,
     ScopedVector<AudioDecoder> decoders,
-    const SetDecryptorReadyCB& set_decryptor_ready_cb,
     const AudioHardwareConfig& hardware_config,
     const scoped_refptr<MediaLog>& media_log)
     : task_runner_(task_runner),
       expecting_config_changes_(false),
       sink_(sink),
-      audio_buffer_stream_(new AudioBufferStream(task_runner,
-                                                 decoders.Pass(),
-                                                 set_decryptor_ready_cb,
-                                                 media_log)),
+      audio_buffer_stream_(
+          new AudioBufferStream(task_runner, decoders.Pass(), media_log)),
       hardware_config_(hardware_config),
       playback_rate_(0),
       state_(kUninitialized),
@@ -141,7 +138,7 @@ void AudioRendererImpl::StopRendering_Locked() {
 }
 
 void AudioRendererImpl::SetMediaTime(base::TimeDelta time) {
-  DVLOG(1) << __FUNCTION__ << "(" << time.InMicroseconds() << ")";
+  DVLOG(1) << __FUNCTION__ << "(" << time << ")";
   DCHECK(task_runner_->BelongsToCurrentThread());
 
   base::AutoLock auto_lock(lock_);
@@ -151,6 +148,7 @@ void AudioRendererImpl::SetMediaTime(base::TimeDelta time) {
   start_timestamp_ = time;
   ended_timestamp_ = kInfiniteDuration();
   last_render_ticks_ = base::TimeTicks();
+  first_packet_timestamp_ = kNoTimestamp();
   audio_clock_.reset(new AudioClock(time, audio_parameters_.sample_rate()));
 }
 
@@ -164,13 +162,12 @@ base::TimeDelta AudioRendererImpl::CurrentMediaTime() {
     current_media_time = audio_clock_->front_timestamp();
   }
 
-  DVLOG(3) << __FUNCTION__ << ": " << current_media_time.InMilliseconds()
-           << " ms";
+  DVLOG(2) << __FUNCTION__ << ": " << current_media_time;
   return current_media_time;
 }
 
 base::TimeDelta AudioRendererImpl::CurrentMediaTimeForSyncingVideo() {
-  DVLOG(2) << __FUNCTION__;
+  DVLOG(3) << __FUNCTION__;
 
   base::AutoLock auto_lock(lock_);
   if (last_render_ticks_.is_null())
@@ -253,12 +250,14 @@ void AudioRendererImpl::StartPlaying() {
   AttemptRead_Locked();
 }
 
-void AudioRendererImpl::Initialize(DemuxerStream* stream,
-                                   const PipelineStatusCB& init_cb,
-                                   const StatisticsCB& statistics_cb,
-                                   const BufferingStateCB& buffering_state_cb,
-                                   const base::Closure& ended_cb,
-                                   const PipelineStatusCB& error_cb) {
+void AudioRendererImpl::Initialize(
+    DemuxerStream* stream,
+    const PipelineStatusCB& init_cb,
+    const SetDecryptorReadyCB& set_decryptor_ready_cb,
+    const StatisticsCB& statistics_cb,
+    const BufferingStateCB& buffering_state_cb,
+    const base::Closure& ended_cb,
+    const PipelineStatusCB& error_cb) {
   DVLOG(1) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(stream);
@@ -316,11 +315,9 @@ void AudioRendererImpl::Initialize(DemuxerStream* stream,
       new AudioClock(base::TimeDelta(), audio_parameters_.sample_rate()));
 
   audio_buffer_stream_->Initialize(
-      stream,
-      false,
-      statistics_cb,
-      base::Bind(&AudioRendererImpl::OnAudioBufferStreamInitialized,
-                 weak_factory_.GetWeakPtr()));
+      stream, base::Bind(&AudioRendererImpl::OnAudioBufferStreamInitialized,
+                         weak_factory_.GetWeakPtr()),
+      set_decryptor_ready_cb, statistics_cb);
 }
 
 void AudioRendererImpl::OnAudioBufferStreamInitialized(bool success) {
@@ -464,6 +461,11 @@ bool AudioRendererImpl::HandleSplicerBuffer_Locked(
       algorithm_->EnqueueBuffer(buffer);
   }
 
+  // Store the timestamp of the first packet so we know when to start actual
+  // audio playback.
+  if (first_packet_timestamp_ == kNoTimestamp())
+    first_packet_timestamp_ = buffer->timestamp();
+
   switch (state_) {
     case kUninitialized:
     case kInitializing:
@@ -588,6 +590,30 @@ int AudioRendererImpl::Render(AudioBus* audio_bus,
       return 0;
     }
 
+    // Delay playback by writing silence if we haven't reached the first
+    // timestamp yet; this can occur if the video starts before the audio.
+    if (algorithm_->frames_buffered() > 0) {
+      DCHECK(first_packet_timestamp_ != kNoTimestamp());
+      const base::TimeDelta play_delay =
+          first_packet_timestamp_ - audio_clock_->back_timestamp();
+      if (play_delay > base::TimeDelta()) {
+        DCHECK_EQ(frames_written, 0);
+        frames_written =
+            std::min(static_cast<int>(play_delay.InSecondsF() *
+                                      audio_parameters_.sample_rate()),
+                     requested_frames);
+        audio_bus->ZeroFramesPartial(0, frames_written);
+      }
+
+      // If there's any space left, actually render the audio; this is where the
+      // aural magic happens.
+      if (frames_written < requested_frames) {
+        frames_written += algorithm_->FillBuffer(
+            audio_bus, frames_written, requested_frames - frames_written,
+            playback_rate_);
+      }
+    }
+
     // We use the following conditions to determine end of playback:
     //   1) Algorithm can not fill the audio callback buffer
     //   2) We received an end of stream buffer
@@ -600,11 +626,7 @@ int AudioRendererImpl::Render(AudioBus* audio_bus,
     //   3) We are in the kPlaying state
     //
     // Otherwise the buffer has data we can send to the device.
-    if (algorithm_->frames_buffered() > 0) {
-      frames_written =
-          algorithm_->FillBuffer(audio_bus, requested_frames, playback_rate_);
-    }
-
+    //
     // Per the TimeSource API the media time should always increase even after
     // we've rendered all known audio data. Doing so simplifies scenarios where
     // we have other sources of media data that need to be scheduled after audio

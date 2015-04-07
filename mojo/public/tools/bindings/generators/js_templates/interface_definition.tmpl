@@ -3,8 +3,9 @@
 {%- endfor %}
 
   function {{interface.name}}Proxy(receiver) {
-    this.receiver_ = receiver;
+    bindings.ProxyBase.call(this, receiver);
   }
+  {{interface.name}}Proxy.prototype = Object.create(bindings.ProxyBase.prototype);
 
 {%- for method in interface.methods %}
   {{interface.name}}Proxy.prototype.{{method.name|stylize_method}} = function(
@@ -14,7 +15,7 @@
 ) {
     var params = new {{interface.name}}_{{method.name}}_Params();
 {%- for parameter in method.parameters %}
-    params.{{parameter.name}} = {{parameter.name}};
+    params.{{parameter.name}} = {{parameter|js_proxy_method_parameter_value}};
 {%- endfor %}
 
 {%- if method.response_parameters == None %}
@@ -45,8 +46,18 @@
   };
 {%- endfor %}
 
-  function {{interface.name}}Stub() {
+  function {{interface.name}}Stub(delegate) {
+    bindings.StubBase.call(this, delegate);
   }
+  {{interface.name}}Stub.prototype = Object.create(bindings.StubBase.prototype);
+
+{%- for method in interface.methods %}
+{%-   set js_method_name = method.name|stylize_method %}
+{%-   set delegate_expr =  "bindings.StubBindings(this).delegate" %}
+  {{interface.name}}Stub.prototype.{{js_method_name}} = function({{method.parameters|map(attribute='name')|join(', ')}}) {
+    return {{delegate_expr}} && {{delegate_expr}}.{{js_method_name}} && {{delegate_expr}}.{{js_method_name}}({{method.parameters|map('js_stub_method_parameter_value')|join(', ')}});
+  }
+{%- endfor %}
 
   {{interface.name}}Stub.prototype.accept = function(message) {
     var reader = new codec.MessageReader(message);
@@ -57,7 +68,7 @@
       var params = reader.decodeStruct({{interface.name}}_{{method.name}}_Params);
       this.{{method.name|stylize_method}}(
 {%- for parameter in method.parameters -%}
-params.{{parameter.name}}{% if not loop.last %}, {% endif %}
+  params.{{parameter.name}}{% if not loop.last %}, {% endif %}
 {%- endfor %});
       return true;
 {%- endif %}
@@ -99,24 +110,6 @@ params.{{parameter.name}}{% if not loop.last %}, {% endif -%}
       return Promise.reject(Error("Unhandled message: " + reader.messageName));
     }
   };
-
-  function {{interface.name}}DelegatingStub() {
-  }
-
-  {{interface.name}}DelegatingStub.prototype =
-      Object.create({{interface.name}}Stub.prototype);
-
-  {{interface.name}}DelegatingStub.prototype.callDelegateMethod$ = function(methodName, args) {
-    var method = this.delegate$ && this.delegate$[methodName];
-    return method && method.apply(this.delegate$, args);
-  }
-
-{%- for method in interface.methods %}
-{%-   set method_name = method.name|stylize_method %}
-  {{interface.name}}DelegatingStub.prototype.{{method_name}} = function() {
-    return this.callDelegateMethod$("{{method_name}}", arguments);
-  }
-{%- endfor %}
 
 {#--- Validation #}
 
@@ -171,7 +164,6 @@ params.{{parameter.name}}{% if not loop.last %}, {% endif -%}
     name: '{{namespace|replace(".","::")}}::{{interface.name}}',
     proxyClass: {{interface.name}}Proxy,
     stubClass: {{interface.name}}Stub,
-    delegatingStubClass: {{interface.name}}DelegatingStub,
     validateRequest: validate{{interface.name}}Request,
 {%- if interface|has_callbacks %}
     validateResponse: validate{{interface.name}}Response,

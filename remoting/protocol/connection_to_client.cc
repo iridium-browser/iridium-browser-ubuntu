@@ -19,10 +19,10 @@ namespace remoting {
 namespace protocol {
 
 ConnectionToClient::ConnectionToClient(protocol::Session* session)
-    : handler_(NULL),
-      clipboard_stub_(NULL),
-      host_stub_(NULL),
-      input_stub_(NULL),
+    : handler_(nullptr),
+      clipboard_stub_(nullptr),
+      host_stub_(nullptr),
+      input_stub_(nullptr),
       session_(session) {
   session_->SetEventHandler(this);
 }
@@ -50,9 +50,9 @@ void ConnectionToClient::Disconnect() {
   session_->Close();
 }
 
-void ConnectionToClient::UpdateSequenceNumber(int64 sequence_number) {
+void ConnectionToClient::OnEventTimestamp(int64 sequence_number) {
   DCHECK(CalledOnValidThread());
-  handler_->OnSequenceNumberUpdated(this, sequence_number);
+  handler_->OnEventTimestamp(this, sequence_number);
 }
 
 VideoStub* ConnectionToClient::video_stub() {
@@ -132,8 +132,8 @@ void ConnectionToClient::OnSessionStateChange(Session::State state) {
           base::Bind(&ConnectionToClient::OnChannelInitialized,
                      base::Unretained(this)));
       event_dispatcher_->set_input_stub(input_stub_);
-      event_dispatcher_->set_sequence_number_callback(base::Bind(
-          &ConnectionToClient::UpdateSequenceNumber, base::Unretained(this)));
+      event_dispatcher_->set_event_timestamp_callback(base::Bind(
+          &ConnectionToClient::OnEventTimestamp, base::Unretained(this)));
 
       video_dispatcher_.reset(new HostVideoDispatcher());
       video_dispatcher_->Init(

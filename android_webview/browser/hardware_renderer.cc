@@ -17,8 +17,10 @@
 #include "cc/layers/layer.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/output_surface.h"
+#include "cc/scheduler/begin_frame_source.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_settings.h"
+#include "gpu/blink/webgraphicscontext3d_in_process_command_buffer_impl.h"
 #include "gpu/command_buffer/client/gl_in_process_context.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "ui/gfx/frame_time.h"
@@ -27,14 +29,13 @@
 #include "ui/gfx/transform.h"
 #include "ui/gl/gl_bindings.h"
 #include "webkit/common/gpu/context_provider_in_process.h"
-#include "webkit/common/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
 
 namespace android_webview {
 
 namespace {
 
-using webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl;
-using webkit::gpu::WebGraphicsContext3DImpl;
+using gpu_blink::WebGraphicsContext3DImpl;
+using gpu_blink::WebGraphicsContext3DInProcessCommandBufferImpl;
 
 scoped_refptr<cc::ContextProvider> CreateContext(
     scoped_refptr<gfx::GLSurface> surface,
@@ -91,17 +92,17 @@ HardwareRenderer::HardwareRenderer(SharedRendererState* state)
   cc::LayerTreeSettings settings;
 
   // Should be kept in sync with compositor_impl_android.cc.
-  settings.allow_antialiasing = false;
-  settings.highp_threshold_min = 2048;
+  settings.renderer_settings.allow_antialiasing = false;
+  settings.renderer_settings.highp_threshold_min = 2048;
 
   // Webview does not own the surface so should not clear it.
-  settings.should_clear_root_render_pass = false;
+  settings.renderer_settings.should_clear_root_render_pass = false;
 
   // TODO(enne): Update this this compositor to use a synchronous scheduler.
   settings.single_thread_proxy_scheduler = false;
 
   layer_tree_host_ = cc::LayerTreeHost::CreateSingleThreaded(
-      this, this, NULL, NULL, settings, NULL);
+      this, this, nullptr, nullptr, settings, nullptr, nullptr);
   layer_tree_host_->SetRootLayer(root_layer_);
   layer_tree_host_->SetLayerTreeHostClientReady();
   layer_tree_host_->set_has_transparent_background(true);
@@ -116,13 +117,13 @@ HardwareRenderer::~HardwareRenderer() {
   root_layer_ = NULL;
   delegated_layer_ = NULL;
   frame_provider_ = NULL;
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   // Check collection is empty.
   cc::ReturnedResourceArray returned_resources;
   resource_collection_->TakeUnusedResourcesForChildCompositor(
       &returned_resources);
   DCHECK_EQ(0u, returned_resources.size());
-#endif  // DCHECK_IS_ON
+#endif  // DCHECK_IS_ON()
 
   resource_collection_->SetClient(NULL);
 
@@ -141,6 +142,7 @@ void HardwareRenderer::DidBeginMainFrame() {
 }
 
 void HardwareRenderer::CommitFrame() {
+  TRACE_EVENT0("android_webview", "CommitFrame");
   scroll_offset_ = shared_renderer_state_->GetScrollOffsetOnRT();
   if (committed_frame_.get()) {
     TRACE_EVENT_INSTANT0("android_webview",
@@ -251,9 +253,7 @@ void HardwareRenderer::DrawGL(bool stencil_enabled,
   gl_surface_->ResetBackingFrameBufferObject();
 }
 
-void HardwareRenderer::RequestNewOutputSurface(bool fallback) {
-  // Android webview does not support losing output surface.
-  DCHECK(!fallback);
+void HardwareRenderer::RequestNewOutputSurface() {
   scoped_refptr<cc::ContextProvider> context_provider =
       CreateContext(gl_surface_,
                     DeferredGpuCommandService::GetInstance());
@@ -261,6 +261,10 @@ void HardwareRenderer::RequestNewOutputSurface(bool fallback) {
       new ParentOutputSurface(context_provider));
   output_surface_ = output_surface_holder.get();
   layer_tree_host_->SetOutputSurface(output_surface_holder.Pass());
+}
+
+void HardwareRenderer::DidFailToInitializeOutputSurface() {
+  RequestNewOutputSurface();
 }
 
 void HardwareRenderer::UnusedResourcesAreAvailable() {

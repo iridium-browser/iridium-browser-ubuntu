@@ -102,7 +102,7 @@ std::string ModuleSystem::ExceptionHandler::CreateExceptionString(
   std::string resource_name = "<unknown resource>";
   if (!message->GetScriptOrigin().ResourceName().IsEmpty()) {
     v8::String::Utf8Value resource_name_v8(
-        message->GetScriptOrigin().ResourceName()->ToString());
+        message->GetScriptOrigin().ResourceName());
     resource_name.assign(*resource_name_v8, resource_name_v8.length());
   }
 
@@ -201,7 +201,7 @@ v8::Handle<v8::Value> ModuleSystem::Require(const std::string& module_name) {
 
 void ModuleSystem::RequireForJs(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-  v8::Handle<v8::String> module_name = args[0]->ToString();
+  v8::Handle<v8::String> module_name = args[0]->ToString(args.GetIsolate());
   args.GetReturnValue().Set(RequireForJsInner(module_name));
 }
 
@@ -354,10 +354,8 @@ void ModuleSystem::LazyFieldGetterInner(
   ModuleSystem* module_system = static_cast<ModuleSystem*>(
       v8::Handle<v8::External>::Cast(module_system_value)->Value());
 
-  std::string name =
-      *v8::String::Utf8Value(
-          parameters->Get(v8::String::NewFromUtf8(info.GetIsolate(),
-                                                  kModuleName))->ToString());
+  std::string name = *v8::String::Utf8Value(parameters->Get(
+      v8::String::NewFromUtf8(info.GetIsolate(), kModuleName)));
 
   // Switch to our v8 context because we need functions created while running
   // the require()d module to belong to our context, not the current one.
@@ -378,7 +376,7 @@ void ModuleSystem::LazyFieldGetterInner(
   v8::Handle<v8::Object> module = v8::Handle<v8::Object>::Cast(module_value);
   v8::Handle<v8::String> field =
       parameters->Get(v8::String::NewFromUtf8(info.GetIsolate(), kModuleField))
-          ->ToString();
+          ->ToString(info.GetIsolate());
 
   if (!module->Has(field)) {
     std::string field_str = *v8::String::Utf8Value(field);
@@ -491,7 +489,7 @@ v8::Handle<v8::Value> ModuleSystem::GetSource(const std::string& module_name) {
 void ModuleSystem::RequireNative(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   CHECK_EQ(1, args.Length());
-  std::string native_name = *v8::String::Utf8Value(args[0]->ToString());
+  std::string native_name = *v8::String::Utf8Value(args[0]);
   args.GetReturnValue().Set(RequireNativeFromString(native_name));
 }
 
@@ -526,7 +524,7 @@ v8::Handle<v8::Value> ModuleSystem::RequireNativeFromString(
 void ModuleSystem::RequireAsync(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   CHECK_EQ(1, args.Length());
-  std::string module_name = *v8::String::Utf8Value(args[0]->ToString());
+  std::string module_name = *v8::String::Utf8Value(args[0]);
   v8::Handle<v8::Promise::Resolver> resolver(
       v8::Promise::Resolver::New(GetIsolate()));
   args.GetReturnValue().Set(resolver->GetPromise());
@@ -565,8 +563,15 @@ v8::Handle<v8::String> ModuleSystem::WrapSource(v8::Handle<v8::String> source) {
 
 void ModuleSystem::Private(const v8::FunctionCallbackInfo<v8::Value>& args) {
   CHECK_EQ(1, args.Length());
-  CHECK(args[0]->IsObject());
-  CHECK(!args[0]->IsNull());
+  if (!args[0]->IsObject() || args[0]->IsNull()) {
+    GetIsolate()->ThrowException(
+        v8::Exception::TypeError(v8::String::NewFromUtf8(GetIsolate(),
+            args[0]->IsUndefined()
+                ? "Method called without a valid receiver (this). "
+                  "Did you forget to call .bind()?"
+                : "Invalid invocation: receiver is not an object!")));
+    return;
+  }
   v8::Local<v8::Object> obj = args[0].As<v8::Object>();
   v8::Local<v8::String> privates_key =
       v8::String::NewFromUtf8(GetIsolate(), "privates");

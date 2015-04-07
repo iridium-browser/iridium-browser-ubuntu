@@ -216,10 +216,6 @@ function convert_srcs_to_project_files {
 
   local source_list=$(grep -E '(\.c|\.h|\.S|\.s|\.asm)$' $1)
 
-  # _offsets are used in pre-processing to generate files for assembly. They are
-  # not part of the compiled library.
-  source_list=$(echo "$source_list" | grep -v '_offsets\.c')
-
   # Not sure why vpx_config is not included.
   source_list=$(echo "$source_list" | grep -v 'vpx_config\.c')
 

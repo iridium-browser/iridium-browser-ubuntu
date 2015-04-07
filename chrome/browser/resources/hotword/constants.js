@@ -6,6 +6,12 @@ cr.define('hotword.constants', function() {
 'use strict';
 
 /**
+ * Number of seconds of audio to record when logging is enabled.
+ * @const {number}
+ */
+var AUDIO_LOG_SECONDS = 2;
+
+/**
  * Hotword data shared module extension's ID.
  * @const {string}
  */
@@ -63,6 +69,7 @@ var Error = {
 var Event = {
   READY: 'ready',
   TRIGGER: 'trigger',
+  SPEAKER_MODEL_SAVED: 'speaker model saved',
   ERROR: 'error',
 };
 
@@ -76,6 +83,11 @@ var NaClPlugin = {
   SAMPLE_RATE_PREFIX: 'h',
   MODEL_PREFIX: 'm',
   STOP: 's',
+  LOG: 'l',
+  BEGIN_SPEAKER_MODEL: 'b',
+  ADAPT_SPEAKER_MODEL: 'a',
+  FINISH_SPEAKER_MODEL: 'f',
+  SPEAKER_MODEL_SAVED: 'sm_saved',
   REQUEST_MODEL: 'model',
   MODEL_LOADED: 'model_loaded',
   READY_FOR_AUDIO: 'audio',
@@ -126,6 +138,16 @@ var SessionSource = {
 };
 
 /**
+ * The mode to start the hotword recognizer in.
+ * @enum {string}
+ */
+var RecognizerStartMode = {
+  NORMAL: 'normal',
+  NEW_MODEL: 'new model',
+  ADAPT_MODEL: 'adapt model'
+};
+
+/**
  * MediaStream open success/errors to be reported via UMA.
  * DO NOT remove or renumber values in this enum. Only add new ones.
  * @enum {number}
@@ -156,7 +178,8 @@ var UmaMetrics = {
   TRIGGER: 'Hotword.HotwordTrigger',
   MEDIA_STREAM_RESULT: 'Hotword.HotwordMediaStreamResult',
   NACL_PLUGIN_LOAD_RESULT: 'Hotword.HotwordNaClPluginLoadResult',
-  NACL_MESSAGE_TIMEOUT: 'Hotword.HotwordNaClMessageTimeout'
+  NACL_MESSAGE_TIMEOUT: 'Hotword.HotwordNaClMessageTimeout',
+  TRIGGER_SOURCE: 'Hotword.HotwordTriggerSource'
 };
 
 /**
@@ -188,6 +211,19 @@ var UmaNaClPluginLoadResult = {
 };
 
 /**
+ * Source of hotword triggering, to be reported via UMA.
+ * DO NOT remove or renumber values in this enum. Only add new ones.
+ * @enum {number}
+ */
+var UmaTriggerSource = {
+  LAUNCHER: 0,
+  NTP_GOOGLE_COM: 1,
+  ALWAYS_ON: 2,
+  TRAINING: 3,
+  MAX: 3
+};
+
+/**
  * The browser UI language.
  * @const {string}
  */
@@ -195,6 +231,7 @@ var UI_LANGUAGE = (chrome.i18n && chrome.i18n.getUILanguage) ?
       chrome.i18n.getUILanguage() : '';
 
 return {
+  AUDIO_LOG_SECONDS: AUDIO_LOG_SECONDS,
   CLIENT_PORT_NAME: CLIENT_PORT_NAME,
   COMMAND_FIELD_NAME: COMMAND_FIELD_NAME,
   SHARED_MODULE_ID: SHARED_MODULE_ID,
@@ -206,12 +243,14 @@ return {
   Event: Event,
   File: File,
   NaClPlugin: NaClPlugin,
+  RecognizerStartMode: RecognizerStartMode,
   SessionSource: SessionSource,
   TimeoutMs: TimeoutMs,
   UmaMediaStreamOpenResult: UmaMediaStreamOpenResult,
   UmaMetrics: UmaMetrics,
   UmaNaClMessageTimeout: UmaNaClMessageTimeout,
-  UmaNaClPluginLoadResult: UmaNaClPluginLoadResult
+  UmaNaClPluginLoadResult: UmaNaClPluginLoadResult,
+  UmaTriggerSource: UmaTriggerSource
 };
 
 });

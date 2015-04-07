@@ -36,6 +36,7 @@
 #include "bindings/core/v8/ScriptRegexp.h"
 #include "core/HTMLNames.h"
 #include "core/UserAgentStyleSheets.h"
+#include "core/animation/AnimationTimeline.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/css/resolver/StyleResolver.h"
 #include "core/css/resolver/ViewportStyleResolver.h"
@@ -291,6 +292,7 @@ bool InspectorPageAgent::cachedResourceContent(Resource* cachedResource, String*
         case Resource::Script:
             *result = cachedResource->resourceBuffer() ? toScriptResource(cachedResource)->decodedText() : toScriptResource(cachedResource)->script();
             return true;
+        case Resource::ImportResource: // Fall through.
         case Resource::Raw: {
             SharedBuffer* buffer = cachedResource->resourceBuffer();
             if (!buffer)
@@ -304,7 +306,7 @@ bool InspectorPageAgent::cachedResourceContent(Resource* cachedResource, String*
         }
         default:
             SharedBuffer* buffer = cachedResource->resourceBuffer();
-            return decodeBuffer(buffer ? buffer->data() : 0, buffer ? buffer->size() : 0, cachedResource->response().textEncodingName(), result);
+            return decodeBuffer(buffer ? buffer->data() : nullptr, buffer ? buffer->size() : 0, cachedResource->response().textEncodingName(), result);
         }
     }
     return false;
@@ -313,7 +315,7 @@ bool InspectorPageAgent::cachedResourceContent(Resource* cachedResource, String*
 // static
 bool InspectorPageAgent::sharedBufferContent(PassRefPtr<SharedBuffer> buffer, const String& textEncodingName, bool withBase64Encode, String* result)
 {
-    return dataContent(buffer ? buffer->data() : 0, buffer ? buffer->size() : 0, textEncodingName, withBase64Encode, result);
+    return dataContent(buffer ? buffer->data() : nullptr, buffer ? buffer->size() : 0, textEncodingName, withBase64Encode, result);
 }
 
 bool InspectorPageAgent::dataContent(const char* data, unsigned size, const String& textEncodingName, bool withBase64Encode, String* result)
@@ -335,12 +337,11 @@ Resource* InspectorPageAgent::cachedResource(LocalFrame* frame, const KURL& url)
 {
     Document* document = frame->document();
     if (!document)
-        return 0;
+        return nullptr;
     Resource* cachedResource = document->fetcher()->cachedResource(url);
     if (!cachedResource) {
         Vector<Document*> allImports = InspectorPageAgent::importsForFrame(frame);
-        for (Vector<Document*>::const_iterator it = allImports.begin(); it != allImports.end(); ++it) {
-            Document* import = *it;
+        for (Document* import : allImports) {
             cachedResource = import->fetcher()->cachedResource(url);
             if (cachedResource)
                 break;
@@ -587,7 +588,7 @@ void InspectorPageAgent::reload(ErrorString*, const bool* const optionalIgnoreCa
 {
     m_pendingScriptToEvaluateOnLoadOnce = optionalScriptToEvaluateOnLoad ? *optionalScriptToEvaluateOnLoad : "";
     m_pendingScriptPreprocessor = optionalScriptPreprocessor ? *optionalScriptPreprocessor : "";
-    m_page->deprecatedLocalMainFrame()->loader().reload(asBool(optionalIgnoreCache) ? EndToEndReload : NormalReload);
+    m_page->mainFrame()->reload(asBool(optionalIgnoreCache) ? EndToEndReload : NormalReload, NotClientRedirect);
 }
 
 void InspectorPageAgent::navigate(ErrorString*, const String& url, String* outFrameId)
@@ -626,9 +627,8 @@ static PassRefPtr<TypeBuilder::Array<TypeBuilder::Page::Cookie> > buildArrayForC
 static void cachedResourcesForDocument(Document* document, Vector<Resource*>& result, bool skipXHRs)
 {
     const ResourceFetcher::DocumentResourceMap& allResources = document->fetcher()->allResources();
-    ResourceFetcher::DocumentResourceMap::const_iterator end = allResources.end();
-    for (ResourceFetcher::DocumentResourceMap::const_iterator it = allResources.begin(); it != end; ++it) {
-        Resource* cachedResource = it->value.get();
+    for (const auto& resource : allResources) {
+        Resource* cachedResource = resource.value.get();
 
         switch (cachedResource->type()) {
         case Resource::Image:
@@ -690,8 +690,8 @@ static Vector<KURL> allResourcesURLsForFrame(LocalFrame* frame)
     result.append(urlWithoutFragment(frame->loader().documentLoader()->url()));
 
     Vector<Resource*> allResources = cachedResourcesForFrame(frame, false);
-    for (Vector<Resource*>::const_iterator it = allResources.begin(); it != allResources.end(); ++it)
-        result.append(urlWithoutFragment((*it)->url()));
+    for (const auto& resource : allResources)
+        result.append(urlWithoutFragment(resource->url()));
 
     return result;
 }
@@ -705,9 +705,9 @@ void InspectorPageAgent::getCookies(ErrorString*, RefPtr<TypeBuilder::Array<Type
             continue;
         Document* document = toLocalFrame(frame)->document();
         Vector<KURL> allURLs = allResourcesURLsForFrame(toLocalFrame(frame));
-        for (Vector<KURL>::const_iterator it = allURLs.begin(); it != allURLs.end(); ++it) {
+        for (const auto& url : allURLs) {
             Vector<Cookie> docCookiesList;
-            getRawCookies(document, *it, docCookiesList);
+            getRawCookies(document, url, docCookiesList);
             int cookiesSize = docCookiesList.size();
             for (int i = 0; i < cookiesSize; i++) {
                 if (!rawCookiesList.contains(docCookiesList[i]))
@@ -785,8 +785,8 @@ void InspectorPageAgent::searchInResource(ErrorString*, const String& frameId, c
     LocalFrame* frame = frameForId(frameId);
     KURL kurl(ParsedURLString, url);
 
-    FrameLoader* frameLoader = frame ? &frame->loader() : 0;
-    DocumentLoader* loader = frameLoader ? frameLoader->documentLoader() : 0;
+    FrameLoader* frameLoader = frame ? &frame->loader() : nullptr;
+    DocumentLoader* loader = frameLoader ? frameLoader->documentLoader() : nullptr;
     if (!loader)
         return;
 
@@ -982,18 +982,14 @@ void InspectorPageAgent::setScriptExecutionDisabled(ErrorString*, bool value)
 
 void InspectorPageAgent::didClearDocumentOfWindowObject(LocalFrame* frame)
 {
-    if (frame == m_page->mainFrame())
-        m_injectedScriptManager->discardInjectedScripts();
-
     if (!m_frontend)
         return;
 
     RefPtr<JSONObject> scripts = m_state->getObject(PageAgentState::pageAgentScriptsToEvaluateOnLoad);
     if (scripts) {
-        JSONObject::const_iterator end = scripts->end();
-        for (JSONObject::const_iterator it = scripts->begin(); it != end; ++it) {
+        for (const auto& script : *scripts) {
             String scriptText;
-            if (it->value->asString(&scriptText))
+            if (script.value->asString(&scriptText))
                 frame->script().executeScriptInMainWorld(scriptText);
         }
     }
@@ -1057,7 +1053,7 @@ LocalFrame* InspectorPageAgent::mainFrame()
 
 LocalFrame* InspectorPageAgent::frameForId(const String& frameId)
 {
-    return frameId.isEmpty() ? 0 : m_identifierToFrame.get(frameId);
+    return frameId.isEmpty() ? nullptr : m_identifierToFrame.get(frameId);
 }
 
 String InspectorPageAgent::frameId(LocalFrame* frame)
@@ -1100,7 +1096,7 @@ LocalFrame* InspectorPageAgent::findFrameWithSecurityOrigin(const String& origin
         if (documentOrigin->toRawString() == originRawString)
             return toLocalFrame(frame);
     }
-    return 0;
+    return nullptr;
 }
 
 LocalFrame* InspectorPageAgent::assertFrame(ErrorString* errorString, const String& frameId)
@@ -1298,9 +1294,7 @@ PassRefPtr<TypeBuilder::Page::FrameResourceTree> InspectorPageAgent::buildObject
          .setResources(subresources);
 
     Vector<Resource*> allResources = cachedResourcesForFrame(frame, true);
-    for (Vector<Resource*>::const_iterator it = allResources.begin(); it != allResources.end(); ++it) {
-        Resource* cachedResource = *it;
-
+    for (Resource* cachedResource : allResources) {
         RefPtr<TypeBuilder::Page::FrameResourceTree::Resources> resourceObject = TypeBuilder::Page::FrameResourceTree::Resources::create()
             .setUrl(urlWithoutFragment(cachedResource->url()).string())
             .setType(cachedResourceTypeJson(*cachedResource))
@@ -1313,8 +1307,7 @@ PassRefPtr<TypeBuilder::Page::FrameResourceTree> InspectorPageAgent::buildObject
     }
 
     Vector<Document*> allImports = InspectorPageAgent::importsForFrame(frame);
-    for (Vector<Document*>::const_iterator it = allImports.begin(); it != allImports.end(); ++it) {
-        Document* import = *it;
+    for (Document* import : allImports) {
         RefPtr<TypeBuilder::Page::FrameResourceTree::Resources> resourceObject = TypeBuilder::Page::FrameResourceTree::Resources::create()
             .setUrl(urlWithoutFragment(import->url()).string())
             .setType(resourceTypeJson(InspectorPageAgent::DocumentResource))
@@ -1366,7 +1359,6 @@ void InspectorPageAgent::updateViewMetrics(bool enabled, int width, int height, 
         document->styleResolverChanged();
         document->mediaQueryAffectingValueChanged();
     }
-    InspectorInstrumentation::mediaQueryResultChanged(document);
 
     if (m_deviceMetricsOverridden) {
         m_page->settings().setTextAutosizingEnabled(mobile);
@@ -1403,7 +1395,7 @@ void InspectorPageAgent::updateTouchEventEmulationInPage(bool enabled)
     m_page->deprecatedLocalMainFrame()->view()->layout();
 }
 
-void InspectorPageAgent::setTouchEmulationEnabled(ErrorString*, bool enabled)
+void InspectorPageAgent::setTouchEmulationEnabled(ErrorString*, bool enabled, const String* configuration)
 {
     if (m_state->getBoolean(PageAgentState::touchEventEmulationEnabled) == enabled)
         return;
@@ -1473,6 +1465,24 @@ void InspectorPageAgent::setShowViewportSizeOnResize(ErrorString*, bool show, co
 {
     m_state->setBoolean(PageAgentState::showSizeOnResize, show);
     m_state->setBoolean(PageAgentState::showGridOnResize, asBool(showGrid));
+}
+
+void InspectorPageAgent::setOverlayMessage(ErrorString*, const String* message)
+{
+    m_overlay->setPausedInDebuggerMessage(message);
+}
+
+void InspectorPageAgent::animationsPlaybackRate(ErrorString*, double* playbackRate)
+{
+    *playbackRate = toLocalFrame(m_page->mainFrame())->document()->timeline().playbackRate();
+}
+
+void InspectorPageAgent::setAnimationsPlaybackRate(ErrorString*, double playbackRate)
+{
+    for (Frame* frame = m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
+        if (frame->isLocalFrame())
+            toLocalFrame(frame)->document()->timeline().setPlaybackRate(playbackRate);
+    }
 }
 
 void InspectorPageAgent::clearEditedResourcesContent()

@@ -123,8 +123,8 @@ class ClientSession
       protocol::ConnectionToClient* connection) override;
   void OnConnectionClosed(protocol::ConnectionToClient* connection,
                           protocol::ErrorCode error) override;
-  void OnSequenceNumberUpdated(protocol::ConnectionToClient* connection,
-                               int64 sequence_number) override;
+  void OnEventTimestamp(protocol::ConnectionToClient* connection,
+                        int64 timestamp) override;
   void OnRouteChange(protocol::ConnectionToClient* connection,
                      const std::string& channel_name,
                      const protocol::TransportRoute& route) override;
@@ -219,8 +219,8 @@ class ClientSession
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
 
   // Schedulers for audio and video capture.
-  // |video_scheduler_| may be NULL if the video channel is not required - see
-  // ResetVideoPipeline().
+  // |video_scheduler_| may be nullptr if the video channel is not required -
+  // see ResetVideoPipeline().
   scoped_refptr<AudioScheduler> audio_scheduler_;
   scoped_refptr<VideoScheduler> video_scheduler_;
 

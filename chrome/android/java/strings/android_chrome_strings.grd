@@ -93,6 +93,217 @@
   </translations>
   <release allow_pseudo="false" seq="1">
     <messages fallback_to_english="true">
+      <!-- Generic strings -->
+      <message name="IDS_OK" desc="Label for a confirm button. Used in multiple contexts. [CHAR-LIMIT=20]">
+        OK
+      </message>
+      <message name="IDS_CANCEL" desc="Label for a cancel button. Used in multiple contexts. [CHAR-LIMIT=20]">
+        Cancel
+      </message>
+      <message name="IDS_SAVE" desc="Label for a button to save a change. Used in multiple contexts. [CHAR-LIMIT=20]">
+        Save
+      </message>
+      <message name="IDS_DELETE" desc="Label for a delete button. Used in multiple contexts. [CHAR-LIMIT=20]">
+        Delete
+      </message>
+      <message name="IDS_TEXT_ON" desc="Text indicating that an option is turned on. [CHAR-LIMIT=20]">
+        On
+      </message>
+      <message name="IDS_TEXT_OFF" desc="Text indicating that an option is turned off. [CHAR-LIMIT=20]">
+        Off
+      </message>
+      <message name="IDS_LEARN_MORE" desc="Generic label for menu item to learn more about a feature. [CHAR-LIMIT=32]">
+        Learn more
+      </message>
+
+      <!-- Main Preferences -->
+      <message name="IDS_PREFERENCES" desc="Title for Chrome's Settings.">
+        Settings
+      </message>
+      <message name="IDS_HELP" desc="Title for the help view.">
+        Help
+      </message>
+      <message name="IDS_MANAGED_BY_YOUR_ADMINISTRATOR" desc="Popup message when the user clicks a UI element that has been disabled by enterprise policy.">
+        Managed by your administrator
+      </message>
+      <message name="IDS_MANAGED_BY_YOUR_PARENTS" desc="Popup message when the user clicks a UI element that has been disabled by his/her parents.">
+        Managed by your parents
+      </message>
+      <message name="IDS_MANAGED_BY_YOUR_PARENT" desc="Popup message when the user clicks a UI element that has been disabled by his/her parent.">
+        Managed by your parent
+      </message>
+
+      <!-- Search engine preferences -->
+      <message name="IDS_PREFS_SEARCH_ENGINE" desc="Title for Search Engine preferences. [CHAR-LIMIT=32]">
+        Search engine
+      </message>
+      <message name="IDS_SEARCH_ENGINE_NAME_AND_DOMAIN" desc="Label for a search engine, that includes its name and its domain, e.g. Google (google.co.uk).">
+        <ph name="SEARCH_ENGINE_NAME">%1$s<ex>Google</ex></ph> (<ph name="SEARCH_ENGINE_DOMAIN">%2$s<ex>google.co.uk</ex></ph>)
+      </message>
+
+      <!-- Autofill preferences -->
+      <message name="IDS_PREFS_AUTOFILL" desc="Title for 'Autofill forms' settings, which control what personal data can be automatically filled into web page forms. [CHAR-LIMIT=32]">
+        Autofill forms
+      </message>
+      <message name="IDS_AUTOFILL_PROFILES_TITLE" desc="Header above the list of profiles (which contain the user's name, address, etc) that can be automatically filled into web page forms. [CHAR-LIMIT=32]">
+        Addresses
+      </message>
+      <message name="IDS_AUTOFILL_CREDIT_CARDS_TITLE" desc="Header above the list of the user's credit cards that can be automatically filled into web page forms. [CHAR-LIMIT=32]">
+        Credit cards
+      </message>
+      <message name="IDS_AUTOFILL_CREATE_PROFILE" desc="Button that allows the user to create a new profile (which contains the user's name, address, etc) that will be automatically filled into web page forms. [CHAR-LIMIT=32]">
+        Add address
+      </message>
+      <message name="IDS_AUTOFILL_EDIT_PROFILE" desc="Button that allows the user to edit a profile (which contains the user's name, address, etc) that can be automatically filled into web page forms. [CHAR-LIMIT=32]">
+        Edit address
+      </message>
+      <message name="IDS_AUTOFILL_CREATE_CREDIT_CARD" desc="Button that allows the user to add a new credit card that will be automatically filled into web page forms. [CHAR-LIMIT=32]">
+        Add credit card
+      </message>
+      <message name="IDS_AUTOFILL_EDIT_CREDIT_CARD" desc="Button that allows the user to edit a credit card that can be automatically filled into web page forms. [CHAR-LIMIT=32]">
+        Edit credit card
+      </message>
+      <message name="IDS_AUTOFILL_PROFILE_EDITOR_EMAIL_ADDRESS" desc="Label for text input field containing an e-mail address. [CHAR-LIMIT=32]">
+        Email
+      </message>
+      <message name="IDS_AUTOFILL_PROFILE_EDITOR_PHONE_NUMBER" desc="Label for text input field containing a phone number. [CHAR-LIMIT=32]">
+        Phone
+      </message>
+      <message name="IDS_AUTOFILL_CREDIT_CARD_EDITOR_NAME" desc="Label for text input field containing the name on a credit card. [CHAR-LIMIT=32]">
+        Name on card
+      </message>
+      <message name="IDS_AUTOFILL_CREDIT_CARD_EDITOR_NUMBER" desc="Label for text input field containing a credit card number. [CHAR-LIMIT=32]">
+        Credit card number
+      </message>
+      <message name="IDS_AUTOFILL_CREDIT_CARD_EDITOR_EXPIRATION_DATE" desc="Label for text input field containing a credit card expiration date. [CHAR-LIMIT=32]">
+        Expiration date
+      </message>
+      <message name="IDS_ACCESSIBILITY_AUTOFILL_CC_NAME_TEXTBOX" desc="Content description for text input field containing the name on a credit card.">
+        Name on card
+      </message>
+      <message name="IDS_ACCESSIBILITY_AUTOFILL_CC_NUMBER_TEXTBOX" desc="Content description for text input field containing a credit card number.">
+        Card number
+      </message>
+      <message name="IDS_ACCESSIBILITY_AUTOFILL_CC_MONTH" desc="Content description for text input field containing a credit card expiration month.">
+        Card expiration month
+      </message>
+      <message name="IDS_ACCESSIBILITY_AUTOFILL_CC_YEAR" desc="Content description for text input field containing a credit card expiration year.">
+        Card expiration year
+      </message>
+
+      <!-- Save passwords preferences -->
+      <message name="IDS_PREFS_SAVED_PASSWORDS" desc="Title for the Saved Passwords preferences. [CHAR-LIMIT=32]">
+        Save passwords
+      </message>
+      <message name="IDS_SECTION_SAVED_PASSWORDS" desc="Header for the list of passwords that have been saved in Chrome. [CHAR-LIMIT=32]">
+        Passwords
+      </message>
+      <message name="IDS_SECTION_SAVED_PASSWORDS_EXCEPTIONS" desc="Header for the list of websites for which user selected to never save passwords. [CHAR-LIMIT=32]">
+        Never saved
+      </message>
+      <message name="IDS_MANAGE_PASSWORDS_TEXT" desc="Text for link to manage passwords on Account Central.">
+        Manage saved passwords in your <ph name="BEGIN_LINK">&lt;link&gt;</ph>Google Account<ph name="END_LINK">&lt;/link&gt;</ph>
+      </message>
+      <message name="IDS_SAVED_PASSWORDS_NONE_TEXT" desc="Text when there are no saved passwords/exceptions.">
+        Saved passwords will appear here.
+      </message>
+      <message name="IDS_PASSWORD_ENTRY_EDITOR_TITLE" desc='Title of the "edit a name/password" screen.'>
+        Edit saved name/password or exception
+      </message>
+
+      <!-- Accessibility preferences -->
+      <message name="IDS_PREFS_ACCESSIBILITY" desc="Title of Accessibility settings, which allows the user to change webpage font sizes. [CHAR-LIMIT=32]">
+        Accessibility
+      </message>
+      <message name="IDS_FONT_SIZE" desc="Title for font size preference.">
+        Text scaling
+      </message>
+      <message name="IDS_FONT_SIZE_PREVIEW_TEXT" desc="Preview text for font-size slider.">
+        Drag the slider until you can read this comfortably. Text should look at least this big after double-tapping on a paragraph.
+      </message>
+      <message name="IDS_FORCE_ENABLE_ZOOM_TITLE" desc="Title of preference that allows the user to zoom in on any webpage, even if the page tries to disable zooming.">
+        Force enable zoom
+      </message>
+      <message name="IDS_FORCE_ENABLE_ZOOM_SUMMARY" desc="Summary of preference that allows the user to zoom in on any webpage, even if the page tries to disable zooming.">
+        Override a website’s request to prevent zooming in
+      </message>
+
+      <!-- Protected content preferences -->
+      <message name="IDS_PROTECTED_CONTENT" desc="Title for link to protected content settings [CHAR-LIMIT=32]">
+        Protected content
+      </message>
+      <message name="IDS_PROTECTED_CONTENT_PREFS_DESCRIPTION" desc="Description of Protected Content preference">
+        When protected content is ON, websites will be able to authenticate your device to ensure it is authorized to play premium, protected videos.
+
+If OFF, you may not be able to play premium videos on this device.
+      </message>
+      <message name="IDS_PROTECTED_CONTENT_RESET_FAILED" desc="Protected content preference device credential reset failure toast">
+        Reset failed. Ensure your device is online and try again.
+      </message>
+      <message name="IDS_RESET_DEVICE_CREDENTIALS" desc="Title for device credential reset menu preference">
+        Reset device credentials
+      </message>
+      <message name="IDS_PROTECTED_CONTENT_RESET_TITLE" desc="Title for device credential reset menu preference">
+        Confirm device credential deletion
+      </message>
+      <message name="IDS_PROTECTED_CONTENT_RESET_MESSAGE" desc="Title for device credential reset menu preference">
+        Content (movies, music, etc.) downloaded in other applications may no longer be playable until those application re-acquire licenses based on a new device credential.
+
+To obtain new licenses, connect to the internet and play your downloaded content.
+      </message>
+      <message name="IDS_PROTECTED_CONTENT_LEARN_MORE_URL" desc="URL for learning more about device credential reset menu preference" translateable="false">
+        https://support.google.com/chrome/?p=mobile_protected_content
+      </message>
+
+      <!-- About Chrome preferences -->
+      <message name="IDS_PREFS_ABOUT_CHROME" desc="Title for the About Chrome page. [CHAR-LIMIT=32]">
+        About Chrome
+      </message>
+      <message name="IDS_LEGAL_INFORMATION_SUMMARY" desc="Summary for legal information" meaning="Android">
+        Copyright <ph name="year">%1$d<ex>2014</ex></ph> Google Inc. All rights reserved.
+      </message>
+      <message name="IDS_APPLICATION_VERSION_TITLE" desc="Title for application version">
+        Application version
+      </message>
+      <message name="IDS_OS_VERSION_TITLE" desc="Title for operating system version">
+        Operating system
+      </message>
+      <message name="IDS_BLINK_VERSION_TITLE" desc="Title for the version of the Blink rendering engine">
+        Blink version
+      </message>
+      <message name="IDS_JAVASCRIPT_VERSION_TITLE" desc="Title for JavaScript version">
+        JavaScript version
+      </message>
+      <message name="IDS_EXECUTABLE_PATH_TITLE" desc="Title for the path to the Chrome executable">
+        Executable path
+      </message>
+      <message name="IDS_PROFILE_PATH_TITLE" desc="Title for the path where Chrome stores profile data">
+        Profile path
+      </message>
+
+      <!-- Legal information preferences -->
+      <message name="IDS_LEGAL_INFORMATION_TITLE" desc="Title for legal information [CHAR-LIMIT=32]">
+        Legal information
+      </message>
+      <message name="IDS_OPEN_SOURCE_LICENSE_TITLE" desc="Title for open source license">
+        Open source licenses
+      </message>
+      <message name="IDS_OPEN_SOURCE_LICENSE_URL" desc="URL for open source license" translateable="false">
+        chrome://credits
+      </message>
+      <message name="IDS_TERMS_OF_SERVICE_TITLE" desc="Title for terms of service">
+        Chrome Terms of Service
+      </message>
+      <message name="IDS_PRIVACY_NOTICE_TITLE" desc="Title for the Chrome privacy notice">
+        Chrome Privacy Notice
+      </message>
+      <message name="IDS_CHROME_PRIVACY_NOTICE_URL" desc="URL for the Chrome privacy notice" translateable="false">
+        https://www.google.com/intl/[GRITLANGCODE]/chrome/browser/privacy/
+      </message>
+      <message name="IDS_CHROME_TERMS_OF_SERVICE_URL" desc="URL for Google Chrome Terms of Service" translateable="false">
+        https://www.google.com/intl/[GRITLANGCODE]/chrome/browser/privacy/eula_text.html
+      </message>
+
       <message desc="Popup button for user to confirm a beforeunload dialog box triggered by a page navigation, i.e. they want to leave the current page [CHAR-LIMIT=20]" name="IDS_LEAVE_THIS_PAGE">
         Leave this Page
       </message>
@@ -120,6 +331,47 @@
       <message desc="Dialog box title for viewing security certificates. [CHAR-LIMIT=32]" name="IDS_CERTTITLE">
         Certificate Viewer
       </message>
+
+      <!-- Sign-in strings -->
+      <message name="IDS_ADD_ACCOUNT_TITLE" desc="Title for add Google account dialog [CHAR-LIMIT=40]">
+        Add a Google Account
+      </message>
+      <message name="IDS_ADD_ACCOUNT_MESSAGE" desc="Message to display for add Google account dialog">
+        You have not yet set up a Google Account on this device
+      </message>
+      <message name="IDS_ADD_ACCOUNT_CONTINUE" desc="Continue button for add Google account dialog [CHAR-LIMIT=20]">
+        Continue
+      </message>
+      <message name="IDS_SIGNOUT_TITLE" desc="Title for sign out of Chrome dialog [CHAR-LIMIT=40]">
+        Sign out of Chrome
+      </message>
+      <message name="IDS_SIGNOUT_MESSAGE" desc="Message to display for sign out of Chrome dialog">
+        The data stored on this device as well as the data stored in your Google Account will remain in both places. However, new data or changes you make to your data will not be synchronized between them.
+      </message>
+      <message name="IDS_SIGNOUT_MANAGED_ACCOUNT_MESSAGE" desc="Message to display for sign out of Chrome dialog when the account has enterprise management, and all user data will be erased">
+        You are signing out of an account managed by <ph name="DOMAIN_NAME">%1$s<ex>google.com</ex></ph>. This will delete the Chrome data stored on this device, but the data will remain in your Google Account.
+      </message>
+      <message name="IDS_FIRSTRUN_SIGNED_IN_TITLE" desc="Message informing the user that they are now signed in.">
+        You're now signed in to Chrome.
+      </message>
+      <message name="IDS_FIRSTRUN_SIGNED_IN_DESCRIPTION" desc="Message informing the user what is being synced.">
+        Your open tabs, bookmarks, history, and more are being synced with your Google Account.
+      </message>
+
+      <!-- Sync strings -->
+      <message name="IDS_SIGN_IN_SYNC" desc="Sync preference title in signed-in prefs and prefix for notification related to sync [CHAR-LIMIT=32]">
+        Sync
+      </message>
+      <message name="IDS_SYNC_ANDROID_MASTER_SYNC_DISABLED" desc="Message to show when Android master sync flag is disabled">
+        Android system sync disabled. Please re-enable and try again.
+      </message>
+      <message name="IDS_SYNC_NEED_PASSPHRASE" desc="Error message when a passphrase is needed for decrypting sync data.">
+        Passphrase required
+      </message>
+      <message name="IDS_SYNC_NEED_PASSWORD" desc="Error message when a password is needed for decrypting sync data.">
+        Password required
+      </message>
+
       <!-- Sync error strings -->
       <message desc="Sync error string for generic error. [CHAR-LIMIT=80]" name="IDS_SYNC_ERROR_GENERIC">
         Sync error
@@ -156,6 +408,7 @@ You are signing in with a managed account and giving its administrator control o
       <message desc="Message for the progress dialog shown while profile data is being wiped after signing out of an enterprise account" name="IDS_WIPING_PROFILE_DATA_MESSAGE">
         Please wait...
       </message>
+
       <!-- Tab switcher -->
       <message name="IDS_ACCESSIBILITY_TAB_SWITCHER_STANDARD_STACK" desc="Content description for the standard stack selection 'button'.">
         Standard tabs
@@ -179,13 +432,15 @@ You are signing in with a managed account and giving its administrator control o
       <message name="IDS_TAB_LOADING_DEFAULT_TITLE" desc="The title of a tab when we are still waiting for either the URL or the real title. This generally shows when the page is first loading.">
         Loading…
       </message>
+
       <!-- InfoBar -->
       <message desc="Accessibility label for the dismiss infobar Button" name="IDS_INFOBAR_CLOSE">
         Close
       </message>
+
       <!-- TranslateInfoBar -->
-      <message name="IDS_TRANSLATE_INFOBAR_TEXT" meaning="Android" desc="Text to display on the translate infobar to offer a translate. [CHAR-LIMIT=64]">
-        This page is in <ph name="SOURCE_LANGUAGE">^1<ex>English</ex></ph>. Translate it to <ph name="TARGET_LANGUAGE">^2<ex>French</ex></ph>?
+      <message name="IDS_TRANSLATE_INFOBAR_TEXT" desc="Text to display on the translate infobar to offer a translate. [CHAR-LIMIT=64]" meaning="Android">
+        This page is in <ph name="SOURCE_LANGUAGE">^1<ex>English</ex></ph>. Translate it to <ph name="TARGET_LANGUAGE">^2<ex>FRENCH</ex></ph>?
       </message>
       <message name="IDS_TRANSLATE_INFOBAR_CHANGE_LANGUAGES" desc="link text to offer to change languages.">
         Change languages
@@ -265,6 +520,7 @@ You are signing in with a managed account and giving its administrator control o
       <message name="IDS_ACCESSIBILITY_CONTENT_VIEW" desc="Content description for the content view that holds the web contents [CHAR-LIMIT=30]">
         Web View
       </message>
+
       <!-- ContextMenu -->
       <message name="IDS_CONTEXTMENU_OPEN_IN_NEW_TAB" desc="Context sensitive menu item to open the selected link in a new tab. [CHAR-LIMIT=30]">
         Open in new tab
@@ -384,14 +640,6 @@ You are signing in with a managed account and giving its administrator control o
         Cancel
       </message>
 
-      <!-- Data Reduction Proxy -->
-      <message name="IDS_DATA_REDUCTION_INFOBAR_TEXT" desc="Text to be displayed in the data reduction proxy infobar" translateable="false">
-        You are part of a data reduction proxy field trial.
-      </message>
-      <message name="IDS_DATA_REDUCTION_INFOBAR_LINK_TEXT" desc="Text to be displayed in the data reduction proxy infobar link" translateable="false">
-        Settings
-      </message>
-
       <!-- Android NFC Beam strings -->
       <message name="IDS_NFC_BEAM_ERROR_OVERLAY_ACTIVE" desc="Android Beam error - a tab is not in the foreground [CHAR-LIMIT=40]">
         Select a tab to beam
@@ -454,6 +702,24 @@ You are signing in with a managed account and giving its administrator control o
         Always
       </message>
 
+      <!-- Sad tab page -->
+      <message name="IDS_SAD_TAB_SUGGESTIONS" desc="The help message displayed on the sad tab page after a tab crashes.">
+        If you're seeing this frequently, try these <ph name="BEGIN_LINK">&lt;link&gt;</ph>suggestions<ph name="END_LINK">&lt;/link&gt;</ph>.
+      </message>
+
+      <!-- Fullscreen -->
+      <message name="IDS_FULLSCREEN_API_NOTIFICATION" desc="Notification message when a site has entered fullscreen and the directions of how to exit.">
+        This site has gone fullscreen.
+Drag from top to exit.
+      </message>
+
+      <!-- Download UI -->
+      <message name="IDS_DOWNLOAD_NOTIFICATION_FAILED" desc="Download notification to be displayed when a download fails.">
+        Download failed.
+      </message>
+      <message name="IDS_CANNOT_ADD_DOWNLOADED_ITEM_TO_MANAGER" desc="Toast for a download which has completed but cannot be added to the download manager">
+        Failed to add downloaded item to the download manager.
+      </message>
     </messages>
   </release>
 </grit>

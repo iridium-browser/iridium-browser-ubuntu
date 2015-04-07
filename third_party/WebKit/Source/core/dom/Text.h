@@ -56,6 +56,7 @@ public:
     void updateTextRenderer(unsigned offsetOfReplacedData, unsigned lengthOfReplacedData, RecalcStyleBehavior = DoNotRecalcStyle);
 
     virtual void attach(const AttachContext& = AttachContext()) override final;
+    void reattachIfNeeded(const AttachContext& = AttachContext());
 
     virtual bool canContainRangeEndPoint() const override final { return true; }
     virtual NodeType nodeType() const override;
@@ -68,7 +69,7 @@ private:
     virtual String nodeName() const override;
     virtual PassRefPtrWillBeRawPtr<Node> cloneNode(bool deep = true) override final;
 
-    bool isTextNode() const WTF_DELETED_FUNCTION; // This will catch anyone doing an unnecessary check.
+    bool isTextNode() const = delete; // This will catch anyone doing an unnecessary check.
 
     bool needsWhitespaceRenderer();
 

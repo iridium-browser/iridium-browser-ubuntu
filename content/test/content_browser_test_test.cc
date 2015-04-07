@@ -9,6 +9,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,7 +22,7 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTest, MANUAL_ShouldntRun) {
 
 class ContentBrowserTestSanityTest : public ContentBrowserTest {
  public:
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     const testing::TestInfo* const test_info =
         testing::UnitTest::GetInstance()->current_test_info();
     if (std::string(test_info->name()) == "SingleProcess")
@@ -45,6 +46,22 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTestSanityTest, Basic) {
 
 IN_PROC_BROWSER_TEST_F(ContentBrowserTestSanityTest, SingleProcess) {
   Test();
+}
+
+namespace {
+
+void CallbackChecker(bool* non_nested_task_ran) {
+  *non_nested_task_ran = true;
+}
+
+}  // namespace
+
+IN_PROC_BROWSER_TEST_F(ContentBrowserTestSanityTest, NonNestableTask) {
+  bool non_nested_task_ran = false;
+  base::MessageLoop::current()->PostNonNestableTask(
+      FROM_HERE, base::Bind(&CallbackChecker, &non_nested_task_ran));
+  content::RunAllPendingInMessageLoop();
+  ASSERT_TRUE(non_nested_task_ran);
 }
 
 }  // namespace content

@@ -32,6 +32,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/latency_info.h"
 
+using std::string;
+
 namespace content {
 
 namespace {
@@ -120,6 +122,7 @@ class FakeResourceMessageFilter : public ResourceMessageFilter {
           NULL  /* blob_storage_context */,
           NULL  /* file_system_context */,
           NULL  /* service_worker_context */,
+          NULL  /* host_zoom_level_context */,
           base::Bind(&FakeResourceMessageFilter::GetContexts,
                      base::Unretained(this))) {
   }

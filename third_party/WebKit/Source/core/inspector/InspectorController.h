@@ -40,6 +40,7 @@
 
 namespace blink {
 
+class AsyncCallTracker;
 class ContextMenuProvider;
 class LocalFrame;
 class GraphicsContext;
@@ -146,7 +147,8 @@ private:
     RefPtrWillBeMember<InstrumentingAgents> m_instrumentingAgents;
     OwnPtrWillBeMember<InjectedScriptManager> m_injectedScriptManager;
     OwnPtrWillBeMember<InspectorCompositeState> m_state;
-    OwnPtr<InspectorOverlay> m_overlay;
+    OwnPtrWillBeMember<InspectorOverlay> m_overlay;
+    OwnPtrWillBeMember<AsyncCallTracker> m_asyncCallTracker;
 
     RawPtrWillBeMember<InspectorDOMAgent> m_domAgent;
     RawPtrWillBeMember<InspectorPageAgent> m_pageAgent;
@@ -171,4 +173,4 @@ private:
 }
 
 
-#endif // !defined(InspectorController_h)
+#endif // InspectorController_h

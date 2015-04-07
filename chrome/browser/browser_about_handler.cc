@@ -6,7 +6,9 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "base/logging.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -102,19 +104,6 @@ bool HandleNonNavigationAboutURL(const GURL& url) {
         base::Bind(&chrome::AttemptExit));
     return true;
   }
-
-  // chrome://ipc/ is currently buggy, so we disable it for official builds.
-#if !defined(OFFICIAL_BUILD)
-
-#if (defined(OS_MACOSX) || defined(OS_WIN)) && defined(IPC_MESSAGE_LOG_ENABLED)
-  if (LowerCaseEqualsASCII(spec, chrome::kChromeUIIPCURL)) {
-    // Run the dialog. This will re-use the existing one if it's already up.
-    chrome::ShowAboutIPCDialog();
-    return true;
-  }
-#endif
-
-#endif  // OFFICIAL_BUILD
 
   return false;
 }

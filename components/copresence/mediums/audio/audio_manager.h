@@ -29,14 +29,13 @@ class AudioManager {
   virtual void StopRecording(AudioType type) = 0;
 
   virtual void SetToken(AudioType type,
-                        const std::string& url_unsafe_token) = 0;
+                        const std::string& url_safe_token) = 0;
 
   virtual const std::string GetToken(AudioType type) = 0;
 
-  virtual bool IsRecording(AudioType type) = 0;
-  virtual bool IsPlaying(AudioType type) = 0;
-
   virtual bool IsPlayingTokenHeard(AudioType type) = 0;
+
+  virtual void SetTokenLength(AudioType type, size_t token_length) = 0;
 };
 
 }  // namespace copresence

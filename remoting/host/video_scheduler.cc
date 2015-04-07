@@ -23,7 +23,6 @@
 #include "third_party/webrtc/modules/desktop_capture/desktop_capturer.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_frame.h"
 #include "third_party/webrtc/modules/desktop_capture/mouse_cursor.h"
-#include "third_party/webrtc/modules/desktop_capture/mouse_cursor_shape.h"
 
 namespace remoting {
 
@@ -65,7 +64,7 @@ VideoScheduler::VideoScheduler(
       capture_pending_(false),
       did_skip_frame_(false),
       is_paused_(false),
-      sequence_number_(0) {
+      latest_event_timestamp_(0) {
   DCHECK(network_task_runner_->BelongsToCurrentThread());
   DCHECK(capturer_);
   DCHECK(mouse_cursor_monitor_);
@@ -77,7 +76,7 @@ VideoScheduler::VideoScheduler(
 // Public methods --------------------------------------------------------------
 
 webrtc::SharedMemory* VideoScheduler::CreateSharedMemory(size_t size) {
-  return NULL;
+  return nullptr;
 }
 
 void VideoScheduler::OnCaptureCompleted(webrtc::DesktopFrame* frame) {
@@ -92,12 +91,12 @@ void VideoScheduler::OnCaptureCompleted(webrtc::DesktopFrame* frame) {
         base::TimeDelta::FromMilliseconds(owned_frame->capture_time_ms()));
   }
 
-  // Even when |frame| is NULL we still need to post it to the encode thread
+  // Even when |frame| is nullptr we still need to post it to the encode thread
   // to make sure frames are freed in the same order they are received and
   // that we don't start capturing frame n+2 before frame n is freed.
   encode_task_runner_->PostTask(
       FROM_HERE, base::Bind(&VideoScheduler::EncodeFrame, this,
-                            base::Passed(&owned_frame), sequence_number_,
+                            base::Passed(&owned_frame), latest_event_timestamp_,
                             base::TimeTicks::Now()));
 
   // If a frame was skipped, try to capture it again.
@@ -123,7 +122,7 @@ void VideoScheduler::OnMouseCursor(webrtc::MouseCursor* cursor) {
   cursor_proto->set_hotspot_x(cursor->hotspot().x());
   cursor_proto->set_hotspot_y(cursor->hotspot().y());
 
-  std::string data;
+  cursor_proto->set_data(std::string());
   uint8_t* current_row = cursor->image()->data();
   for (int y = 0; y < cursor->image()->size().height(); ++y) {
     cursor_proto->mutable_data()->append(
@@ -156,8 +155,8 @@ void VideoScheduler::Stop() {
   DCHECK(network_task_runner_->BelongsToCurrentThread());
 
   // Clear stubs to prevent further updates reaching the client.
-  cursor_stub_ = NULL;
-  video_stub_ = NULL;
+  cursor_stub_ = nullptr;
+  video_stub_ = nullptr;
 
   keep_alive_timer_.reset();
 
@@ -182,16 +181,16 @@ void VideoScheduler::Pause(bool pause) {
   }
 }
 
-void VideoScheduler::UpdateSequenceNumber(int64 sequence_number) {
+void VideoScheduler::SetLatestEventTimestamp(int64 latest_event_timestamp) {
   if (!capture_task_runner_->BelongsToCurrentThread()) {
     DCHECK(network_task_runner_->BelongsToCurrentThread());
     capture_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&VideoScheduler::UpdateSequenceNumber,
-                              this, sequence_number));
+        FROM_HERE, base::Bind(&VideoScheduler::SetLatestEventTimestamp,
+                              this, latest_event_timestamp));
     return;
   }
 
-  sequence_number_ = sequence_number;
+  latest_event_timestamp_ = latest_event_timestamp;
 }
 
 void VideoScheduler::SetLosslessEncode(bool want_lossless) {
@@ -271,7 +270,7 @@ void VideoScheduler::ScheduleNextCapture() {
 void VideoScheduler::CaptureNextFrame() {
   DCHECK(capture_task_runner_->BelongsToCurrentThread());
 
-  // If we are stopping (|capturer_| is NULL), or paused, then don't capture.
+  // If we are stopping (|capturer_| is nullptr), or paused, then don't capture.
   if (!capturer_ || is_paused_)
     return;
 
@@ -370,7 +369,7 @@ void VideoScheduler::SendCursorShape(
 
 void VideoScheduler::EncodeFrame(
     scoped_ptr<webrtc::DesktopFrame> frame,
-    int64 sequence_number,
+    int64 latest_event_timestamp,
     base::TimeTicks timestamp) {
   DCHECK(encode_task_runner_->BelongsToCurrentThread());
 
@@ -378,7 +377,7 @@ void VideoScheduler::EncodeFrame(
   if (!frame || frame->updated_region().is_empty()) {
     capture_task_runner_->DeleteSoon(FROM_HERE, frame.release());
     scoped_ptr<VideoPacket> packet(new VideoPacket());
-    packet->set_client_sequence_number(sequence_number);
+    packet->set_latest_event_timestamp(latest_event_timestamp);
     network_task_runner_->PostTask(
         FROM_HERE,
         base::Bind(
@@ -387,7 +386,7 @@ void VideoScheduler::EncodeFrame(
   }
 
   scoped_ptr<VideoPacket> packet = encoder_->Encode(*frame);
-  packet->set_client_sequence_number(sequence_number);
+  packet->set_latest_event_timestamp(latest_event_timestamp);
 
   if (g_enable_timestamps) {
     packet->set_timestamp(timestamp.ToInternalValue());

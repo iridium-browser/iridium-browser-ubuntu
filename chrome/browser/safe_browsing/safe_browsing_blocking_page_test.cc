@@ -351,7 +351,7 @@ class SafeBrowsingBlockingPageBrowserTest
     InProcessBrowserTest::SetUp();
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitchASCII(
         switches::kForceFieldTrials, "UwSInterstitialStatus/On/");
   }
@@ -413,6 +413,8 @@ class SafeBrowsingBlockingPageBrowserTest
             InterstitialPage::GetInterstitialPage(contents)->
                 GetDelegateForTesting());
     ASSERT_TRUE(interstitial_page);
+    ASSERT_EQ(SafeBrowsingBlockingPage::kTypeForTesting,
+              interstitial_page->GetTypeForTesting());
     interstitial_page->CommandReceived(command);
   }
 
@@ -443,6 +445,8 @@ class SafeBrowsingBlockingPageBrowserTest
       TestSafeBrowsingBlockingPage* page =
           static_cast<TestSafeBrowsingBlockingPage*>(
               contents->GetInterstitialPage()->GetDelegateForTesting());
+      ASSERT_EQ(SafeBrowsingBlockingPage::kTypeForTesting,
+                page->GetTypeForTesting());
       page->WaitForDelete();
     }
 
@@ -489,11 +493,7 @@ class SafeBrowsingBlockingPageBrowserTest
     content::WaitForInterstitialAttach(contents);
     // Cancel the redirect request while interstitial page is open.
     browser()->tab_strip_model()->ActivateTabAt(0, true);
-    ui_test_utils::NavigateToURLWithDisposition(
-        browser(),
-        GURL("javascript:stopWin()"),
-        CURRENT_TAB,
-        ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+    ui_test_utils::NavigateToURL(browser(), GURL("javascript:stopWin()"));
     browser()->tab_strip_model()->ActivateTabAt(1, true);
     // Simulate the user clicking "proceed", there should be no crash.  Since
     // clicking proceed may do nothing (see comment in RedirectCanceled
@@ -508,7 +508,7 @@ class SafeBrowsingBlockingPageBrowserTest
         browser()->tab_strip_model()->GetActiveWebContents());
     if (!interstitial)
       return NULL;
-    return interstitial->GetRenderViewHostForTesting();
+    return interstitial->GetMainFrame()->GetRenderViewHost();
   }
 
   bool WaitForReady() {
@@ -608,7 +608,8 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, RedirectCanceled) {
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, DontProceed) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -641,7 +642,8 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, Proceed) {
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, IframeDontProceed) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -675,12 +677,9 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, IframeProceed) {
 
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
                        IframeOptInAndReportMalwareDetails) {
-  // The extended reporting opt-in is presented in the interstitial for both
-  // malware and UwS threats. It however only results in uploading further
+  // The extended reporting opt-in is presented in the interstitial for malware,
+  // phishing, and UwS threats. It however only results in uploading further
   // details about the immediate threat when facing malware threats.
-  const bool expect_extended_optin_option =
-      GetParam() == SB_THREAT_TYPE_URL_MALWARE ||
-      GetParam() == SB_THREAT_TYPE_URL_UNWANTED;
   const bool expect_malware_details = GetParam() == SB_THREAT_TYPE_URL_MALWARE;
 
   scoped_refptr<content::MessageLoopRunner> malware_report_sent_runner(
@@ -698,16 +697,13 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
   if (expect_malware_details)
     fake_malware_details->WaitForDOM();
 
-  EXPECT_EQ(expect_extended_optin_option ? VISIBLE : HIDDEN,
-            GetVisibility("malware-opt-in"));
-  if (expect_extended_optin_option)
-    EXPECT_TRUE(Click("opt-in-checkbox"));
+  EXPECT_EQ(VISIBLE, GetVisibility("malware-opt-in"));
+  EXPECT_TRUE(Click("opt-in-checkbox"));
   EXPECT_TRUE(ClickAndWaitForDetach("proceed-link"));
   AssertNoInterstitial(true);  // Assert the interstitial is gone
 
-  EXPECT_EQ(expect_extended_optin_option,
-            browser()->profile()->GetPrefs()->GetBoolean(
-                prefs::kSafeBrowsingExtendedReportingEnabled));
+  EXPECT_TRUE(browser()->profile()->GetPrefs()->GetBoolean(
+              prefs::kSafeBrowsingExtendedReportingEnabled));
   EXPECT_EQ(url,
             browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
 
@@ -727,7 +723,8 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ProceedDisabled) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -758,7 +755,8 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ProceedDisabled) {
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest, ReportingDisabled) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 

@@ -14,39 +14,9 @@
 #include "ui/native_theme/native_theme.h"
 #import "ui/views/cocoa/bridged_content_view.h"
 #import "ui/views/cocoa/bridged_native_widget.h"
+#import "ui/views/cocoa/native_widget_mac_nswindow.h"
 #import "ui/views/cocoa/views_nswindow_delegate.h"
 #include "ui/views/window/native_frame_view.h"
-
-@interface NativeWidgetMacNSWindow : NSWindow
-- (ViewsNSWindowDelegate*)viewsNSWindowDelegate;
-@end
-
-@implementation NativeWidgetMacNSWindow
-
-- (ViewsNSWindowDelegate*)viewsNSWindowDelegate {
-  return base::mac::ObjCCastStrict<ViewsNSWindowDelegate>([self delegate]);
-}
-
-// Override canBecome{Key,Main}Window to always return YES, otherwise Windows
-// with a styleMask of NSBorderlessWindowMask default to NO.
-- (BOOL)canBecomeKeyWindow {
-  return YES;
-}
-
-- (BOOL)canBecomeMainWindow {
-  return YES;
-}
-
-// Override orderWindow to intercept visibility changes, since there is no way
-// to observe these changes via NSWindowDelegate.
-- (void)orderWindow:(NSWindowOrderingMode)orderingMode
-         relativeTo:(NSInteger)otherWindowNumber {
-  [[self viewsNSWindowDelegate] onWindowOrderWillChange:orderingMode];
-  [super orderWindow:orderingMode relativeTo:otherWindowNumber];
-  [[self viewsNSWindowDelegate] onWindowOrderChanged];
-}
-
-@end
 
 namespace views {
 namespace {
@@ -100,6 +70,18 @@ NativeWidgetMac::~NativeWidgetMac() {
     CloseNow();
 }
 
+// static
+BridgedNativeWidget* NativeWidgetMac::GetBridgeForNativeWindow(
+    gfx::NativeWindow window) {
+  id<NSWindowDelegate> window_delegate = [window delegate];
+  if ([window_delegate respondsToSelector:@selector(nativeWidgetMac)]) {
+    ViewsNSWindowDelegate* delegate =
+        base::mac::ObjCCastStrict<ViewsNSWindowDelegate>(window_delegate);
+    return [delegate nativeWidgetMac]->bridge_.get();
+  }
+  return nullptr;  // Not created by NativeWidgetMac.
+}
+
 void NativeWidgetMac::OnWindowWillClose() {
   delegate_->OnNativeWidgetDestroying();
   // Note: If closed via CloseNow(), |bridge_| will already be reset. If closed
@@ -135,6 +117,23 @@ void NativeWidgetMac::InitNativeWidget(const Widget::InitParams& params) {
 
   DCHECK(GetWidget()->GetRootView());
   bridge_->SetRootView(GetWidget()->GetRootView());
+
+  // "Infer" must be handled by ViewsDelegate::OnBeforeWidgetInit().
+  DCHECK_NE(Widget::InitParams::INFER_OPACITY, params.opacity);
+  bool translucent = params.opacity == Widget::InitParams::TRANSLUCENT_WINDOW;
+  switch (params.layer_type) {
+    case aura::WINDOW_LAYER_NONE:
+      break;
+    case aura::WINDOW_LAYER_TEXTURED:
+      bridge_->CreateLayer(ui::LAYER_TEXTURED, translucent);
+      break;
+    case aura::WINDOW_LAYER_NOT_DRAWN:
+      bridge_->CreateLayer(ui::LAYER_NOT_DRAWN, translucent);
+      break;
+    case aura::WINDOW_LAYER_SOLID_COLOR:
+      bridge_->CreateLayer(ui::LAYER_SOLID_COLOR, translucent);
+      break;
+  }
 }
 
 NonClientFrameView* NativeWidgetMac::CreateNonClientFrameView() {
@@ -146,8 +145,9 @@ bool NativeWidgetMac::ShouldUseNativeFrame() const {
 }
 
 bool NativeWidgetMac::ShouldWindowContentsBeTransparent() const {
-  NOTIMPLEMENTED();
-  return false;
+  // On Windows, this returns false when DWM is unavailable (e.g. XP, RDP or
+  // classic mode). OSX always has a compositing window manager.
+  return true;
 }
 
 void NativeWidgetMac::FrameTypeChanged() {
@@ -177,13 +177,12 @@ Widget* NativeWidgetMac::GetTopLevelWidget() {
 }
 
 const ui::Compositor* NativeWidgetMac::GetCompositor() const {
-  NOTIMPLEMENTED();
-  return NULL;
+  return bridge_ && bridge_->layer() ? bridge_->layer()->GetCompositor()
+                                     : nullptr;
 }
 
 const ui::Layer* NativeWidgetMac::GetLayer() const {
-  NOTIMPLEMENTED();
-  return NULL;
+  return bridge_ ? bridge_->layer() : nullptr;
 }
 
 void NativeWidgetMac::ReorderNativeViews() {
@@ -196,12 +195,15 @@ void NativeWidgetMac::ViewRemoved(View* view) {
 }
 
 void NativeWidgetMac::SetNativeWindowProperty(const char* name, void* value) {
-  NOTIMPLEMENTED();
+  if (bridge_)
+    bridge_->SetNativeWindowProperty(name, value);
 }
 
 void* NativeWidgetMac::GetNativeWindowProperty(const char* name) const {
-  NOTIMPLEMENTED();
-  return NULL;
+  if (bridge_)
+    return bridge_->GetNativeWindowProperty(name);
+
+  return nullptr;
 }
 
 TooltipManager* NativeWidgetMac::GetTooltipManager() const {
@@ -210,16 +212,17 @@ TooltipManager* NativeWidgetMac::GetTooltipManager() const {
 }
 
 void NativeWidgetMac::SetCapture() {
-  NOTIMPLEMENTED();
+  if (bridge_ && !bridge_->HasCapture())
+    bridge_->AcquireCapture();
 }
 
 void NativeWidgetMac::ReleaseCapture() {
-  NOTIMPLEMENTED();
+  if (bridge_)
+    bridge_->ReleaseCapture();
 }
 
 bool NativeWidgetMac::HasCapture() const {
-  NOTIMPLEMENTED();
-  return false;
+  return bridge_ && bridge_->HasCapture();
 }
 
 InputMethod* NativeWidgetMac::CreateInputMethod() {
@@ -282,9 +285,8 @@ gfx::Rect NativeWidgetMac::GetRestoredBounds() const {
 }
 
 void NativeWidgetMac::SetBounds(const gfx::Rect& bounds) {
-  [GetNativeWindow() setFrame:gfx::ScreenRectToNSRect(bounds)
-                      display:YES
-                      animate:NO];
+  if (bridge_)
+    bridge_->SetBounds(bounds);
 }
 
 void NativeWidgetMac::SetSize(const gfx::Size& size) {
@@ -335,7 +337,10 @@ void NativeWidgetMac::Show() {
 }
 
 void NativeWidgetMac::Hide() {
-  NOTIMPLEMENTED();
+  if (!bridge_)
+    return;
+
+  bridge_->SetVisibilityState(BridgedNativeWidget::HIDE_WINDOW);
 }
 
 void NativeWidgetMac::ShowMaximizedWithBounds(
@@ -344,6 +349,9 @@ void NativeWidgetMac::ShowMaximizedWithBounds(
 }
 
 void NativeWidgetMac::ShowWithWindowState(ui::WindowShowState state) {
+  if (!bridge_)
+    return;
+
   switch (state) {
     case ui::SHOW_STATE_DEFAULT:
     case ui::SHOW_STATE_NORMAL:
@@ -358,21 +366,20 @@ void NativeWidgetMac::ShowWithWindowState(ui::WindowShowState state) {
       NOTREACHED();
       break;
   }
-  if (state == ui::SHOW_STATE_INACTIVE) {
-    if (!IsVisible())
-      [GetNativeWindow() orderBack:nil];
-  } else {
-    Activate();
-  }
+  bridge_->SetVisibilityState(state == ui::SHOW_STATE_INACTIVE
+      ? BridgedNativeWidget::SHOW_INACTIVE
+      : BridgedNativeWidget::SHOW_AND_ACTIVATE_WINDOW);
 }
 
 bool NativeWidgetMac::IsVisible() const {
-  return [GetNativeWindow() isVisible];
+  return bridge_ && bridge_->window_visible();
 }
 
 void NativeWidgetMac::Activate() {
-  [GetNativeWindow() makeKeyAndOrderFront:nil];
-  [NSApp activateIgnoringOtherApps:YES];
+  if (!bridge_)
+    return;
+
+  bridge_->SetVisibilityState(BridgedNativeWidget::SHOW_AND_ACTIVATE_WINDOW);
 }
 
 void NativeWidgetMac::Deactivate() {
@@ -423,7 +430,13 @@ void NativeWidgetMac::Maximize() {
 }
 
 void NativeWidgetMac::Minimize() {
-  NOTIMPLEMENTED();
+  NSWindow* window = GetNativeWindow();
+  // Calling performMiniaturize: will momentarily highlight the button, but
+  // AppKit will reject it if there is no miniaturize button.
+  if ([window styleMask] & NSMiniaturizableWindowMask)
+    [window performMiniaturize:nil];
+  else
+    [window miniaturize:nil];
 }
 
 bool NativeWidgetMac::IsMaximized() const {
@@ -433,12 +446,11 @@ bool NativeWidgetMac::IsMaximized() const {
 }
 
 bool NativeWidgetMac::IsMinimized() const {
-  NOTIMPLEMENTED();
-  return false;
+  return [GetNativeWindow() isMiniaturized];
 }
 
 void NativeWidgetMac::Restore() {
-  NOTIMPLEMENTED();
+  [GetNativeWindow() deminiaturize:nil];
 }
 
 void NativeWidgetMac::SetFullscreen(bool fullscreen) {
@@ -476,6 +488,8 @@ void NativeWidgetMac::SchedulePaintInRect(const gfx::Rect& rect) {
   // TODO(tapted): This should use setNeedsDisplayInRect:, once the coordinate
   // system of |rect| has been converted.
   [GetNativeView() setNeedsDisplay:YES];
+  if (bridge_ && bridge_->layer())
+    bridge_->layer()->SchedulePaint(rect);
 }
 
 void NativeWidgetMac::SetCursor(gfx::NativeCursor cursor) {
@@ -583,33 +597,32 @@ NativeWidgetPrivate* NativeWidgetPrivate::GetNativeWidgetForNativeWindow(
 // static
 NativeWidgetPrivate* NativeWidgetPrivate::GetTopLevelNativeWidget(
     gfx::NativeView native_view) {
-  NativeWidgetPrivate* native_widget =
-      GetNativeWidgetForNativeView(native_view);
-  if (!native_widget)
+  BridgedNativeWidget* bridge =
+      NativeWidgetMac::GetBridgeForNativeWindow([native_view window]);
+  if (!bridge)
     return NULL;
 
-  for (NativeWidgetPrivate* parent;
-       (parent = GetNativeWidgetForNativeWindow(
-            [native_widget->GetNativeWindow() parentWindow]));
-       native_widget = parent) {
+  for (BridgedNativeWidget* parent;
+       (parent = bridge->parent());
+       bridge = parent) {
   }
-  return native_widget;
+  return bridge->native_widget_mac();
 }
 
 // static
 void NativeWidgetPrivate::GetAllChildWidgets(gfx::NativeView native_view,
                                              Widget::Widgets* children) {
-  NativeWidgetPrivate* native_widget =
-      GetNativeWidgetForNativeView(native_view);
-  if (!native_widget)
+  BridgedNativeWidget* bridge =
+      NativeWidgetMac::GetBridgeForNativeWindow([native_view window]);
+  if (!bridge)
     return;
 
   // Code expects widget for |native_view| to be added to |children|.
-  if (native_widget->GetWidget())
-    children->insert(native_widget->GetWidget());
+  if (bridge->native_widget_mac()->GetWidget())
+    children->insert(bridge->native_widget_mac()->GetWidget());
 
-  for (NSWindow* child_window : [native_widget->GetNativeWindow() childWindows])
-    GetAllChildWidgets([child_window contentView], children);
+  for (BridgedNativeWidget* child : bridge->child_windows())
+    GetAllChildWidgets(child->ns_view(), children);
 }
 
 // static

@@ -18,6 +18,7 @@
 <translation id="7121570032414343252"><ph name="NUMBER_TWO"/> ಸೆಕೆಂಡುಗಳು</translation>
 <translation id="7511635910912978956"><ph name="NUMBER_FEW"/> ಗಂಟೆಗಳು ಉಳಿದಿವೆ</translation>
 <translation id="5948410903763073882">Alt+<ph name="KEY_COMBO_NAME"/></translation>
+<translation id="598033046487663418">ಎಲ್ಲಾ ಅಪ್ಲಿಕೇಶನ್‌ಗಳು</translation>
 <translation id="7658239707568436148">ರದ್ದುಮಾಡು</translation>
 <translation id="7222373446505536781">F11</translation>
 <translation id="1761785978543082658"><ph name="QUANTITY"/> B</translation>
@@ -46,7 +47,6 @@
 <translation id="4999762576397546063">Ctrl+<ph name="KEY_COMBO_NAME"/></translation>
 <translation id="7770995925463083016"><ph name="NUMBER_TWO"/> mins ago</translation>
 <translation id="3234408098842461169">ಕೆಳಗಿನ ಬಾಣದ ಗುರುತು</translation>
-<translation id="5901398892005759450">ಎಲ್ಲಾ ಅಪ್ಲಿಕೇಶನ್‌ಗಳು</translation>
 <translation id="3087734570205094154">ಕೆಳಗೆ</translation>
 <translation id="8828991073132329143"><ph name="NUMBER_MANY"/> ಸೆಕೆಂಡ್‍ಗಳು ಉಳಿದಿವೆ</translation>
 <translation id="5935630983280450497"><ph name="NUMBER_ONE"/> ನಿಮಿಷಗಳು ಉಳಿದಿದೆ</translation>
@@ -123,6 +123,7 @@
 <translation id="8677655579646609597"><ph name="QUANTITY"/> KB/s </translation>
 <translation id="8394908167088220973">ಮೀಡಿಯಾ ಪ್ಲೇ/ವಿರಾಮ</translation>
 <translation id="2148716181193084225">ಇಂದು</translation>
+<translation id="5120799197269191491">ಹುಡುಕಾಟ + <ph name="KEY_COMBO_NAME"/></translation>
 <translation id="7960078400008666149">ಒಂದು ಗಂಟೆಯ ಕಾಲ ಅಡಚಣೆ ಮಾಡಬೇಡಿ</translation>
 <translation id="4373894838514502496"><ph name="NUMBER_FEW"/> mins ago</translation>
 <translation id="4115153316875436289"><ph name="NUMBER_TWO"/> ದಿನಗಳು</translation>
@@ -208,6 +209,7 @@
 <translation id="6907759265145635167"><ph name="QUANTITY"/> PB/s</translation>
 <translation id="2743387203779672305">ಕ್ಲಿಪ್‌ಬೋರ್ಡ್‌ಗೆ ನಕಲಿಸಿ</translation>
 <translation id="8371695176452482769">ಈಗ ಮಾತನಾಡಿ</translation>
+<translation id="6129953537138746214">ಸ್ಪೇಸ್</translation>
 <translation id="1167268268675672572">ಸಾಲಿನ ಪ್ರಾರಂಭಕ್ಕೆ ಸರಿಸಿ ಮತ್ತು ಆಯ್ಕೆಯನ್ನು ಮಾರ್ಪಡಿಸಿ</translation>
 <translation id="6965382102122355670">ಸರಿ</translation>
 <translation id="7850320739366109486">ಅಡಚಣೆ ಮಾಡಬೇಡಿ</translation>

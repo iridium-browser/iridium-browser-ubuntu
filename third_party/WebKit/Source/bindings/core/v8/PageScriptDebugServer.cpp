@@ -190,7 +190,6 @@ void PageScriptDebugServer::runScript(ScriptState* scriptState, const String& sc
     ExecutionContext* executionContext = scriptState->executionContext();
     LocalFrame* frame = toDocument(executionContext)->frame();
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "EvaluateScript", "data", InspectorEvaluateScriptEvent::data(frame, sourceURL, TextPosition::minimumPosition().m_line.oneBasedInt()));
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.stack"), "CallStack", "stack", InspectorCallStackEvent::currentCallStack());
     // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
     InspectorInstrumentationCookie cookie;
     if (frame)
@@ -252,7 +251,7 @@ void PageScriptDebugServer::preprocessBeforeCompile(const v8::Debug::EventDetail
     // Avoid preprocessing any internal scripts by processing only eval source in this V8 event handler.
     v8::Handle<v8::Value> argvEventData[] = { eventData };
     v8::Handle<v8::Value> v8Value = callDebuggerMethod("isEvalCompilation", WTF_ARRAY_LENGTH(argvEventData), argvEventData);
-    if (v8Value.IsEmpty() || !v8Value->ToBoolean()->Value())
+    if (v8Value.IsEmpty() || !v8Value->ToBoolean(debugContext->GetIsolate())->Value())
         return;
 
     // The name and source are in the JS event data.
@@ -278,7 +277,7 @@ bool PageScriptDebugServer::canPreprocess(LocalFrame* frame)
     // Web page to ensure that the debugger's console initialization code has completed.
     if (!m_scriptPreprocessor) {
         TemporaryChange<bool> isPreprocessing(isCreatingPreprocessor, true);
-        m_scriptPreprocessor = adoptPtr(new ScriptPreprocessor(*m_preprocessorSourceCode.get(), frame));
+        m_scriptPreprocessor = adoptPtr(new ScriptPreprocessor(m_isolate, *m_preprocessorSourceCode.get(), frame));
     }
 
     if (m_scriptPreprocessor->isValid())

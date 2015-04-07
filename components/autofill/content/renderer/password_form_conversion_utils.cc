@@ -107,12 +107,16 @@ bool LocateSpecificPasswords(std::vector<WebInputElement> passwords,
 }
 
 // Get information about a login form encapsulated in a PasswordForm struct.
-void GetPasswordForm(const WebFormElement& form, PasswordForm* password_form) {
+// If an element of |form| has an entry in |user_modified_elements|, the
+// associated string is used instead of the element's value to create
+// the PasswordForm.
+void GetPasswordForm(const WebFormElement& form,
+                     PasswordForm* password_form,
+                     const std::map<const blink::WebInputElement,
+                                    blink::WebString>* user_modified_elements) {
   WebInputElement latest_input_element;
   WebInputElement username_element;
-  // Caches whether |username_element| is marked with autocomplete='username'.
-  // Needed for performance reasons to avoid recalculating this multiple times.
-  bool has_seen_element_with_autocomplete_username_before = false;
+  password_form->username_marked_by_site = false;
   std::vector<WebInputElement> passwords;
   std::vector<base::string16> other_possible_usernames;
 
@@ -149,7 +153,7 @@ void GetPasswordForm(const WebFormElement& form, PasswordForm* password_form) {
     // Various input types such as text, url, email can be a username field.
     if (input_element->isTextField() && !input_element->isPasswordField()) {
       if (HasAutocompleteAttributeValue(*input_element, "username")) {
-        if (has_seen_element_with_autocomplete_username_before) {
+        if (password_form->username_marked_by_site) {
           // A second or subsequent element marked with autocomplete='username'.
           // This makes us less confident that we have understood the form. We
           // will stick to our choice that the first such element was the real
@@ -167,11 +171,11 @@ void GetPasswordForm(const WebFormElement& form, PasswordForm* password_form) {
           // usernames we have accrued so far: they come from fields not marked
           // with the autocomplete attribute, making them unlikely alternatives.
           username_element = *input_element;
-          has_seen_element_with_autocomplete_username_before = true;
+          password_form->username_marked_by_site = true;
           other_possible_usernames.clear();
         }
       } else {
-        if (has_seen_element_with_autocomplete_username_before) {
+        if (password_form->username_marked_by_site) {
           // Having seen elements with autocomplete='username', elements without
           // this attribute are no longer interesting. No-op.
         } else {
@@ -191,7 +195,20 @@ void GetPasswordForm(const WebFormElement& form, PasswordForm* password_form) {
 
   if (!username_element.isNull()) {
     password_form->username_element = username_element.nameForAutofill();
-    password_form->username_value = username_element.value();
+    base::string16 username_value = username_element.value();
+    if (user_modified_elements != nullptr) {
+      auto username_iterator = user_modified_elements->find(username_element);
+      if (username_iterator != user_modified_elements->end()) {
+        base::string16 typed_username_value = username_iterator->second;
+        if (!StartsWith(username_value, typed_username_value, false)) {
+          // We check that |username_value| was not obtained by autofilling
+          // |typed_username_value|. In case when it was, |typed_username_value|
+          // is incomplete, so we should leave autofilled value.
+          username_value = typed_username_value;
+        }
+      }
+    }
+    password_form->username_value = username_value;
   }
 
   // Get the document URL
@@ -227,7 +244,13 @@ void GetPasswordForm(const WebFormElement& form, PasswordForm* password_form) {
 
   if (!password.isNull()) {
     password_form->password_element = password.nameForAutofill();
-    password_form->password_value = password.value();
+    blink::WebString password_value = password.value();
+    if (user_modified_elements != nullptr) {
+      auto password_iterator = user_modified_elements->find(password);
+      if (password_iterator != user_modified_elements->end())
+        password_value = password_iterator->second;
+    }
+    password_form->password_value = password_value;
     password_form->password_autocomplete_set = password.autoComplete();
   }
   if (!new_password.isNull()) {
@@ -244,12 +267,15 @@ void GetPasswordForm(const WebFormElement& form, PasswordForm* password_form) {
 
 }  // namespace
 
-scoped_ptr<PasswordForm> CreatePasswordForm(const WebFormElement& web_form) {
+scoped_ptr<PasswordForm> CreatePasswordForm(
+    const WebFormElement& web_form,
+    const std::map<const blink::WebInputElement, blink::WebString>*
+        user_modified_elements) {
   if (web_form.isNull())
     return scoped_ptr<PasswordForm>();
 
   scoped_ptr<PasswordForm> password_form(new PasswordForm());
-  GetPasswordForm(web_form, password_form.get());
+  GetPasswordForm(web_form, password_form.get(), user_modified_elements);
 
   if (!password_form->action.is_valid())
     return scoped_ptr<PasswordForm>();

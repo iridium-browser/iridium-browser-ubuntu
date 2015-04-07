@@ -17,7 +17,6 @@
 #include "extensions/browser/event_router.h"
 #include "extensions/common/api/test.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/switches.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -26,17 +25,6 @@ namespace extensions {
 namespace OnMessage = core_api::test::OnMessage;
 
 namespace {
-
-void FindFrame(const GURL& url,
-               content::RenderFrameHost** out,
-               content::RenderFrameHost* frame) {
-  if (frame->GetLastCommittedURL() == url) {
-    if (*out != NULL) {
-      ADD_FAILURE() << "Found multiple frames at " << url;
-    }
-    *out = frame;
-  }
-}
 
 // Tests running extension APIs on WebUI.
 class ExtensionWebUITest : public ExtensionApiTest {
@@ -120,13 +108,10 @@ class ExtensionWebUITest : public ExtensionApiTest {
     if (active_web_contents->GetLastCommittedURL() == frame_url)
       return active_web_contents->GetMainFrame();
 
-    content::RenderFrameHost* frame_host = NULL;
-    active_web_contents->ForEachFrame(
-        base::Bind(&FindFrame, frame_url, &frame_host));
-    return frame_host;
+    return FrameMatchingPredicate(
+        active_web_contents,
+        base::Bind(&content::FrameHasSourceUrl, frame_url));
   }
-
-  scoped_ptr<FeatureSwitch::ScopedOverride> enable_options_;
 };
 
 IN_PROC_BROWSER_TEST_F(ExtensionWebUITest, SanityCheckAvailableAPIsInFrame) {

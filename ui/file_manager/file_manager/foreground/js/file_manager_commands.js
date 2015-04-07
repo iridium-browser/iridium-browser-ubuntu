@@ -107,23 +107,6 @@ CommandUtil.canExecuteAlways = function(event) {
 };
 
 /**
- * Returns a single selected/passed entry or null.
- * @param {!Event} event Command event.
- * @param {!FileManager} fileManager FileManager to use.
- * @return {FileEntry} The entry or null.
- */
-CommandUtil.getSingleEntry = function(event, fileManager) {
-  if (event.target.entry) {
-    return event.target.entry;
-  }
-  var selection = fileManager.getSelection();
-  if (selection.totalCount == 1) {
-    return selection.entries[0];
-  }
-  return null;
-};
-
-/**
  * Obtains target entries that can be pinned from the selection.
  * If directories are included in the selection, it just returns an empty
  * array to avoid confusing because pinning directory is not supported
@@ -236,13 +219,14 @@ CommandUtil.getOnlyOneSelectedDirectory = function(selection) {
     return null;
   if (!selection.entries[0].isDirectory)
     return null;
-  return selection.entries[0];
+  return /** @type {!DirectoryEntry} */(selection.entries[0]);
 };
 
 /**
  * Handle of the command events.
  * @param {!FileManager} fileManager FileManager.
  * @constructor
+ * @struct
  */
 var CommandHandler = function(fileManager) {
   /**
@@ -259,8 +243,6 @@ var CommandHandler = function(fileManager) {
    */
   this.commands_ = {};
 
-  Object.seal(this);
-
   // Decorate command tags in the document.
   var commands = fileManager.document.querySelectorAll('command');
   for (var i = 0; i < commands.length; i++) {
@@ -270,8 +252,12 @@ var CommandHandler = function(fileManager) {
 
   // Register events.
   fileManager.document.addEventListener('command', this.onCommand_.bind(this));
-  fileManager.document.addEventListener('canExecute',
-                                        this.onCanExecute_.bind(this));
+  fileManager.document.addEventListener(
+      'canExecute', this.onCanExecute_.bind(this));
+  fileManager.directoryModel.addEventListener(
+      'directory-change', this.updateAvailability.bind(this));
+  fileManager.volumeManager.addEventListener(
+      'drive-connection-changed', this.updateAvailability.bind(this));
 };
 
 /**
@@ -348,7 +334,8 @@ CommandHandler.COMMANDS_['unmount'] = /** @type {Command} */ ({
       return;
     }
     var errorCallback = function() {
-      fileManager.alert.showHtml('', str('UNMOUNT_FAILED'));
+      fileManager.ui.alertDialog.showHtml(
+          '', str('UNMOUNT_FAILED'), null, null, null);
     };
     var volumeInfo = fileManager.volumeManager.getVolumeInfo(root);
     if (!volumeInfo) {
@@ -409,10 +396,11 @@ CommandHandler.COMMANDS_['format'] = /** @type {Command} */ ({
 
     var volumeInfo = fileManager.volumeManager.getVolumeInfo(root);
     if (volumeInfo) {
-      fileManager.confirm.show(
+      fileManager.ui.confirmDialog.show(
           loadTimeData.getString('FORMATTING_WARNING'),
           chrome.fileManagerPrivate.formatVolume.bind(null,
-                                                      volumeInfo.volumeId));
+                                                      volumeInfo.volumeId),
+          null, null);
     }
   },
   /**
@@ -446,7 +434,67 @@ CommandHandler.COMMANDS_['new-folder'] = /** @type {Command} */ ({
    * @param {!FileManager} fileManager FileManager to use.
    */
   execute: function(event, fileManager) {
-    fileManager.createNewFolder();
+    var defaultName = str('DEFAULT_NEW_FOLDER_NAME');
+
+    // Find a name that doesn't exist in the data model.
+    var files = fileManager.directoryModel.getFileList();
+    var hash = {};
+    for (var i = 0; i < files.length; i++) {
+      var name = files.item(i).name;
+      // Filtering names prevents from conflicts with prototype's names
+      // and '__proto__'.
+      if (name.substring(0, defaultName.length) == defaultName)
+        hash[name] = 1;
+    }
+
+    var baseName = defaultName;
+    var separator = '';
+    var suffix = '';
+    var index = '';
+
+    var advance = function() {
+      separator = ' (';
+      suffix = ')';
+      index++;
+    };
+
+    var current = function() {
+      return baseName + separator + index + suffix;
+    };
+
+    // Accessing hasOwnProperty is safe since hash properties filtered.
+    while (hash.hasOwnProperty(current())) {
+      advance();
+    }
+
+    var list = fileManager.ui.listContainer.currentList;
+
+    var onSuccess = function(entry) {
+      metrics.recordUserAction('CreateNewFolder');
+      list.selectedItem = entry;
+
+      fileManager.ui.listContainer.endBatchUpdates();
+
+      fileManager.namingController.initiateRename();
+    };
+
+    var onError = function(error) {
+      fileManager.ui.listContainer.endBatchUpdates();
+
+      fileManager.ui.alertDialog.show(
+          strf('ERROR_CREATING_FOLDER',
+               current(),
+               util.getFileErrorString(error.name)),
+          null, null);
+    };
+
+    var onAbort = function() {
+      fileManager.ui.listContainer.endBatchUpdates();
+    };
+
+    fileManager.ui.listContainer.startBatchUpdates();
+    fileManager.directoryModel.createDirectory(
+        current(), onSuccess, onError, onAbort);
   },
   /**
    * @param {!Event} event Command event.
@@ -501,7 +549,11 @@ CommandHandler.COMMANDS_['drive-sync-settings'] = /** @type {Command} */ ({
    * @param {!FileManager} fileManager FileManager to use.
    */
   execute: function(event, fileManager) {
-    fileManager.toggleDriveSyncSettings();
+    // If checked, the sync is disabled.
+    var nowCellularDisabled =
+        fileManager.ui.gearMenu.syncButton.hasAttribute('checked');
+    var changeInfo = {cellularDisabled: !nowCellularDisabled};
+    chrome.fileManagerPrivate.setPreferences(changeInfo);
   },
   /**
    * @param {!Event} event Command event.
@@ -525,7 +577,16 @@ CommandHandler.COMMANDS_['drive-hosted-settings'] = /** @type {Command} */ ({
    * @param {!FileManager} fileManager FileManager to use.
    */
   execute: function(event, fileManager) {
-    fileManager.toggleDriveHostedSettings();
+    // If checked, showing drive hosted files is enabled.
+    var nowHostedFilesEnabled =
+        fileManager.ui.gearMenu.hostedButton.hasAttribute('checked');
+    var nowHostedFilesDisabled = !nowHostedFilesEnabled;
+    /*
+    var changeInfo = {hostedFilesDisabled: !nowHostedFilesDisabled};
+    */
+    var changeInfo = {};
+    changeInfo['hostedFilesDisabled'] = !nowHostedFilesDisabled;
+    chrome.fileManagerPrivate.setPreferences(changeInfo);
   },
   /**
    * @param {!Event} event Command event.
@@ -553,7 +614,7 @@ CommandHandler.COMMANDS_['delete'] = /** @type {Command} */ ({
         strf('GALLERY_CONFIRM_DELETE_SOME', entries.length);
     fileManager.ui.deleteConfirmDialog.show(message, function() {
       fileManager.fileOperationManager.deleteEntries(entries);
-    });
+    }, null, null);
   },
   /**
    * @param {!Event} event Command event.
@@ -732,7 +793,7 @@ CommandHandler.COMMANDS_['open-with'] = /** @type {Command} */ ({
   execute: function(event, fileManager) {
     var tasks = fileManager.getSelection().tasks;
     if (tasks) {
-      tasks.showTaskPicker(fileManager.defaultTaskPicker,
+      tasks.showTaskPicker(fileManager.ui.defaultTaskPicker,
           str('OPEN_WITH_BUTTON_LABEL'),
           '',
           function(task) {
@@ -850,10 +911,12 @@ CommandHandler.COMMANDS_['toggle-pinned'] = /** @type {Command} */ ({
 
       // Show the error
       showError: function(filesystem) {
-        fileManager.alert.showHtml(str('DRIVE_OUT_OF_SPACE_HEADER'),
-                                   strf('DRIVE_OUT_OF_SPACE_MESSAGE',
-                                        unescape(currentEntry.name),
-                                        util.bytesToString(filesystem.size)));
+        fileManager.ui.alertDialog.showHtml(
+            str('DRIVE_OUT_OF_SPACE_HEADER'),
+            strf('DRIVE_OUT_OF_SPACE_MESSAGE',
+                 unescape(currentEntry.name),
+                 util.bytesToString(filesystem.size)),
+            null, null, null);
       }
     };
     steps.start();
@@ -927,7 +990,17 @@ CommandHandler.COMMANDS_['share'] = /** @type {Command} */ ({
    * @param {!FileManager} fileManager FileManager to use.
    */
   execute: function(event, fileManager) {
-    fileManager.shareSelection();
+    var entries = fileManager.getSelection().entries;
+    if (entries.length != 1) {
+      console.warn('Unable to share multiple items at once.');
+      return;
+    }
+    // Add the overlapped class to prevent the applicaiton window from
+    // captureing mouse events.
+    fileManager.ui.shareDialog.show(entries[0], function(result) {
+      if (result == ShareDialog.Result.NETWORK_ERROR)
+        fileManager.ui.errorDialog.show(str('SHARE_ERROR'), null, null, null);
+    }.bind(this));
   },
   /**
    * @param {!Event} event Command event.
@@ -942,6 +1015,36 @@ CommandHandler.COMMANDS_['share'] = /** @type {Command} */ ({
         !isDriveOffline &&
         selection && selection.totalCount == 1;
     event.command.setHidden(!fileManager.isOnDrive());
+  }
+});
+
+/**
+ * Initiates cloud import.
+ * @type {Command}
+ */
+CommandHandler.COMMANDS_['cloud-import'] = /** @type {Command} */ ({
+  /**
+   * @param {!Event} event Command event.
+   * @param {!FileManager} fileManager
+   */
+  execute: function(event, fileManager) {
+    console.assert(fileManager.importController !== null);
+      fileManager.importController.execute();
+  },
+  /**
+   * @param {!Event} event Command event.
+   * @param {!FileManager} fileManager
+   */
+  canExecute: function(event, fileManager) {
+    if (fileManager.importController) {
+      var response = fileManager.importController.update();
+      event.command.label = str(response.label_id);
+      event.canExecute = response.executable;
+      event.command.setHidden(!response.visible);
+    } else {
+      event.canExecute = false;
+      event.command.setHidden(true);
+    }
   }
 });
 
@@ -961,7 +1064,9 @@ CommandHandler.COMMANDS_['create-folder-shortcut'] = /** @type {Command} */ ({
                    'which does not have corresponding entry.');
       return;
     }
-    fileManager.createFolderShortcut(entry);
+    if (fileManager.folderShortcutsModel.exists(entry))
+      return;
+    fileManager.folderShortcutsModel.add(entry);
   },
 
   /**
@@ -970,8 +1075,8 @@ CommandHandler.COMMANDS_['create-folder-shortcut'] = /** @type {Command} */ ({
    */
   canExecute: function(event, fileManager) {
     var entry = CommandUtil.getCommandEntry(event.target);
-    var folderShortcutExists = entry &&
-                               fileManager.folderShortcutExists(entry);
+    var folderShortcutExists =
+        entry && fileManager.folderShortcutsModel.exists(entry);
 
     var onlyOneFolderSelected = true;
     // Only on list, user can select multiple files. The command is enabled only
@@ -1005,7 +1110,7 @@ CommandHandler.COMMANDS_['remove-folder-shortcut'] = /** @type {Command} */ ({
                    'which does not have corresponding entry.');
       return;
     }
-    fileManager.removeFolderShortcut(entry);
+    fileManager.folderShortcutsModel.remove(entry);
   },
 
   /**
@@ -1017,7 +1122,7 @@ CommandHandler.COMMANDS_['remove-folder-shortcut'] = /** @type {Command} */ ({
     var location = entry && fileManager.volumeManager.getLocationInfo(entry);
 
     var eligible = location && location.isEligibleForFolderShortcut;
-    var isShortcut = entry && fileManager.folderShortcutExists(entry);
+    var isShortcut = entry && fileManager.folderShortcutsModel.exists(entry);
     event.canExecute = isShortcut && eligible;
     event.command.setHidden(!event.canExecute);
   }

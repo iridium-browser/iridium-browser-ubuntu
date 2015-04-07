@@ -9,7 +9,7 @@
 #include "base/numerics/safe_math.h"
 #include "base/stl_util.h"
 #include "content/child/webcrypto/crypto_data.h"
-#include "content/child/webcrypto/openssl/aes_key_openssl.h"
+#include "content/child/webcrypto/openssl/aes_algorithm_openssl.h"
 #include "content/child/webcrypto/openssl/key_openssl.h"
 #include "content/child/webcrypto/openssl/util_openssl.h"
 #include "content/child/webcrypto/status.h"
@@ -51,9 +51,7 @@ Status AesKwEncryptDecrypt(EncryptOrDecrypt mode,
   const std::vector<uint8_t>& raw_key =
       SymKeyOpenSsl::Cast(key)->raw_key_data();
 
-  return AeadEncryptDecrypt(mode,
-                            raw_key,
-                            data,
+  return AeadEncryptDecrypt(mode, raw_key, data,
                             8,             // tag_length_bytes
                             CryptoData(),  // iv
                             CryptoData(),  // additional_data

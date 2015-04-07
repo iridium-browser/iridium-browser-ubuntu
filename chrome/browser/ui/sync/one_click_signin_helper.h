@@ -102,7 +102,7 @@ class OneClickSigninHelper
                   const std::string& refresh_token,
                   content::WebContents* web_contents,
                   bool untrusted_confirmation_required,
-                  signin::Source source,
+                  signin_metrics::Source source,
                   OneClickSigninSyncStarter::Callback callback);
     ~StartSyncArgs();
 
@@ -119,7 +119,7 @@ class OneClickSigninHelper
     content::WebContents* web_contents;
 
     OneClickSigninSyncStarter::ConfirmationRequired confirmation_required;
-    signin::Source source;
+    signin_metrics::Source source;
     OneClickSigninSyncStarter::Callback callback;
   };
 
@@ -169,11 +169,7 @@ class OneClickSigninHelper
     DISALLOW_COPY_AND_ASSIGN(SyncStarterWrapper);
   };
 
-  static void LogHistogramValue(signin::Source source, int action);
-
-  static void CreateForWebContentsWithPasswordManager(
-      content::WebContents* contents,
-      password_manager::PasswordManager* password_manager);
+  static void LogHistogramValue(int action);
 
   // Returns true if the one-click signin feature can be offered at this time.
   // If |email| is not empty, then the profile is checked to see if it's
@@ -220,17 +216,17 @@ class OneClickSigninHelper
       const std::string& password,
       const std::string& refresh_token,
       OneClickSigninHelper::AutoAccept auto_accept,
-      signin::Source source,
+      signin_metrics::Source source,
       OneClickSigninSyncStarter::StartSyncMode start_mode,
       OneClickSigninSyncStarter::Callback sync_callback);
 
   static void RedirectToNtpOrAppsPage(
-      content::WebContents* contents, signin::Source source);
+      content::WebContents* contents, signin_metrics::Source source);
 
   // If the |source| is not settings page/webstore, redirects to
   // the NTP/Apps page.
   static void RedirectToNtpOrAppsPageIfNecessary(
-      content::WebContents* contents, signin::Source source);
+      content::WebContents* contents, signin_metrics::Source source);
 
   // Remove the item currently at the top of the history list if it's
   // the Gaia redirect URL. Due to limitations of the NavigationController
@@ -282,8 +278,7 @@ class OneClickSigninHelper
   // SAML-based accounts, but causes bug crbug.com/181163.
   static const int kMaxNavigationsSince;
 
-  OneClickSigninHelper(content::WebContents* web_contents,
-                       password_manager::PasswordManager* password_manager);
+  explicit OneClickSigninHelper(content::WebContents* web_contents);
 
   ~OneClickSigninHelper() override;
 
@@ -309,7 +304,7 @@ class OneClickSigninHelper
   static void ShowInfoBarUIThread(const std::string& session_index,
                                   const std::string& email,
                                   AutoAccept auto_accept,
-                                  signin::Source source,
+                                  signin_metrics::Source source,
                                   const GURL& continue_url,
                                   int child_id,
                                   int route_id);
@@ -357,7 +352,7 @@ class OneClickSigninHelper
   std::string email_;
   std::string password_;
   AutoAccept auto_accept_;
-  signin::Source source_;
+  signin_metrics::Source source_;
   bool switched_to_advanced_;
   GURL continue_url_;
   // The orignal continue URL after sync setup is complete.

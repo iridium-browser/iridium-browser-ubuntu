@@ -238,7 +238,7 @@ base::Value* NetLogSpdyPingCallback(SpdyPingId unique_id,
                                     const char* type,
                                     NetLog::LogLevel /* log_level */) {
   base::DictionaryValue* dict = new base::DictionaryValue();
-  dict->SetInteger("unique_id", unique_id);
+  dict->SetInteger("unique_id", static_cast<int>(unique_id));
   dict->SetString("type", type);
   dict->SetBoolean("is_ack", is_ack);
   return dict;
@@ -268,6 +268,14 @@ base::Value* NetLogSpdyPushPromiseReceivedCallback(
             SpdyHeaderBlockToListValue(*headers, log_level).release());
   dict->SetInteger("id", stream_id);
   dict->SetInteger("promised_stream_id", promised_stream_id);
+  return dict;
+}
+
+base::Value* NetLogSpdyAdoptedPushStreamCallback(
+    SpdyStreamId stream_id, const GURL* url, NetLog::LogLevel log_level) {
+  base::DictionaryValue* dict = new base::DictionaryValue();
+  dict->SetInteger("stream_id", stream_id);
+  dict->SetString("url", url->spec());
   return dict;
 }
 
@@ -398,6 +406,10 @@ SpdyProtocolErrorDetails MapRstStreamStatusToProtocolError(
       return STATUS_CODE_CONNECT_ERROR;
     case RST_STREAM_ENHANCE_YOUR_CALM:
       return STATUS_CODE_ENHANCE_YOUR_CALM;
+    case RST_STREAM_INADEQUATE_SECURITY:
+      return STATUS_CODE_INADEQUATE_SECURITY;
+    case RST_STREAM_HTTP_1_1_REQUIRED:
+      return STATUS_CODE_HTTP_1_1_REQUIRED;
     default:
       NOTREACHED();
       return static_cast<SpdyProtocolErrorDetails>(-1);
@@ -643,7 +655,7 @@ SpdySession::SpdySession(
       check_ping_status_pending_(false),
       send_connection_header_prefix_(false),
       flow_control_state_(FLOW_CONTROL_NONE),
-      stream_initial_send_window_size_(kSpdyStreamInitialWindowSize),
+      stream_initial_send_window_size_(GetInitialWindowSize(default_protocol)),
       stream_initial_recv_window_size_(stream_initial_recv_window_size == 0
                                            ? kDefaultInitialRecvWindowSize
                                            : stream_initial_recv_window_size),
@@ -717,17 +729,19 @@ void SpdySession::InitializeWithSocket(
       connection_->socket()->GetNegotiatedProtocol();
   if (protocol_negotiated != kProtoUnknown) {
     protocol_ = protocol_negotiated;
+    stream_initial_send_window_size_ = GetInitialWindowSize(protocol_);
   }
   DCHECK_GE(protocol_, kProtoSPDYMinimumVersion);
   DCHECK_LE(protocol_, kProtoSPDYMaximumVersion);
 
-  if (protocol_ == kProtoSPDY4)
+  if ((protocol_ >= kProtoSPDY4MinimumVersion) &&
+      (protocol_ <= kProtoSPDY4MaximumVersion))
     send_connection_header_prefix_ = true;
 
   if (protocol_ >= kProtoSPDY31) {
     flow_control_state_ = FLOW_CONTROL_STREAM_AND_SESSION;
-    session_send_window_size_ = kSpdySessionInitialWindowSize;
-    session_recv_window_size_ = kSpdySessionInitialWindowSize;
+    session_send_window_size_ = GetInitialWindowSize(protocol_);
+    session_recv_window_size_ = GetInitialWindowSize(protocol_);
   } else if (protocol_ >= kProtoSPDY3) {
     flow_control_state_ = FLOW_CONTROL_STREAM;
   } else {
@@ -741,7 +755,7 @@ void SpdySession::InitializeWithSocket(
   buffered_spdy_framer_->set_debug_visitor(this);
   UMA_HISTOGRAM_ENUMERATION(
       "Net.SpdyVersion2",
-      protocol_ - kProtoSPDYMinimumVersion,
+      protocol_ - kProtoSPDYHistogramOffset,
       kProtoSPDYMaximumVersion - kProtoSPDYMinimumVersion + 1);
 
   net_log_.AddEvent(NetLog::TYPE_SPDY_SESSION_INITIALIZED,
@@ -904,7 +918,7 @@ void SpdySession::CancelStreamRequest(
   CHECK_GE(priority, MINIMUM_PRIORITY);
   CHECK_LE(priority, MAXIMUM_PRIORITY);
 
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   // |request| should not be in a queue not matching its priority.
   for (int i = MINIMUM_PRIORITY; i <= MAXIMUM_PRIORITY; ++i) {
     if (priority == i)
@@ -1617,7 +1631,7 @@ int SpdySession::DoWriteComplete(int result) {
 }
 
 void SpdySession::DcheckGoingAway() const {
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   DCHECK_GE(availability_state_, STATE_GOING_AWAY);
   for (int i = MINIMUM_PRIORITY; i <= MAXIMUM_PRIORITY; ++i) {
     DCHECK(pending_create_stream_queues_[i].empty());
@@ -1691,6 +1705,11 @@ void SpdySession::DoDrainSession(Error err, const std::string& description) {
   }
   MakeUnavailable();
 
+  // Mark host_port_pair requiring HTTP/1.1 for subsequent connections.
+  if (err == ERR_HTTP_1_1_REQUIRED) {
+    http_server_properties_->SetHTTP11Required(host_port_pair());
+  }
+
   // If |err| indicates an error occurred, inform the peer that we're closing
   // and why. Don't GOAWAY on a graceful or idle close, as that may
   // unnecessarily wake the radio. We could technically GOAWAY on network errors
@@ -1699,7 +1718,7 @@ void SpdySession::DoDrainSession(Error err, const std::string& description) {
   if (err != OK &&
       err != ERR_ABORTED &&  // Used by SpdySessionPool to close idle sessions.
       err != ERR_NETWORK_CHANGED &&  // Used to deprecate sessions on IP change.
-      err != ERR_SOCKET_NOT_CONNECTED &&
+      err != ERR_SOCKET_NOT_CONNECTED && err != ERR_HTTP_1_1_REQUIRED &&
       err != ERR_CONNECTION_CLOSED && err != ERR_CONNECTION_RESET) {
     // Enqueue a GOAWAY to inform the peer of why we're closing the connection.
     SpdyGoAwayIR goaway_ir(last_accepted_push_stream_id_,
@@ -1958,7 +1977,9 @@ base::WeakPtr<SpdyStream> SpdySession::GetActivePushStream(const GURL& url) {
     return base::WeakPtr<SpdyStream>();
   }
 
-  net_log_.AddEvent(NetLog::TYPE_SPDY_STREAM_ADOPTED_PUSH_STREAM);
+  net_log_.AddEvent(NetLog::TYPE_SPDY_STREAM_ADOPTED_PUSH_STREAM,
+                    base::Bind(&NetLogSpdyAdoptedPushStreamCallback,
+                               active_it->second.stream->stream_id(), &url));
   used_push_streams.Increment();
   return active_it->second.stream->GetWeakPtr();
 }
@@ -2416,6 +2437,13 @@ void SpdySession::OnRstStream(SpdyStreamId stream_id,
     it->second.stream->OnDataReceived(scoped_ptr<SpdyBuffer>());
   } else if (status == RST_STREAM_REFUSED_STREAM) {
     CloseActiveStreamIterator(it, ERR_SPDY_SERVER_REFUSED_STREAM);
+  } else if (status == RST_STREAM_HTTP_1_1_REQUIRED) {
+    // TODO(bnc): Record histogram with number of open streams capped at 50.
+    it->second.stream->LogStreamError(
+        ERR_HTTP_1_1_REQUIRED,
+        base::StringPrintf(
+            "SPDY session closed because of stream with status: %d", status));
+    DoDrainSession(ERR_HTTP_1_1_REQUIRED, "HTTP_1_1_REQUIRED for stream.");
   } else {
     RecordProtocolErrorHistogram(
         PROTOCOL_ERROR_RST_STREAM_FOR_NON_ACTIVE_STREAM);
@@ -2441,7 +2469,12 @@ void SpdySession::OnGoAway(SpdyStreamId last_accepted_stream_id,
                  unclaimed_pushed_streams_.size(),
                  status));
   MakeUnavailable();
-  StartGoingAway(last_accepted_stream_id, ERR_ABORTED);
+  if (status == GOAWAY_HTTP_1_1_REQUIRED) {
+    // TODO(bnc): Record histogram with number of open streams capped at 50.
+    DoDrainSession(ERR_HTTP_1_1_REQUIRED, "HTTP_1_1_REQUIRED for stream.");
+  } else {
+    StartGoingAway(last_accepted_stream_id, ERR_ABORTED);
+  }
   // This is to handle the case when we already don't have any active
   // streams (i.e., StartGoingAway() did nothing). Otherwise, we have
   // active streams and so the last one being closed will finish the
@@ -2457,8 +2490,8 @@ void SpdySession::OnPing(SpdyPingId unique_id, bool is_ack) {
       base::Bind(&NetLogSpdyPingCallback, unique_id, is_ack, "received"));
 
   // Send response to a PING from server.
-  if ((protocol_ >= kProtoSPDY4 && !is_ack) ||
-      (protocol_ < kProtoSPDY4 && unique_id % 2 == 0)) {
+  if ((protocol_ >= kProtoSPDY4MinimumVersion && !is_ack) ||
+      (protocol_ < kProtoSPDY4MinimumVersion && unique_id % 2 == 0)) {
     WritePingFrame(unique_id, true);
     return;
   }
@@ -2744,7 +2777,8 @@ void SpdySession::SendInitialData() {
   DCHECK(enable_sending_initial_data_);
 
   if (send_connection_header_prefix_) {
-    DCHECK_EQ(protocol_, kProtoSPDY4);
+    DCHECK_GE(protocol_, kProtoSPDY4MinimumVersion);
+    DCHECK_LE(protocol_, kProtoSPDY4MaximumVersion);
     scoped_ptr<SpdyFrame> connection_header_prefix_frame(
         new SpdyFrame(const_cast<char*>(kHttp2ConnectionHeaderPrefix),
                       kHttp2ConnectionHeaderPrefixSize,
@@ -2762,7 +2796,7 @@ void SpdySession::SendInitialData() {
   settings_map[SETTINGS_MAX_CONCURRENT_STREAMS] =
       SettingsFlagsAndValue(SETTINGS_FLAG_NONE, kMaxConcurrentPushedStreams);
   if (flow_control_state_ >= FLOW_CONTROL_STREAM &&
-      stream_initial_recv_window_size_ != kSpdyStreamInitialWindowSize) {
+      stream_initial_recv_window_size_ != GetInitialWindowSize(protocol_)) {
     settings_map[SETTINGS_INITIAL_WINDOW_SIZE] =
         SettingsFlagsAndValue(SETTINGS_FLAG_NONE,
                               stream_initial_recv_window_size_);
@@ -2905,7 +2939,7 @@ void SpdySession::SendWindowUpdateFrame(SpdyStreamId stream_id,
   EnqueueSessionWrite(priority, WINDOW_UPDATE, window_update_frame.Pass());
 }
 
-void SpdySession::WritePingFrame(uint32 unique_id, bool is_ack) {
+void SpdySession::WritePingFrame(SpdyPingId unique_id, bool is_ack) {
   DCHECK(buffered_spdy_framer_.get());
   scoped_ptr<SpdyFrame> ping_frame(
       buffered_spdy_framer_->CreatePingFrame(unique_id, is_ack));
@@ -3179,7 +3213,8 @@ void SpdySession::IncreaseRecvWindowSize(int32 delta_window_size) {
                  delta_window_size, session_recv_window_size_));
 
   session_unacked_recv_window_bytes_ += delta_window_size;
-  if (session_unacked_recv_window_bytes_ > kSpdySessionInitialWindowSize / 2) {
+  if (session_unacked_recv_window_bytes_ >
+      GetInitialWindowSize(protocol_) / 2) {
     SendWindowUpdateFrame(kSessionFlowControlStreamId,
                           session_unacked_recv_window_bytes_,
                           HIGHEST);
@@ -3230,7 +3265,7 @@ void SpdySession::ResumeSendStalledStreams() {
 
   while (!IsSendStalled()) {
     size_t old_size = 0;
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
     old_size = GetTotalSize(stream_send_unstall_queue_);
 #endif
 

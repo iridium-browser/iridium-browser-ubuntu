@@ -44,31 +44,31 @@ namespace blink {
 class Blob;
 class BlobDataHandle;
 class DOMArrayBuffer;
+class DOMArrayBufferView;
 class DOMFormData;
 class Document;
 class DocumentParser;
 class ExceptionState;
-class ResourceRequest;
+class ReadableStream;
 class SecurityOrigin;
 class SharedBuffer;
 class Stream;
 class TextResourceDecoder;
 class ThreadableLoader;
-class UnderlyingSource;
 class XMLHttpRequestUpload;
 
 typedef int ExceptionCode;
 
 class XMLHttpRequest final
-    : public RefCountedWillBeGarbageCollectedFinalized<XMLHttpRequest>
-    , public XMLHttpRequestEventTarget
+    : public XMLHttpRequestEventTarget
+    , public RefCountedWillBeNoBase<XMLHttpRequest>
     , private ThreadableLoaderClient
     , public DocumentParserClient
     , public ActiveDOMObject {
     DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(XMLHttpRequest);
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(XMLHttpRequest);
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(XMLHttpRequest);
 public:
     static PassRefPtrWillBeRawPtr<XMLHttpRequest> create(ExecutionContext*, PassRefPtr<SecurityOrigin> = nullptr);
     virtual ~XMLHttpRequest();
@@ -120,8 +120,8 @@ public:
     void send(const String&, ExceptionState&);
     void send(Blob*, ExceptionState&);
     void send(DOMFormData*, ExceptionState&);
-    void send(ArrayBuffer*, ExceptionState&);
-    void send(ArrayBufferView*, ExceptionState&);
+    void send(DOMArrayBuffer*, ExceptionState&);
+    void send(DOMArrayBufferView*, ExceptionState&);
     void abort();
     void setRequestHeader(const AtomicString& name, const AtomicString& value, ExceptionState&);
     void overrideMimeType(const AtomicString& override, ExceptionState&);
@@ -134,8 +134,8 @@ public:
     DOMArrayBuffer* responseArrayBuffer();
     Stream* responseLegacyStream();
     ReadableStream* responseStream();
-    unsigned long timeout() const { return m_timeoutMilliseconds; }
-    void setTimeout(unsigned long timeout, ExceptionState&);
+    unsigned timeout() const { return m_timeoutMilliseconds; }
+    void setTimeout(unsigned timeout, ExceptionState&);
     ResponseTypeCode responseTypeCode() const { return m_responseTypeCode; }
     String responseType();
     void setResponseType(const String&, ExceptionState&);
@@ -152,6 +152,7 @@ public:
 
 private:
     class BlobLoader;
+    class ReadableStreamSource;
     XMLHttpRequest(ExecutionContext*, PassRefPtr<SecurityOrigin>);
 
     Document* document() const;
@@ -255,8 +256,8 @@ private:
     unsigned long m_timeoutMilliseconds;
     PersistentWillBeMember<Blob> m_responseBlob;
     RefPtrWillBeMember<Stream> m_responseLegacyStream;
-    PersistentWillBeMember<ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBuffer> > > m_responseStream;
-    PersistentWillBeMember<UnderlyingSource> m_streamSource;
+    PersistentWillBeMember<ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBuffer>>> m_responseStream;
+    PersistentWillBeMember<ReadableStreamSource> m_responseStreamSource;
 
     RefPtr<ThreadableLoader> m_loader;
     unsigned long m_loaderIdentifier;
@@ -293,6 +294,11 @@ private:
     // This blob loader will be used if |m_downloadingToFile| is true and
     // |m_responseTypeCode| is NOT ResponseTypeBlob.
     OwnPtrWillBeMember<BlobLoader> m_blobLoader;
+
+    // Positive if we are dispatching events.
+    // This is an integer specifying the recursion level rather than a boolean
+    // because in some cases we have recursive dispatching.
+    int m_eventDispatchRecursionLevel;
 
     bool m_async;
     bool m_includeCredentials;

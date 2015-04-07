@@ -18,9 +18,6 @@
 
 namespace cc {
 
-static const GLuint kFramebufferId = 1;
-static const GLuint kRenderbufferId = 2;
-
 static unsigned s_context_id = 1;
 
 const GLuint TestWebGraphicsContext3D::kExternalTextureId = 1337;
@@ -34,7 +31,8 @@ TestWebGraphicsContext3D::Namespace*
 TestWebGraphicsContext3D::Namespace::Namespace()
     : next_buffer_id(1),
       next_image_id(1),
-      next_texture_id(1) {
+      next_texture_id(1),
+      next_renderbuffer_id(1) {
 }
 
 TestWebGraphicsContext3D::Namespace::~Namespace() {
@@ -58,6 +56,8 @@ TestWebGraphicsContext3D::TestWebGraphicsContext3D()
       max_used_transfer_buffer_usage_bytes_(0),
       next_program_id_(1000),
       next_shader_id_(2000),
+      next_framebuffer_id_(1),
+      current_framebuffer_(0),
       max_texture_size_(2048),
       reshape_called_(false),
       width_(0),
@@ -67,6 +67,7 @@ TestWebGraphicsContext3D::TestWebGraphicsContext3D()
       last_update_type_(NoUpdate),
       next_insert_sync_point_(1),
       last_waited_sync_point_(0),
+      unpack_alignment_(4),
       bound_buffer_(0),
       weak_ptr_factory_(this) {
   CreateNamespace();
@@ -161,13 +162,13 @@ void TestWebGraphicsContext3D::genBuffers(GLsizei count, GLuint* ids) {
 void TestWebGraphicsContext3D::genFramebuffers(
     GLsizei count, GLuint* ids) {
   for (int i = 0; i < count; ++i)
-    ids[i] = kFramebufferId | context_id_ << 16;
+    ids[i] = NextFramebufferId();
 }
 
 void TestWebGraphicsContext3D::genRenderbuffers(
     GLsizei count, GLuint* ids) {
   for (int i = 0; i < count; ++i)
-    ids[i] = kRenderbufferId | context_id_ << 16;
+    ids[i] = NextRenderbufferId();
 }
 
 void TestWebGraphicsContext3D::genTextures(GLsizei count, GLuint* ids) {
@@ -187,14 +188,19 @@ void TestWebGraphicsContext3D::deleteBuffers(GLsizei count, GLuint* ids) {
 
 void TestWebGraphicsContext3D::deleteFramebuffers(
     GLsizei count, GLuint* ids) {
-  for (int i = 0; i < count; ++i)
-    DCHECK_EQ(kFramebufferId | context_id_ << 16, ids[i]);
+  for (int i = 0; i < count; ++i) {
+    if (ids[i]) {
+      RetireFramebufferId(ids[i]);
+      if (ids[i] == current_framebuffer_)
+        current_framebuffer_ = 0;
+    }
+  }
 }
 
 void TestWebGraphicsContext3D::deleteRenderbuffers(
     GLsizei count, GLuint* ids) {
   for (int i = 0; i < count; ++i)
-    DCHECK_EQ(kRenderbufferId | context_id_ << 16, ids[i]);
+    RetireRenderbufferId(ids[i]);
 }
 
 void TestWebGraphicsContext3D::deleteTextures(GLsizei count, GLuint* ids) {
@@ -293,16 +299,31 @@ void TestWebGraphicsContext3D::useProgram(GLuint program) {
 
 void TestWebGraphicsContext3D::bindFramebuffer(
     GLenum target, GLuint framebuffer) {
-  if (!framebuffer)
-    return;
-  DCHECK_EQ(kFramebufferId | context_id_ << 16, framebuffer);
+  base::AutoLock lock_for_framebuffer_access(namespace_->lock);
+  if (framebuffer != 0 &&
+      framebuffer_set_.find(framebuffer) == framebuffer_set_.end()) {
+    ADD_FAILURE() << "bindFramebuffer called with unknown framebuffer";
+  } else if (framebuffer != 0 && (framebuffer >> 16) != context_id_) {
+    ADD_FAILURE()
+        << "bindFramebuffer called with framebuffer from other context";
+  } else {
+    current_framebuffer_ = framebuffer;
+  }
 }
 
 void TestWebGraphicsContext3D::bindRenderbuffer(
       GLenum target, GLuint renderbuffer) {
   if (!renderbuffer)
     return;
-  DCHECK_EQ(kRenderbufferId | context_id_ << 16, renderbuffer);
+  base::AutoLock lock_for_renderbuffer_access(namespace_->lock);
+  if (renderbuffer != 0 &&
+      namespace_->renderbuffer_set.find(renderbuffer) ==
+          namespace_->renderbuffer_set.end()) {
+    ADD_FAILURE() << "bindRenderbuffer called with unknown renderbuffer";
+  } else if ((renderbuffer >> 16) != context_id_) {
+    ADD_FAILURE()
+        << "bindRenderbuffer called with renderbuffer from other context";
+  }
 }
 
 void TestWebGraphicsContext3D::bindTexture(
@@ -367,6 +388,10 @@ void TestWebGraphicsContext3D::getIntegerv(
     *value = max_texture_size_;
   else if (pname == GL_ACTIVE_TEXTURE)
     *value = GL_TEXTURE0;
+  else if (pname == GL_UNPACK_ALIGNMENT)
+    *value = unpack_alignment_;
+  else if (pname == GL_FRAMEBUFFER_BINDING)
+    *value = current_framebuffer_;
 }
 
 void TestWebGraphicsContext3D::getProgramiv(GLuint program,
@@ -518,6 +543,28 @@ void TestWebGraphicsContext3D::bufferData(GLenum target,
                current_used_transfer_buffer_usage_bytes_);
 }
 
+void TestWebGraphicsContext3D::pixelStorei(GLenum pname, GLint param) {
+  switch (pname) {
+    case GL_UNPACK_ALIGNMENT:
+      // Param should be a power of two <= 8.
+      EXPECT_EQ(0, param & (param - 1));
+      EXPECT_GE(8, param);
+      switch (param) {
+        case 1:
+        case 2:
+        case 4:
+        case 8:
+          unpack_alignment_ = param;
+          break;
+        default:
+          break;
+      }
+      break;
+    default:
+      break;
+  }
+}
+
 void* TestWebGraphicsContext3D::mapBufferCHROMIUM(GLenum target,
                                                   GLenum access) {
   base::AutoLock lock(namespace_->lock);
@@ -647,6 +694,37 @@ void TestWebGraphicsContext3D::RetireImageId(GLuint id) {
   DCHECK(image_id);
   DCHECK_LT(image_id, namespace_->next_image_id);
   DCHECK_EQ(context_id, context_id_);
+}
+
+GLuint TestWebGraphicsContext3D::NextFramebufferId() {
+  base::AutoLock lock_for_framebuffer_access(namespace_->lock);
+  GLuint id = next_framebuffer_id_++;
+  DCHECK(id < (1 << 16));
+  id |= context_id_ << 16;
+  framebuffer_set_.insert(id);
+  return id;
+}
+
+void TestWebGraphicsContext3D::RetireFramebufferId(GLuint id) {
+  base::AutoLock lock_for_framebuffer_access(namespace_->lock);
+  DCHECK(framebuffer_set_.find(id) != framebuffer_set_.end());
+  framebuffer_set_.erase(id);
+}
+
+GLuint TestWebGraphicsContext3D::NextRenderbufferId() {
+  base::AutoLock lock_for_renderbuffer_access(namespace_->lock);
+  GLuint id = namespace_->next_renderbuffer_id++;
+  DCHECK(id < (1 << 16));
+  id |= context_id_ << 16;
+  namespace_->renderbuffer_set.insert(id);
+  return id;
+}
+
+void TestWebGraphicsContext3D::RetireRenderbufferId(GLuint id) {
+  base::AutoLock lock_for_renderbuffer_access(namespace_->lock);
+  DCHECK(namespace_->renderbuffer_set.find(id) !=
+         namespace_->renderbuffer_set.end());
+  namespace_->renderbuffer_set.erase(id);
 }
 
 void TestWebGraphicsContext3D::SetMaxTransferBufferUsageBytes(

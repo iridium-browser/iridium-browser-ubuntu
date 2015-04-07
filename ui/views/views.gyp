@@ -32,6 +32,11 @@
       'cocoa/bridged_content_view.mm',
       'cocoa/bridged_native_widget.h',
       'cocoa/bridged_native_widget.mm',
+      'cocoa/cocoa_mouse_capture.h',
+      'cocoa/cocoa_mouse_capture.mm',
+      'cocoa/cocoa_mouse_capture_delegate.h',
+      'cocoa/native_widget_mac_nswindow.h',
+      'cocoa/native_widget_mac_nswindow.mm',
       'cocoa/views_nswindow_delegate.h',
       'cocoa/views_nswindow_delegate.mm',
       'color_chooser/color_chooser_listener.h',
@@ -207,6 +212,7 @@
       'drag_utils.cc',
       'drag_utils.h',
       'drag_utils_aura.cc',
+      'drag_utils_mac.mm',
       'event_monitor.h',
       'event_monitor_aura.cc',
       'event_monitor_aura.h',
@@ -259,6 +265,8 @@
       'mouse_constants.h',
       'mouse_watcher.h',
       'mouse_watcher.cc',
+      'mouse_watcher_view_host.cc',
+      'mouse_watcher_view_host.h',
       'native_cursor.h',
       'native_cursor_aura.cc',
       'native_cursor_mac.mm',
@@ -382,8 +390,6 @@
       'corewm/tooltip_controller.h',
       'corewm/tooltip_win.cc',
       'corewm/tooltip_win.h',
-      'mouse_watcher_view_host.cc',
-      'mouse_watcher_view_host.h',
       'touchui/touch_editing_menu.cc',
       'touchui/touch_editing_menu.h',
       'touchui/touch_selection_controller_impl.cc',
@@ -503,6 +509,7 @@
       'bubble/bubble_frame_view_unittest.cc',
       'bubble/bubble_window_targeter_unittest.cc',
       'cocoa/bridged_native_widget_unittest.mm',
+      'cocoa/cocoa_mouse_capture_unittest.mm',
       'controls/button/blue_button_unittest.cc',
       'controls/button/custom_button_unittest.cc',
       'controls/button/image_button_unittest.cc',
@@ -534,7 +541,7 @@
       'controls/textfield/textfield_unittest.cc',
       'controls/textfield/textfield_model_unittest.cc',
       'controls/tree/tree_view_unittest.cc',
-      'event_monitor_mac_unittest.mm',
+      'event_monitor_unittest.cc',
       'focus/focus_manager_unittest.cc',
       'focus/focus_traversal_unittest.cc',
       'ime/input_method_bridge_unittest.cc',
@@ -548,6 +555,7 @@
       'view_unittest.cc',
       'view_unittest_aura.cc',
       'widget/native_widget_aura_unittest.cc',
+      'widget/native_widget_mac_unittest.mm',
       'widget/native_widget_unittest.cc',
       'widget/root_view_unittest.cc',
       'widget/widget_unittest.cc',
@@ -557,7 +565,6 @@
       'window/dialog_delegate_unittest.cc',
     ],
     'views_unittests_aura_sources': [
-      'corewm/capture_controller_unittest.cc',
       'corewm/tooltip_aura_unittest.cc',
       'corewm/tooltip_controller_unittest.cc',
       'touchui/touch_selection_controller_impl_unittest.cc',
@@ -693,6 +700,11 @@
             }],
           ],
         }],
+        ['OS=="mac"', {
+          'dependencies': [
+            '../accelerated_widget_mac/accelerated_widget_mac.gyp:accelerated_widget_mac',
+          ],
+        }],
       ],
     }, # target_name: views
     {
@@ -818,11 +830,6 @@
             '../events/platform/x11/x11_events_platform.gyp:x11_events_platform',
           ],
         }],
-        ['use_ozone==1', {
-          'sources!': [
-            'corewm/capture_controller_unittest.cc',
-          ],
-        }],
         ['use_aura==1', {
           'sources': [ '<@(views_unittests_aura_sources)' ],
           'dependencies': [
@@ -876,6 +883,7 @@
             'views_test_support',
           ],
           'sources': [
+            'cocoa/bridged_native_widget_interactive_uitest.mm',
             'run_all_unittests.cc',
             'widget/native_widget_mac_interactive_uitest.mm',
           ],

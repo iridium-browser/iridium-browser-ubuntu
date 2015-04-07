@@ -431,18 +431,11 @@ QuicConfig::QuicConfig()
       congestion_feedback_(kCGST, PRESENCE_REQUIRED),
       connection_options_(kCOPT, PRESENCE_OPTIONAL),
       idle_connection_state_lifetime_seconds_(kICSL, PRESENCE_REQUIRED),
-      keepalive_timeout_seconds_(kKATO, PRESENCE_OPTIONAL),
+      silent_close_(kSCLS, PRESENCE_OPTIONAL),
       max_streams_per_connection_(kMSPC, PRESENCE_REQUIRED),
       bytes_for_connection_id_(kTCID, PRESENCE_OPTIONAL),
-      initial_congestion_window_(kSWND, PRESENCE_OPTIONAL),
       initial_round_trip_time_us_(kIRTT, PRESENCE_OPTIONAL),
-      // TODO(rjshade): Remove this when retiring QUIC_VERSION_19.
-      initial_flow_control_window_bytes_(kIFCW, PRESENCE_OPTIONAL),
-      // TODO(rjshade): Make this PRESENCE_REQUIRED when retiring
-      // QUIC_VERSION_19.
       initial_stream_flow_control_window_bytes_(kSFCW, PRESENCE_OPTIONAL),
-      // TODO(rjshade): Make this PRESENCE_REQUIRED when retiring
-      // QUIC_VERSION_19.
       initial_session_flow_control_window_bytes_(kCFCW, PRESENCE_OPTIONAL),
       socket_receive_buffer_(kSRBF, PRESENCE_OPTIONAL) {
   SetDefaults();
@@ -485,8 +478,8 @@ void QuicConfig::SetIdleConnectionStateLifetime(
     QuicTime::Delta max_idle_connection_state_lifetime,
     QuicTime::Delta default_idle_conection_state_lifetime) {
   idle_connection_state_lifetime_seconds_.set(
-      max_idle_connection_state_lifetime.ToSeconds(),
-      default_idle_conection_state_lifetime.ToSeconds());
+      static_cast<uint32>(max_idle_connection_state_lifetime.ToSeconds()),
+      static_cast<uint32>(default_idle_conection_state_lifetime.ToSeconds()));
 }
 
 QuicTime::Delta QuicConfig::IdleConnectionStateLifetime() const {
@@ -494,9 +487,12 @@ QuicTime::Delta QuicConfig::IdleConnectionStateLifetime() const {
       idle_connection_state_lifetime_seconds_.GetUint32());
 }
 
-QuicTime::Delta QuicConfig::KeepaliveTimeout() const {
-  return QuicTime::Delta::FromSeconds(
-      keepalive_timeout_seconds_.GetUint32());
+void QuicConfig::SetSilentClose(bool silent_close) {
+  silent_close_.set(silent_close ? 1 : 0, silent_close ? 1 : 0);
+}
+
+bool QuicConfig::SilentClose() const {
+  return silent_close_.GetUint32() > 0;
 }
 
 void QuicConfig::SetMaxStreamsPerConnection(size_t max_streams,
@@ -524,19 +520,7 @@ uint32 QuicConfig::ReceivedBytesForConnectionId() const {
   return bytes_for_connection_id_.GetReceivedValue();
 }
 
-void QuicConfig::SetInitialCongestionWindowToSend(size_t initial_window) {
-  initial_congestion_window_.SetSendValue(initial_window);
-}
-
-bool QuicConfig::HasReceivedInitialCongestionWindow() const {
-  return initial_congestion_window_.HasReceivedValue();
-}
-
-uint32 QuicConfig::ReceivedInitialCongestionWindow() const {
-  return initial_congestion_window_.GetReceivedValue();
-}
-
-void QuicConfig::SetInitialRoundTripTimeUsToSend(size_t rtt) {
+void QuicConfig::SetInitialRoundTripTimeUsToSend(uint32 rtt) {
   initial_round_trip_time_us_.SetSendValue(rtt);
 }
 
@@ -556,34 +540,12 @@ uint32 QuicConfig::GetInitialRoundTripTimeUsToSend() const {
   return initial_round_trip_time_us_.GetSendValue();
 }
 
-void QuicConfig::SetInitialFlowControlWindowToSend(uint32 window_bytes) {
-  if (window_bytes < kDefaultFlowControlSendWindow) {
-    LOG(DFATAL) << "Initial flow control receive window (" << window_bytes
-                << ") cannot be set lower than default ("
-                << kDefaultFlowControlSendWindow << ").";
-    window_bytes = kDefaultFlowControlSendWindow;
-  }
-  initial_flow_control_window_bytes_.SetSendValue(window_bytes);
-}
-
-uint32 QuicConfig::GetInitialFlowControlWindowToSend() const {
-  return initial_flow_control_window_bytes_.GetSendValue();
-}
-
-bool QuicConfig::HasReceivedInitialFlowControlWindowBytes() const {
-  return initial_flow_control_window_bytes_.HasReceivedValue();
-}
-
-uint32 QuicConfig::ReceivedInitialFlowControlWindowBytes() const {
-  return initial_flow_control_window_bytes_.GetReceivedValue();
-}
-
 void QuicConfig::SetInitialStreamFlowControlWindowToSend(uint32 window_bytes) {
-  if (window_bytes < kDefaultFlowControlSendWindow) {
+  if (window_bytes < kMinimumFlowControlSendWindow) {
     LOG(DFATAL) << "Initial stream flow control receive window ("
                 << window_bytes << ") cannot be set lower than default ("
-                << kDefaultFlowControlSendWindow << ").";
-    window_bytes = kDefaultFlowControlSendWindow;
+                << kMinimumFlowControlSendWindow << ").";
+    window_bytes = kMinimumFlowControlSendWindow;
   }
   initial_stream_flow_control_window_bytes_.SetSendValue(window_bytes);
 }
@@ -601,11 +563,11 @@ uint32 QuicConfig::ReceivedInitialStreamFlowControlWindowBytes() const {
 }
 
 void QuicConfig::SetInitialSessionFlowControlWindowToSend(uint32 window_bytes) {
-  if (window_bytes < kDefaultFlowControlSendWindow) {
+  if (window_bytes < kMinimumFlowControlSendWindow) {
     LOG(DFATAL) << "Initial session flow control receive window ("
                 << window_bytes << ") cannot be set lower than default ("
-                << kDefaultFlowControlSendWindow << ").";
-    window_bytes = kDefaultFlowControlSendWindow;
+                << kMinimumFlowControlSendWindow << ").";
+    window_bytes = kMinimumFlowControlSendWindow;
   }
   initial_session_flow_control_window_bytes_.SetSendValue(window_bytes);
 }
@@ -644,7 +606,6 @@ bool QuicConfig::negotiated() const {
   // ProcessServerHello.
   return congestion_feedback_.negotiated() &&
       idle_connection_state_lifetime_seconds_.negotiated() &&
-      keepalive_timeout_seconds_.negotiated() &&
       max_streams_per_connection_.negotiated();
 }
 
@@ -654,8 +615,11 @@ void QuicConfig::SetDefaults() {
   congestion_feedback_.set(congestion_feedback, kQBIC);
   idle_connection_state_lifetime_seconds_.set(kMaximumIdleTimeoutSecs,
                                               kDefaultIdleTimeoutSecs);
-  // kKATO is optional. Return 0 if not negotiated.
-  keepalive_timeout_seconds_.set(0, 0);
+  if (FLAGS_quic_allow_silent_close) {
+    silent_close_.set(1, 0);
+  } else {
+    silent_close_.set(0, 0);
+  }
   SetMaxStreamsPerConnection(kDefaultMaxStreamsPerConnection,
                              kDefaultMaxStreamsPerConnection);
   max_time_before_crypto_handshake_ =
@@ -664,20 +628,17 @@ void QuicConfig::SetDefaults() {
       QuicTime::Delta::FromSeconds(kInitialIdleTimeoutSecs);
   max_undecryptable_packets_ = kDefaultMaxUndecryptablePackets;
 
-  SetInitialFlowControlWindowToSend(kDefaultFlowControlSendWindow);
-  SetInitialStreamFlowControlWindowToSend(kDefaultFlowControlSendWindow);
-  SetInitialSessionFlowControlWindowToSend(kDefaultFlowControlSendWindow);
+  SetInitialStreamFlowControlWindowToSend(kMinimumFlowControlSendWindow);
+  SetInitialSessionFlowControlWindowToSend(kMinimumFlowControlSendWindow);
 }
 
 void QuicConfig::ToHandshakeMessage(CryptoHandshakeMessage* out) const {
   congestion_feedback_.ToHandshakeMessage(out);
   idle_connection_state_lifetime_seconds_.ToHandshakeMessage(out);
-  keepalive_timeout_seconds_.ToHandshakeMessage(out);
+  silent_close_.ToHandshakeMessage(out);
   max_streams_per_connection_.ToHandshakeMessage(out);
   bytes_for_connection_id_.ToHandshakeMessage(out);
-  initial_congestion_window_.ToHandshakeMessage(out);
   initial_round_trip_time_us_.ToHandshakeMessage(out);
-  initial_flow_control_window_bytes_.ToHandshakeMessage(out);
   initial_stream_flow_control_window_bytes_.ToHandshakeMessage(out);
   initial_session_flow_control_window_bytes_.ToHandshakeMessage(out);
   socket_receive_buffer_.ToHandshakeMessage(out);
@@ -700,8 +661,8 @@ QuicErrorCode QuicConfig::ProcessPeerHello(
         peer_hello, hello_type, error_details);
   }
   if (error == QUIC_NO_ERROR) {
-    error = keepalive_timeout_seconds_.ProcessPeerHello(
-        peer_hello, hello_type, error_details);
+    error =
+        silent_close_.ProcessPeerHello(peer_hello, hello_type, error_details);
   }
   if (error == QUIC_NO_ERROR) {
     error = max_streams_per_connection_.ProcessPeerHello(
@@ -712,15 +673,7 @@ QuicErrorCode QuicConfig::ProcessPeerHello(
         peer_hello, hello_type, error_details);
   }
   if (error == QUIC_NO_ERROR) {
-    error = initial_congestion_window_.ProcessPeerHello(
-        peer_hello, hello_type, error_details);
-  }
-  if (error == QUIC_NO_ERROR) {
     error = initial_round_trip_time_us_.ProcessPeerHello(
-        peer_hello, hello_type, error_details);
-  }
-  if (error == QUIC_NO_ERROR) {
-    error = initial_flow_control_window_bytes_.ProcessPeerHello(
         peer_hello, hello_type, error_details);
   }
   if (error == QUIC_NO_ERROR) {

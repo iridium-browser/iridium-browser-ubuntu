@@ -15,23 +15,27 @@
 <translation id="3622586652998721735">Ange som standardschema</translation>
 <translation id="2179565792157161713">Öppna lång beskrivning på ny flik</translation>
 <translation id="2471847333270902538">Färgschema för <ph name="SITE"/>:</translation>
+<translation id="381767806621926835">Högerklicka på någonting med attributet longdesc eller aria-describedat för att komma åt den långa beskrivningen.</translation>
+<translation id="786423340267544509">Lägg till ramar i element med attributen aria-describedat eller longdesc.</translation>
 <translation id="690628312087070417">När textmarkören flyttas långt bort:</translation>
 <translation id="5331422999063554397">Inverterad färg</translation>
 <translation id="2648340354586434750">Tryck länge på &lt;span class='key'&gt;Option&lt;/span&gt; för att flytta efter ord.</translation>
+<translation id="4769065380738716500">Bilderna har ersatts av deras alt-text.</translation>
 <translation id="5287723860611749454">&lt;p&gt;Använd piltangenterna för att flytta i dokumentet. &lt;/p&gt;&lt;p&gt;Klicka någonstans för att flytta markören till den platsen. &lt;/p&gt; &lt;p&gt;   Tryck på &lt;span class='key'&gt;Skift&lt;/span&gt; + pilarna för att markera text.&lt;/p&gt;</translation>
 <translation id="5558600050691192317">Tangentbordskommandon</translation>
 <translation id="633394792577263429">Tryck länge på &lt;span class='key'&gt;Ctrl&lt;/span&gt; för att flytta efter ord.</translation>
+<translation id="2079545284768500474">Ångra</translation>
 <translation id="8254860724243898966">Tryck på &lt;span class='key'&gt;Alt&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt; (tangenten för att öka ljusstyrkan eller F7) för att aktivera textmarkörläget. Tryck igen för att inaktivera det.</translation>
 <translation id="3812541808639806898">Visningsprogram för Alt-text</translation>
 <translation id="1287053896835709737">Gult på svart</translation>
 <translation id="4896660567607030658">Ingen feedback, visa bara markören.</translation>
 <translation id="5631241868147802353">Standardschema för färger:</translation>
-<translation id="625377550964694810">Ett HTML-element med antingen attributet ”longdesc” eller ”aria-describedat” får en tjock vibrerande ram. Om du högerklickar på den läggs alternativet för att visa den långa beskrivningen till i snabbmenyn.</translation>
 <translation id="5173942593318174089">Visa markörens position med en animering.</translation>
 <translation id="894241283505723656">Långa beskrivningar i snabbmenyn</translation>
 <translation id="5555153510860501336">Hög kontrast är inaktiverat</translation>
 <translation id="1703735871906654364">Textmarkörläge</translation>
 <translation id="7384431257964758081">Hög kontrast är aktiverat</translation>
+<translation id="6550675742724504774">Alternativ</translation>
 <translation id="5650358096585648000">Visuell feedback</translation>
 <translation id="4388820049312272371">Låt markören blinka till för att visa sin position.</translation>
 <translation id="4023902424053835668">Bläddra igenom texten på webbsidor med piltangenterna.</translation>

@@ -11,12 +11,12 @@
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "chrome/browser/web_resource/resource_request_allowed_notifier_test_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "components/variations/proto/study.pb.h"
 #include "components/variations/proto/variations_seed.pb.h"
+#include "components/web_resource/resource_request_allowed_notifier_test_util.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
@@ -37,7 +37,7 @@ namespace {
 // A test class used to validate expected functionality in VariationsService.
 class TestVariationsService : public VariationsService {
  public:
-  TestVariationsService(TestRequestAllowedNotifier* test_notifier,
+  TestVariationsService(web_resource::TestRequestAllowedNotifier* test_notifier,
                         PrefService* local_state)
       : VariationsService(test_notifier, local_state, NULL),
         intercepts_fetch_(true),
@@ -266,7 +266,8 @@ TEST_F(VariationsServiceTest, RequestsInitiallyNotAllowed) {
 
   // Pass ownership to TestVariationsService, but keep a weak pointer to
   // manipulate it for this test.
-  TestRequestAllowedNotifier* test_notifier = new TestRequestAllowedNotifier;
+  web_resource::TestRequestAllowedNotifier* test_notifier =
+      new web_resource::TestRequestAllowedNotifier(&prefs);
   TestVariationsService test_service(test_notifier, &prefs);
 
   // Force the notifier to initially disallow requests.
@@ -287,7 +288,8 @@ TEST_F(VariationsServiceTest, RequestsInitiallyAllowed) {
 
   // Pass ownership to TestVariationsService, but keep a weak pointer to
   // manipulate it for this test.
-  TestRequestAllowedNotifier* test_notifier = new TestRequestAllowedNotifier;
+  web_resource::TestRequestAllowedNotifier* test_notifier =
+      new web_resource::TestRequestAllowedNotifier(&prefs);
   TestVariationsService test_service(test_notifier, &prefs);
 
   test_notifier->SetRequestsAllowedOverride(true);
@@ -302,7 +304,10 @@ TEST_F(VariationsServiceTest, SeedStoredWhenOKStatus) {
   TestingPrefServiceSimple prefs;
   VariationsService::RegisterPrefs(prefs.registry());
 
-  TestVariationsService service(new TestRequestAllowedNotifier, &prefs);
+  TestVariationsService service(
+      new web_resource::TestRequestAllowedNotifier(&prefs), &prefs);
+  const GURL url = VariationsService::GetVariationsServerURL(&prefs);
+  service.variations_server_url_ = url;
   service.set_intercepts_fetch(false);
 
   net::TestURLFetcherFactory factory;
@@ -332,7 +337,10 @@ TEST_F(VariationsServiceTest, SeedNotStoredWhenNonOKStatus) {
   TestingPrefServiceSimple prefs;
   VariationsService::RegisterPrefs(prefs.registry());
 
-  VariationsService service(new TestRequestAllowedNotifier, &prefs, NULL);
+  VariationsService service(
+      new web_resource::TestRequestAllowedNotifier(&prefs), &prefs, NULL);
+  const GURL url = VariationsService::GetVariationsServerURL(&prefs);
+  service.variations_server_url_ = url;
   for (size_t i = 0; i < arraysize(non_ok_status_codes); ++i) {
     net::TestURLFetcherFactory factory;
     service.DoActualFetch();
@@ -353,8 +361,11 @@ TEST_F(VariationsServiceTest, SeedDateUpdatedOn304Status) {
   TestingPrefServiceSimple prefs;
   VariationsService::RegisterPrefs(prefs.registry());
 
-  VariationsService service(new TestRequestAllowedNotifier, &prefs, NULL);
   net::TestURLFetcherFactory factory;
+  VariationsService service(
+      new web_resource::TestRequestAllowedNotifier(&prefs), &prefs, NULL);
+  const GURL url = VariationsService::GetVariationsServerURL(&prefs);
+  service.variations_server_url_ = url;
   service.DoActualFetch();
   EXPECT_TRUE(
       prefs.FindPreference(prefs::kVariationsSeedDate)->IsDefaultValue());
@@ -369,7 +380,8 @@ TEST_F(VariationsServiceTest, SeedDateUpdatedOn304Status) {
 TEST_F(VariationsServiceTest, Observer) {
   TestingPrefServiceSimple prefs;
   VariationsService::RegisterPrefs(prefs.registry());
-  VariationsService service(new TestRequestAllowedNotifier, &prefs, NULL);
+  VariationsService service(
+      new web_resource::TestRequestAllowedNotifier(&prefs), &prefs, NULL);
 
   struct {
     int normal_count;

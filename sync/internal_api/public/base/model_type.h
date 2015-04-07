@@ -80,13 +80,13 @@ enum ModelType {
   // An extension setting from the extension settings API.
   EXTENSION_SETTINGS,
   // App notifications.
-  APP_NOTIFICATIONS,
+  APP_NOTIFICATIONS,  // Deprecated.
   // History delete directives.
   HISTORY_DELETE_DIRECTIVES,
   // Synced push notifications.
-  SYNCED_NOTIFICATIONS,
+  SYNCED_NOTIFICATIONS,   // Deprecated.
   // Synced Notification app info.
-  SYNCED_NOTIFICATION_APP_INFO,
+  SYNCED_NOTIFICATION_APP_INFO,  // Deprecated.
   // Custom spelling dictionary.
   DICTIONARY,
   // Favicon images.
@@ -114,6 +114,9 @@ enum ModelType {
   // WiFi credentials. Each item contains the information for connecting to one
   // WiFi network. This includes, e.g., network name and password.
   WIFI_CREDENTIALS,
+  // Supervised user whitelists. Each item contains a CRX ID (like an extension
+  // ID) and a name.
+  SUPERVISED_USER_WHITELISTS,
 
   // ---- Proxy types ----
   // Proxy types are excluded from the sync protocol, but are still considered
@@ -251,8 +254,6 @@ SYNC_EXPORT_PRIVATE ModelType GetModelTypeFromSpecificsFieldNumber(
 
 // Return the field number of the EntitySpecifics field associated with
 // a model type.
-//
-// Used by tests outside of sync.
 SYNC_EXPORT int GetSpecificsFieldNumberFromModelType(
     ModelType model_type);
 

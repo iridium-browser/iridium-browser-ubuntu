@@ -19,13 +19,13 @@
 #include "components/component_updater/component_updater_configurator.h"
 #include "components/component_updater/crx_update_item.h"
 #include "components/crx_file/id_util.h"
-#include "components/omaha_query_params/omaha_query_params.h"
+#include "components/update_client/update_query_params.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 
-using omaha_query_params::OmahaQueryParams;
+using update_client::UpdateQueryParams;
 
 namespace component_updater {
 
@@ -38,6 +38,25 @@ int GetPhysicalMemoryGB() {
   return static_cast<int>(std::floor(0.5 + phys_mem / kOneGB));
 }
 
+// Produces an extension-like friendly id.
+std::string HexStringToID(const std::string& hexstr) {
+  std::string id;
+  for (size_t i = 0; i < hexstr.size(); ++i) {
+    int val = 0;
+    if (base::HexStringToInt(
+            base::StringPiece(hexstr.begin() + i, hexstr.begin() + i + 1),
+            &val)) {
+      id.append(1, val + 'a');
+    } else {
+      id.append(1, 'a');
+    }
+  }
+
+  DCHECK(crx_file::id_util::IdIsValid(id));
+
+  return id;
+}
+
 }  // namespace
 
 std::string BuildProtocolRequest(const std::string& browser_version,
@@ -47,7 +66,7 @@ std::string BuildProtocolRequest(const std::string& browser_version,
                                  const std::string& request_body,
                                  const std::string& additional_attributes) {
   const std::string prod_id(
-      OmahaQueryParams::GetProdIdString(OmahaQueryParams::CHROME));
+      UpdateQueryParams::GetProdIdString(UpdateQueryParams::CHROME));
 
   std::string request(
       "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -63,15 +82,15 @@ std::string BuildProtocolRequest(const std::string& browser_version,
       "requestid=\"{%s}\" lang=\"%s\" updaterchannel=\"%s\" prodchannel=\"%s\" "
       "os=\"%s\" arch=\"%s\" nacl_arch=\"%s\"",
       prod_id.c_str(),
-      browser_version.c_str(),           // "version"
-      browser_version.c_str(),           // "prodversion"
-      base::GenerateGUID().c_str(),      // "requestid"
-      lang.c_str(),                      // "lang",
-      channel.c_str(),                   // "updaterchannel"
-      channel.c_str(),                   // "prodchannel"
-      OmahaQueryParams::GetOS(),         // "os"
-      OmahaQueryParams::GetArch(),       // "arch"
-      OmahaQueryParams::GetNaclArch());  // "nacl_arch"
+      browser_version.c_str(),            // "version"
+      browser_version.c_str(),            // "prodversion"
+      base::GenerateGUID().c_str(),       // "requestid"
+      lang.c_str(),                       // "lang",
+      channel.c_str(),                    // "updaterchannel"
+      channel.c_str(),                    // "prodchannel"
+      UpdateQueryParams::GetOS(),         // "os"
+      UpdateQueryParams::GetArch(),       // "arch"
+      UpdateQueryParams::GetNaclArch());  // "nacl_arch"
 #if defined(OS_WIN)
   const bool is_wow64(base::win::OSInfo::GetInstance()->wow64_status() ==
                       base::win::OSInfo::WOW64_ENABLED);
@@ -169,28 +188,11 @@ bool DeleteFileAndEmptyParentDirectory(const base::FilePath& filepath) {
   return base::DeleteFile(dirname, false);
 }
 
-// Produces an extension-like friendly id.
-std::string HexStringToID(const std::string& hexstr) {
-  std::string id;
-  for (size_t i = 0; i < hexstr.size(); ++i) {
-    int val = 0;
-    if (base::HexStringToInt(
-            base::StringPiece(hexstr.begin() + i, hexstr.begin() + i + 1),
-            &val)) {
-      id.append(1, val + 'a');
-    } else {
-      id.append(1, 'a');
-    }
-  }
-
-  DCHECK(crx_file::id_util::IdIsValid(id));
-
-  return id;
-}
-
 std::string GetCrxComponentID(const CrxComponent& component) {
+  const size_t kCrxIdSize = 16;
+  CHECK_GE(component.pk_hash.size(), kCrxIdSize);
   return HexStringToID(base::StringToLowerASCII(
-      base::HexEncode(&component.pk_hash[0], component.pk_hash.size() / 2)));
+      base::HexEncode(&component.pk_hash[0], kCrxIdSize)));
 }
 
 }  // namespace component_updater

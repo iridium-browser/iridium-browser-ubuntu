@@ -36,20 +36,21 @@ public:
     virtual void trace(Visitor*) override;
 
     // If you have a RenderSVGContainer, use firstChild or lastChild instead.
-    void slowFirstChild() const WTF_DELETED_FUNCTION;
-    void slowLastChild() const WTF_DELETED_FUNCTION;
+    void slowFirstChild() const = delete;
+    void slowLastChild() const = delete;
 
     RenderObject* firstChild() const { ASSERT(children() == virtualChildren()); return children()->firstChild(); }
     RenderObject* lastChild() const { ASSERT(children() == virtualChildren()); return children()->lastChild(); }
 
-    virtual void paint(PaintInfo&, const LayoutPoint&) override;
+    virtual void paint(const PaintInfo&, const LayoutPoint&) override;
+    virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle) override;
     virtual void setNeedsBoundariesUpdate() override final { m_needsBoundariesUpdate = true; }
     virtual bool didTransformToRootUpdate() { return false; }
     bool isObjectBoundingBoxValid() const { return m_objectBoundingBoxValid; }
 
-    virtual FloatRect paintInvalidationRectInLocalCoordinates() const override final { return m_paintInvalidationBoundingBox; }
     bool selfWillPaint();
 
+    virtual bool hasNonIsolatedBlendingDescendants() const override final;
 protected:
     virtual RenderObjectChildList* virtualChildren() override final { return children(); }
     virtual const RenderObjectChildList* virtualChildren() const override final { return children(); }
@@ -61,7 +62,7 @@ protected:
 
     virtual void addChild(RenderObject* child, RenderObject* beforeChild = 0) override final;
     virtual void removeChild(RenderObject*) override final;
-    virtual void addFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset, const RenderLayerModelObject* paintContainer) const override final;
+    virtual void addFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset) const override final;
 
     virtual FloatRect objectBoundingBox() const override final { return m_objectBoundingBox; }
     virtual FloatRect strokeBoundingBox() const override final { return m_strokeBoundingBox; }
@@ -79,16 +80,19 @@ protected:
 
     void updateCachedBoundaries();
 
+    virtual void descendantIsolationRequirementsChanged(DescendantIsolationState) override final;
+
 private:
     const RenderObjectChildList* children() const { return &m_children; }
     RenderObjectChildList* children() { return &m_children; }
 
     RenderObjectChildList m_children;
     FloatRect m_objectBoundingBox;
-    bool m_objectBoundingBoxValid;
     FloatRect m_strokeBoundingBox;
-    FloatRect m_paintInvalidationBoundingBox;
-    bool m_needsBoundariesUpdate : 1;
+    bool m_objectBoundingBoxValid;
+    bool m_needsBoundariesUpdate;
+    mutable bool m_hasNonIsolatedBlendingDescendants : 1;
+    mutable bool m_hasNonIsolatedBlendingDescendantsDirty : 1;
 };
 
 DEFINE_RENDER_OBJECT_TYPE_CASTS(RenderSVGContainer, isSVGContainer());

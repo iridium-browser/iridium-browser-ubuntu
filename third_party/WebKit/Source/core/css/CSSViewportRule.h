@@ -41,6 +41,7 @@ class StyleRuleViewport;
 class StyleRuleCSSStyleDeclaration;
 
 class CSSViewportRule final: public CSSRule {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<CSSViewportRule> create(StyleRuleViewport* viewportRule, CSSStyleSheet* sheet)
     {
@@ -48,7 +49,6 @@ public:
     }
     virtual ~CSSViewportRule();
 
-    virtual CSSRule::Type type() const override { return VIEWPORT_RULE; }
     virtual String cssText() const override;
     virtual void reattach(StyleRuleBase*) override;
 
@@ -58,6 +58,8 @@ public:
 
 private:
     CSSViewportRule(StyleRuleViewport*, CSSStyleSheet*);
+
+    virtual CSSRule::Type type() const override { return VIEWPORT_RULE; }
 
     RefPtrWillBeMember<StyleRuleViewport> m_viewportRule;
     mutable RefPtrWillBeMember<StyleRuleCSSStyleDeclaration> m_propertiesCSSOMWrapper;

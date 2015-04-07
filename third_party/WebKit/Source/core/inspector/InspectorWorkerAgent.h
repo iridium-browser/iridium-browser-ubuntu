@@ -37,6 +37,7 @@
 #include "wtf/HashMap.h"
 
 namespace blink {
+class PageConsoleAgent;
 class JSONObject;
 class KURL;
 class WorkerInspectorProxy;
@@ -45,7 +46,7 @@ typedef String ErrorString;
 
 class InspectorWorkerAgent final : public InspectorBaseAgent<InspectorWorkerAgent>, public InspectorBackendDispatcher::WorkerCommandHandler {
 public:
-    static PassOwnPtrWillBeRawPtr<InspectorWorkerAgent> create();
+    static PassOwnPtrWillBeRawPtr<InspectorWorkerAgent> create(PageConsoleAgent*);
     virtual ~InspectorWorkerAgent();
 
     virtual void init() override;
@@ -70,19 +71,28 @@ public:
     void setTracingSessionId(const String&);
 
 private:
-    InspectorWorkerAgent();
-    void createWorkerFrontendChannelsForExistingWorkers();
-    void createWorkerFrontendChannel(WorkerInspectorProxy*, const String& url);
-    void destroyWorkerFrontendChannels();
+    InspectorWorkerAgent(PageConsoleAgent*);
+    void createWorkerAgentClientsForExistingWorkers();
+    void createWorkerAgentClient(WorkerInspectorProxy*, const String& url, int id);
+    void destroyWorkerAgentClients();
 
     InspectorFrontend::Worker* m_frontend;
 
-    class WorkerFrontendChannel;
-    typedef HashMap<int, WorkerFrontendChannel*> WorkerChannels;
-    WorkerChannels m_idToChannel;
-    typedef HashMap<WorkerInspectorProxy*, String> WorkerIds;
-    WorkerIds m_workerIds;
+    class WorkerInfo {
+    public:
+        WorkerInfo() : id(0) { }
+        WorkerInfo(const String& url, int id) : url(url), id(id) { }
+        String url;
+        int id;
+    };
+    class WorkerAgentClient;
+    typedef HashMap<int, WorkerAgentClient*> WorkerClients;
+    WorkerClients m_idToClient;
+    typedef HashMap<WorkerInspectorProxy*, WorkerInfo> WorkerInfos;
+    WorkerInfos m_workerInfos;
     String m_tracingSessionId;
+    int m_nextId;
+    PageConsoleAgent* m_consoleAgent;
 };
 
 } // namespace blink

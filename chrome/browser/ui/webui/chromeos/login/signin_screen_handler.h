@@ -16,7 +16,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/chromeos/login/enrollment/auto_enrollment_controller.h"
 #include "chrome/browser/chromeos/login/screens/error_screen_actor.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
@@ -27,14 +26,14 @@
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/touch_view_controller_delegate.h"
-#include "chromeos/ime/ime_keyboard.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui.h"
 #include "net/base/net_errors.h"
+#include "ui/base/ime/chromeos/ime_keyboard.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/events/event_handler.h"
 
 class EasyUnlockService;
@@ -96,13 +95,6 @@ class LoginDisplayWebUIHandler {
                                         const std::string& password) = 0;
   virtual void LoadUsers(const base::ListValue& users_list,
                          bool show_guest) = 0;
-  virtual void SetPublicSessionDisplayName(const std::string& user_id,
-                                           const std::string& display_name) = 0;
-  virtual void SetPublicSessionLocales(const std::string& user_id,
-                                       scoped_ptr<base::ListValue> locales,
-                                       const std::string& default_locale,
-                                       bool multipleRecommendedLocales) = 0;
-
  protected:
   virtual ~LoginDisplayWebUIHandler() {}
 };
@@ -149,6 +141,9 @@ class SigninScreenHandlerDelegate {
   // Shows Enterprise Enrollment screen.
   virtual void ShowEnterpriseEnrollmentScreen() = 0;
 
+  // Shows Enable Developer Features screen.
+  virtual void ShowEnableDebuggingScreen() = 0;
+
   // Shows Kiosk Enable screen.
   virtual void ShowKioskEnableScreen() = 0;
 
@@ -194,15 +189,6 @@ class SigninScreenHandlerDelegate {
   // Request to (re)load user list.
   virtual void HandleGetUsers() = 0;
 
-  // Set authentication type (for easier unlocking).
-  virtual void SetAuthType(
-      const std::string& username,
-      ScreenlockBridge::LockHandler::AuthType auth_type) = 0;
-
-  // Get authentication type (for easier unlocking).
-  virtual ScreenlockBridge::LockHandler::AuthType GetAuthType(
-      const std::string& username) const = 0;
-
  protected:
   virtual ~SigninScreenHandlerDelegate() {}
 };
@@ -213,7 +199,6 @@ class SigninScreenHandler
     : public BaseScreenHandler,
       public LoginDisplayWebUIHandler,
       public content::NotificationObserver,
-      public ScreenlockBridge::LockHandler,
       public NetworkStateInformer::NetworkStateInformerObserver,
       public input_method::ImeKeyboard::Observer,
       public TouchViewControllerDelegate::Observer,
@@ -226,11 +211,16 @@ class SigninScreenHandler
       GaiaScreenHandler* gaia_screen_handler);
   virtual ~SigninScreenHandler();
 
+  static std::string GetUserLRUInputMethod(const std::string& username);
+
+  // Update current input method (namely keyboard layout) in the given IME state
+  // to LRU by this user.
+  static void SetUserInputMethod(
+      const std::string& username,
+      input_method::InputMethodManager::State* ime_state);
+
   // Shows the sign in screen.
   void Show(const LoginScreenContext& context);
-
-  // Shows the login spinner UI for retail mode logins.
-  void ShowRetailModeLoginSpinner();
 
   // Sets delegate to be used by the handler. It is guaranteed that valid
   // delegate is set before Show() method will be called.
@@ -245,19 +235,18 @@ class SigninScreenHandler
   // Required Local State preferences.
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
-  void set_kiosk_enable_flow_aborted_callback_for_test(
-      const base::Closure& callback) {
-    kiosk_enable_flow_aborted_callback_for_test_ = callback;
-  }
-
   // OobeUI::Observer implemetation.
   virtual void OnCurrentScreenChanged(OobeUI::Screen current_screen,
                                       OobeUI::Screen new_screen) override;
 
-  // Returns least used user login input method.
-  std::string GetUserLRUInputMethod(const std::string& username) const;
 
   void SetFocusPODCallbackForTesting(base::Closure callback);
+
+  // To avoid spurious error messages on flaky networks, the offline message is
+  // only shown if the network is offline for a threshold number of seconds.
+  // This method reduces the threshold to zero, allowing the offline message to
+  // show instantaneously in tests.
+  void ZeroOfflineTimeoutForTesting();
 
  private:
   enum UIState {
@@ -312,36 +301,11 @@ class SigninScreenHandler
                                         const std::string& password) override;
   virtual void LoadUsers(const base::ListValue& users_list,
                          bool show_guest) override;
-  virtual void SetPublicSessionDisplayName(
-      const std::string& user_id,
-      const std::string& display_name) override;
-  virtual void SetPublicSessionLocales(
-      const std::string& user_id,
-      scoped_ptr<base::ListValue> locales,
-      const std::string& default_locale,
-      bool multipleRecommendedLocales) override;
 
   // content::NotificationObserver implementation:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) override;
-
-  // ScreenlockBridge::LockHandler implementation:
-  virtual void ShowBannerMessage(const base::string16& message) override;
-  virtual void ShowUserPodCustomIcon(
-      const std::string& username,
-      const ScreenlockBridge::UserPodCustomIconOptions& icon) override;
-  virtual void HideUserPodCustomIcon(const std::string& username) override;
-  virtual void EnableInput() override;
-  virtual void SetAuthType(const std::string& username,
-                           ScreenlockBridge::LockHandler::AuthType auth_type,
-                           const base::string16& initial_value) override;
-  virtual ScreenlockBridge::LockHandler::AuthType GetAuthType(
-      const std::string& username) const override;
-  virtual void Unlock(const std::string& user_email) override;
-  virtual void AttemptEasySignin(const std::string& user_email,
-                                 const std::string& secret,
-                                 const std::string& key_label) override;
 
   // TouchViewControllerDelegate::Observer implementation:
   virtual void OnMaximizeModeStarted() override;
@@ -360,7 +324,6 @@ class SigninScreenHandler
   void HandleAuthenticateUser(const std::string& username,
                               const std::string& password);
   void HandleAttemptUnlock(const std::string& username);
-  void HandleLaunchDemoUser();
   void HandleLaunchIncognito();
   void HandleLaunchPublicSession(const std::string& user_id,
                                  const std::string& locale,
@@ -372,6 +335,7 @@ class SigninScreenHandler
   void HandleRemoveUser(const std::string& email);
   void HandleShowAddUser(const base::ListValue* args);
   void HandleToggleEnrollmentScreen();
+  void HandleToggleEnableDebuggingScreen();
   void HandleToggleKioskEnableScreen();
   void HandleToggleResetScreen();
   void HandleToggleKioskAutolaunchScreen();
@@ -438,16 +402,6 @@ class SigninScreenHandler
 
   bool ShouldLoadGaia() const;
 
-  // Update current input method (namely keyboard layout) in the given IME state
-  // to LRU by this user.
-  void SetUserInputMethod(const std::string& username,
-                          input_method::InputMethodManager::State* ime_state);
-
-  // Invoked when auto enrollment check progresses to decide whether to
-  // continue kiosk enable flow. Kiosk enable flow is resumed when
-  // |state| indicates that enrollment is not applicable.
-  void ContinueKioskEnableFlow(policy::AutoEnrollmentState state);
-
   // Shows signin.
   void OnShowAddUser();
 
@@ -466,36 +420,37 @@ class SigninScreenHandler
       const std::string& username) const;
 
   // Current UI state of the signin screen.
-  UIState ui_state_;
+  UIState ui_state_ = UI_STATE_UNKNOWN;
 
   // A delegate that glues this handler with backend LoginDisplay.
-  SigninScreenHandlerDelegate* delegate_;
+  SigninScreenHandlerDelegate* delegate_ = nullptr;
 
   // A delegate used to get gfx::NativeWindow.
-  NativeWindowDelegate* native_window_delegate_;
+  NativeWindowDelegate* native_window_delegate_ = nullptr;
 
   // Whether screen should be shown right after initialization.
-  bool show_on_init_;
+  bool show_on_init_ = false;
 
   // Keeps whether screen should be shown for OOBE.
-  bool oobe_ui_;
+  bool oobe_ui_ = false;
 
   // Is account picker being shown for the first time.
-  bool is_account_picker_showing_first_time_;
+  bool is_account_picker_showing_first_time_ = false;
 
   // Network state informer used to keep signin screen up.
   scoped_refptr<NetworkStateInformer> network_state_informer_;
 
   // Set to true once |LOGIN_WEBUI_VISIBLE| notification is observed.
-  bool webui_visible_;
-  bool preferences_changed_delayed_;
+  bool webui_visible_ = false;
+  bool preferences_changed_delayed_ = false;
 
   ErrorScreenActor* error_screen_actor_;
   CoreOobeActor* core_oobe_actor_;
 
-  bool is_first_update_state_call_;
-  bool offline_login_active_;
-  NetworkStateInformer::State last_network_state_;
+  bool is_first_update_state_call_ = false;
+  bool offline_login_active_ = false;
+  NetworkStateInformer::State last_network_state_ =
+      NetworkStateInformer::UNKNOWN;
 
   base::CancelableClosure update_state_closure_;
   base::CancelableClosure connecting_closure_;
@@ -505,14 +460,9 @@ class SigninScreenHandler
   // Whether there is an auth UI pending. This flag is set on receiving
   // NOTIFICATION_AUTH_NEEDED and reset on either NOTIFICATION_AUTH_SUPPLIED or
   // NOTIFICATION_AUTH_CANCELLED.
-  bool has_pending_auth_ui_;
-
-  scoped_ptr<AutoEnrollmentController::ProgressCallbackList::Subscription>
-      auto_enrollment_progress_subscription_;
+  bool has_pending_auth_ui_ = false;
 
   bool caps_lock_enabled_;
-
-  base::Closure kiosk_enable_flow_aborted_callback_for_test_;
 
   // Non-owning ptr.
   // TODO(ygorshenin@): remove this dependency.
@@ -522,7 +472,7 @@ class SigninScreenHandler
   scoped_ptr<TouchViewControllerDelegate> max_mode_delegate_;
 
   // Whether consumer management enrollment is in progress.
-  bool is_enrolling_consumer_management_;
+  bool is_enrolling_consumer_management_ = false;
 
   // Input Method Engine state used at signin screen.
   scoped_refptr<input_method::InputMethodManager::State> ime_state_;
@@ -531,7 +481,9 @@ class SigninScreenHandler
   base::Closure test_focus_pod_callback_;
 
   // True if SigninScreenHandler has already been added to OobeUI observers.
-  bool oobe_ui_observer_added_;
+  bool oobe_ui_observer_added_ = false;
+
+  bool zero_offline_timeout_for_test_ = false;
 
   scoped_ptr<ErrorScreensHistogramHelper> histogram_helper_;
 

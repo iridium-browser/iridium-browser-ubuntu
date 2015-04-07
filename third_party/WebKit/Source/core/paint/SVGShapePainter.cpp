@@ -5,9 +5,11 @@
 #include "config.h"
 #include "core/paint/SVGShapePainter.h"
 
+#include "core/paint/GraphicsContextAnnotator.h"
 #include "core/paint/ObjectPainter.h"
+#include "core/paint/RenderDrawingRecorder.h"
 #include "core/paint/SVGContainerPainter.h"
-#include "core/rendering/GraphicsContextAnnotator.h"
+#include "core/paint/TransformRecorder.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/svg/RenderSVGPath.h"
 #include "core/rendering/svg/RenderSVGResourceMarker.h"
@@ -17,6 +19,8 @@
 #include "core/rendering/svg/SVGRenderingContext.h"
 #include "core/rendering/svg/SVGResources.h"
 #include "core/rendering/svg/SVGResourcesCache.h"
+#include "platform/graphics/paint/DisplayItemList.h"
+#include "third_party/skia/include/core/SkPicture.h"
 
 namespace blink {
 
@@ -40,7 +44,7 @@ static void useStrokeStyleToFill(GraphicsContext* context)
         context->setFillColor(context->strokeColor());
 }
 
-void SVGShapePainter::paint(PaintInfo& paintInfo)
+void SVGShapePainter::paint(const PaintInfo& paintInfo)
 {
     ANNOTATE_GRAPHICS_CONTEXT(paintInfo, &m_renderSVGShape);
     if (paintInfo.phase != PaintPhaseForeground
@@ -48,57 +52,55 @@ void SVGShapePainter::paint(PaintInfo& paintInfo)
         || m_renderSVGShape.isShapeEmpty())
         return;
 
-    FloatRect boundingBox = m_renderSVGShape.paintInvalidationRectInLocalCoordinates();
-    if (!SVGRenderSupport::paintInfoIntersectsPaintInvalidationRect(boundingBox, m_renderSVGShape.localTransform(), paintInfo))
-        return;
-
     PaintInfo childPaintInfo(paintInfo);
+    FloatRect boundingBox = m_renderSVGShape.paintInvalidationRectInLocalCoordinates();
 
     GraphicsContextStateSaver stateSaver(*childPaintInfo.context);
-    childPaintInfo.applyTransform(m_renderSVGShape.localTransform());
-
+    TransformRecorder transformRecorder(*childPaintInfo.context, m_renderSVGShape.displayItemClient(), m_renderSVGShape.localTransform());
     SVGRenderingContext renderingContext(&m_renderSVGShape, childPaintInfo);
-
     if (renderingContext.isRenderingPrepared()) {
-        const SVGRenderStyle& svgStyle = m_renderSVGShape.style()->svgStyle();
-        if (svgStyle.shapeRendering() == SR_CRISPEDGES)
-            childPaintInfo.context->setShouldAntialias(false);
+        RenderDrawingRecorder recorder(childPaintInfo.context, m_renderSVGShape, childPaintInfo.phase, boundingBox);
+        if (!recorder.canUseCachedDrawing()) {
+            const SVGRenderStyle& svgStyle = m_renderSVGShape.style()->svgStyle();
+            if (svgStyle.shapeRendering() == SR_CRISPEDGES)
+                childPaintInfo.context->setShouldAntialias(false);
 
-        for (int i = 0; i < 3; i++) {
-            switch (svgStyle.paintOrderType(i)) {
-            case PT_FILL: {
-                GraphicsContextStateSaver stateSaver(*childPaintInfo.context, false);
-                if (!SVGRenderSupport::updateGraphicsContext(stateSaver, m_renderSVGShape.style(), m_renderSVGShape, ApplyToFillMode))
-                    break;
-                fillShape(childPaintInfo.context);
-                break;
-            }
-            case PT_STROKE:
-                if (svgStyle.hasVisibleStroke()) {
+            for (int i = 0; i < 3; i++) {
+                switch (svgStyle.paintOrderType(i)) {
+                case PT_FILL: {
                     GraphicsContextStateSaver stateSaver(*childPaintInfo.context, false);
-                    AffineTransform nonScalingTransform;
-                    const AffineTransform* additionalPaintServerTransform = 0;
-
-                    if (m_renderSVGShape.hasNonScalingStroke()) {
-                        nonScalingTransform = m_renderSVGShape.nonScalingStrokeTransform();
-                        if (!setupNonScalingStrokeContext(nonScalingTransform, stateSaver))
-                            return;
-
-                        // Non-scaling stroke needs to reset the transform back to the host transform.
-                        additionalPaintServerTransform = &nonScalingTransform;
-                    }
-
-                    if (!SVGRenderSupport::updateGraphicsContext(stateSaver, m_renderSVGShape.style(), m_renderSVGShape, ApplyToStrokeMode, additionalPaintServerTransform))
+                    if (!SVGRenderSupport::updateGraphicsContext(childPaintInfo, stateSaver, m_renderSVGShape.style(), m_renderSVGShape, ApplyToFillMode))
                         break;
-                    strokeShape(childPaintInfo.context);
+                    fillShape(childPaintInfo.context);
+                    break;
                 }
-                break;
-            case PT_MARKERS:
-                paintMarkers(childPaintInfo);
-                break;
-            default:
-                ASSERT_NOT_REACHED();
-                break;
+                case PT_STROKE:
+                    if (svgStyle.hasVisibleStroke()) {
+                        GraphicsContextStateSaver stateSaver(*childPaintInfo.context, false);
+                        AffineTransform nonScalingTransform;
+                        const AffineTransform* additionalPaintServerTransform = 0;
+
+                        if (m_renderSVGShape.hasNonScalingStroke()) {
+                            nonScalingTransform = m_renderSVGShape.nonScalingStrokeTransform();
+                            if (!setupNonScalingStrokeContext(nonScalingTransform, stateSaver))
+                                return;
+
+                            // Non-scaling stroke needs to reset the transform back to the host transform.
+                            additionalPaintServerTransform = &nonScalingTransform;
+                        }
+
+                        if (!SVGRenderSupport::updateGraphicsContext(childPaintInfo, stateSaver, m_renderSVGShape.style(), m_renderSVGShape, ApplyToStrokeMode, additionalPaintServerTransform))
+                            break;
+                        strokeShape(childPaintInfo.context);
+                    }
+                    break;
+                case PT_MARKERS:
+                    paintMarkers(childPaintInfo);
+                    break;
+                default:
+                    ASSERT_NOT_REACHED();
+                    break;
+                }
             }
         }
     }
@@ -143,7 +145,7 @@ void SVGShapePainter::strokeShape(GraphicsContext* context)
     }
 }
 
-void SVGShapePainter::paintMarkers(PaintInfo& paintInfo)
+void SVGShapePainter::paintMarkers(const PaintInfo& paintInfo)
 {
     const Vector<MarkerPosition>* markerPositions = m_renderSVGShape.markerPositions();
     if (!markerPositions || markerPositions->isEmpty())
@@ -167,7 +169,7 @@ void SVGShapePainter::paintMarkers(PaintInfo& paintInfo)
     }
 }
 
-void SVGShapePainter::paintMarker(PaintInfo& paintInfo, RenderSVGResourceMarker& marker, const MarkerPosition& position, float strokeWidth)
+void SVGShapePainter::paintMarker(const PaintInfo& paintInfo, RenderSVGResourceMarker& marker, const MarkerPosition& position, float strokeWidth)
 {
     // An empty viewBox disables rendering.
     SVGMarkerElement* markerElement = toSVGMarkerElement(marker.element());
@@ -175,16 +177,27 @@ void SVGShapePainter::paintMarker(PaintInfo& paintInfo, RenderSVGResourceMarker&
     if (markerElement->hasAttribute(SVGNames::viewBoxAttr) && markerElement->viewBox()->currentValue()->isValid() && markerElement->viewBox()->currentValue()->value().isEmpty())
         return;
 
-    PaintInfo info(paintInfo);
-    GraphicsContextStateSaver stateSaver(*info.context, false);
-    info.applyTransform(marker.markerTransformation(position.origin, position.angle, strokeWidth), &stateSaver);
+    OwnPtr<DisplayItemList> displayItemList;
+    if (RuntimeEnabledFeatures::slimmingPaintEnabled())
+        displayItemList = DisplayItemList::create();
+    GraphicsContext recordingContext(nullptr, displayItemList.get());
+    recordingContext.beginRecording(m_renderSVGShape.paintInvalidationRectInLocalCoordinates());
 
-    if (SVGRenderSupport::isOverflowHidden(&marker)) {
-        stateSaver.saveIfNeeded();
-        info.context->clip(marker.viewport());
+    PaintInfo markerPaintInfo(paintInfo);
+    markerPaintInfo.context = &recordingContext;
+    {
+        TransformRecorder transformRecorder(*markerPaintInfo.context, marker.displayItemClient(), marker.markerTransformation(position.origin, position.angle, strokeWidth));
+        OwnPtr<FloatClipRecorder> clipRecorder;
+        if (SVGRenderSupport::isOverflowHidden(&marker))
+            clipRecorder = adoptPtr(new FloatClipRecorder(recordingContext, marker.displayItemClient(), markerPaintInfo.phase, marker.viewport()));
+
+        SVGContainerPainter(marker).paint(markerPaintInfo);
     }
 
-    SVGContainerPainter(marker).paint(info);
+    if (displayItemList)
+        displayItemList->replay(&recordingContext);
+    RefPtr<const SkPicture> recording = recordingContext.endRecording();
+    paintInfo.context->drawPicture(recording.get());
 }
 
 void SVGShapePainter::strokeZeroLengthLineCaps(GraphicsContext* context)

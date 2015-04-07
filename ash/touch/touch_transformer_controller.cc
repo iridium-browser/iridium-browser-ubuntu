@@ -25,7 +25,7 @@ DisplayManager* GetDisplayManager() {
 ui::TouchscreenDevice FindTouchscreenById(unsigned int id) {
   const std::vector<ui::TouchscreenDevice>& touchscreens =
       ui::DeviceDataManager::GetInstance()->touchscreen_devices();
-  for (auto touchscreen : touchscreens) {
+  for (const auto& touchscreen : touchscreens) {
     if (touchscreen.id == id)
       return touchscreen;
   }
@@ -80,6 +80,12 @@ gfx::Transform TouchTransformerController::GetTouchTransform(
   if (current_size.IsEmpty() || native_size.IsEmpty() || touch_area.IsEmpty() ||
       touchscreen.id == ui::InputDevice::kInvalidId)
     return ctm;
+
+#if defined(USE_OZONE)
+  // Translate the touch so that it falls within the display bounds.
+  ctm.Translate(display.bounds_in_native().x(),
+                display.bounds_in_native().y());
+#endif
 
   // Take care of panel fitting only if supported.
   // If panel fitting is enabled then the aspect ratio is preserved and the

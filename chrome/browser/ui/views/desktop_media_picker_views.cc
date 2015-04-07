@@ -322,7 +322,7 @@ void DesktopMediaListView::OnSourceAdded(int index) {
     parent_->OnMediaListRowsChanged();
 
   std::string autoselect_source =
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kAutoSelectDesktopCaptureSource);
   if (!autoselect_source.empty() &&
       base::ASCIIToUTF16(autoselect_source) == source.name) {
@@ -415,7 +415,8 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
       parent_web_contents &&
       !parent_web_contents->GetDelegate()->IsNeverVisible(parent_web_contents);
   if (modal_dialog) {
-    widget = CreateWebModalDialogViews(this, parent_web_contents);
+    widget = constrained_window::CreateWebModalDialogViews(this,
+                                                           parent_web_contents);
   } else {
     widget = DialogDelegate::CreateDialogWidget(this, context, NULL);
   }

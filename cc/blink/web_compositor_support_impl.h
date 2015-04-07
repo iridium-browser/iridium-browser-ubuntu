@@ -10,6 +10,7 @@
 #include "cc/blink/cc_blink_export.h"
 #include "third_party/WebKit/public/platform/WebCompositorAnimationCurve.h"
 #include "third_party/WebKit/public/platform/WebCompositorSupport.h"
+#include "third_party/WebKit/public/platform/WebContentLayerClient.h"
 #include "third_party/WebKit/public/platform/WebLayer.h"
 #include "third_party/WebKit/public/platform/WebTransformOperations.h"
 
@@ -41,6 +42,7 @@ class CC_BLINK_EXPORT WebCompositorSupportImpl
       int thumb_thickness,
       int track_start,
       bool is_left_side_vertical_scrollbar);
+  virtual blink::WebDisplayItemList* createDisplayItemList();
   virtual blink::WebCompositorAnimation* createAnimation(
       const blink::WebCompositorAnimationCurve& curve,
       blink::WebCompositorAnimation::TargetProperty target,

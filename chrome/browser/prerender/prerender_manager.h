@@ -131,7 +131,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
       const gfx::Size& size);
 
   // Adds a prerender for |url| if valid. As the prerender request is coming
-  // from a source without a RenderViewHost (i.e., the omnibox) we don't have a
+  // from a source without a RenderFrameHost (i.e., the omnibox) we don't have a
   // child or route id, or a referrer. This method uses sensible values for
   // those. The |session_storage_namespace| matches the namespace of the active
   // tab at the time the prerender is generated from the omnibox. Returns a
@@ -475,8 +475,8 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
     void BeginSwap();
 
     // content::WebContentsObserver implementation.
-    void AboutToNavigateRenderView(
-        content::RenderViewHost* render_view_host) override;
+    void AboutToNavigateRenderFrame(
+        content::RenderFrameHost* render_frame_host) override;
     void DidStartProvisionalLoadForFrame(
         content::RenderFrameHost* render_frame_host,
         const GURL& validated_url,
@@ -547,14 +547,12 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   void OnCancelPrerenderHandle(PrerenderData* prerender_data);
 
-  // Adds a prerender for |url| from |referrer| initiated from the process
-  // |child_id|. The |origin| specifies how the prerender was added. If |size|
-  // is empty, then PrerenderContents::StartPrerendering will instead use a
-  // default from PrerenderConfig. Returns a PrerenderHandle*, owned by the
-  // caller, or NULL.
+  // Adds a prerender for |url| from |referrer|. The |origin| specifies how the
+  // prerender was added. If |size| is empty, then
+  // PrerenderContents::StartPrerendering will instead use a default from
+  // PrerenderConfig. Returns a PrerenderHandle*, owned by the caller, or NULL.
   PrerenderHandle* AddPrerender(
       Origin origin,
-      int child_id,
       const GURL& url,
       const content::Referrer& referrer,
       const gfx::Size& size,

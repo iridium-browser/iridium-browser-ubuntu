@@ -110,16 +110,20 @@ def CodecType(kind):
   if mojom.IsArrayKind(kind):
     array_type = "NullableArrayOf" if mojom.IsNullableKind(kind) else "ArrayOf"
     array_length = "" if kind.length is None else ", %d" % kind.length
-    element_type = "codec.PackedBool" if mojom.IsBoolKind(kind.kind) \
-        else CodecType(kind.kind)
+    element_type = ElementCodecType(kind.kind)
     return "new codec.%s(%s%s)" % (array_type, element_type, array_length)
   if mojom.IsInterfaceKind(kind) or mojom.IsInterfaceRequestKind(kind):
     return CodecType(mojom.MSGPIPE)
   if mojom.IsEnumKind(kind):
     return _kind_to_codec_type[mojom.INT32]
+  if mojom.IsMapKind(kind):
+    map_type = "NullableMapOf" if mojom.IsNullableKind(kind) else "MapOf"
+    key_type = ElementCodecType(kind.key_kind)
+    value_type = ElementCodecType(kind.value_kind)
+    return "new codec.%s(%s, %s)" % (map_type, key_type, value_type)
   return kind
 
-def MapCodecType(kind):
+def ElementCodecType(kind):
   return "codec.PackedBool" if mojom.IsBoolKind(kind) else CodecType(kind)
 
 def JavaScriptDecodeSnippet(kind):
@@ -129,7 +133,7 @@ def JavaScriptDecodeSnippet(kind):
     return "decodeStructPointer(%s)" % JavaScriptType(kind)
   if mojom.IsMapKind(kind):
     return "decodeMapPointer(%s, %s)" % \
-        (MapCodecType(kind.key_kind), MapCodecType(kind.value_kind))
+        (ElementCodecType(kind.key_kind), ElementCodecType(kind.value_kind))
   if mojom.IsArrayKind(kind) and mojom.IsBoolKind(kind.kind):
     return "decodeArrayPointer(codec.PackedBool)"
   if mojom.IsArrayKind(kind):
@@ -147,7 +151,7 @@ def JavaScriptEncodeSnippet(kind):
     return "encodeStructPointer(%s, " % JavaScriptType(kind)
   if mojom.IsMapKind(kind):
     return "encodeMapPointer(%s, %s, " % \
-        (MapCodecType(kind.key_kind), MapCodecType(kind.value_kind))
+        (ElementCodecType(kind.key_kind), ElementCodecType(kind.value_kind))
   if mojom.IsArrayKind(kind) and mojom.IsBoolKind(kind.kind):
     return "encodeArrayPointer(codec.PackedBool, ";
   if mojom.IsArrayKind(kind):
@@ -184,8 +188,7 @@ def JavaScriptValidateArrayParams(packed_field):
   element_size = pack.PackedField.GetSizeForKind(element_kind)
   expected_dimension_sizes = GetArrayExpectedDimensionSizes(
       packed_field.field.kind)
-  element_type = "codec.PackedBool" if mojom.IsBoolKind(element_kind) \
-      else CodecType(element_kind)
+  element_type = ElementCodecType(element_kind)
   return "%s, %s, %s, %s, %s, 0" % \
       (field_offset, element_size, element_type, nullable,
        expected_dimension_sizes)
@@ -201,9 +204,9 @@ def JavaScriptValidateStructParams(packed_field):
 def JavaScriptValidateMapParams(packed_field):
   nullable = JavaScriptNullableParam(packed_field)
   field_offset = JavaScriptFieldOffset(packed_field)
-  keys_type = MapCodecType(packed_field.field.kind.key_kind)
+  keys_type = ElementCodecType(packed_field.field.kind.key_kind)
   values_kind = packed_field.field.kind.value_kind;
-  values_type = MapCodecType(values_kind)
+  values_type = ElementCodecType(values_kind)
   values_nullable = "true" if mojom.IsNullableKind(values_kind) else "false"
   return "%s, %s, %s, %s, %s" % \
       (field_offset, nullable, keys_type, values_type, values_nullable)
@@ -219,6 +222,30 @@ def JavaScriptValidateHandleParams(packed_field):
   field_offset = JavaScriptFieldOffset(packed_field)
   return "%s, %s" % (field_offset, nullable)
 
+
+
+
+def JavaScriptProxyMethodParameterValue(parameter):
+  name = parameter.name;
+  if (IsInterfaceParameter(parameter)):
+   type = JavaScriptType(parameter.kind)
+   return "core.isHandle(%s) ? %s : connection.bindProxyClient" \
+       "(%s, %s, %s.client)" % (name, name, name, type, type)
+  if (IsInterfaceRequestParameter(parameter)):
+   type = JavaScriptType(parameter.kind.kind)
+   return "core.isHandle(%s) ? %s : connection.bindProxyClient" \
+       "(%s, %s.client, %s)" % (name, name, name, type, type)
+  return name;
+
+def JavaScriptStubMethodParameterValue(parameter):
+  name = parameter.name;
+  if (IsInterfaceParameter(parameter)):
+   type = JavaScriptType(parameter.kind)
+   return "connection.bindProxyHandle(%s, %s.client, %s)" % (name, type, type)
+  if (IsInterfaceRequestParameter(parameter)):
+   type = JavaScriptType(parameter.kind.kind)
+   return "connection.bindProxyHandle(%s, %s, %s.client)" % (name, type, type)
+  return name;
 
 def TranslateConstants(token):
   if isinstance(token, (mojom.EnumValue, mojom.NamedValue)):
@@ -249,7 +276,6 @@ def TranslateConstants(token):
 def ExpressionToText(value):
   return TranslateConstants(value)
 
-
 def IsArrayPointerField(field):
   return mojom.IsArrayKind(field.kind)
 
@@ -264,6 +290,12 @@ def IsMapPointerField(field):
 
 def IsHandleField(field):
   return mojom.IsAnyHandleKind(field.kind)
+
+def IsInterfaceRequestParameter(parameter):
+  return mojom.IsInterfaceRequestKind(parameter.kind)
+
+def IsInterfaceParameter(parameter):
+  return mojom.IsInterfaceKind(parameter.kind)
 
 
 class Generator(generator.Generator):
@@ -282,6 +314,10 @@ class Generator(generator.Generator):
     "is_string_pointer_field": IsStringPointerField,
     "is_handle_field": IsHandleField,
     "js_type": JavaScriptType,
+    "is_interface_request_parameter": IsInterfaceRequestParameter,
+    "is_interface_parameter": IsInterfaceParameter,
+    "js_proxy_method_parameter_value": JavaScriptProxyMethodParameterValue,
+    "js_stub_method_parameter_value": JavaScriptStubMethodParameterValue,
     "stylize_method": generator.StudlyCapsToCamel,
     "validate_array_params": JavaScriptValidateArrayParams,
     "validate_handle_params": JavaScriptValidateHandleParams,

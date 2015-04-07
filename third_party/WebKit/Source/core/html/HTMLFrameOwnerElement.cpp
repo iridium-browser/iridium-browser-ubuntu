@@ -23,7 +23,7 @@
 
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/accessibility/AXObjectCache.h"
+#include "core/dom/AXObjectCache.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/events/Event.h"
 #include "core/frame/FrameView.h"
@@ -176,7 +176,7 @@ Document* HTMLFrameOwnerElement::contentDocument() const
     return (m_contentFrame && m_contentFrame->isLocalFrame()) ? toLocalFrame(m_contentFrame)->document() : 0;
 }
 
-LocalDOMWindow* HTMLFrameOwnerElement::contentWindow() const
+DOMWindow* HTMLFrameOwnerElement::contentWindow() const
 {
     return m_contentFrame ? m_contentFrame->domWindow() : 0;
 }
@@ -184,6 +184,11 @@ LocalDOMWindow* HTMLFrameOwnerElement::contentWindow() const
 void HTMLFrameOwnerElement::setSandboxFlags(SandboxFlags flags)
 {
     m_sandboxFlags = flags;
+}
+
+SandboxFlags HTMLFrameOwnerElement::sandboxFlags() const
+{
+    return m_sandboxFlags | document().sandboxFlags();
 }
 
 bool HTMLFrameOwnerElement::isKeyboardFocusable() const
@@ -238,7 +243,7 @@ Widget* HTMLFrameOwnerElement::ownedWidget() const
     return m_widget.get();
 }
 
-bool HTMLFrameOwnerElement::loadOrRedirectSubframe(const KURL& url, const AtomicString& frameName, bool lockBackForwardList)
+bool HTMLFrameOwnerElement::loadOrRedirectSubframe(const KURL& url, const AtomicString& frameName, bool lockBackForwardList, ContentSecurityPolicyDisposition shouldCheckContentSecurityPolicy)
 {
     RefPtrWillBeRawPtr<LocalFrame> parentFrame = document().frame();
     if (contentFrame()) {
@@ -254,7 +259,7 @@ bool HTMLFrameOwnerElement::loadOrRedirectSubframe(const KURL& url, const Atomic
     if (!SubframeLoadingDisabler::canLoadFrame(*this))
         return false;
 
-    return parentFrame->loader().client()->createFrame(url, frameName, this);
+    return parentFrame->loader().client()->createFrame(url, frameName, this, shouldCheckContentSecurityPolicy);
 }
 
 void HTMLFrameOwnerElement::trace(Visitor* visitor)

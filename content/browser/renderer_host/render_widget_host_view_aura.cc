@@ -27,6 +27,7 @@
 #include "content/browser/renderer_host/compositor_resize_lock_aura.h"
 #include "content/browser/renderer_host/dip_util.h"
 #include "content/browser/renderer_host/input/synthetic_gesture_target_aura.h"
+#include "content/browser/renderer_host/input/web_input_event_util.h"
 #include "content/browser/renderer_host/overscroll_controller.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_view_host_delegate_view.h"
@@ -69,9 +70,9 @@
 #include "ui/events/gestures/gesture_recognizer.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/display.h"
-#include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/screen.h"
-#include "ui/gfx/size_conversions.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/wm/public/activation_client.h"
 #include "ui/wm/public/scoped_tooltip_disabler.h"
@@ -229,22 +230,6 @@ BOOL CALLBACK DismissOwnedPopups(HWND window, LPARAM arg) {
   return TRUE;
 }
 #endif
-
-void UpdateWebTouchEventAfterDispatch(blink::WebTouchEvent* event,
-                                      blink::WebTouchPoint* point) {
-  if (point->state != blink::WebTouchPoint::StateReleased &&
-      point->state != blink::WebTouchPoint::StateCancelled)
-    return;
-
-  const unsigned new_length = event->touchesLength - 1;
-  // Work around a gcc 4.9 bug. crbug.com/392872
-  if (new_length >= event->touchesLengthCap)
-    return;
-
-  for (unsigned i = point - event->touches; i < new_length; ++i)
-    event->touches[i] = event->touches[i + 1];
-  event->touchesLength = new_length;
-}
 
 bool CanRendererHandleEvent(const ui::MouseEvent* event) {
   if (event->type() == ui::ET_MOUSE_CAPTURE_CHANGED)
@@ -685,7 +670,6 @@ gfx::NativeViewAccessible RenderWidgetHostViewAura::GetNativeViewAccessible() {
   aura::WindowTreeHost* host = window_->GetHost();
   if (!host)
     return static_cast<gfx::NativeViewAccessible>(NULL);
-  HWND hwnd = host->GetAcceleratedWidget();
   BrowserAccessibilityManager* manager =
       host_->GetOrCreateRootBrowserAccessibilityManager();
   if (manager)
@@ -952,26 +936,53 @@ gfx::Size RenderWidgetHostViewAura::GetRequestedRendererSize() const {
 
 void RenderWidgetHostViewAura::SelectionBoundsChanged(
     const ViewHostMsg_SelectionBounds_Params& params) {
-  if (selection_anchor_rect_ == params.anchor_rect &&
-      selection_focus_rect_ == params.focus_rect)
+  ui::SelectionBound anchor_bound, focus_bound;
+  anchor_bound.SetEdge(params.anchor_rect.origin(),
+                       params.anchor_rect.bottom_left());
+  focus_bound.SetEdge(params.focus_rect.origin(),
+                      params.focus_rect.bottom_left());
+
+  if (params.anchor_rect == params.focus_rect) {
+    anchor_bound.set_type(ui::SelectionBound::CENTER);
+    focus_bound.set_type(ui::SelectionBound::CENTER);
+  } else {
+    // Whether text is LTR at the anchor handle.
+    bool anchor_LTR = params.anchor_dir == blink::WebTextDirectionLeftToRight;
+    // Whether text is LTR at the focus handle.
+    bool focus_LTR = params.focus_dir == blink::WebTextDirectionLeftToRight;
+
+    if ((params.is_anchor_first && anchor_LTR) ||
+        (!params.is_anchor_first && !anchor_LTR)) {
+      anchor_bound.set_type(ui::SelectionBound::LEFT);
+    } else {
+      anchor_bound.set_type(ui::SelectionBound::RIGHT);
+    }
+    if ((params.is_anchor_first && focus_LTR) ||
+        (!params.is_anchor_first && !focus_LTR)) {
+      focus_bound.set_type(ui::SelectionBound::RIGHT);
+    } else {
+      focus_bound.set_type(ui::SelectionBound::LEFT);
+    }
+  }
+
+  if (anchor_bound == selection_anchor_ && focus_bound == selection_focus_)
     return;
 
-  selection_anchor_rect_ = params.anchor_rect;
-  selection_focus_rect_ = params.focus_rect;
-
+  selection_anchor_ = anchor_bound;
+  selection_focus_ = focus_bound;
   if (GetInputMethod())
     GetInputMethod()->OnCaretBoundsChanged(this);
 
   if (touch_editing_client_) {
-    touch_editing_client_->OnSelectionOrCursorChanged(selection_anchor_rect_,
-        selection_focus_rect_);
+    touch_editing_client_->OnSelectionOrCursorChanged(
+        anchor_bound, focus_bound);
   }
 }
 
 void RenderWidgetHostViewAura::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
-    CopyFromCompositingSurfaceCallback& callback,
+    ReadbackRequestCallback& callback,
     const SkColorType color_type) {
   delegated_frame_host_->CopyFromCompositingSurface(
       src_subrect, dst_size, callback, color_type);
@@ -1246,6 +1257,14 @@ gfx::GLSurfaceHandle RenderWidgetHostViewAura::GetCompositingSurface() {
 void RenderWidgetHostViewAura::ShowDisambiguationPopup(
     const gfx::Rect& rect_pixels,
     const SkBitmap& zoomed_bitmap) {
+  RenderViewHostDelegate* delegate = NULL;
+  if (host_->IsRenderView())
+    delegate = RenderViewHost::From(host_)->GetDelegate();
+  // Suppress the link disambiguation popup if the virtual keyboard is currently
+  // requested, as it doesn't interact well with the keyboard.
+  if (delegate && delegate->IsVirtualKeyboardRequested())
+    return;
+
   // |target_rect| is provided in pixels, not DIPs. So we convert it to DIPs
   // by scaling it by the inverse of the device scale factor.
   gfx::RectF screen_target_rect_f(rect_pixels);
@@ -1265,35 +1284,36 @@ void RenderWidgetHostViewAura::ShowDisambiguationPopup(
       disambiguation_target_rect_,
       zoomed_size,
       base::Bind(&RenderWidgetHostViewAura::DisambiguationPopupRendered,
-          base::internal::SupportsWeakPtrBase::StaticAsWeakPtr
-              <RenderWidgetHostViewAura>(this)),
-      kN32_SkColorType);
+                 weak_ptr_factory_.GetWeakPtr()),
+                 kN32_SkColorType);
 }
 
 void RenderWidgetHostViewAura::DisambiguationPopupRendered(
-    bool success,
-    const SkBitmap& result) {
-  if (!success || disambiguation_scroll_offset_ != last_scroll_offset_)
+    const SkBitmap& result,
+    ReadbackResponse response) {
+  if ((response != READBACK_SUCCESS) ||
+      disambiguation_scroll_offset_ != last_scroll_offset_)
     return;
 
   // Use RenderViewHostDelegate to get to the WebContentsViewAura, which will
-  // actually show the delegate.
+  // actually show the disambiguation popup.
   RenderViewHostDelegate* delegate = NULL;
   if (host_->IsRenderView())
     delegate = RenderViewHost::From(host_)->GetDelegate();
   RenderViewHostDelegateView* delegate_view = NULL;
-  if (delegate)
+  if (delegate) {
     delegate_view = delegate->GetDelegateView();
+    if (delegate->IsVirtualKeyboardRequested())
+      return;
+  }
   if (delegate_view) {
     delegate_view->ShowDisambiguationPopup(
         disambiguation_target_rect_,
         result,
         base::Bind(&RenderWidgetHostViewAura::ProcessDisambiguationGesture,
-            base::internal::SupportsWeakPtrBase::StaticAsWeakPtr
-                <RenderWidgetHostViewAura>(this)),
+                   weak_ptr_factory_.GetWeakPtr()),
         base::Bind(&RenderWidgetHostViewAura::ProcessDisambiguationMouse,
-            base::internal::SupportsWeakPtrBase::StaticAsWeakPtr
-                <RenderWidgetHostViewAura>(this)));
+                   weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -1310,7 +1330,7 @@ void RenderWidgetHostViewAura::HideDisambiguationPopup() {
 
 void RenderWidgetHostViewAura::ProcessDisambiguationGesture(
     ui::GestureEvent* event) {
-  blink::WebGestureEvent web_gesture = content::MakeWebGestureEvent(event);
+  blink::WebGestureEvent web_gesture = content::MakeWebGestureEvent(*event);
   // If we fail to make a WebGestureEvent that is a Tap from the provided event,
   // don't forward it to Blink.
   if (web_gesture.type < blink::WebInputEvent::Type::GestureTap ||
@@ -1322,7 +1342,7 @@ void RenderWidgetHostViewAura::ProcessDisambiguationGesture(
 
 void RenderWidgetHostViewAura::ProcessDisambiguationMouse(
     ui::MouseEvent* event) {
-  blink::WebMouseEvent web_mouse = content::MakeWebMouseEvent(event);
+  blink::WebMouseEvent web_mouse = content::MakeWebMouseEvent(*event);
   host_->ForwardMouseEvent(web_mouse);
 }
 
@@ -1512,8 +1532,8 @@ gfx::Rect RenderWidgetHostViewAura::ConvertRectFromScreen(
 }
 
 gfx::Rect RenderWidgetHostViewAura::GetCaretBounds() const {
-  const gfx::Rect rect =
-      gfx::UnionRects(selection_anchor_rect_, selection_focus_rect_);
+  gfx::Rect rect =
+      ui::RectBetweenSelectionBounds(selection_anchor_, selection_focus_);
   return ConvertRectToScreen(rect);
 }
 
@@ -1836,18 +1856,8 @@ void RenderWidgetHostViewAura::OnKeyEvent(ui::KeyEvent* event) {
     }
 
     // We don't have to communicate with an input method here.
-    if (!event->HasNativeEvent()) {
-      NativeWebKeyboardEvent webkit_event(
-          event->type(),
-          event->is_char(),
-          event->is_char() ? event->GetCharacter() : event->key_code(),
-          event->flags(),
-          ui::EventTimeForNow().InSecondsF());
-      ForwardKeyboardEvent(webkit_event);
-    } else {
-      NativeWebKeyboardEvent webkit_event(event);
-      ForwardKeyboardEvent(webkit_event);
-    }
+    NativeWebKeyboardEvent webkit_event(*event);
+    ForwardKeyboardEvent(webkit_event);
   }
   event->SetHandled();
 }
@@ -1865,7 +1875,7 @@ void RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
 
     if (event->type() == ui::ET_MOUSEWHEEL) {
       blink::WebMouseWheelEvent mouse_wheel_event =
-          MakeWebMouseWheelEvent(static_cast<ui::MouseWheelEvent*>(event));
+          MakeWebMouseWheelEvent(static_cast<ui::MouseWheelEvent&>(*event));
       if (mouse_wheel_event.deltaX != 0 || mouse_wheel_event.deltaY != 0)
         host_->ForwardWheelEvent(mouse_wheel_event);
       return;
@@ -1882,7 +1892,7 @@ void RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
       return;
     }
 
-    blink::WebMouseEvent mouse_event = MakeWebMouseEvent(event);
+    blink::WebMouseEvent mouse_event = MakeWebMouseEvent(*event);
 
     bool is_move_to_center_event = (event->type() == ui::ET_MOUSE_MOVED ||
         event->type() == ui::ET_MOUSE_DRAGGED) &&
@@ -1947,7 +1957,7 @@ void RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
     HideDisambiguationPopup();
 
     blink::WebMouseWheelEvent mouse_wheel_event =
-        MakeWebMouseWheelEvent(static_cast<ui::MouseWheelEvent*>(event));
+        MakeWebMouseWheelEvent(static_cast<ui::MouseWheelEvent&>(*event));
     if (mouse_wheel_event.deltaX != 0 || mouse_wheel_event.deltaY != 0)
       host_->ForwardWheelEvent(mouse_wheel_event);
   } else if (CanRendererHandleEvent(event) &&
@@ -1957,7 +1967,7 @@ void RenderWidgetHostViewAura::OnMouseEvent(ui::MouseEvent* event) {
     if (event->type() == ui::ET_MOUSE_PRESSED)
       FinishImeCompositionSession();
 
-    blink::WebMouseEvent mouse_event = MakeWebMouseEvent(event);
+    blink::WebMouseEvent mouse_event = MakeWebMouseEvent(*event);
     ModifyEventMovementAndCoords(&mouse_event);
     host_->ForwardMouseEvent(mouse_event);
     // Ensure that we get keyboard focus on mouse down as a plugin window may
@@ -2010,13 +2020,12 @@ void RenderWidgetHostViewAura::OnScrollEvent(ui::ScrollEvent* event) {
         MakeWebGestureEventFlingCancel();
     host_->ForwardGestureEvent(gesture_event);
     blink::WebMouseWheelEvent mouse_wheel_event =
-        MakeWebMouseWheelEvent(event);
+        MakeWebMouseWheelEvent(*event);
     host_->ForwardWheelEvent(mouse_wheel_event);
     RecordAction(base::UserMetricsAction("TrackpadScroll"));
   } else if (event->type() == ui::ET_SCROLL_FLING_START ||
              event->type() == ui::ET_SCROLL_FLING_CANCEL) {
-    blink::WebGestureEvent gesture_event =
-        MakeWebGestureEvent(event);
+    blink::WebGestureEvent gesture_event = MakeWebGestureEvent(*event);
     host_->ForwardGestureEvent(gesture_event);
     if (event->type() == ui::ET_SCROLL_FLING_START)
       RecordAction(base::UserMetricsAction("TrackpadScrollFling"));
@@ -2031,22 +2040,26 @@ void RenderWidgetHostViewAura::OnTouchEvent(ui::TouchEvent* event) {
     return;
 
   // Update the touch event first.
-  blink::WebTouchPoint* point = UpdateWebTouchEventFromUIEvent(*event,
-                                                                &touch_event_);
-
-  // Forward the touch event only if a touch point was updated, and there's a
-  // touch-event handler in the page, and no other touch-event is in the queue.
-  // It is important to always consume the event if there is a touch-event
-  // handler in the page, or some touch-event is already in the queue, even if
-  // no point has been updated, to make sure that this event does not get
-  // processed by the gesture recognizer before the events in the queue.
-  if (host_->ShouldForwardTouchEvent())
+  if (!pointer_state_.OnTouch(*event)) {
     event->StopPropagation();
+    return;
+  }
 
-  if (point) {
-    if (host_->ShouldForwardTouchEvent())
-      host_->ForwardTouchEventWithLatencyInfo(touch_event_, *event->latency());
-    UpdateWebTouchEventAfterDispatch(&touch_event_, point);
+  blink::WebTouchEvent touch_event = CreateWebTouchEventFromMotionEvent(
+      pointer_state_, event->may_cause_scrolling());
+  pointer_state_.CleanupRemovedTouchPoints(*event);
+
+  // Forward the touch event only if a touch point was updated, and
+  // there's a touch-event handler in the page, and no other
+  // touch-event is in the queue. It is important to always mark
+  // events as being handled asynchronously if there is a touch-event
+  // handler in the page, or some touch-event is already in the queue,
+  // even if no point has been updated. This ensures that this event
+  // does not get processed by the gesture recognizer before events
+  // currently awaiting dispatch in the touch queue.
+  if (host_->ShouldForwardTouchEvent()) {
+    event->DisableSynchronousHandling();
+    host_->ForwardTouchEventWithLatencyInfo(touch_event, *event->latency());
   }
 }
 
@@ -2076,7 +2089,7 @@ void RenderWidgetHostViewAura::OnGestureEvent(ui::GestureEvent* event) {
     delegate->HandleGestureBegin();
   }
 
-  blink::WebGestureEvent gesture = MakeWebGestureEvent(event);
+  blink::WebGestureEvent gesture = MakeWebGestureEvent(*event);
   if (event->type() == ui::ET_GESTURE_TAP_DOWN) {
     // Webkit does not stop a fling-scroll on tap-down. So explicitly send an
     // event to stop any in-progress flings.
@@ -2427,8 +2440,8 @@ void RenderWidgetHostViewAura::InternalSetBounds(const gfx::Rect& rect) {
   host_->WasResized();
   delegated_frame_host_->WasResized();
   if (touch_editing_client_) {
-    touch_editing_client_->OnSelectionOrCursorChanged(selection_anchor_rect_,
-      selection_focus_rect_);
+    touch_editing_client_->OnSelectionOrCursorChanged(selection_anchor_,
+                                                      selection_focus_);
   }
 #if defined(OS_WIN)
   // Create the legacy dummy window which corresponds to the bounds of the

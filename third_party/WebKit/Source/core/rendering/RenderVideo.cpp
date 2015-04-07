@@ -52,9 +52,9 @@ RenderVideo::~RenderVideo()
 {
 }
 
-IntSize RenderVideo::defaultSize()
+LayoutSize RenderVideo::defaultSize()
 {
-    return IntSize(defaultWidth, defaultHeight);
+    return LayoutSize(defaultWidth, defaultHeight);
 }
 
 void RenderVideo::intrinsicSizeChanged()
@@ -98,7 +98,7 @@ LayoutSize RenderVideo::calculateIntrinsicSize()
     if (webMediaPlayer && video->readyState() >= HTMLVideoElement::HAVE_METADATA) {
         IntSize size = webMediaPlayer->naturalSize();
         if (!size.isEmpty())
-            return size;
+            return LayoutSize(size);
     }
 
     if (video->shouldDisplayPosterImage() && !m_cachedImageSize.isEmpty() && !imageResource()->errorOccurred())
@@ -143,7 +143,7 @@ bool RenderVideo::shouldDisplayVideo() const
     return !videoElement()->shouldDisplayPosterImage();
 }
 
-void RenderVideo::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void RenderVideo::paintReplaced(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     VideoPainter(*this).paintReplaced(paintInfo, paintOffset);
 }
@@ -179,7 +179,7 @@ void RenderVideo::updatePlayer()
     if (!mediaPlayer)
         return;
 
-    if (!videoElement()->isActive())
+    if (!videoElement()->inActiveDocument())
         return;
 
     videoElement()->setNeedsCompositingUpdate();

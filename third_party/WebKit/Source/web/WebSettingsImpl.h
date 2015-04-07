@@ -69,7 +69,6 @@ public:
     virtual void setAutoZoomFocusedNodeToLegibleScale(bool) override;
     virtual void setCaretBrowsingEnabled(bool) override;
     virtual void setClobberUserAgentInitialScaleQuirk(bool) override;
-    virtual void setContainerCullingEnabled(bool) override;
     virtual void setCookieEnabled(bool) override;
     virtual void setNavigateOnDragDrop(bool) override;
     virtual void setCursiveFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) override;
@@ -81,10 +80,9 @@ public:
     virtual void setDefaultVideoPosterURL(const WebString&) override;
     virtual void setDeferredImageDecodingEnabled(bool) override;
     virtual void setDeviceScaleAdjustment(float) override;
-    virtual void setDeviceSupportsMouse(bool) override;
 
-    // FIXME: Remove once the pointer/hover features are converted to use the
-    // new APIs (e.g. setPrimaryPointerType) on the chromium side
+    // FIXME: Replace these two with pointer/hover queries? crbug.com/441813
+    virtual void setDeviceSupportsMouse(bool) override;
     virtual void setDeviceSupportsTouch(bool) override;
 
     virtual void setDoubleTapToZoomEnabled(bool) override;
@@ -100,13 +98,13 @@ public:
     virtual void setFullscreenSupported(bool) override;
     virtual void setHyperlinkAuditingEnabled(bool) override;
     virtual void setIgnoreMainFrameOverflowHiddenQuirk(bool) override;
+    virtual void setImageAnimationPolicy(ImageAnimationPolicy) override;
     virtual void setImagesEnabled(bool) override;
     virtual void setInlineTextBoxAccessibilityEnabled(bool) override;
     virtual void setJavaEnabled(bool) override;
     virtual void setJavaScriptCanAccessClipboard(bool) override;
     virtual void setJavaScriptCanOpenWindowsAutomatically(bool) override;
     virtual void setJavaScriptEnabled(bool) override;
-    virtual void setLayerSquashingEnabled(bool) override;
     virtual void setLoadsImagesAutomatically(bool) override;
     virtual void setLoadWithOverviewMode(bool) override;
     virtual void setLocalStorageEnabled(bool) override;
@@ -135,6 +133,7 @@ public:
     virtual void setRenderVSyncNotificationEnabled(bool) override;
     virtual void setReportScreenSizeInPhysicalPixelsQuirk(bool) override;
     virtual void setRootLayerScrolls(bool) override;
+    virtual void setRubberBandingOnCompositorThread(bool) override;
     virtual void setSansSerifFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) override;
     virtual void setSelectTrailingWhitespaceEnabled(bool override);
     virtual void setSelectionIncludesAltImageText(bool) override;
@@ -142,6 +141,7 @@ public:
     virtual void setShouldPrintBackgrounds(bool) override;
     virtual void setShouldClearDocumentBackground(bool) override;
     virtual void setShouldRespectImageOrientation(bool) override;
+    virtual void setShowContextMenuOnMouseUp(bool) override;
     virtual void setShowFPSCounter(bool) override;
     virtual void setShowPaintRects(bool) override;
     virtual void setShrinksStandaloneImagesToFit(bool) override;
@@ -149,6 +149,8 @@ public:
     virtual void setSmartInsertDeleteEnabled(bool) override;
     virtual void setSpatialNavigationEnabled(bool) override;
     virtual void setStandardFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) override;
+    virtual void setStrictMixedContentChecking(bool) override;
+    virtual void setStrictPowerfulFeatureRestrictions(bool) override;
     virtual void setSupportDeprecatedTargetDensityDPI(bool) override;
     virtual void setSupportsMultipleWindows(bool) override;
     virtual void setSyncXHRInDocumentsEnabled(bool) override;

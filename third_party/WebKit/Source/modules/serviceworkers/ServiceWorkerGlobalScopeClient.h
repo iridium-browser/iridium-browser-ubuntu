@@ -33,21 +33,24 @@
 
 #include "core/dom/MessagePort.h"
 #include "core/workers/WorkerClients.h"
-#include "public/platform/WebCallbacks.h"
 #include "public/platform/WebMessagePortChannel.h"
+#include "public/platform/WebServiceWorkerClientFocusCallback.h"
 #include "public/platform/WebServiceWorkerClientsInfo.h"
 #include "public/platform/WebServiceWorkerEventResult.h"
+#include "public/platform/WebServiceWorkerSkipWaitingCallbacks.h"
 #include "wtf/Forward.h"
 #include "wtf/Noncopyable.h"
 
 namespace blink {
 
 class ExecutionContext;
+struct WebCrossOriginServiceWorkerClient;
 class WebServiceWorkerCacheStorage;
 class WebServiceWorkerResponse;
 class WebURL;
 class WorkerClients;
 
+// See WebServiceWorkerContextClient for documentation for the methods in this class.
 class ServiceWorkerGlobalScopeClient : public WillBeHeapSupplement<WorkerClients> {
     WTF_MAKE_NONCOPYABLE(ServiceWorkerGlobalScopeClient);
 public:
@@ -58,13 +61,19 @@ public:
     virtual WebServiceWorkerCacheStorage* cacheStorage() const = 0;
 
     virtual void didHandleActivateEvent(int eventID, WebServiceWorkerEventResult) = 0;
-    virtual void didHandleInstallEvent(int installEventID, WebServiceWorkerEventResult) = 0;
     // Calling didHandleFetchEvent without response means no response was
     // provided by the service worker in the fetch events, so fallback to native.
     virtual void didHandleFetchEvent(int fetchEventID) = 0;
     virtual void didHandleFetchEvent(int fetchEventID, const WebServiceWorkerResponse&) = 0;
+    virtual void didHandleInstallEvent(int installEventID, WebServiceWorkerEventResult) = 0;
+    virtual void didHandleNotificationClickEvent(int eventID, WebServiceWorkerEventResult) = 0;
+    virtual void didHandlePushEvent(int pushEventID, WebServiceWorkerEventResult) = 0;
     virtual void didHandleSyncEvent(int syncEventID) = 0;
+    virtual void didHandleCrossOriginConnectEvent(int connectEventID, bool acceptConnect) = 0;
     virtual void postMessageToClient(int clientID, const WebString& message, PassOwnPtr<WebMessagePortChannelArray>) = 0;
+    virtual void postMessageToCrossOriginClient(const WebCrossOriginServiceWorkerClient&, const WebString& message, PassOwnPtr<WebMessagePortChannelArray>) = 0;
+    virtual void skipWaiting(WebServiceWorkerSkipWaitingCallbacks*) = 0;
+    virtual void focus(int clientID, WebServiceWorkerClientFocusCallback*) = 0;
 
     static const char* supplementName();
     static ServiceWorkerGlobalScopeClient* from(ExecutionContext*);

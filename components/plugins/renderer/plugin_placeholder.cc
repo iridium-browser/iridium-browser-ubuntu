@@ -41,6 +41,18 @@ namespace plugins {
 
 gin::WrapperInfo PluginPlaceholder::kWrapperInfo = {gin::kEmbedderNativeGin};
 
+#if defined(ENABLE_PLUGINS)
+void PluginPlaceholder::BlockForPowerSaverPoster() {
+  DCHECK(!is_blocked_for_power_saver_poster_);
+  is_blocked_for_power_saver_poster_ = true;
+
+  render_frame()->RegisterPeripheralPlugin(
+      GURL(plugin_params_.url).GetOrigin(),
+      base::Bind(&PluginPlaceholder::DisablePowerSaverForInstance,
+                 weak_factory_.GetWeakPtr()));
+}
+#endif
+
 PluginPlaceholder::PluginPlaceholder(content::RenderFrame* render_frame,
                                      WebLocalFrame* frame,
                                      const WebPluginParams& params,
@@ -53,12 +65,28 @@ PluginPlaceholder::PluginPlaceholder(content::RenderFrame* render_frame,
                                     render_frame->GetWebkitPreferences(),
                                     html_data,
                                     placeholderDataUrl)),
+      is_blocked_for_background_tab_(false),
       is_blocked_for_prerendering_(false),
+      is_blocked_for_power_saver_poster_(false),
+      power_saver_mode_(content::RenderFrame::POWER_SAVER_MODE_ESSENTIAL),
       allow_loading_(false),
       hidden_(false),
-      finished_loading_(false) {}
+      finished_loading_(false),
+      weak_factory_(this) {
+}
 
 PluginPlaceholder::~PluginPlaceholder() {}
+
+#if defined(ENABLE_PLUGINS)
+void PluginPlaceholder::DisablePowerSaverForInstance() {
+  power_saver_mode_ = content::RenderFrame::POWER_SAVER_MODE_ESSENTIAL;
+  if (is_blocked_for_power_saver_poster_) {
+    is_blocked_for_power_saver_poster_ = false;
+    if (!LoadingBlocked())
+      LoadPlugin();
+  }
+}
+#endif
 
 gin::ObjectTemplateBuilder PluginPlaceholder::GetObjectTemplateBuilder(
     v8::Isolate* isolate) {
@@ -176,6 +204,14 @@ void PluginPlaceholder::PluginDestroyed() {
   plugin_ = NULL;
 }
 
+void PluginPlaceholder::WasShown() {
+  if (is_blocked_for_background_tab_) {
+    is_blocked_for_background_tab_ = false;
+    if (!LoadingBlocked())
+      LoadPlugin();
+  }
+}
+
 void PluginPlaceholder::OnDestruct() {
   frame_ = NULL;
 }
@@ -192,8 +228,11 @@ void PluginPlaceholder::OnSetIsPrerendering(bool is_prerendering) {
   // Prerendering can only be enabled prior to a RenderView's first navigation,
   // so no BlockedPlugin should see the notification that enables prerendering.
   DCHECK(!is_prerendering);
-  if (is_blocked_for_prerendering_ && !is_prerendering)
-    LoadPlugin();
+  if (is_blocked_for_prerendering_) {
+    is_blocked_for_prerendering_ = false;
+    if (!LoadingBlocked())
+      LoadPlugin();
+  }
 }
 
 void PluginPlaceholder::LoadPlugin() {
@@ -211,13 +250,18 @@ void PluginPlaceholder::LoadPlugin() {
   // TODO(mmenke):  In the case of prerendering, feed into
   //                ChromeContentRendererClient::CreatePlugin instead, to
   //                reduce the chance of future regressions.
-  WebPlugin* plugin =
-      render_frame()->CreatePlugin(frame_, plugin_info_, plugin_params_);
+  WebPlugin* plugin = render_frame()->CreatePlugin(
+      frame_, plugin_info_, plugin_params_, power_saver_mode_);
   ReplacePlugin(plugin);
 }
 
 void PluginPlaceholder::LoadCallback() {
   RenderThread::Get()->RecordAction(UserMetricsAction("Plugin_Load_Click"));
+// If the user specifically clicks on the plug-in content's placeholder,
+// disable power saver throttling for this instance.
+#if defined(ENABLE_PLUGINS)
+  DisablePowerSaverForInstance();
+#endif
   LoadPlugin();
 }
 
@@ -249,6 +293,12 @@ blink::WebLocalFrame* PluginPlaceholder::GetFrame() { return frame_; }
 
 const blink::WebPluginParams& PluginPlaceholder::GetPluginParams() const {
   return plugin_params_;
+}
+
+bool PluginPlaceholder::LoadingBlocked() const {
+  DCHECK(allow_loading_);
+  return is_blocked_for_background_tab_ || is_blocked_for_power_saver_poster_ ||
+         is_blocked_for_prerendering_;
 }
 
 }  // namespace plugins

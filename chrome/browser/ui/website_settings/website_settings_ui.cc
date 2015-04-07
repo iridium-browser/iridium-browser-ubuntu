@@ -18,54 +18,55 @@ const int kInvalidResourceID = -1;
 // The resource id's for the strings that are displayed on the permissions
 // button if the permission setting is managed by policy.
 const int kPermissionButtonTextIDPolicyManaged[] = {
-  kInvalidResourceID,
-  IDS_WEBSITE_SETTINGS_BUTTON_TEXT_ALLOWED_BY_POLICY,
-  IDS_WEBSITE_SETTINGS_BUTTON_TEXT_BLOCKED_BY_POLICY,
-  kInvalidResourceID,
-  kInvalidResourceID
-};
-COMPILE_ASSERT(arraysize(kPermissionButtonTextIDPolicyManaged) ==
-               CONTENT_SETTING_NUM_SETTINGS,
-               button_text_id_array_size_incorrect);
+    kInvalidResourceID,
+    IDS_WEBSITE_SETTINGS_BUTTON_TEXT_ALLOWED_BY_POLICY,
+    IDS_WEBSITE_SETTINGS_BUTTON_TEXT_BLOCKED_BY_POLICY,
+    IDS_WEBSITE_SETTINGS_BUTTON_TEXT_ASK_BY_POLICY,
+    kInvalidResourceID,
+    kInvalidResourceID};
+static_assert(arraysize(kPermissionButtonTextIDPolicyManaged) ==
+              CONTENT_SETTING_NUM_SETTINGS,
+              "kPermissionButtonTextIDPolicyManaged array size is incorrect");
 
 // The resource id's for the strings that are displayed on the permissions
 // button if the permission setting is managed by an extension.
 const int kPermissionButtonTextIDExtensionManaged[] = {
-  kInvalidResourceID,
-  IDS_WEBSITE_SETTINGS_BUTTON_TEXT_ALLOWED_BY_EXTENSION,
-  IDS_WEBSITE_SETTINGS_BUTTON_TEXT_BLOCKED_BY_EXTENSION,
-  kInvalidResourceID,
-  kInvalidResourceID
-};
-COMPILE_ASSERT(arraysize(kPermissionButtonTextIDExtensionManaged) ==
-               CONTENT_SETTING_NUM_SETTINGS,
-               button_text_id_array_size_incorrect);
+    kInvalidResourceID,
+    IDS_WEBSITE_SETTINGS_BUTTON_TEXT_ALLOWED_BY_EXTENSION,
+    IDS_WEBSITE_SETTINGS_BUTTON_TEXT_BLOCKED_BY_EXTENSION,
+    kInvalidResourceID,
+    kInvalidResourceID,
+    kInvalidResourceID};
+static_assert(arraysize(kPermissionButtonTextIDExtensionManaged) ==
+              CONTENT_SETTING_NUM_SETTINGS,
+              "kPermissionButtonTextIDExtensionManaged array size is "
+              "incorrect");
 
 // The resource id's for the strings that are displayed on the permissions
 // button if the permission setting is managed by the user.
 const int kPermissionButtonTextIDUserManaged[] = {
-  kInvalidResourceID,
-  IDS_WEBSITE_SETTINGS_BUTTON_TEXT_ALLOWED_BY_USER,
-  IDS_WEBSITE_SETTINGS_BUTTON_TEXT_BLOCKED_BY_USER,
-  kInvalidResourceID,
-  kInvalidResourceID
-};
-COMPILE_ASSERT(arraysize(kPermissionButtonTextIDUserManaged) ==
-               CONTENT_SETTING_NUM_SETTINGS,
-               button_text_id_array_size_incorrect);
+    kInvalidResourceID,
+    IDS_WEBSITE_SETTINGS_BUTTON_TEXT_ALLOWED_BY_USER,
+    IDS_WEBSITE_SETTINGS_BUTTON_TEXT_BLOCKED_BY_USER,
+    IDS_WEBSITE_SETTINGS_BUTTON_TEXT_ASK_BY_USER,
+    kInvalidResourceID,
+    IDS_WEBSITE_SETTINGS_BUTTON_TEXT_DETECT_IMPORTANT_CONTENT_BY_USER};
+static_assert(arraysize(kPermissionButtonTextIDUserManaged) ==
+              CONTENT_SETTING_NUM_SETTINGS,
+              "kPermissionButtonTextIDUserManaged array size is incorrect");
 
 // The resource id's for the strings that are displayed on the permissions
 // button if the permission setting is the global default setting.
 const int kPermissionButtonTextIDDefaultSetting[] = {
-  kInvalidResourceID,
-  IDS_WEBSITE_SETTINGS_BUTTON_TEXT_ALLOWED_BY_DEFAULT,
-  IDS_WEBSITE_SETTINGS_BUTTON_TEXT_BLOCKED_BY_DEFAULT,
-  IDS_WEBSITE_SETTINGS_BUTTON_TEXT_ASK_BY_DEFAULT,
-  kInvalidResourceID
-};
-COMPILE_ASSERT(arraysize(kPermissionButtonTextIDDefaultSetting) ==
-               CONTENT_SETTING_NUM_SETTINGS,
-               button_text_id_array_size_incorrect);
+    kInvalidResourceID,
+    IDS_WEBSITE_SETTINGS_BUTTON_TEXT_ALLOWED_BY_DEFAULT,
+    IDS_WEBSITE_SETTINGS_BUTTON_TEXT_BLOCKED_BY_DEFAULT,
+    IDS_WEBSITE_SETTINGS_BUTTON_TEXT_ASK_BY_DEFAULT,
+    kInvalidResourceID,
+    IDS_WEBSITE_SETTINGS_BUTTON_TEXT_DETECT_IMPORTANT_CONTENT_BY_DEFAULT};
+static_assert(arraysize(kPermissionButtonTextIDDefaultSetting) ==
+              CONTENT_SETTING_NUM_SETTINGS,
+              "kPermissionButtonTextIDDefaultSetting array size is incorrect");
 
 }  // namespace
 
@@ -156,9 +157,10 @@ base::string16 WebsiteSettingsUI::PermissionValueToUIString(
 
 // static
 base::string16 WebsiteSettingsUI::PermissionActionToUIString(
-      ContentSetting setting,
-      ContentSetting default_setting,
-      content_settings::SettingSource source) {
+    ContentSettingsType type,
+    ContentSetting setting,
+    ContentSetting default_setting,
+    content_settings::SettingSource source) {
   ContentSetting effective_setting = setting;
   if (effective_setting == CONTENT_SETTING_DEFAULT)
     effective_setting = default_setting;

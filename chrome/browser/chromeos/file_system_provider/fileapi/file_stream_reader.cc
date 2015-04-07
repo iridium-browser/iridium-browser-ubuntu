@@ -7,6 +7,7 @@
 #include "base/debug/trace_event.h"
 #include "base/files/file.h"
 #include "base/memory/ref_counted.h"
+#include "chrome/browser/chromeos/file_system_provider/abort_callback.h"
 #include "chrome/browser/chromeos/file_system_provider/fileapi/provider_async_file_util.h"
 #include "chrome/browser/chromeos/file_system_provider/mount_path_util.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_interface.h"
@@ -141,10 +142,9 @@ class FileStreamReader::OperationRunner
       return;
     }
 
-    const ProvidedFileSystemInterface::AbortCallback abort_callback =
-        abort_callback_;
-    abort_callback_ = ProvidedFileSystemInterface::AbortCallback();
-    abort_callback.Run(base::Bind(
+    const AbortCallback last_abort_callback = abort_callback_;
+    abort_callback_ = AbortCallback();
+    last_abort_callback.Run(base::Bind(
         &OperationRunner::OnAbortCompletedOnUIThread, this, callback));
   }
 
@@ -161,7 +161,9 @@ class FileStreamReader::OperationRunner
       base::File::Error result) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-    file_handle_ = file_handle;
+    if (result == base::File::FILE_OK)
+      file_handle_ = file_handle;
+
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE, base::Bind(callback, result));
   }
@@ -201,7 +203,7 @@ class FileStreamReader::OperationRunner
         BrowserThread::IO, FROM_HERE, base::Bind(callback, result));
   }
 
-  ProvidedFileSystemInterface::AbortCallback abort_callback_;
+  AbortCallback abort_callback_;
   base::WeakPtr<ProvidedFileSystemInterface> file_system_;
   base::FilePath file_path_;
   int file_handle_;

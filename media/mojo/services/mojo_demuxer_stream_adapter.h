@@ -35,7 +35,7 @@ class MojoDemuxerStreamAdapter : public DemuxerStream,
   void Read(const ReadCB& read_cb) override;
   AudioDecoderConfig audio_decoder_config() override;
   VideoDecoderConfig video_decoder_config() override;
-  Type type() override;
+  Type type() const override;
   void EnableBitstreamConverter() override;
   bool SupportsConfigChanges() override;
   VideoRotation video_rotation() override;
@@ -68,6 +68,9 @@ class MojoDemuxerStreamAdapter : public DemuxerStream,
   std::queue<VideoDecoderConfig> video_config_queue_;
 
   DemuxerStream::Type type_;
+
+  // DataPipe for deserializing the data section of DecoderBuffers from.
+  mojo::ScopedDataPipeConsumerHandle stream_pipe_;
 
   base::WeakPtrFactory<MojoDemuxerStreamAdapter> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(MojoDemuxerStreamAdapter);

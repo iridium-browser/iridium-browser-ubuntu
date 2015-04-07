@@ -76,10 +76,10 @@ inline bool IsProfilerTimingEnabled() {
   base::subtle::Atomic32 current_timing_enabled =
       base::subtle::NoBarrier_Load(&g_profiler_timing_enabled);
   if (current_timing_enabled == UNDEFINED_TIMING) {
-    if (!CommandLine::InitializedForCurrentProcess())
+    if (!base::CommandLine::InitializedForCurrentProcess())
       return true;
     current_timing_enabled =
-        (CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+        (base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
              switches::kProfilerTiming) ==
          switches::kProfilerTimingDisabledValue)
             ? DISABLED_TIMING
@@ -116,7 +116,7 @@ DeathData::DeathData(int count) {
 
 void DeathData::RecordDeath(const int32 queue_duration,
                             const int32 run_duration,
-                            int32 random_number) {
+                            const uint32 random_number) {
   // We'll just clamp at INT_MAX, but we should note this in the UI as such.
   if (count_ < INT_MAX)
     ++count_;
@@ -307,7 +307,7 @@ void ThreadData::PushToHeadOfList() {
   (void)VALGRIND_MAKE_MEM_DEFINED_IF_ADDRESSABLE(&random_number_,
                                                  sizeof(random_number_));
   MSAN_UNPOISON(&random_number_, sizeof(random_number_));
-  random_number_ += static_cast<int32>(this - static_cast<ThreadData*>(0));
+  random_number_ += static_cast<uint32>(this - static_cast<ThreadData*>(0));
   random_number_ ^= (Now() - TrackedTime()).InMilliseconds();
 
   DCHECK(!next_);
@@ -453,10 +453,10 @@ void ThreadData::TallyADeath(const Births& birth,
   int32 run_duration = stopwatch.RunDurationMs();
 
   // Stir in some randomness, plus add constant in case durations are zero.
-  const int32 kSomePrimeNumber = 2147483647;
+  const uint32 kSomePrimeNumber = 2147483647;
   random_number_ += queue_duration + run_duration + kSomePrimeNumber;
   // An address is going to have some randomness to it as well ;-).
-  random_number_ ^= static_cast<int32>(&birth - reinterpret_cast<Births*>(0));
+  random_number_ ^= static_cast<uint32>(&birth - reinterpret_cast<Births*>(0));
 
   // We don't have queue durations without OS timer. OS timer is automatically
   // used for task-post-timing, so the use of an alternate timer implies all
@@ -873,21 +873,21 @@ TaskStopwatch::TaskStopwatch()
       current_thread_data_(NULL),
       excluded_duration_ms_(0),
       parent_(NULL) {
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   state_ = CREATED;
   child_ = NULL;
 #endif
 }
 
 TaskStopwatch::~TaskStopwatch() {
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   DCHECK(state_ != RUNNING);
   DCHECK(child_ == NULL);
 #endif
 }
 
 void TaskStopwatch::Start() {
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   DCHECK(state_ == CREATED);
   state_ = RUNNING;
 #endif
@@ -899,7 +899,7 @@ void TaskStopwatch::Start() {
     return;
 
   parent_ = current_thread_data_->current_stopwatch_;
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   if (parent_) {
     DCHECK(parent_->state_ == RUNNING);
     DCHECK(parent_->child_ == NULL);
@@ -911,7 +911,7 @@ void TaskStopwatch::Start() {
 
 void TaskStopwatch::Stop() {
   const TrackedTime end_time = ThreadData::Now();
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   DCHECK(state_ == RUNNING);
   state_ = STOPPED;
   DCHECK(child_ == NULL);
@@ -929,7 +929,7 @@ void TaskStopwatch::Stop() {
   if (!parent_)
     return;
 
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   DCHECK(parent_->state_ == RUNNING);
   DCHECK(parent_->child_ == this);
   parent_->child_ = NULL;
@@ -939,7 +939,7 @@ void TaskStopwatch::Stop() {
 }
 
 TrackedTime TaskStopwatch::StartTime() const {
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   DCHECK(state_ != CREATED);
 #endif
 
@@ -947,7 +947,7 @@ TrackedTime TaskStopwatch::StartTime() const {
 }
 
 int32 TaskStopwatch::RunDurationMs() const {
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   DCHECK(state_ == STOPPED);
 #endif
 
@@ -955,7 +955,7 @@ int32 TaskStopwatch::RunDurationMs() const {
 }
 
 ThreadData* TaskStopwatch::GetThreadData() const {
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   DCHECK(state_ != CREATED);
 #endif
 

@@ -112,6 +112,11 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
 
+    'buildtools/third_party/libc++/trunk/test': [
+        # http://llvm.org/bugs/show_bug.cgi?id=18291
+        'UNKNOWN',
+    ],
+
     'chrome/common/extensions/docs/examples': [  # http://crbug.com/98092
         'UNKNOWN',
     ],
@@ -122,6 +127,10 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
     'courgette/third_party/bsdiff_create.cc': [  # http://crbug.com/98095
+        'UNKNOWN',
+    ],
+    # This code is not shipped.
+    'mojo/public/third_party/ply': [
         'UNKNOWN',
     ],
     'native_client': [  # http://crbug.com/98099
@@ -211,14 +220,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/lcov/contrib/galaxy/genflat.pl': [
         'GPL (v2 or later)',
     ],
-    'third_party/libc++/trunk/include/support/solaris': [
-        # http://llvm.org/bugs/show_bug.cgi?id=18291
-        'UNKNOWN',
-    ],
-    'third_party/libc++/trunk/src/support/solaris/xlocale.c': [
-        # http://llvm.org/bugs/show_bug.cgi?id=18291
-        'UNKNOWN',
-    ],
     'third_party/libc++/trunk/test': [
         # http://llvm.org/bugs/show_bug.cgi?id=18291
         'UNKNOWN',
@@ -293,19 +294,19 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/ocmock/OCMock': [  # http://crbug.com/98454
         'UNKNOWN',
     ],
-    'third_party/ply/__init__.py': [
-        'UNKNOWN',
-    ],
     'third_party/protobuf': [  # http://crbug.com/98455
         'UNKNOWN',
     ],
 
-    # http://crbug.com/222831
-    # https://bitbucket.org/eliben/pyelftools/issue/12
-    'third_party/pyelftools': [
+    # https://bitbucket.org/ned/coveragepy/issue/313/add-license-file-containing-2-3-or-4
+    # BSD 2-clause license.
+    'third_party/pycoverage': [
         'UNKNOWN',
     ],
 
+    'third_party/pyelftools': [ # http://crbug.com/222831
+        'UNKNOWN',
+    ],
     'third_party/scons-2.0.1/engine/SCons': [  # http://crbug.com/98462
         'UNKNOWN',
     ],

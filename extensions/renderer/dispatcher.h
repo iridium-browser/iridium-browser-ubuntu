@@ -33,6 +33,7 @@ class ModuleSystem;
 class URLPattern;
 struct ExtensionMsg_ExternalConnectionInfo;
 struct ExtensionMsg_Loaded_Params;
+struct ExtensionMsg_TabConnectionInfo;
 struct ExtensionMsg_UpdatePermissions_Params;
 
 namespace blink {
@@ -41,7 +42,6 @@ class WebSecurityOrigin;
 }
 
 namespace base {
-class DictionaryValue;
 class ListValue;
 }
 
@@ -163,13 +163,10 @@ class Dispatcher : public content::RenderProcessObserver,
 
   void OnActivateExtension(const std::string& extension_id);
   void OnCancelSuspend(const std::string& extension_id);
-  void OnClearTabSpecificPermissions(
-      int tab_id,
-      const std::vector<std::string>& extension_ids);
   void OnDeliverMessage(int target_port_id, const Message& message);
   void OnDispatchOnConnect(int target_port_id,
                            const std::string& channel_name,
-                           const base::DictionaryValue& source_tab,
+                           const ExtensionMsg_TabConnectionInfo& source,
                            const ExtensionMsg_ExternalConnectionInfo& info,
                            const std::string& tls_channel_id);
   void OnDispatchOnDisconnect(int port_id, const std::string& error_message);
@@ -192,10 +189,6 @@ class Dispatcher : public content::RenderProcessObserver,
   void OnTransferBlobs(const std::vector<std::string>& blob_uuids);
   void OnUnloaded(const std::string& id);
   void OnUpdatePermissions(const ExtensionMsg_UpdatePermissions_Params& params);
-  void OnUpdateTabSpecificPermissions(const GURL& url,
-                                      int tab_id,
-                                      const std::string& extension_id,
-                                      const URLPatternSet& origin_set);
   void OnUsingWebRequestAPI(bool webrequest_used);
 
   // UserScriptSetManager::Observer implementation.
@@ -226,6 +219,14 @@ class Dispatcher : public content::RenderProcessObserver,
 
   void RegisterNativeHandlers(ModuleSystem* module_system,
                               ScriptContext* context);
+
+  // Determines if a ScriptContext can connect to any externally_connectable-
+  // enabled extension.
+  bool IsRuntimeAvailableToContext(ScriptContext* context);
+
+  // Updates a web page context with any content capabilities granted by active
+  // extensions.
+  void UpdateContentCapabilities(ScriptContext* context);
 
   // Inserts static source code into |source_map_|.
   void PopulateSourceMap();

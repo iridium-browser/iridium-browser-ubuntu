@@ -127,7 +127,7 @@ static REFERENCE_MODE read_frame_reference_mode(const VP9_COMMON *cm,
 }
 
 static void read_frame_reference_mode_probs(VP9_COMMON *cm, vp9_reader *r) {
-  FRAME_CONTEXT *const fc = &cm->fc;
+  FRAME_CONTEXT *const fc = cm->fc;
   int i;
 
   if (cm->reference_mode == REFERENCE_MODE_SELECT)
@@ -667,6 +667,14 @@ static void setup_display_size(VP9_COMMON *cm, struct vp9_read_bit_buffer *rb) {
     vp9_read_frame_size(rb, &cm->display_width, &cm->display_height);
 }
 
+static void resize_mv_buffer(VP9_COMMON *cm) {
+  vpx_free(cm->cur_frame->mvs);
+  cm->cur_frame->mi_rows = cm->mi_rows;
+  cm->cur_frame->mi_cols = cm->mi_cols;
+  cm->cur_frame->mvs = (MV_REF *)vpx_calloc(cm->mi_rows * cm->mi_cols,
+                                            sizeof(*cm->cur_frame->mvs));
+}
+
 static void resize_context_buffers(VP9_COMMON *cm, int width, int height) {
 #if CONFIG_SIZE_LIMIT
   if (width > DECODE_WIDTH_LIMIT || height > DECODE_HEIGHT_LIMIT)
@@ -691,6 +699,10 @@ static void resize_context_buffers(VP9_COMMON *cm, int width, int height) {
     vp9_init_context_buffers(cm);
     cm->width = width;
     cm->height = height;
+  }
+  if (cm->cur_frame->mvs == NULL || cm->mi_rows > cm->cur_frame->mi_rows ||
+      cm->mi_cols > cm->cur_frame->mi_cols) {
+    resize_mv_buffer(cm);
   }
 }
 
@@ -902,11 +914,8 @@ static const uint8_t *decode_tiles(VP9Decoder *pbi,
     LFWorkerData *const lf_data = (LFWorkerData*)pbi->lf_worker.data1;
     // Be sure to sync as we might be resuming after a failed frame decode.
     winterface->sync(&pbi->lf_worker);
-    lf_data->frame_buffer = get_frame_new_buffer(cm);
-    lf_data->cm = cm;
-    vp9_copy(lf_data->planes, pbi->mb.plane);
-    lf_data->stop = 0;
-    lf_data->y_only = 0;
+    vp9_loop_filter_data_reset(lf_data, get_frame_new_buffer(cm), cm,
+                               pbi->mb.plane);
     vp9_loop_filter_frame_init(cm, cm->lf.filter_level);
   }
 
@@ -1065,14 +1074,19 @@ static const uint8_t *decode_tiles_mt(VP9Decoder *pbi,
     // use num_threads - 1 workers.
     CHECK_MEM_ERROR(cm, pbi->tile_workers,
                     vpx_malloc(num_threads * sizeof(*pbi->tile_workers)));
+    // Ensure tile data offsets will be properly aligned. This may fail on
+    // platforms without DECLARE_ALIGNED().
+    assert((sizeof(*pbi->tile_worker_data) % 16) == 0);
+    CHECK_MEM_ERROR(cm, pbi->tile_worker_data,
+                    vpx_memalign(32, num_threads *
+                                 sizeof(*pbi->tile_worker_data)));
+    CHECK_MEM_ERROR(cm, pbi->tile_worker_info,
+                    vpx_malloc(num_threads * sizeof(*pbi->tile_worker_info)));
     for (i = 0; i < num_threads; ++i) {
       VP9Worker *const worker = &pbi->tile_workers[i];
       ++pbi->num_tile_workers;
 
       winterface->init(worker);
-      CHECK_MEM_ERROR(cm, worker->data1,
-                      vpx_memalign(32, sizeof(TileWorkerData)));
-      CHECK_MEM_ERROR(cm, worker->data2, vpx_malloc(sizeof(TileInfo)));
       if (i < num_threads - 1 && !winterface->reset(worker)) {
         vpx_internal_error(&cm->error, VPX_CODEC_ERROR,
                            "Tile decoder thread creation failed");
@@ -1082,8 +1096,11 @@ static const uint8_t *decode_tiles_mt(VP9Decoder *pbi,
 
   // Reset tile decoding hook
   for (n = 0; n < num_workers; ++n) {
-    winterface->sync(&pbi->tile_workers[n]);
-    pbi->tile_workers[n].hook = (VP9WorkerHook)tile_worker_hook;
+    VP9Worker *const worker = &pbi->tile_workers[n];
+    winterface->sync(worker);
+    worker->hook = (VP9WorkerHook)tile_worker_hook;
+    worker->data1 = &pbi->tile_worker_data[n];
+    worker->data2 = &pbi->tile_worker_info[n];
   }
 
   // Note: this memset assumes above_context[0], [1] and [2]
@@ -1386,7 +1403,7 @@ static int read_compressed_header(VP9Decoder *pbi, const uint8_t *data,
                                   size_t partition_size) {
   VP9_COMMON *const cm = &pbi->common;
   MACROBLOCKD *const xd = &pbi->mb;
-  FRAME_CONTEXT *const fc = &cm->fc;
+  FRAME_CONTEXT *const fc = cm->fc;
   vp9_reader r;
   int k;
 
@@ -1532,15 +1549,16 @@ void vp9_decode_frame(VP9Decoder *pbi,
 
   init_macroblockd(cm, &pbi->mb);
 
-  if (!cm->error_resilient_mode)
-    set_prev_mi(cm);
-  else
-    cm->prev_mi = NULL;
+  cm->use_prev_frame_mvs = !cm->error_resilient_mode &&
+                           cm->width == cm->last_width &&
+                           cm->height == cm->last_height &&
+                           !cm->intra_only &&
+                           cm->last_show_frame;
 
   setup_plane_dequants(cm, xd, cm->base_qindex);
   vp9_setup_block_planes(xd, cm->subsampling_x, cm->subsampling_y);
 
-  cm->fc = cm->frame_contexts[cm->frame_context_idx];
+  *cm->fc = cm->frame_contexts[cm->frame_context_idx];
   vp9_zero(cm->counts);
   vp9_zero(xd->dqcoeff);
 
@@ -1555,7 +1573,9 @@ void vp9_decode_frame(VP9Decoder *pbi,
     if (!xd->corrupted) {
       // If multiple threads are used to decode tiles, then we use those threads
       // to do parallel loopfiltering.
-      vp9_loop_filter_frame_mt(new_fb, pbi, cm, cm->lf.filter_level, 0);
+      vp9_loop_filter_frame_mt(&pbi->lf_row_sync, new_fb, pbi->mb.plane, cm,
+                               pbi->tile_workers, pbi->num_tile_workers,
+                               cm->lf.filter_level, 0);
     }
   } else {
     *p_data_end = decode_tiles(pbi, data + first_partition_size, data_end);
@@ -1580,5 +1600,5 @@ void vp9_decode_frame(VP9Decoder *pbi,
   }
 
   if (cm->refresh_frame_context)
-    cm->frame_contexts[cm->frame_context_idx] = cm->fc;
+    cm->frame_contexts[cm->frame_context_idx] = *cm->fc;
 }

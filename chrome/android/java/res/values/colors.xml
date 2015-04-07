@@ -7,6 +7,7 @@
 <resources>
     <!-- Common colors -->
     <color name="default_text_color">#333</color>
+    <color name="default_primary_color">#f2f2f2</color>
     <color name="light_normal_color">#5A5A5A</color>
     <color name="light_active_color">#4285F4</color>
 
@@ -39,13 +40,20 @@
 
     <!--  Website Settings Popup colors -->
     <color name="website_settings_popup_button_text">#444444</color>
-    <color name="website_settings_popup_url">#848484</color>
-    <color name="website_settings_popup_url_domain">#444444</color>
-    <color name="website_settings_popup_url_scheme_http">#666666</color>
-    <color name="website_settings_popup_url_scheme_https">#1ac222</color>
-    <color name="website_settings_popup_url_scheme_mixed">#f2a600</color>
-    <color name="website_settings_popup_url_scheme_broken">#db4437</color>
+    <color name="website_settings_connection_broken_leading_text">#db4437</color>
     <color name="website_settings_popup_permission_spinner_text">#646464</color>
+
+    <!-- URL Emphasizer colors -->
+    <color name="url_emphasis_start_scheme_security_warning">#ffb000</color>
+    <color name="url_emphasis_start_scheme_security_error">#db4437</color>
+    <color name="url_emphasis_start_scheme_ev_secure">#1ac222</color>
+    <color name="url_emphasis_start_scheme_secure">#1ac222</color>
+    <color name="url_emphasis_non_emphasized_text">#80333333</color>
+    <color name="url_emphasis_light_non_emphasized_text">#80ffffff</color>
+    <color name="url_emphasis_domain_and_registry">#333333</color>
+    <color name="url_emphasis_light_domain_and_registry">#ffffff</color>
+    <color name="url_emphasis_default_text">#333333</color>
+    <color name="url_emphasis_light_default_text">#ffffff</color>
 
     <!--  Distilled Page Prefs colors -->
     <color name="distilled_page_prefs_selected">#999999</color>
@@ -55,4 +63,10 @@
     <color name="password_generation_divider_color">#e5e5e5</color>
     <color name="password_generation_explanation_text_color">#909090</color>
     <color name="password_generation_link_text_color">#5595e3</color>
+
+    <!--  Preferences Colors -->
+    <color name="pref_accent_color">#03a9f4</color>
+    <color name="pref_button_pressed_color">#038ecd</color>
+    <color name="pref_button_disabled_color">#83d7fd</color>
+
 </resources>

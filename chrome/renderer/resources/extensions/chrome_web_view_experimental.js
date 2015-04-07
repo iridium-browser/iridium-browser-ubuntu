@@ -18,7 +18,24 @@ var EventBindings = require('event_bindings');
 var idGeneratorNatives = requireNative('id_generator');
 var MessagingNatives = requireNative('messaging_natives');
 var utils = require('utils');
-var WebView = require('webView').WebView;
+var WebViewImpl = require('webView').WebViewImpl;
+var DeclarativeContentSchema =
+    requireNative('schema_registry').GetSchema('declarativeContent');
+
+var DeclarativeContentEvent = function(opt_eventName,
+                                       opt_argSchemas,
+                                       opt_eventOptions,
+                                       opt_webViewInstanceId) {
+  EventBindings.Event.call(this,
+                           opt_eventName,
+                           opt_argSchemas,
+                           opt_eventOptions,
+                           opt_webViewInstanceId);
+}
+
+DeclarativeContentEvent.prototype = {
+  __proto__: EventBindings.Event.prototype
+};
 
 function GetUniqueSubEventName(eventName) {
   return eventName + '/' + idGeneratorNatives.GetNextId();
@@ -94,7 +111,7 @@ var WebViewContextMenus = utils.expose(
     { functions: ['create', 'remove', 'removeAll', 'update'] });
 
 /** @private */
-WebView.prototype.maybeHandleContextMenu = function(e, webViewEvent) {
+WebViewImpl.prototype.maybeHandleContextMenu = function(e, webViewEvent) {
   var requestId = e.requestId;
   // Construct the event.menu object.
   var actionTaken = false;
@@ -112,19 +129,19 @@ WebView.prototype.maybeHandleContextMenu = function(e, webViewEvent) {
       validateCall();
       // TODO(lazyboy): WebViewShowContextFunction doesn't do anything useful
       // with |items|, implement.
-      ChromeWebView.showContextMenu(this.guestInstanceId, requestId, items);
+      ChromeWebView.showContextMenu(this.guest.getId(), requestId, items);
     }.bind(this)
   };
   webViewEvent.menu = menu;
-  var webviewNode = this.webviewNode;
-  var defaultPrevented = !webviewNode.dispatchEvent(webViewEvent);
+  var element = this.element;
+  var defaultPrevented = !element.dispatchEvent(webViewEvent);
   if (actionTaken) {
     return;
   }
   if (!defaultPrevented) {
     actionTaken = true;
     // The default action is equivalent to just showing the context menu as is.
-    ChromeWebView.showContextMenu(this.guestInstanceId, requestId, undefined);
+    ChromeWebView.showContextMenu(this.guest.getId(), requestId, undefined);
 
     // TODO(lazyboy): Figure out a way to show warning message only when
     // listeners are registered for this event.
@@ -132,7 +149,7 @@ WebView.prototype.maybeHandleContextMenu = function(e, webViewEvent) {
 };
 
 /** @private */
-WebView.prototype.setupExperimentalContextMenus = function() {
+WebViewImpl.prototype.setupExperimentalContextMenus = function() {
   var createContextMenus = function() {
     return function() {
       if (this.contextMenus_) {
@@ -168,10 +185,42 @@ WebView.prototype.setupExperimentalContextMenus = function() {
 
   // Expose <webview>.contextMenus object.
   Object.defineProperty(
-      this.webviewNode,
+      this.element,
       'contextMenus',
       {
         get: createContextMenus(),
         enumerable: true
       });
+};
+
+WebViewImpl.prototype.maybeSetupExperimentalChromeWebViewEvents = function(
+    request) {
+  var createDeclarativeContentEvent = function(declarativeContentEvent) {
+    return function() {
+      if (!this[declarativeContentEvent.name]) {
+        this[declarativeContentEvent.name] =
+            new DeclarativeContentEvent(
+                'webViewInternal.declarativeContent.' +
+                declarativeContentEvent.name,
+                declarativeContentEvent.parameters,
+                declarativeContentEvent.options,
+                this.viewInstanceId);
+      }
+      return this[declarativeContentEvent.name];
+    }.bind(this);
+  }.bind(this);
+
+  for (var i = 0; i < DeclarativeContentSchema.events.length; ++i) {
+    var eventSchema = DeclarativeContentSchema.events[i];
+    var declarativeContentEvent = createDeclarativeContentEvent(eventSchema);
+    Object.defineProperty(
+        request,
+        eventSchema.name,
+        {
+          get: declarativeContentEvent,
+          enumerable: true
+        }
+    );
+  }
+  return request;
 };

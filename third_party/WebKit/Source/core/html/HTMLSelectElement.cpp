@@ -31,8 +31,9 @@
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "bindings/core/v8/UnionTypesCore.h"
 #include "core/HTMLNames.h"
-#include "core/accessibility/AXObjectCache.h"
+#include "core/dom/AXObjectCache.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/NodeListsNodeData.h"
@@ -211,22 +212,25 @@ int HTMLSelectElement::activeSelectionEndListIndex() const
     return lastSelectedListIndex();
 }
 
-void HTMLSelectElement::add(HTMLElement* element, HTMLElement* before, ExceptionState& exceptionState)
+void HTMLSelectElement::add(const HTMLOptionElementOrHTMLOptGroupElement& element, const HTMLElementOrLong& before, ExceptionState& exceptionState)
 {
-    // Make sure the element is ref'd and deref'd so we don't leak it.
-    RefPtrWillBeRawPtr<HTMLElement> protectNewChild(element);
+    RefPtrWillBeRawPtr<HTMLElement> elementToInsert;
+    ASSERT(!element.isNull());
+    if (element.isHTMLOptionElement())
+        elementToInsert = element.getAsHTMLOptionElement();
+    else
+        elementToInsert = element.getAsHTMLOptGroupElement();
 
-    if (!element || !(isHTMLOptionElement(element) || isHTMLOptGroupElement(element) || isHTMLHRElement(element)))
-        return;
+    RefPtrWillBeRawPtr<HTMLElement> beforeElement;
+    if (before.isHTMLElement())
+        beforeElement = before.getAsHTMLElement();
+    else if (before.isLong())
+        beforeElement = options()->item(before.getAsLong());
+    else
+        beforeElement = nullptr;
 
-    insertBefore(element, before, exceptionState);
+    insertBefore(elementToInsert, beforeElement.get(), exceptionState);
     setNeedsValidityCheck();
-}
-
-void HTMLSelectElement::addBeforeOptionAtIndex(HTMLElement* element, int beforeIndex, ExceptionState& exceptionState)
-{
-    HTMLOptionElement* beforeElement = options()->item(beforeIndex);
-    add(element, beforeElement, exceptionState);
 }
 
 void HTMLSelectElement::remove(int optionIndex)
@@ -465,18 +469,20 @@ void HTMLSelectElement::setOption(unsigned index, HTMLOptionElement* option, Exc
     if (index > maxSelectItems - 1)
         index = maxSelectItems - 1;
     int diff = index - length();
-    RefPtrWillBeRawPtr<HTMLOptionElement> before = nullptr;
+    HTMLOptionElementOrHTMLOptGroupElement element;
+    element.setHTMLOptionElement(option);
+    HTMLElementOrLong before;
     // Out of array bounds? First insert empty dummies.
     if (diff > 0) {
         setLength(index, exceptionState);
         // Replace an existing entry?
     } else if (diff < 0) {
-        before = options()->item(index + 1);
+        before.setHTMLElement(options()->item(index + 1));
         remove(index);
     }
     // Finally add the new element.
     if (!exceptionState.hadException()) {
-        add(option, before.get(), exceptionState);
+        add(element, before, exceptionState);
         if (diff >= 0 && option->selected())
             optionSelectionStateChanged(option, true);
     }
@@ -490,9 +496,7 @@ void HTMLSelectElement::setLength(unsigned newLen, ExceptionState& exceptionStat
 
     if (diff < 0) { // Add dummy elements.
         do {
-            RefPtrWillBeRawPtr<Element> option = document().createElement(optionTag, false);
-            ASSERT(option);
-            add(toHTMLElement(option), 0, exceptionState);
+            appendChild(document().createElement(optionTag, false), exceptionState);
             if (exceptionState.hadException())
                 break;
         } while (++diff);
@@ -656,20 +660,19 @@ void HTMLSelectElement::setActiveSelectionEndIndex(int index)
 void HTMLSelectElement::updateListBoxSelection(bool deselectOtherOptions, bool scroll)
 {
     ASSERT(renderer() && (renderer()->isListBox() || m_multiple));
-    ASSERT(!listItems().size() || m_activeSelectionAnchorIndex >= 0);
 
-    unsigned start = std::min(m_activeSelectionAnchorIndex, m_activeSelectionEndIndex);
-    unsigned end = std::max(m_activeSelectionAnchorIndex, m_activeSelectionEndIndex);
+    int start = std::min(m_activeSelectionAnchorIndex, m_activeSelectionEndIndex);
+    int end = std::max(m_activeSelectionAnchorIndex, m_activeSelectionEndIndex);
 
     const WillBeHeapVector<RawPtrWillBeMember<HTMLElement>>& items = listItems();
-    for (unsigned i = 0; i < items.size(); ++i) {
+    for (int i = 0; i < static_cast<int>(items.size()); ++i) {
         HTMLElement* element = items[i];
         if (!isHTMLOptionElement(*element) || toHTMLOptionElement(element)->isDisabledFormControl() || !toHTMLOptionElement(element)->renderer())
             continue;
 
         if (i >= start && i <= end)
             toHTMLOptionElement(element)->setSelectedState(m_activeSelectionState);
-        else if (deselectOtherOptions || i >= m_cachedStateForActiveSelection.size())
+        else if (deselectOtherOptions || i >= static_cast<int>(m_cachedStateForActiveSelection.size()))
             toHTMLOptionElement(element)->setSelectedState(false);
         else
             toHTMLOptionElement(element)->setSelectedState(m_cachedStateForActiveSelection[i]);
@@ -732,7 +735,7 @@ void HTMLSelectElement::scrollToSelection()
         return;
     if (usesMenuList())
         return;
-    scrollTo(activeSelectionEndListIndex());
+    scrollToIndex(activeSelectionEndListIndex());
     if (AXObjectCache* cache = document().existingAXObjectCache())
         cache->selectedChildrenChanged(this);
 }
@@ -883,11 +886,11 @@ void HTMLSelectElement::setSuggestedIndex(int suggestedIndex)
 
     if (RenderObject* renderer = this->renderer())  {
         renderer->updateFromElement();
-        scrollTo(suggestedIndex);
+        scrollToIndex(suggestedIndex);
     }
 }
 
-void HTMLSelectElement::scrollTo(int listIndex)
+void HTMLSelectElement::scrollToIndex(int listIndex)
 {
     if (listIndex < 0)
         return;
@@ -913,6 +916,13 @@ void HTMLSelectElement::optionSelectionStateChanged(HTMLOptionElement* option, b
         selectOption(-1);
     else
         selectOption(nextSelectableListIndex(-1));
+}
+
+void HTMLSelectElement::optionInserted(const HTMLOptionElement& option, bool optionIsSelected)
+{
+    ASSERT(option.ownerSelectElement() == this);
+    if (optionIsSelected)
+        selectOption(option.index());
 }
 
 void HTMLSelectElement::optionRemoved(const HTMLOptionElement& option)
@@ -958,7 +968,6 @@ void HTMLSelectElement::selectOption(int optionIndex, SelectOptionFlags flags)
         renderer->updateFromElement();
 
     scrollToSelection();
-
     setNeedsValidityCheck();
 
     if (usesMenuList()) {
@@ -1201,10 +1210,6 @@ void HTMLSelectElement::handlePopupOpenKeyboardEvent(Event* event)
     saveLastSelection();
     if (RenderMenuList* menuList = toRenderMenuList(renderer()))
         menuList->showPopup();
-    int index = selectedIndex();
-    ASSERT(index >= 0);
-    ASSERT_WITH_SECURITY_IMPLICATION(index < static_cast<int>(listItems().size()));
-    setSelectedIndex(index);
     event->setDefaultHandled();
     return;
 }
@@ -1568,7 +1573,7 @@ void HTMLSelectElement::listBoxDefaultEventHandler(Event* event)
                 setActiveSelectionAnchorIndex(m_activeSelectionEndIndex);
             }
 
-            scrollTo(endIndex);
+            scrollToIndex(endIndex);
             if (selectNewItem) {
                 updateListBoxSelection(deselectOthers);
                 listBoxOnChange();
@@ -1652,7 +1657,7 @@ String HTMLSelectElement::optionAtIndex(int index) const
     HTMLElement* element = items[index];
     if (!isHTMLOptionElement(*element) || toHTMLOptionElement(element)->isDisabledFormControl())
         return String();
-    return toHTMLOptionElement(element)->textIndentedToRespectGroupLabel();
+    return toHTMLOptionElement(element)->text();
 }
 
 void HTMLSelectElement::typeAheadFind(KeyboardEvent* event)
@@ -1759,7 +1764,7 @@ void HTMLSelectElement::trace(Visitor* visitor)
 void HTMLSelectElement::didAddUserAgentShadowRoot(ShadowRoot& root)
 {
     RefPtrWillBeRawPtr<HTMLContentElement> content = HTMLContentElement::create(document());
-    content->setAttribute(selectAttr, "option,optgroup");
+    content->setAttribute(selectAttr, "option,optgroup,hr");
     root.appendChild(content);
 }
 

@@ -35,6 +35,7 @@
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/utils/SkDeferredCanvas.h"
+#include "wtf/Deque.h"
 #include "wtf/DoublyLinkedList.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/RefCounted.h"
@@ -74,6 +75,7 @@ public:
     WebLayer* layer() const;
     Platform3DObject getBackingTexture();
     bool isAccelerated() const { return true; }
+    void setFilterLevel(SkPaint::FilterLevel);
     void setIsHidden(bool);
     void setImageBuffer(ImageBuffer* imageBuffer) { m_imageBuffer = imageBuffer; }
 
@@ -83,8 +85,6 @@ public:
     virtual size_t storageAllocatedForRecording(); // virtual for faking
     size_t bytesAllocated() const { return m_bytesAllocated; }
     void limitPendingFrames();
-    void freeReleasedMailbox();
-    bool hasReleasedMailbox() const;
     void freeTransientResources();
     bool hasTransientResources() const;
     bool isHidden() { return m_isHidden; }
@@ -96,7 +96,6 @@ public:
 protected:
     Canvas2DLayerBridge(PassOwnPtr<WebGraphicsContext3DProvider>, PassOwnPtr<SkDeferredCanvas>, PassRefPtr<SkSurface>, int, OpacityMode);
     void setRateLimitingEnabled(bool);
-    bool releasedMailboxHasExpired();
     WebGraphicsContext3D* context();
 
     OwnPtr<SkDeferredCanvas> m_canvas;
@@ -112,6 +111,7 @@ protected:
     int m_framesSinceMailboxRelease;
     bool m_destructionInProgress;
     bool m_rateLimitingEnabled;
+    SkPaint::FilterLevel m_filterLevel;
     bool m_isHidden;
 
     friend class WTF::DoublyLinkedListNode<Canvas2DLayerBridge>;
@@ -119,27 +119,26 @@ protected:
     Canvas2DLayerBridge* m_next;
     Canvas2DLayerBridge* m_prev;
 
-    enum MailboxStatus {
-        MailboxInUse,
-        MailboxReleased,
-        MailboxAvailable,
-    };
-
     struct MailboxInfo {
         WebExternalTextureMailbox m_mailbox;
         RefPtr<SkImage> m_image;
-        MailboxStatus m_status;
         RefPtr<Canvas2DLayerBridge> m_parentLayerBridge;
 
         MailboxInfo(const MailboxInfo&);
         MailboxInfo() {}
     };
-    MailboxInfo* createMailboxInfo();
-    MailboxInfo* releasedMailboxInfo();
 
     uint32_t m_lastImageId;
-    Vector<MailboxInfo> m_mailboxes;
-    int m_releasedMailboxInfoIndex;
+
+    enum {
+        // We should normally not have more that two active mailboxes at a time,
+        // but sometime we may have three due to the async nature of mailbox handling.
+        MaxActiveMailboxes = 3,
+    };
+
+    Deque<MailboxInfo, MaxActiveMailboxes> m_mailboxes;
+    GLenum m_lastFilter;
+    OpacityMode m_opacityMode;
 };
 
 } // namespace blink

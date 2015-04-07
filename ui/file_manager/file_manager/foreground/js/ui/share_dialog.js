@@ -16,6 +16,7 @@ function ShareDialog(parentNode) {
   this.webView_ = null;
   this.failureTimeout_ = null;
   this.callback_ = null;
+  this.overrideURLForTesting_ = null;
 
   FileManagerDialogBase.call(this, parentNode);
 }
@@ -109,6 +110,18 @@ ShareDialog.WebViewAuthorizer.prototype.authorizeRequest_ = function(e) {
 
 ShareDialog.prototype = {
   __proto__: FileManagerDialogBase.prototype
+};
+
+/**
+ * Sets an override URLs for testing. It will be used instead of the sharing URL
+ * fetched from Drive. Note, that the domain still has to match
+ * ShareClient.SHARE_TARGET, as well as the hostname access enabled in the
+ * manifest (if different).
+ *
+ * @param {?string} url
+ */
+ShareDialog.prototype.setOverrideURLForTesting = function(url) {
+  this.overrideURLForTesting_ = url;
 };
 
 /**
@@ -211,7 +224,7 @@ ShareDialog.prototype.hideWithResult = function(result, opt_onHide) {
 
 /**
  * Shows the dialog.
- * @param {FileEntry} entry Entry to share.
+ * @param {!Entry} entry Entry to share.
  * @param {function(ShareDialog.Result)} callback Callback to be called when the
  *     showing task is completed. The argument is whether to succeed or not.
  *     Note that cancel is regarded as success.
@@ -247,6 +260,7 @@ ShareDialog.prototype.show = function(entry, callback) {
       !window.IN_TEST ? (ShareClient.SHARE_TARGET + '/*') : '<all_urls>',
       this.webView_);
   this.webView_.addEventListener('newwindow', function(e) {
+    e = /** @type {NewWindowEvent} */ (e);
     // Discard the window object and reopen in an external window.
     e.window.discard();
     util.visitURL(e.targetUrl);
@@ -262,19 +276,26 @@ ShareDialog.prototype.show = function(entry, callback) {
   // Initialize and authorize the Web View tag asynchronously.
   var group = new AsyncUtil.Group();
 
-  // Fetches an url to the sharing dialog.
   var shareUrl;
-  group.add(function(inCallback) {
-    chrome.fileManagerPrivate.getShareUrl(
-        entry.toURL(),
-        function(inShareUrl) {
-          if (!chrome.runtime.lastError)
-            shareUrl = inShareUrl;
-          else
-            console.error(chrome.runtime.lastError.message);
-          inCallback();
-        });
-  });
+  if (this.overrideURLForTesting_) {
+    console.debug('Using an override URL for testing: ' +
+        this.overrideURLForTesting_);
+    shareUrl = this.overrideURLForTesting_;
+  } else {
+    // Fetches an url to the sharing dialog.
+    group.add(function(inCallback) {
+      chrome.fileManagerPrivate.getShareUrl(
+          entry.toURL(),
+          function(inShareUrl) {
+            if (!chrome.runtime.lastError)
+              shareUrl = inShareUrl;
+            else
+              console.error(chrome.runtime.lastError.message);
+            inCallback();
+          });
+    });
+  }
+
   group.add(this.webViewAuthorizer_.initialize.bind(this.webViewAuthorizer_));
   group.add(this.webViewAuthorizer_.authorize.bind(this.webViewAuthorizer_));
 

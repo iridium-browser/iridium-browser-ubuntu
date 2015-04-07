@@ -7,22 +7,26 @@ import page_sets
 from telemetry import benchmark
 
 
-@benchmark.Enabled('android', 'has tabs')
-class StartWithUrlCold(benchmark.Benchmark):
+class _StartWithUrl(benchmark.Benchmark):
+  page_set = page_sets.StartupPagesPageSet
+  test = startup.StartWithUrl
+
+  def CreatePageTest(self, options):
+    is_cold = (self.tag == 'cold')
+    return self.test(cold=is_cold)
+
+
+@benchmark.Enabled('has tabs')
+@benchmark.Disabled('chromeos', 'linux', 'mac', 'win')
+class StartWithUrlCold(_StartWithUrl):
   """Measure time to start Chrome cold with startup URLs"""
   tag = 'cold'
-  test = startup.StartWithUrl
-  page_set = page_sets.StartupPagesPageSet
-  options = {'cold': True,
-             'pageset_repeat': 5}
+  options = {'pageset_repeat': 5}
 
 
-@benchmark.Enabled('android', 'has tabs')
-class StartWithUrlWarm(benchmark.Benchmark):
+@benchmark.Enabled('has tabs')
+@benchmark.Disabled('chromeos', 'linux', 'mac', 'win')
+class StartWithUrlWarm(_StartWithUrl):
   """Measure time to start Chrome warm with startup URLs"""
   tag = 'warm'
-  test = startup.StartWithUrl
-  page_set = page_sets.StartupPagesPageSet
-  options = {'warm': True,
-             'pageset_repeat': 10}
-
+  options = {'pageset_repeat': 10}

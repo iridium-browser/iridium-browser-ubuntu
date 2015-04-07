@@ -230,6 +230,14 @@ class BitFieldBase {
 };
 
 
+template <class T, int shift, int size>
+class BitField8 : public BitFieldBase<T, shift, size, uint8_t> {};
+
+
+template <class T, int shift, int size>
+class BitField16 : public BitFieldBase<T, shift, size, uint16_t> {};
+
+
 template<class T, int shift, int size>
 class BitField : public BitFieldBase<T, shift, size, uint32_t> { };
 
@@ -855,7 +863,7 @@ class SimpleStringBuilder {
   // compute the length of the input string.
   void AddString(const char* s);
 
-  // Add the first 'n' characters of the given string 's' to the
+  // Add the first 'n' characters of the given 0-terminated string 's' to the
   // builder. The input string must have enough characters.
   void AddSubstring(const char* s, int n);
 

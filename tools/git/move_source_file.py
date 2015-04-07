@@ -33,7 +33,7 @@ if __name__ == '__main__':
 sort_headers = __import__('sort-headers')
 
 
-HANDLED_EXTENSIONS = ['.cc', '.mm', '.h', '.hh']
+HANDLED_EXTENSIONS = ['.cc', '.mm', '.h', '.hh', '.cpp']
 
 
 def IsHandledFile(path):
@@ -50,6 +50,10 @@ def MakeDestinationPath(from_path, to_path):
     raise Exception('Only intended to move individual source files '
                     '(%s does not have a recognized extension).' %
                     from_path)
+
+  # Remove '.', '..', etc.
+  to_path = os.path.normpath(to_path)
+
   if os.path.isdir(to_path):
     to_path = os.path.join(to_path, os.path.basename(from_path))
   else:
@@ -84,7 +88,7 @@ def UpdatePostMove(from_path, to_path):
     files_with_changed_includes = mffr.MultiFileFindReplace(
         r'(#(include|import)\s*["<])%s([>"])' % re.escape(from_path),
         r'\1%s\3' % to_path,
-        ['*.cc', '*.h', '*.m', '*.mm'])
+        ['*.cc', '*.h', '*.m', '*.mm', '*.cpp'])
 
     # Reorder headers in files that changed.
     for changed_file in files_with_changed_includes:
@@ -100,7 +104,7 @@ def UpdatePostMove(from_path, to_path):
   mffr.MultiFileFindReplace(
       r'(//.*)%s' % re.escape(from_path),
       r'\1%s' % to_path,
-      ['*.cc', '*.h', '*.m', '*.mm'])
+      ['*.cc', '*.h', '*.m', '*.mm', '*.cpp'])
 
   # Update references in .gyp(i) files.
   def PathMinusFirstComponent(path):

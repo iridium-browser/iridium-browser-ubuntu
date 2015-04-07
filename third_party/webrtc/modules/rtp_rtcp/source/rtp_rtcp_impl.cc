@@ -31,7 +31,6 @@ RtpRtcp::Configuration::Configuration()
       default_module(NULL),
       receive_statistics(NullObjectReceiveStatistics()),
       outgoing_transport(NULL),
-      rtcp_feedback(NULL),
       intra_frame_callback(NULL),
       bandwidth_callback(NULL),
       rtt_stats(NULL),
@@ -88,6 +87,7 @@ ModuleRtpRtcpImpl::ModuleRtpRtcpImpl(const Configuration& configuration)
       padding_index_(static_cast<size_t>(-1)),  // Start padding at first child.
       nack_method_(kNackOff),
       nack_last_time_sent_full_(0),
+      nack_last_time_sent_full_prev_(0),
       nack_last_seq_number_sent_(0),
       simulcast_(false),
       key_frame_req_method_(kKeyFrameReqFirRtp),
@@ -102,8 +102,7 @@ ModuleRtpRtcpImpl::ModuleRtpRtcpImpl(const Configuration& configuration)
   }
   // TODO(pwestin) move to constructors of each rtp/rtcp sender/receiver object.
   rtcp_receiver_.RegisterRtcpObservers(configuration.intra_frame_callback,
-                                       configuration.bandwidth_callback,
-                                       configuration.rtcp_feedback);
+                                       configuration.bandwidth_callback);
   rtcp_sender_.RegisterSendTransport(configuration.outgoing_transport);
 
   // Make sure that RTCP objects are aware of our SSRC.
@@ -155,9 +154,10 @@ void ModuleRtpRtcpImpl::DeRegisterChildModule(RtpRtcp* remove_module) {
 
 // Returns the number of milliseconds until the module want a worker thread
 // to call Process.
-int32_t ModuleRtpRtcpImpl::TimeUntilNextProcess() {
-    const int64_t now = clock_->TimeInMilliseconds();
-  return kRtpRtcpMaxIdleTimeProcess - (now - last_process_time_);
+int64_t ModuleRtpRtcpImpl::TimeUntilNextProcess() {
+  const int64_t now = clock_->TimeInMilliseconds();
+  const int64_t kRtpRtcpMaxIdleTimeProcessMs = 5;
+  return kRtpRtcpMaxIdleTimeProcessMs - (now - last_process_time_);
 }
 
 // Process any pending tasks such as timeouts (non time critical events).
@@ -165,12 +165,14 @@ int32_t ModuleRtpRtcpImpl::Process() {
   const int64_t now = clock_->TimeInMilliseconds();
   last_process_time_ = now;
 
+  const int64_t kRtpRtcpBitrateProcessTimeMs = 10;
   if (now >= last_bitrate_process_time_ + kRtpRtcpBitrateProcessTimeMs) {
     rtp_sender_.ProcessBitrate();
     last_bitrate_process_time_ = now;
   }
 
   if (!IsDefaultModule()) {
+    const int64_t kRtpRtcpRttProcessTimeMs = 1000;
     bool process_rtt = now >= last_rtt_process_time_ + kRtpRtcpRttProcessTimeMs;
     if (rtcp_sender_.Sending()) {
       // Process RTT if we have received a receiver report and we haven't
@@ -261,7 +263,7 @@ void ModuleRtpRtcpImpl::SetRtxSendPayloadType(int payload_type) {
 
 int32_t ModuleRtpRtcpImpl::IncomingRtcpPacket(
     const uint8_t* rtcp_packet,
-    const uint16_t length) {
+    const size_t length) {
   // Allow receive of non-compound RTCP packets.
   RTCPUtility::RTCPParserV2 rtcp_parser(rtcp_packet, length, true);
 
@@ -319,11 +321,9 @@ uint32_t ModuleRtpRtcpImpl::StartTimestamp() const {
 }
 
 // Configure start timestamp, default is a random number.
-int32_t ModuleRtpRtcpImpl::SetStartTimestamp(
-    const uint32_t timestamp) {
+void ModuleRtpRtcpImpl::SetStartTimestamp(const uint32_t timestamp) {
   rtcp_sender_.SetStartTimestamp(timestamp);
   rtp_sender_.SetStartTimestamp(timestamp, true);
-  return 0;  // TODO(pwestin): change to void.
 }
 
 uint16_t ModuleRtpRtcpImpl::SequenceNumber() const {
@@ -331,10 +331,8 @@ uint16_t ModuleRtpRtcpImpl::SequenceNumber() const {
 }
 
 // Set SequenceNumber, default is a random number.
-int32_t ModuleRtpRtcpImpl::SetSequenceNumber(
-    const uint16_t seq_num) {
+void ModuleRtpRtcpImpl::SetSequenceNumber(const uint16_t seq_num) {
   rtp_sender_.SetSequenceNumber(seq_num);
-  return 0;  // TODO(pwestin): change to void.
 }
 
 void ModuleRtpRtcpImpl::SetRtpStateForSsrc(uint32_t ssrc,
@@ -384,20 +382,7 @@ void ModuleRtpRtcpImpl::SetSSRC(const uint32_t ssrc) {
   SetRtcpReceiverSsrcs(ssrc);
 }
 
-int32_t ModuleRtpRtcpImpl::SetCSRCStatus(const bool include) {
-  rtcp_sender_.SetCSRCStatus(include);
-  rtp_sender_.SetCSRCStatus(include);
-  return 0;  // TODO(pwestin): change to void.
-}
-
-int32_t ModuleRtpRtcpImpl::CSRCs(
-  uint32_t arr_of_csrc[kRtpCsrcSize]) const {
-  return rtp_sender_.CSRCs(arr_of_csrc);
-}
-
-int32_t ModuleRtpRtcpImpl::SetCSRCs(
-    const uint32_t arr_of_csrc[kRtpCsrcSize],
-    const uint8_t arr_length) {
+void ModuleRtpRtcpImpl::SetCsrcs(const std::vector<uint32_t>& csrcs) {
   if (IsDefaultModule()) {
     // For default we need to update all child modules too.
     CriticalSectionScoped lock(critical_section_module_ptrs_.get());
@@ -406,15 +391,15 @@ int32_t ModuleRtpRtcpImpl::SetCSRCs(
     while (it != child_modules_.end()) {
       RtpRtcp* module = *it;
       if (module) {
-        module->SetCSRCs(arr_of_csrc, arr_length);
+        module->SetCsrcs(csrcs);
       }
       it++;
     }
-  } else {
-    rtcp_sender_.SetCSRCs(arr_of_csrc, arr_length);
-    rtp_sender_.SetCSRCs(arr_of_csrc, arr_length);
+    return;
   }
-  return 0;  // TODO(pwestin): change to void.
+
+  rtcp_sender_.SetCsrcs(csrcs);
+  rtp_sender_.SetCsrcs(csrcs);
 }
 
 // TODO(pbos): Handle media and RTX streams separately (separate RTCP
@@ -478,9 +463,8 @@ bool ModuleRtpRtcpImpl::Sending() const {
   return rtcp_sender_.Sending();
 }
 
-int32_t ModuleRtpRtcpImpl::SetSendingMediaStatus(const bool sending) {
+void ModuleRtpRtcpImpl::SetSendingMediaStatus(const bool sending) {
   rtp_sender_.SetSendingMediaStatus(sending);
-  return 0;
 }
 
 bool ModuleRtpRtcpImpl::SendingMedia() const {
@@ -506,7 +490,7 @@ int32_t ModuleRtpRtcpImpl::SendOutgoingData(
     uint32_t time_stamp,
     int64_t capture_time_ms,
     const uint8_t* payload_data,
-    uint32_t payload_size,
+    size_t payload_size,
     const RTPFragmentationHeader* fragmentation,
     const RTPVideoHeader* rtp_video_hdr) {
   rtcp_sender_.SetLastRtpTime(time_stamp, capture_time_ms);
@@ -605,7 +589,7 @@ bool ModuleRtpRtcpImpl::TimeToSendPacket(uint32_t ssrc,
   return true;
 }
 
-int ModuleRtpRtcpImpl::TimeToSendPadding(int bytes) {
+size_t ModuleRtpRtcpImpl::TimeToSendPadding(size_t bytes) {
   if (!IsDefaultModule()) {
     // Don't send from default module.
     return rtp_sender_.TimeToSendPadding(bytes);
@@ -716,11 +700,9 @@ RTCPMethod ModuleRtpRtcpImpl::RTCP() const {
 }
 
 // Configure RTCP status i.e on/off.
-int32_t ModuleRtpRtcpImpl::SetRTCPStatus(const RTCPMethod method) {
-  if (rtcp_sender_.SetRTCPStatus(method) == 0) {
-    return rtcp_receiver_.SetRTCPStatus(method);
-  }
-  return -1;
+void ModuleRtpRtcpImpl::SetRTCPStatus(const RTCPMethod method) {
+  rtcp_sender_.SetRTCPStatus(method);
+  rtcp_receiver_.SetRTCPStatus(method);
 }
 
 // Only for internal test.
@@ -733,9 +715,8 @@ int32_t ModuleRtpRtcpImpl::SetCNAME(const char c_name[RTCP_CNAME_SIZE]) {
   return rtcp_sender_.SetCNAME(c_name);
 }
 
-int32_t ModuleRtpRtcpImpl::AddMixedCNAME(
-  const uint32_t ssrc,
-  const char c_name[RTCP_CNAME_SIZE]) {
+int32_t ModuleRtpRtcpImpl::AddMixedCNAME(uint32_t ssrc,
+                                         const char c_name[RTCP_CNAME_SIZE]) {
   return rtcp_sender_.AddMixedCNAME(ssrc, c_name);
 }
 
@@ -778,11 +759,6 @@ int32_t ModuleRtpRtcpImpl::RTT(const uint32_t remote_ssrc,
   return ret;
 }
 
-// Reset RoundTripTime statistics.
-int32_t ModuleRtpRtcpImpl::ResetRTT(const uint32_t remote_ssrc) {
-  return rtcp_receiver_.ResetRTT(remote_ssrc);
-}
-
 // Reset RTP data counters for the sending side.
 int32_t ModuleRtpRtcpImpl::ResetSendDataCountersRTP() {
   rtp_sender_.ResetDataCounters();
@@ -817,8 +793,9 @@ bool ModuleRtpRtcpImpl::RtcpXrRrtrStatus() const {
   return rtcp_sender_.RtcpXrReceiverReferenceTime();
 }
 
+// TODO(asapersson): Replace this method with the one below.
 int32_t ModuleRtpRtcpImpl::DataCountersRTP(
-    uint32_t* bytes_sent,
+    size_t* bytes_sent,
     uint32_t* packets_sent) const {
   StreamDataCounters rtp_stats;
   StreamDataCounters rtx_stats;
@@ -833,6 +810,12 @@ int32_t ModuleRtpRtcpImpl::DataCountersRTP(
     *packets_sent = rtp_stats.packets + rtx_stats.packets;
   }
   return 0;
+}
+
+void ModuleRtpRtcpImpl::GetSendStreamDataCounters(
+    StreamDataCounters* rtp_counters,
+    StreamDataCounters* rtx_counters) const {
+  rtp_sender_.GetDataCounters(rtp_counters, rtx_counters);
 }
 
 int32_t ModuleRtpRtcpImpl::RemoteRTCPStat(RTCPSenderInfo* sender_info) {
@@ -868,14 +851,13 @@ bool ModuleRtpRtcpImpl::REMB() const {
   return rtcp_sender_.REMB();
 }
 
-int32_t ModuleRtpRtcpImpl::SetREMBStatus(const bool enable) {
-  return rtcp_sender_.SetREMBStatus(enable);
+void ModuleRtpRtcpImpl::SetREMBStatus(const bool enable) {
+  rtcp_sender_.SetREMBStatus(enable);
 }
 
-int32_t ModuleRtpRtcpImpl::SetREMBData(const uint32_t bitrate,
-                                       const uint8_t number_of_ssrc,
-                                       const uint32_t* ssrc) {
-  return rtcp_sender_.SetREMBData(bitrate, number_of_ssrc, ssrc);
+void ModuleRtpRtcpImpl::SetREMBData(const uint32_t bitrate,
+                                    const std::vector<uint32_t>& ssrcs) {
+  rtcp_sender_.SetREMBData(bitrate, ssrcs);
 }
 
 // (IJ) Extended jitter report.
@@ -883,8 +865,8 @@ bool ModuleRtpRtcpImpl::IJ() const {
   return rtcp_sender_.IJ();
 }
 
-int32_t ModuleRtpRtcpImpl::SetIJStatus(const bool enable) {
-  return rtcp_sender_.SetIJStatus(enable);
+void ModuleRtpRtcpImpl::SetIJStatus(const bool enable) {
+  rtcp_sender_.SetIJStatus(enable);
 }
 
 int32_t ModuleRtpRtcpImpl::RegisterSendRtpHeaderExtension(
@@ -903,8 +885,8 @@ bool ModuleRtpRtcpImpl::TMMBR() const {
   return rtcp_sender_.TMMBR();
 }
 
-int32_t ModuleRtpRtcpImpl::SetTMMBRStatus(const bool enable) {
-  return rtcp_sender_.SetTMMBRStatus(enable);
+void ModuleRtpRtcpImpl::SetTMMBRStatus(const bool enable) {
+  rtcp_sender_.SetTMMBRStatus(enable);
 }
 
 int32_t ModuleRtpRtcpImpl::SetTMMBN(const TMMBRSet* bounding_set) {
@@ -927,73 +909,77 @@ int ModuleRtpRtcpImpl::SetSelectiveRetransmissions(uint8_t settings) {
 // Send a Negative acknowledgment packet.
 int32_t ModuleRtpRtcpImpl::SendNACK(const uint16_t* nack_list,
                                     const uint16_t size) {
+  uint16_t nack_length = size;
+  uint16_t start_id = 0;
+  int64_t now = clock_->TimeInMilliseconds();
+  if (TimeToSendFullNackList(now)) {
+    nack_last_time_sent_full_ = now;
+    nack_last_time_sent_full_prev_ = now;
+  } else {
+    // Only send extended list.
+    if (nack_last_seq_number_sent_ == nack_list[size - 1]) {
+      // Last sequence number is the same, do not send list.
+      return 0;
+    }
+    // Send new sequence numbers.
+    for (int i = 0; i < size; ++i) {
+      if (nack_last_seq_number_sent_ == nack_list[i]) {
+        start_id = i + 1;
+        break;
+      }
+    }
+    nack_length = size - start_id;
+  }
+
+  // Our RTCP NACK implementation is limited to kRtcpMaxNackFields sequence
+  // numbers per RTCP packet.
+  if (nack_length > kRtcpMaxNackFields) {
+    nack_length = kRtcpMaxNackFields;
+  }
+  nack_last_seq_number_sent_ = nack_list[start_id + nack_length - 1];
+
+  return rtcp_sender_.SendRTCP(
+      GetFeedbackState(), kRtcpNack, nack_length, &nack_list[start_id]);
+}
+
+bool ModuleRtpRtcpImpl::TimeToSendFullNackList(int64_t now) const {
   // Use RTT from RtcpRttStats class if provided.
   uint16_t rtt = rtt_ms();
   if (rtt == 0) {
     rtcp_receiver_.RTT(rtcp_receiver_.RemoteSSRC(), NULL, &rtt, NULL, NULL);
   }
 
+  const int64_t kStartUpRttMs = 100;
   int64_t wait_time = 5 + ((rtt * 3) >> 1);  // 5 + RTT * 1.5.
-  if (wait_time == 5) {
-    wait_time = 100;  // During startup we don't have an RTT.
+  if (rtt == 0) {
+    wait_time = kStartUpRttMs;
   }
-  const int64_t now = clock_->TimeInMilliseconds();
-  const int64_t time_limit = now - wait_time;
-  uint16_t nackLength = size;
-  uint16_t start_id = 0;
 
-  if (nack_last_time_sent_full_ < time_limit) {
-    // Send list. Set the timer to make sure we only send a full NACK list once
-    // within every time_limit.
-    nack_last_time_sent_full_ = now;
-  } else {
-    // Only send if extended list.
-    if (nack_last_seq_number_sent_ == nack_list[size - 1]) {
-      // Last seq num is the same don't send list.
-      return 0;
-    } else {
-      // Send NACKs only for new sequence numbers to avoid re-sending
-      // NACKs for sequences we have already sent.
-      for (int i = 0; i < size; ++i)  {
-        if (nack_last_seq_number_sent_ == nack_list[i]) {
-          start_id = i + 1;
-          break;
-        }
-      }
-      nackLength = size - start_id;
-    }
+  // Send a full NACK list once within every |wait_time|.
+  if (rtt_stats_) {
+    return now - nack_last_time_sent_full_ > wait_time;
   }
-  // Our RTCP NACK implementation is limited to kRtcpMaxNackFields sequence
-  // numbers per RTCP packet.
-  if (nackLength > kRtcpMaxNackFields) {
-    nackLength = kRtcpMaxNackFields;
-  }
-  nack_last_seq_number_sent_ = nack_list[start_id + nackLength - 1];
-
-  return rtcp_sender_.SendRTCP(
-      GetFeedbackState(), kRtcpNack, nackLength, &nack_list[start_id]);
+  return now - nack_last_time_sent_full_prev_ > wait_time;
 }
 
 // Store the sent packets, needed to answer to a Negative acknowledgment
 // requests.
-int32_t ModuleRtpRtcpImpl::SetStorePacketsStatus(
-    const bool enable,
-    const uint16_t number_to_store) {
+void ModuleRtpRtcpImpl::SetStorePacketsStatus(const bool enable,
+                                              const uint16_t number_to_store) {
   rtp_sender_.SetStorePacketsStatus(enable, number_to_store);
-  return 0;  // TODO(pwestin): change to void.
 }
 
 bool ModuleRtpRtcpImpl::StorePackets() const {
   return rtp_sender_.StorePackets();
 }
 
-void ModuleRtpRtcpImpl::RegisterSendChannelRtcpStatisticsCallback(
+void ModuleRtpRtcpImpl::RegisterRtcpStatisticsCallback(
     RtcpStatisticsCallback* callback) {
   rtcp_receiver_.RegisterRtcpStatisticsCallback(callback);
 }
 
-RtcpStatisticsCallback* ModuleRtpRtcpImpl::
-        GetSendChannelRtcpStatisticsCallback() {
+RtcpStatisticsCallback*
+ModuleRtpRtcpImpl::GetRtcpStatisticsCallback() {
   return rtcp_receiver_.GetRtcpStatisticsCallback();
 }
 

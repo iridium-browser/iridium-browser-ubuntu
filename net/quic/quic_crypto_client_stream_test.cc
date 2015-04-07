@@ -18,6 +18,8 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using std::string;
+
 namespace net {
 namespace test {
 namespace {
@@ -34,10 +36,12 @@ class QuicCryptoClientStreamTest : public ::testing::Test {
         stream_(new QuicCryptoClientStream(server_id_, session_.get(), nullptr,
                                            &crypto_config_)) {
     session_->SetCryptoStream(stream_.get());
+    // Advance the time, because timers do not like uninitialized times.
+    connection_->AdvanceTime(QuicTime::Delta::FromSeconds(1));
   }
 
   void CompleteCryptoHandshake() {
-    EXPECT_TRUE(stream_->CryptoConnect());
+    stream_->CryptoConnect();
     CryptoTestUtils::HandshakeWithFakeServer(connection_, stream_.get());
   }
 
@@ -77,7 +81,7 @@ TEST_F(QuicCryptoClientStreamTest, MessageAfterHandshake) {
 }
 
 TEST_F(QuicCryptoClientStreamTest, BadMessageType) {
-  EXPECT_TRUE(stream_->CryptoConnect());
+  stream_->CryptoConnect();
 
   message_.set_tag(kCHLO);
   ConstructHandshakeMessage();
@@ -96,7 +100,6 @@ TEST_F(QuicCryptoClientStreamTest, NegotiatedParameters) {
             config->IdleConnectionStateLifetime().ToSeconds());
   EXPECT_EQ(kDefaultMaxStreamsPerConnection,
             config->MaxStreamsPerConnection());
-  EXPECT_EQ(0, config->KeepaliveTimeout().ToSeconds());
 
   const QuicCryptoNegotiatedParameters& crypto_params(
       stream_->crypto_negotiated_params());
@@ -128,12 +131,11 @@ TEST_F(QuicCryptoClientStreamTest, ExpiredServerConfig) {
 
   // Advance time 5 years to ensure that we pass the expiry time of the cached
   // server config.
-  reinterpret_cast<MockClock*>(const_cast<QuicClock*>(connection_->clock()))
-      ->AdvanceTime(QuicTime::Delta::FromSeconds(60 * 60 * 24 * 365 * 5));
+  connection_->AdvanceTime(
+      QuicTime::Delta::FromSeconds(60 * 60 * 24 * 365 * 5));
 
-  // Check that a client hello was sent and that CryptoConnect doesn't fail
-  // with an error.
-  EXPECT_TRUE(stream_->CryptoConnect());
+  stream_->CryptoConnect();
+  // Check that a client hello was sent.
   ASSERT_EQ(1u, connection_->packets_.size());
 }
 

@@ -32,8 +32,7 @@ class VectorPlatformDeviceEmf : public SkBitmapDevice, public PlatformDevice {
 
   // PlatformDevice methods
   virtual PlatformSurface BeginPlatformPaint() override;
-  virtual void DrawToNativeContext(HDC dc, int x, int y,
-                                   const RECT* src_rect) override;
+
   // SkBaseDevice methods.
   virtual void drawPaint(const SkDraw& draw, const SkPaint& paint) override;
   virtual void drawPoints(const SkDraw& draw, SkCanvas::PointMode mode,
@@ -79,8 +78,7 @@ class VectorPlatformDeviceEmf : public SkBitmapDevice, public PlatformDevice {
   void LoadClipRegion();
 
  protected:
-  virtual SkBaseDevice* onCreateDevice(const SkImageInfo& info,
-                                       Usage usage) override;
+  virtual SkBaseDevice* onCreateCompatibleDevice(const CreateInfo& info) override;
 
  private:
   // Applies the SkPaint's painting properties in the current GDI context, if

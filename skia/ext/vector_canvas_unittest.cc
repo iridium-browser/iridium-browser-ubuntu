@@ -19,7 +19,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/effects/SkDashPathEffect.h"
 #include "ui/gfx/codec/png_codec.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace skia {
 
@@ -418,8 +418,9 @@ class VectorCanvasTest : public ImageTest {
   // Returns COMPARE, which is the default. If kGenerateSwitch command
   // line argument is used to start this process, GENERATE is returned instead.
   static ProcessAction CurrentMode() {
-    return CommandLine::ForCurrentProcess()->HasSwitch(kGenerateSwitch) ?
-               GENERATE : COMPARE;
+    return base::CommandLine::ForCurrentProcess()->HasSwitch(kGenerateSwitch)
+               ? GENERATE
+               : COMPARE;
   }
 
   // Length in x and y of the square canvas.

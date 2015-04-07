@@ -4,8 +4,9 @@
 
 #include "chromeos/network/network_state.h"
 
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "chromeos/network/network_event_log.h"
+#include "chromeos/device_event_log.h"
 #include "chromeos/network/network_profile_handler.h"
 #include "chromeos/network/network_type_pattern.h"
 #include "chromeos/network/network_util.h"
@@ -28,33 +29,6 @@ bool ConvertListValueToStringVector(const base::ListValue& string_list,
   return true;
 }
 
-bool IsCaCertNssSet(const base::DictionaryValue& properties) {
-  std::string ca_cert_nss;
-  if (properties.GetStringWithoutPathExpansion(shill::kEapCaCertNssProperty,
-                                               &ca_cert_nss) &&
-      !ca_cert_nss.empty()) {
-    return true;
-  }
-
-  const base::DictionaryValue* provider = NULL;
-  properties.GetDictionaryWithoutPathExpansion(shill::kProviderProperty,
-                                               &provider);
-  if (!provider)
-    return false;
-  if (provider->GetStringWithoutPathExpansion(
-          shill::kL2tpIpsecCaCertNssProperty, &ca_cert_nss) &&
-      !ca_cert_nss.empty()) {
-    return true;
-  }
-  if (provider->GetStringWithoutPathExpansion(
-          shill::kOpenVPNCaCertNSSProperty, &ca_cert_nss) &&
-      !ca_cert_nss.empty()) {
-    return true;
-  }
-
-  return false;
-}
-
 }  // namespace
 
 namespace chromeos {
@@ -65,8 +39,7 @@ NetworkState::NetworkState(const std::string& path)
       connectable_(false),
       prefix_length_(0),
       signal_strength_(0),
-      cellular_out_of_credits_(false),
-      has_ca_cert_nss_(false) {
+      cellular_out_of_credits_(false) {
 }
 
 NetworkState::~NetworkState() {
@@ -105,8 +78,8 @@ bool NetworkState::PropertyChanged(const std::string& key,
       return false;
     return olp->GetStringWithoutPathExpansion(shill::kPaymentPortalURL,
                                               &payment_url_);
-  } else if (key == shill::kSecurityProperty) {
-    return GetStringValue(key, value, &security_);
+  } else if (key == shill::kSecurityClassProperty) {
+    return GetStringValue(key, value, &security_class_);
   } else if (key == shill::kEapMethodProperty) {
     return GetStringValue(key, value, &eap_method_);
   } else if (key == shill::kNetworkTechnologyProperty) {
@@ -117,12 +90,19 @@ bool NetworkState::PropertyChanged(const std::string& key,
     return GetStringValue(key, value, &guid_);
   } else if (key == shill::kProfileProperty) {
     return GetStringValue(key, value, &profile_path_);
+  } else if (key == shill::kWifiHexSsid) {
+    std::string ssid_hex;
+    if (!GetStringValue(key, value, &ssid_hex)) {
+      return false;
+    }
+    raw_ssid_.clear();
+    return base::HexStringToBytes(ssid_hex, &raw_ssid_);
   } else if (key == shill::kOutOfCreditsProperty) {
     return GetBooleanValue(key, value, &cellular_out_of_credits_);
   } else if (key == shill::kProxyConfigProperty) {
     std::string proxy_config_str;
     if (!value.GetAsString(&proxy_config_str)) {
-      NET_LOG_ERROR("Failed to parse " + key, path());
+      NET_LOG(ERROR) << "Failed to parse " << path() << "." << key;
       return false;
     }
 
@@ -139,7 +119,7 @@ bool NetworkState::PropertyChanged(const std::string& key,
       // order leads to memory access errors.
       proxy_config_.MergeDictionary(proxy_config_dict.get());
     } else {
-      NET_LOG_ERROR("Failed to parse " + key, path());
+      NET_LOG(ERROR) << "Failed to parse " << path() << "." << key;
     }
     return true;
   }
@@ -148,20 +128,14 @@ bool NetworkState::PropertyChanged(const std::string& key,
 
 bool NetworkState::InitialPropertiesReceived(
     const base::DictionaryValue& properties) {
-  NET_LOG_DEBUG("InitialPropertiesReceived", path());
-  bool changed = false;
+  NET_LOG(EVENT) << "InitialPropertiesReceived: " << path() << ": " << name()
+                 << " State: " << connection_state_ << " Visible: " << visible_;
   if (!properties.HasKey(shill::kTypeProperty)) {
-    NET_LOG_ERROR("NetworkState has no type",
-                  shill_property_util::GetNetworkIdFromProperties(properties));
+    NET_LOG(ERROR) << "NetworkState has no type: "
+                   << shill_property_util::GetNetworkIdFromProperties(
+                          properties);
     return false;
   }
-  // Ensure that the network has a valid name.
-  changed |= UpdateName(properties);
-
-  // Set the has_ca_cert_nss_ property.
-  bool had_ca_cert_nss = has_ca_cert_nss_;
-  has_ca_cert_nss_ = IsCaCertNssSet(properties);
-  changed |= had_ca_cert_nss != has_ca_cert_nss_;
 
   // By convention, all visible WiFi and WiMAX networks have a
   // SignalStrength > 0.
@@ -170,7 +144,8 @@ bool NetworkState::InitialPropertiesReceived(
       signal_strength_ = 1;
   }
 
-  return changed;
+  // Ensure that the network has a valid name.
+  return UpdateName(properties);
 }
 
 void NetworkState::GetStateProperties(base::DictionaryValue* dictionary) const {
@@ -178,8 +153,8 @@ void NetworkState::GetStateProperties(base::DictionaryValue* dictionary) const {
 
   // Properties shared by all types.
   dictionary->SetStringWithoutPathExpansion(shill::kGuidProperty, guid());
-  dictionary->SetStringWithoutPathExpansion(shill::kSecurityProperty,
-                                            security());
+  dictionary->SetStringWithoutPathExpansion(shill::kSecurityClassProperty,
+                                            security_class());
 
   if (visible()) {
     if (!error().empty())
@@ -248,8 +223,8 @@ void NetworkState::IPConfigPropertiesChanged(
           if (gurl.is_valid()) {
             web_proxy_auto_discovery_url_ = gurl;
           } else {
-            NET_LOG_ERROR("Invalid WebProxyAutoDiscoveryUrl: " + url_string,
-                          path());
+            NET_LOG(ERROR) << "Invalid WebProxyAutoDiscoveryUrl: " << path()
+                           << ": " << url_string;
             web_proxy_auto_discovery_url_ = GURL();
           }
         }
@@ -306,11 +281,11 @@ std::string NetworkState::GetNetmask() const {
 
 std::string NetworkState::GetSpecifier() const {
   if (!update_received()) {
-    NET_LOG_ERROR("GetSpecifier called before update", path());
+    NET_LOG(ERROR) << "GetSpecifier called before update: " <<  path();
     return std::string();
   }
   if (type() == shill::kTypeWifi)
-    return name() + "_" + security_;
+    return name() + "_" + security_class_;
   if (!name().empty())
     return name();
   return type();  // For unnamed networks such as ethernet.

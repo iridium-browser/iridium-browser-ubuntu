@@ -85,9 +85,9 @@ Status UnpackAutomationExtension(const base::FilePath& temp_dir,
   return Status(kOk);
 }
 
-Status PrepareCommandLine(int port,
+Status PrepareCommandLine(uint16 port,
                           const Capabilities& capabilities,
-                          CommandLine* prepared_command,
+                          base::CommandLine* prepared_command,
                           base::ScopedTempDir* user_data_dir,
                           base::ScopedTempDir* extension_dir,
                           std::vector<std::string>* extension_bg_pages) {
@@ -100,7 +100,7 @@ Status PrepareCommandLine(int port,
                   base::StringPrintf("no chrome binary at %" PRFilePath,
                                      program.value().c_str()));
   }
-  CommandLine command(program);
+  base::CommandLine command(program);
   Switches switches;
 
   for (size_t i = 0; i < arraysize(kCommonSwitches); ++i)
@@ -268,13 +268,13 @@ Status LaunchRemoteChromeSession(
 
 Status LaunchDesktopChrome(
     URLRequestContextGetter* context_getter,
-    int port,
+    uint16 port,
     scoped_ptr<PortReservation> port_reservation,
     const SyncWebSocketFactory& socket_factory,
     const Capabilities& capabilities,
     ScopedVector<DevToolsEventListener>* devtools_event_listeners,
     scoped_ptr<Chrome>* chrome) {
-  CommandLine command(CommandLine::NO_PROGRAM);
+  base::CommandLine command(base::CommandLine::NO_PROGRAM);
   base::ScopedTempDir user_data_dir;
   base::ScopedTempDir extension_dir;
   std::vector<std::string> extension_bg_pages;
@@ -316,7 +316,7 @@ Status LaunchDesktopChrome(
 #if defined(OS_POSIX)
   base::FileHandleMappingVector no_stderr;
   base::ScopedFD devnull;
-  if (!CommandLine::ForCurrentProcess()->HasSwitch("verbose")) {
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch("verbose")) {
     // Redirect stderr to /dev/null, so that Chrome log spew doesn't confuse
     // users.
     devnull.reset(HANDLE_EINTR(open("/dev/null", O_WRONLY)));
@@ -352,8 +352,8 @@ Status LaunchDesktopChrome(
   std::string command_string = command.GetCommandLineString();
 #endif
   VLOG(0) << "Launching chrome: " << command_string;
-  base::ProcessHandle process;
-  if (!base::LaunchProcess(command, options, &process))
+  base::Process process = base::LaunchProcess(command, options);
+  if (!process.IsValid())
     return Status(kUnknownError, "chrome failed to start");
 
   scoped_ptr<DevToolsHttpClient> devtools_http_client;
@@ -364,7 +364,7 @@ Status LaunchDesktopChrome(
   if (status.IsError()) {
     int exit_code;
     base::TerminationStatus chrome_status =
-        base::GetTerminationStatus(process, &exit_code);
+        base::GetTerminationStatus(process.Handle(), &exit_code);
     if (chrome_status != base::TERMINATION_STATUS_STILL_RUNNING) {
       std::string termination_reason;
       switch (chrome_status) {
@@ -387,9 +387,9 @@ Status LaunchDesktopChrome(
       return Status(kUnknownError,
                     "Chrome failed to start: " + termination_reason);
     }
-    if (!base::KillProcess(process, 0, true)) {
+    if (!base::KillProcess(process.Handle(), 0, true)) {
       int exit_code;
-      if (base::GetTerminationStatus(process, &exit_code) ==
+      if (base::GetTerminationStatus(process.Handle(), &exit_code) ==
           base::TERMINATION_STATUS_STILL_RUNNING)
         return Status(kUnknownError, "cannot kill Chrome", status);
     }
@@ -410,7 +410,7 @@ Status LaunchDesktopChrome(
                             devtools_websocket_client.Pass(),
                             *devtools_event_listeners,
                             port_reservation.Pass(),
-                            process,
+                            process.Pass(),
                             command,
                             &user_data_dir,
                             &extension_dir));
@@ -432,7 +432,7 @@ Status LaunchDesktopChrome(
 
 Status LaunchAndroidChrome(
     URLRequestContextGetter* context_getter,
-    int port,
+    uint16 port,
     scoped_ptr<PortReservation> port_reservation,
     const SyncWebSocketFactory& socket_factory,
     const Capabilities& capabilities,
@@ -511,7 +511,7 @@ Status LaunchChrome(
         capabilities, devtools_event_listeners, chrome);
   }
 
-  int port = 0;
+  uint16 port = 0;
   scoped_ptr<PortReservation> port_reservation;
   Status port_status(kOk);
 

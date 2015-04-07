@@ -28,7 +28,6 @@
 #include "core/HTMLNames.h"
 #include "core/fetch/ImageResource.h"
 #include "core/paint/TableRowPainter.h"
-#include "core/rendering/GraphicsContextAnnotator.h"
 #include "core/rendering/HitTestResult.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderTableCell.h"
@@ -220,7 +219,7 @@ bool RenderTableRow::nodeAtPoint(const HitTestRequest& request, HitTestResult& r
     return false;
 }
 
-void RenderTableRow::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void RenderTableRow::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     TableRowPainter(*this).paint(paintInfo, paintOffset);
 }

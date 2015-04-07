@@ -29,7 +29,7 @@ class CC_EXPORT SoftwareRenderer : public DirectRenderer {
  public:
   static scoped_ptr<SoftwareRenderer> Create(
       RendererClient* client,
-      const LayerTreeSettings* settings,
+      const RendererSettings* settings,
       OutputSurface* output_surface,
       ResourceProvider* resource_provider);
 
@@ -63,7 +63,7 @@ class CC_EXPORT SoftwareRenderer : public DirectRenderer {
       scoped_ptr<CopyOutputRequest> request) override;
 
   SoftwareRenderer(RendererClient* client,
-                   const LayerTreeSettings* settings,
+                   const RendererSettings* settings,
                    OutputSurface* output_surface,
                    ResourceProvider* resource_provider);
 
@@ -102,6 +102,7 @@ class CC_EXPORT SoftwareRenderer : public DirectRenderer {
   SkPaint current_paint_;
   scoped_ptr<ResourceProvider::ScopedWriteLockSoftware>
       current_framebuffer_lock_;
+  skia::RefPtr<SkCanvas> current_framebuffer_canvas_;
   scoped_ptr<SoftwareFrameData> current_frame_data_;
 
   DISALLOW_COPY_AND_ASSIGN(SoftwareRenderer);

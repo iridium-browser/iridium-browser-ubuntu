@@ -53,7 +53,7 @@ public:
     bool isEmpty() const { return m_effects.isEmpty(); }
     bool affects(CSSPropertyID) const;
     bool hasActiveAnimationsOnCompositor(CSSPropertyID) const;
-    static WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation> > activeInterpolations(AnimationStack*, const WillBeHeapVector<RawPtrWillBeMember<InertAnimation> >* newAnimations, const WillBeHeapHashSet<RawPtrWillBeMember<const AnimationPlayer> >* cancelledAnimationPlayers, Animation::Priority, double timelineCurrentTime);
+    static WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation> > activeInterpolations(AnimationStack*, const WillBeHeapVector<RawPtrWillBeMember<InertAnimation> >* newAnimations, const WillBeHeapHashSet<RawPtrWillBeMember<const AnimationPlayer> >* suppressedAnimationPlayers, Animation::Priority, double timelineCurrentTime);
 
     bool getAnimatedBoundingBox(FloatBox&, CSSPropertyID) const;
     void trace(Visitor*);
@@ -68,4 +68,4 @@ private:
 
 } // namespace blink
 
-#endif
+#endif // AnimationStack_h

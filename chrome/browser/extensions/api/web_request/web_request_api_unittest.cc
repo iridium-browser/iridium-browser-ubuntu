@@ -120,9 +120,9 @@ void GetPartOfMessageArguments(IPC::Message* message,
                                ExtensionMsg_MessageInvoke::Param* param) {
   ASSERT_EQ(ExtensionMsg_MessageInvoke::ID, message->type());
   ASSERT_TRUE(ExtensionMsg_MessageInvoke::Read(message, param));
-  ASSERT_GE(param->d.GetSize(), 2u);
+  ASSERT_GE(get<3>(*param).GetSize(), 2u);
   const base::Value* value = NULL;
-  ASSERT_TRUE(param->d.Get(1, &value));
+  ASSERT_TRUE(get<3>(*param).Get(1, &value));
   const base::ListValue* list = NULL;
   ASSERT_TRUE(value->GetAsList(&list));
   ASSERT_EQ(1u, list->GetSize());
@@ -181,7 +181,8 @@ class ExtensionWebRequestTest : public testing::Test {
   void SetUp() override {
     ASSERT_TRUE(profile_manager_.SetUp());
     ChromeNetworkDelegate::InitializePrefsOnUIThread(
-        &enable_referrers_, NULL, NULL, profile_.GetTestingPrefService());
+        &enable_referrers_, NULL, NULL, NULL, NULL,
+        profile_.GetTestingPrefService());
     network_delegate_.reset(
         new ChromeNetworkDelegate(event_router_.get(), &enable_referrers_));
     network_delegate_->set_profile(&profile_);
@@ -602,8 +603,9 @@ TEST_F(ExtensionWebRequestTest, AccessRequestBodyData) {
     &raw,
     &raw,
   };
-  COMPILE_ASSERT(arraysize(kPath) == arraysize(kExpected),
-                 the_arrays_kPath_and_kExpected_need_to_be_the_same_size);
+  static_assert(arraysize(kPath) == arraysize(kExpected),
+                "kPath and kExpected arrays should have the same number "
+                "of elements");
   // Header.
   const char kMultipart[] = "multipart/form-data; boundary=" kBoundary;
 #undef kBoundary
@@ -779,7 +781,8 @@ class ExtensionWebRequestHeaderModificationTest
   void SetUp() override {
     ASSERT_TRUE(profile_manager_.SetUp());
     ChromeNetworkDelegate::InitializePrefsOnUIThread(
-        &enable_referrers_, NULL, NULL, profile_.GetTestingPrefService());
+        &enable_referrers_, NULL, NULL, NULL, NULL,
+        profile_.GetTestingPrefService());
     network_delegate_.reset(
         new ChromeNetworkDelegate(event_router_.get(), &enable_referrers_));
     network_delegate_->set_profile(&profile_);
@@ -918,7 +921,7 @@ TEST_P(ExtensionWebRequestHeaderModificationTest, TestModifications) {
       continue;
     ExtensionMsg_MessageInvoke::Param message_tuple;
     ExtensionMsg_MessageInvoke::Read(message, &message_tuple);
-    base::ListValue& args = message_tuple.d;
+    base::ListValue& args = get<3>(message_tuple);
 
     std::string event_name;
     if (!args.GetString(0, &event_name) ||

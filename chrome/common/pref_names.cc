@@ -133,6 +133,11 @@ const char kSupervisedUserSecondCustodianProfileURL[] =
 // the format.
 const char kSupervisedUserSharedSettings[] = "profile.managed.shared_settings";
 
+// A dictionary storing whitelists for a supervised user. The key is the CRX ID
+// of the whitelist, the value a dictionary containing whitelist properties
+// (currently the name).
+const char kSupervisedUserWhitelists[] = "profile.managed.whitelists";
+
 // The application locale.
 // For OS_CHROMEOS we maintain kApplicationLocale property in both local state
 // and user's profile.  Global property determines locale of login screen,
@@ -332,10 +337,6 @@ const char kSafeBrowsingExtendedReportingEnabled[] =
 const char kSafeBrowsingProceedAnywayDisabled[] =
     "safebrowsing.proceed_anyway_disabled";
 
-// Boolean that is true when SafeBrowsing has sent an incident report.
-const char kSafeBrowsingIncidentReportSent[] =
-    "safebrowsing.incident_report_sent";
-
 // A dictionary mapping incident types to a dict of incident key:digest pairs.
 const char kSafeBrowsingIncidentsSent[] = "safebrowsing.incidents_sent";
 
@@ -459,39 +460,6 @@ const char kDefaultAppsInstallState[] = "default_apps_install_state";
 const char kHideWebStoreIcon[] = "hide_web_store_icon";
 
 #if defined(OS_CHROMEOS)
-// A dictionary pref to hold the mute setting for all the currently known
-// audio devices.
-const char kAudioDevicesMute[] = "settings.audio.devices.mute";
-
-// A dictionary pref storing the volume settings for all the currently known
-// audio devices.
-const char kAudioDevicesVolumePercent[] =
-    "settings.audio.devices.volume_percent";
-
-// An integer pref to initially mute volume if 1. This pref is ignored if
-// |kAudioOutputAllowed| is set to false, but its value is preserved, therefore
-// when the policy is lifted the original mute state is restored.  This setting
-// is here only for migration purposes now. It is being replaced by the
-// |kAudioDevicesMute| setting.
-const char kAudioMute[] = "settings.audio.mute";
-
-// A double pref storing the user-requested volume. This setting is here only
-// for migration purposes now. It is being replaced by the
-// |kAudioDevicesVolumePercent| setting.
-const char kAudioVolumePercent[] = "settings.audio.volume_percent";
-
-// An integer pref to record user's spring charger check result.
-// 0 - unknown charger, not checked yet.
-// 1 - confirmed safe charger.
-// 2 - confirmed original charger and declined to order new charger.
-// 3 - confirmed original charger and ordered new charger online.
-// 4 - confirmed original charger and ordered new charger by phone.
-// 5 - confirmed original charger, ordered a new one online, but continue to use
-//     the old one.
-// 6 - confirmed original charger, ordered a new one by phone, but continue to
-//     use the old one.
-const char kSpringChargerCheck[] = "settings.spring_charger.check_result";
-
 // A boolean pref set to true if touchpad tap-to-click is enabled.
 const char kTapToClickEnabled[] = "settings.touchpad.enable_tap_to_click";
 
@@ -551,14 +519,25 @@ const char kLanguageHotkeyPreviousEngine[] =
 // (ex. "en-US,fr,ko").
 const char kLanguagePreferredLanguages[] =
     "settings.language.preferred_languages";
+const char kLanguagePreferredLanguagesSyncable[] =
+    "settings.language.preferred_languages_syncable";
 
 // A string pref (comma-separated list) set to the preloaded (active) input
 // method IDs (ex. "pinyin,mozc").
 const char kLanguagePreloadEngines[] = "settings.language.preload_engines";
+const char kLanguagePreloadEnginesSyncable[] =
+    "settings.language.preload_engines_syncable";
 
-// A List pref (comma-separated list) set to the extension IMEs to be enabled.
+// A string pref (comma-separated list) set to the extension IMEs to be enabled.
 const char kLanguageEnabledExtensionImes[] =
     "settings.language.enabled_extension_imes";
+const char kLanguageEnabledExtensionImesSyncable[] =
+    "settings.language.enabled_extension_imes_syncable";
+
+// A boolean pref to indicate whether we still need to add the globally synced
+// input methods. False after the initial post-OOBE sync.
+const char kLanguageShouldMergeInputMethods[] =
+    "settings.language.merge_input_methods";
 
 // Integer prefs which determine how we remap modifier keys (e.g. swap Alt and
 // Control.) Possible values for these prefs are 0-4. See ModifierKey enum in
@@ -720,6 +699,11 @@ const char kPowerBatteryIdleWarningDelayMs[] =
 const char kPowerBatteryIdleDelayMs[] =
     "power.battery_idle_delay_ms";
 
+// Inactivity delays used to dim the screen or turn it off while the screen is
+// locked.
+const char kPowerLockScreenDimDelayMs[] = "power.lock_screen_dim_delay_ms";
+const char kPowerLockScreenOffDelayMs[] = "power.lock_screen_off_delay_ms";
+
 // Action that should be performed when the idle delay is reached while the
 // system is on AC power or battery power.
 // Values are from the chromeos::PowerPolicyController::Action enum.
@@ -753,6 +737,11 @@ const char kPowerUserActivityScreenDimDelayFactor[] =
 // user activity has been observed in a session.
 const char kPowerWaitForInitialUserActivity[] =
     "power.wait_for_initial_user_activity";
+
+// Boolean controlling whether the panel backlight should be forced to a
+// nonzero level when user activity is observed.
+const char kPowerForceNonzeroBrightnessForUserActivity[] =
+    "power.force_nonzero_brightness_for_user_activity";
 
 // The URL from which the Terms of Service can be downloaded. The value is only
 // honored for public accounts.
@@ -835,6 +824,9 @@ const char kFileSystemProviderMounted[] = "file_system_provider.mounted";
 // A boolean pref set to true if the virtual keyboard should be enabled.
 const char kTouchVirtualKeyboardEnabled[] = "ui.touch_virtual_keyboard_enabled";
 
+// A boolean pref that controls whether wake on SSID is enabled.
+const char kWakeOnWifiSsid[] = "settings.internet.wake_on_wifi_ssid";
+
 #endif  // defined(OS_CHROMEOS)
 
 // The disabled messages in IPC logging.
@@ -888,8 +880,17 @@ const char kSavingBrowserHistoryDisabled[] = "history.saving_disabled";
 // permitted.
 const char kAllowDeletingBrowserHistory[] = "history.deleting_enabled";
 
-// Boolean controlling whether SafeSearch is mandatory for Google Web Searches.
+// Boolean controlling whether SafeSearch is mandatory for Google Web Searches
+// and also whether Safety Mode is mandatory on YouTube.
+// DEPRECATED: This is replaced by kForceGoogleSafeSearch and
+// kForceYouTubeSafetyMode, and still exists for legacy reasons only.
 const char kForceSafeSearch[] = "settings.force_safesearch";
+
+// Boolean controlling whether SafeSearch is mandatory for Google Web Searches.
+const char kForceGoogleSafeSearch[] = "settings.force_google_safesearch";
+
+// Boolean controlling whether Safety Mode is mandatory on YouTube.
+const char kForceYouTubeSafetyMode[] = "settings.force_youtube_safety_mode";
 
 // Boolean controlling whether History is recorded and synced for
 // supervised users.
@@ -1226,6 +1227,15 @@ const char kEasyUnlockShowTutorial[] = "easy_unlock.show_tutorial";
 // A cache of zero suggest results using JSON serialized into a string.
 const char kZeroSuggestCachedResults[] = "zerosuggest.cachedresults";
 
+// These device IDs are used by the copresence component, to uniquely identify
+// this device to the server. For privacy, authenticated and unauthenticated
+// calls are made using different device IDs.
+#if defined(ENABLE_EXTENSIONS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+const char kCopresenceAuthenticatedDeviceId[] =
+    "apps.copresence.auth_device_id";
+const char kCopresenceAnonymousDeviceId[] = "apps.copresence.unauth_device_id";
+#endif
+
 // *************** LOCAL STATE ***************
 // These are attached to the machine/installation
 
@@ -1277,9 +1287,6 @@ const char kDisableSSLRecordSplitting[] = "ssl.ssl_record_splitting.disabled";
 // Dictionary of dates when a site's SSL blocking interstitial was proceeded
 // through.
 const char kSSLBlockingBypassed[] = "ssl.ssl_blocking_bypassed";
-
-// A boolean pref of the EULA accepted flag.
-const char kEulaAccepted[] = "EulaAccepted";
 
 // Boolean that specifies whether or not crash reporting and metrics reporting
 // are sent over the network for analysis.
@@ -1413,10 +1420,6 @@ const char kTaskManagerWindowPlacement[] = "task_manager.window_placement";
 // A collection of position, size, and other data relating to app windows to
 // restore on startup.
 const char kAppWindowPlacement[] = "browser.app_window_placement";
-
-// An integer specifying the total number of bytes to be used by the
-// renderer's in-memory cache of objects.
-const char kMemoryCacheSize[] = "renderer.memory_cache.size";
 
 // String which specifies where to download files to by default.
 const char kDownloadDefaultDirectory[] = "download.default_directory";
@@ -1789,15 +1792,16 @@ const char kHotwordSearchEnabled[] = "hotword.search_enabled_2";
 // trigger from any screen.
 const char kHotwordAlwaysOnSearchEnabled[] = "hotword.always_on_search_enabled";
 
-// A boolean pref that controls whether the sound of "Ok, Google" plus a few
-// seconds of audio data before is sent back to improve voice search.
-const char kHotwordAudioLoggingEnabled[] = "hotword.audio_logging_enabled";
+// A boolean pref that indicates whether the hotword always-on notification
+// has been seen already.
+const char kHotwordAlwaysOnNotificationSeen[] =
+    "hotword.always_on_notification_seen";
 
-// A boolean pref that controls the user's global account preference for
-// audio history is enabled. Updated whenever the user changes it in
-// chrome://settings and also polled for every 24 hours and on first voice
-// search action after profile startup.
-const char kHotwordAudioHistoryEnabled[] = "hotword.audio_history_enabled";
+// A boolean pref that controls whether the sound of "Ok, Google" plus a few
+// seconds of audio data before and the spoken query are sent back to be stored
+// in a user's Voice & Audio Activity. Updated whenever the user opens
+// chrome://settings and also polled for every 24 hours.
+const char kHotwordAudioLoggingEnabled[] = "hotword.audio_logging_enabled";
 
 // A string holding the locale information under which Hotword was installed.
 // It is used for comparison since the hotword voice search trigger must be
@@ -1846,14 +1850,6 @@ const char kDeviceLocation[] = "device_status.location";
 // A pref holding the value of the policy used to disable mounting of external
 // storage for the user.
 const char kExternalStorageDisabled[] = "hardware.external_storage_disabled";
-
-// A pref holding the value of the policy used to disable playing audio on
-// ChromeOS devices. This pref overrides |kAudioMute| but does not overwrite
-// it, therefore when the policy is lifted the original mute state is restored.
-const char kAudioOutputAllowed[] = "hardware.audio_output_enabled";
-
-// A dictionary that maps usernames to wallpaper properties.
-const char kUsersWallpaperInfo[] = "user_wallpaper_info";
 
 // Copy of owner swap mouse buttons option to use on login screen.
 const char kOwnerPrimaryMouseButtonRight[] = "owner.mouse.primary_right";
@@ -1935,11 +1931,13 @@ const char kCustomizationDefaultWallpaperURL[] =
 // This is saved to file and cleared after chrome process starts.
 const char kLogoutStartedLast[] = "chromeos.logout-started";
 
-// An integer pref of the current consumer management enrollment stage. The
-// meaning of the value is defined in the enum EnrollmentStage in:
-//   chrome/browser/chromeos/policy/consumer_management_service.h
-const char kConsumerManagementEnrollmentStage[] =
-    "consumer_management.enrollment_stage";
+// An integer pref of the current consumer management stage. The meaning of the
+// value is defined in:
+//   chrome/browser/chromeos/policy/consumer_management_stage.h
+const char kConsumerManagementStage[] = "consumer_management.stage";
+
+// A boolean pref. If set to true, new experimental OOBE UI is displayed.
+const char kNewOobe[] = "NewOobe";
 #endif  // defined(OS_CHROMEOS)
 
 // Whether there is a Flash version installed that supports clearing LSO data.
@@ -1973,6 +1971,9 @@ const char kTabStripStackedLayout[] = "tab-strip-stacked-layout";
 
 // Indicates that factory reset was requested from options page or reset screen.
 const char kFactoryResetRequested[] = "FactoryResetRequested";
+
+// Indicates that debugging features were requested from oobe screen.
+const char kDebuggingFeaturesRequested[] = "DebuggingFeaturesRequested";
 
 // Boolean recording whether we have showed a balloon that calls out the message
 // center for desktop notifications.
@@ -2279,6 +2280,10 @@ const char kBrowserAddPersonEnabled[] = "profile.add_person_enabled";
 // A dictionary that maps user id to hardlock state.
 const char kEasyUnlockHardlockState[] = "easy_unlock.hardlock_state";
 
+// A dictionary that maps user id to public part of RSA key pair used by
+// Easy Sign-in for the user.
+const char kEasyUnlockLocalStateTpmKeys[] = "easy_unlock.public_tpm_keys";
+
 // The beginning of time span when we count user's "Nope" for the password
 // bubble.
 const char kPasswordBubbleTimeStamp[] = "password_bubble.timestamp";
@@ -2288,5 +2293,9 @@ const char kPasswordBubbleNopesCount[] = "password_bubble.nopes";
 
 // Last user's interaction with the password bubble.
 const char kPasswordBubbleLastInteractions[] = "password_bubble.interactions";
+
+// Boolean that indicates whether elevation is needed to recover Chrome upgrade.
+const char kRecoveryComponentNeedsElevation[] =
+    "recovery_component.needs_elevation";
 
 }  // namespace prefs

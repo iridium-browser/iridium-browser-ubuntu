@@ -10,6 +10,7 @@
 #include "base/path_service.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
+#include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/remoting/key_code_conv.h"
@@ -18,6 +19,7 @@
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
@@ -134,40 +136,37 @@ void RemoteDesktopBrowserTest::UninstallChromotingApp() {
 }
 
 void RemoteDesktopBrowserTest::VerifyChromotingLoaded(bool expected) {
-  const extensions::ExtensionSet* extensions =
-      extension_service()->extensions();
-  scoped_refptr<const extensions::Extension> extension;
   bool installed = false;
 
-  for (extensions::ExtensionSet::const_iterator iter = extensions->begin();
-       iter != extensions->end(); ++iter) {
-    extension = *iter;
+  for (const scoped_refptr<const extensions::Extension>& extension :
+       extensions::ExtensionRegistry::Get(profile())->enabled_extensions()) {
     // Is there a better way to recognize the chromoting extension
     // than name comparison?
     if (extension->name() == extension_name_) {
+      if (extension_) {
+        EXPECT_EQ(extension.get(), extension_);
+      } else {
+        extension_ = extension.get();
+      }
+
       installed = true;
       break;
     }
   }
 
   if (installed) {
-    if (extension_)
-      EXPECT_EQ(extension.get(), extension_);
-    else
-      extension_ = extension.get();
-
     // Either a V1 (TYPE_LEGACY_PACKAGED_APP) or a V2 (TYPE_PLATFORM_APP ) app.
-    extensions::Manifest::Type type = extension->GetType();
+    extensions::Manifest::Type type = extension_->GetType();
     EXPECT_TRUE(type == extensions::Manifest::TYPE_PLATFORM_APP ||
                 type == extensions::Manifest::TYPE_LEGACY_PACKAGED_APP);
 
-    EXPECT_TRUE(extension->ShouldDisplayInAppLauncher());
+    EXPECT_TRUE(extension_->ShouldDisplayInAppLauncher());
   }
 
   ASSERT_EQ(installed, expected);
 }
 
-void RemoteDesktopBrowserTest::LaunchChromotingApp() {
+void RemoteDesktopBrowserTest::LaunchChromotingApp(bool defer_start) {
   ASSERT_TRUE(extension_);
 
   GURL chromoting_main = Chromoting_Main_URL();
@@ -175,13 +174,21 @@ void RemoteDesktopBrowserTest::LaunchChromotingApp() {
   // loaded could be the generated background page. We need to wait
   // till the chromoting main page is loaded.
   PageLoadNotificationObserver observer(chromoting_main);
+  observer.set_ignore_url_parameters(true);
 
-  OpenApplication(AppLaunchParams(
-      browser()->profile(),
-      extension_,
-      is_platform_app() ? extensions::LAUNCH_CONTAINER_NONE :
-          extensions::LAUNCH_CONTAINER_TAB,
-      is_platform_app() ? NEW_WINDOW : CURRENT_TAB));
+  // If the app should be started in deferred mode, ensure that a "source" URL
+  // parameter; if not, ensure that no such parameter is present. The value of
+  // the parameter is determined by the AppLaunchParams ("test", in this case).
+  extensions::FeatureSwitch::ScopedOverride override_trace_app_source(
+      extensions::FeatureSwitch::trace_app_source(),
+      defer_start);
+
+  OpenApplication(AppLaunchParams(browser()->profile(), extension_,
+                                  is_platform_app()
+                                      ? extensions::LAUNCH_CONTAINER_NONE
+                                      : extensions::LAUNCH_CONTAINER_TAB,
+                                  is_platform_app() ? NEW_WINDOW : CURRENT_TAB,
+                                  extensions::SOURCE_TEST));
 
   observer.Wait();
 
@@ -210,6 +217,10 @@ void RemoteDesktopBrowserTest::LaunchChromotingApp() {
 
   EXPECT_EQ(Chromoting_Main_URL(), GetCurrentURL());
 }
+
+void RemoteDesktopBrowserTest::StartChromotingApp() {
+  ClickOnControl("browser-test-continue-init");
+};
 
 void RemoteDesktopBrowserTest::Authorize() {
   // The chromoting extension should be installed.
@@ -350,11 +361,7 @@ void RemoteDesktopBrowserTest::DisconnectMe2Me() {
 
   ASSERT_TRUE(RemoteDesktopBrowserTest::IsSessionConnected());
 
-  ClickOnControl("toolbar-stub");
-
-  EXPECT_TRUE(HtmlElementVisible("session-toolbar"));
-
-  ClickOnControl("toolbar-disconnect");
+  ExecuteScript("remoting.disconnect();");
 
   EXPECT_TRUE(HtmlElementVisible("client-dialog"));
   EXPECT_TRUE(HtmlElementVisible("client-reconnect-button"));
@@ -444,6 +451,18 @@ void RemoteDesktopBrowserTest::Install() {
   VerifyChromotingLoaded(true);
 }
 
+void RemoteDesktopBrowserTest::LoadBrowserTestJavaScript(
+    content::WebContents* content) {
+  LoadScript(content, FILE_PATH_LITERAL("browser_test.js"));
+  LoadScript(content, FILE_PATH_LITERAL("mock_client_plugin.js"));
+  LoadScript(content, FILE_PATH_LITERAL("mock_host_list_api.js"));
+  LoadScript(content, FILE_PATH_LITERAL("mock_identity.js"));
+  LoadScript(content, FILE_PATH_LITERAL("mock_oauth2_api.js"));
+  LoadScript(content, FILE_PATH_LITERAL("mock_session_connector.js"));
+  LoadScript(content, FILE_PATH_LITERAL("mock_signal_strategy.js"));
+  LoadScript(content, FILE_PATH_LITERAL("timeout_waiter.js"));
+}
+
 void RemoteDesktopBrowserTest::Cleanup() {
   // TODO(weitaosu): Remove this hack by blocking on the appropriate
   // notification.
@@ -466,11 +485,15 @@ void RemoteDesktopBrowserTest::Cleanup() {
 void RemoteDesktopBrowserTest::SetUpTestForMe2Me() {
   VerifyInternetAccess();
   Install();
-  LaunchChromotingApp();
+  LaunchChromotingApp(false);
+  LoadBrowserTestJavaScript(app_web_content());
   Auth();
-  LoadScript(app_web_content(), FILE_PATH_LITERAL("browser_test.js"));
   ExpandMe2Me();
-  EnsureRemoteConnectionEnabled();
+  // The call to EnsureRemoteConnectionEnabled() does a PIN reset.
+  // This causes the test to fail because of a recent bug:
+  // crbug.com/430676
+  // TODO(anandc): Reactivate this call after above bug is fixed.
+  //EnsureRemoteConnectionEnabled();
 }
 
 void RemoteDesktopBrowserTest::Auth() {
@@ -497,6 +520,13 @@ void RemoteDesktopBrowserTest::EnsureRemoteConnectionEnabled() {
 }
 
 void RemoteDesktopBrowserTest::ConnectToLocalHost(bool remember_pin) {
+  // Wait for local-host to be ready.
+  ConditionalTimeoutWaiter waiter(
+        base::TimeDelta::FromSeconds(5),
+        base::TimeDelta::FromMilliseconds(500),
+        base::Bind(&RemoteDesktopBrowserTest::IsLocalHostReady, this));
+  EXPECT_TRUE(waiter.Wait());
+
   // Verify that the local host is online.
   ASSERT_TRUE(ExecuteScriptAndExtractBool(
       "remoting.hostList.localHost_.hostName && "
@@ -515,6 +545,16 @@ void RemoteDesktopBrowserTest::ConnectToLocalHost(bool remember_pin) {
 
 void RemoteDesktopBrowserTest::ConnectToRemoteHost(
     const std::string& host_name, bool remember_pin) {
+
+  // Wait for hosts list to be fetched.
+  // This test typically runs with a clean user-profile, with no host-list
+  // cached. Waiting for the host-list to be null is sufficient to proceed.
+  ConditionalTimeoutWaiter waiter(
+        base::TimeDelta::FromSeconds(5),
+        base::TimeDelta::FromMilliseconds(500),
+        base::Bind(&RemoteDesktopBrowserTest::IsHostListReady, this));
+  EXPECT_TRUE(waiter.Wait());
+
   std::string host_id = ExecuteScriptAndExtractString(
       "remoting.hostList.getHostIdForName('" + host_name + "')");
 
@@ -556,7 +596,7 @@ void RemoteDesktopBrowserTest::DisableDNSLookupForThisTest() {
 }
 
 void RemoteDesktopBrowserTest::ParseCommandLine() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
   // The test framework overrides any command line user-data-dir
   // argument with a /tmp/.org.chromium.Chromium.XXXXXX directory.
@@ -575,7 +615,7 @@ void RemoteDesktopBrowserTest::ParseCommandLine() {
                                    override_user_data_dir);
   }
 
-  CommandLine::StringType accounts_file =
+  base::CommandLine::StringType accounts_file =
       command_line->GetSwitchValueNative(kAccountsFile);
   std::string account_type = command_line->GetSwitchValueASCII(kAccountType);
   if (!accounts_file.empty()) {
@@ -698,7 +738,7 @@ void RemoteDesktopBrowserTest::RunJavaScriptTest(
   std::string script = "browserTest.runTest(browserTest." + testName + ", " +
                        testData + ");";
 
-  LOG(INFO) << "Executing " << script;
+  DVLOG(1) << "Executing " << script;
 
   ASSERT_TRUE(
       content::ExecuteScriptAndExtractString(web_contents, script, &result));
@@ -795,6 +835,14 @@ bool RemoteDesktopBrowserTest::IsLocalHostReady() {
   // TODO(weitaosu): Instead of polling, can we register a callback to
   // remoting.hostList.setLocalHost_?
   return ExecuteScriptAndExtractBool("remoting.hostList.localHost_ != null");
+}
+
+bool RemoteDesktopBrowserTest::IsHostListReady() {
+  // Wait until hostList is not null.
+  // The connect-to-host tests are run on the waterfall using a new profile-dir.
+  // No hosts will be cached.
+  return ExecuteScriptAndExtractBool(
+    "remoting.hostList != null && remoting.hostList.hosts_ != null");
 }
 
 bool RemoteDesktopBrowserTest::IsSessionConnected() {

@@ -60,14 +60,14 @@ static const int undefinedSize = -1;
 static const CSSValueID displayWritingModeMap[] = {
     CSSValueHorizontalTb, CSSValueVerticalRl, CSSValueVerticalLr
 };
-COMPILE_ASSERT(WTF_ARRAY_LENGTH(displayWritingModeMap) == VTTCue::NumberOfWritingDirections,
-    displayWritingModeMap_has_wrong_size);
+static_assert(WTF_ARRAY_LENGTH(displayWritingModeMap) == VTTCue::NumberOfWritingDirections,
+    "displayWritingModeMap should have the same number of elements as VTTCue::NumberOfWritingDirections");
 
 static const CSSValueID displayAlignmentMap[] = {
     CSSValueStart, CSSValueCenter, CSSValueEnd, CSSValueLeft, CSSValueRight
 };
-COMPILE_ASSERT(WTF_ARRAY_LENGTH(displayAlignmentMap) == VTTCue::NumberOfAlignments,
-    displayAlignmentMap_has_wrong_size);
+static_assert(WTF_ARRAY_LENGTH(displayAlignmentMap) == VTTCue::NumberOfAlignments,
+    "displayAlignmentMap should have the same number of elements as VTTCue::NumberOfAlignments");
 
 static const String& startKeyword()
 {
@@ -526,7 +526,6 @@ static TextDirection determineDirectionality(const String& value, bool& hasStron
 
 static CSSValueID determineTextDirection(DocumentFragment* vttRoot)
 {
-    DEFINE_STATIC_LOCAL(const String, rtTag, ("rt"));
     ASSERT(vttRoot);
 
     // Apply the Unicode Bidirectional Algorithm's Paragraph Level steps to the
@@ -534,14 +533,23 @@ static CSSValueID determineTextDirection(DocumentFragment* vttRoot)
     // pre-order, depth-first traversal, excluding WebVTT Ruby Text Objects and
     // their descendants.
     TextDirection textDirection = LTR;
-    for (Node& node : NodeTraversal::descendantsOf(*vttRoot)) {
-        if (!node.isTextNode() || node.localName() == rtTag)
-            continue;
+    Node* node = NodeTraversal::next(*vttRoot);
+    while (node) {
+        ASSERT(node->isDescendantOf(vttRoot));
 
-        bool hasStrongDirectionality;
-        textDirection = determineDirectionality(node.nodeValue(), hasStrongDirectionality);
-        if (hasStrongDirectionality)
-            break;
+        if (node->isTextNode()) {
+            bool hasStrongDirectionality;
+            textDirection = determineDirectionality(node->nodeValue(), hasStrongDirectionality);
+            if (hasStrongDirectionality)
+                break;
+        } else if (node->isVTTElement()) {
+            if (toVTTElement(node)->webVTTNodeType() == VTTNodeTypeRubyText) {
+                node = NodeTraversal::nextSkippingChildren(*node);
+                continue;
+            }
+        }
+
+        node = NodeTraversal::next(*node);
     }
     return isLeftToRightDirection(textDirection) ? CSSValueLtr : CSSValueRtl;
 }

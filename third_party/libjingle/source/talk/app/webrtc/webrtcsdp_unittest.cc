@@ -588,88 +588,74 @@ class WebRtcSdpTest : public testing::Test {
     // v4 host
     int port = 1234;
     rtc::SocketAddress address("192.168.1.5", port++);
-    Candidate candidate1(
-        "", ICE_CANDIDATE_COMPONENT_RTP, "udp", address, kCandidatePriority,
-        "", "", LOCAL_PORT_TYPE,
-        "", kCandidateGeneration, kCandidateFoundation1);
+    Candidate candidate1("", ICE_CANDIDATE_COMPONENT_RTP, "udp", address,
+                         kCandidatePriority, "", "", LOCAL_PORT_TYPE,
+                         kCandidateGeneration, kCandidateFoundation1);
     address.SetPort(port++);
-    Candidate candidate2(
-        "", ICE_CANDIDATE_COMPONENT_RTCP, "udp", address, kCandidatePriority,
-        "", "", LOCAL_PORT_TYPE,
-        "", kCandidateGeneration, kCandidateFoundation1);
+    Candidate candidate2("", ICE_CANDIDATE_COMPONENT_RTCP, "udp", address,
+                         kCandidatePriority, "", "", LOCAL_PORT_TYPE,
+                         kCandidateGeneration, kCandidateFoundation1);
     address.SetPort(port++);
-    Candidate candidate3(
-        "", ICE_CANDIDATE_COMPONENT_RTCP, "udp", address, kCandidatePriority,
-        "", "", LOCAL_PORT_TYPE,
-        "", kCandidateGeneration, kCandidateFoundation1);
+    Candidate candidate3("", ICE_CANDIDATE_COMPONENT_RTCP, "udp", address,
+                         kCandidatePriority, "", "", LOCAL_PORT_TYPE,
+                         kCandidateGeneration, kCandidateFoundation1);
     address.SetPort(port++);
-    Candidate candidate4(
-        "", ICE_CANDIDATE_COMPONENT_RTP, "udp", address, kCandidatePriority,
-        "", "", LOCAL_PORT_TYPE,
-        "", kCandidateGeneration, kCandidateFoundation1);
+    Candidate candidate4("", ICE_CANDIDATE_COMPONENT_RTP, "udp", address,
+                         kCandidatePriority, "", "", LOCAL_PORT_TYPE,
+                         kCandidateGeneration, kCandidateFoundation1);
 
     // v6 host
     rtc::SocketAddress v6_address("::1", port++);
-    cricket::Candidate candidate5(
-        "", cricket::ICE_CANDIDATE_COMPONENT_RTP,
-        "udp", v6_address, kCandidatePriority,
-        "", "", cricket::LOCAL_PORT_TYPE,
-        "", kCandidateGeneration, kCandidateFoundation2);
+    cricket::Candidate candidate5("", cricket::ICE_CANDIDATE_COMPONENT_RTP,
+                                  "udp", v6_address, kCandidatePriority, "", "",
+                                  cricket::LOCAL_PORT_TYPE,
+                                  kCandidateGeneration, kCandidateFoundation2);
     v6_address.SetPort(port++);
-    cricket::Candidate candidate6(
-        "", cricket::ICE_CANDIDATE_COMPONENT_RTCP,
-        "udp", v6_address, kCandidatePriority,
-        "", "", cricket::LOCAL_PORT_TYPE,
-        "", kCandidateGeneration, kCandidateFoundation2);
+    cricket::Candidate candidate6("", cricket::ICE_CANDIDATE_COMPONENT_RTCP,
+                                  "udp", v6_address, kCandidatePriority, "", "",
+                                  cricket::LOCAL_PORT_TYPE,
+                                  kCandidateGeneration, kCandidateFoundation2);
     v6_address.SetPort(port++);
-    cricket::Candidate candidate7(
-        "", cricket::ICE_CANDIDATE_COMPONENT_RTCP,
-        "udp", v6_address, kCandidatePriority,
-        "", "", cricket::LOCAL_PORT_TYPE,
-        "", kCandidateGeneration, kCandidateFoundation2);
+    cricket::Candidate candidate7("", cricket::ICE_CANDIDATE_COMPONENT_RTCP,
+                                  "udp", v6_address, kCandidatePriority, "", "",
+                                  cricket::LOCAL_PORT_TYPE,
+                                  kCandidateGeneration, kCandidateFoundation2);
     v6_address.SetPort(port++);
-    cricket::Candidate candidate8(
-        "", cricket::ICE_CANDIDATE_COMPONENT_RTP,
-        "udp", v6_address, kCandidatePriority,
-        "", "", cricket::LOCAL_PORT_TYPE,
-        "", kCandidateGeneration, kCandidateFoundation2);
+    cricket::Candidate candidate8("", cricket::ICE_CANDIDATE_COMPONENT_RTP,
+                                  "udp", v6_address, kCandidatePriority, "", "",
+                                  cricket::LOCAL_PORT_TYPE,
+                                  kCandidateGeneration, kCandidateFoundation2);
 
     // stun
     int port_stun = 2345;
     rtc::SocketAddress address_stun("74.125.127.126", port_stun++);
     rtc::SocketAddress rel_address_stun("192.168.1.5", port_stun++);
-    cricket::Candidate candidate9
-        ("", cricket::ICE_CANDIDATE_COMPONENT_RTP,
-         "udp", address_stun, kCandidatePriority,
-         "", "", STUN_PORT_TYPE,
-         "", kCandidateGeneration, kCandidateFoundation3);
+    cricket::Candidate candidate9("", cricket::ICE_CANDIDATE_COMPONENT_RTP,
+                                  "udp", address_stun, kCandidatePriority, "",
+                                  "", STUN_PORT_TYPE, kCandidateGeneration,
+                                  kCandidateFoundation3);
     candidate9.set_related_address(rel_address_stun);
 
     address_stun.SetPort(port_stun++);
     rel_address_stun.SetPort(port_stun++);
-    cricket::Candidate candidate10(
-        "", cricket::ICE_CANDIDATE_COMPONENT_RTCP,
-        "udp", address_stun, kCandidatePriority,
-        "", "", STUN_PORT_TYPE,
-        "", kCandidateGeneration, kCandidateFoundation3);
+    cricket::Candidate candidate10("", cricket::ICE_CANDIDATE_COMPONENT_RTCP,
+                                   "udp", address_stun, kCandidatePriority, "",
+                                   "", STUN_PORT_TYPE, kCandidateGeneration,
+                                   kCandidateFoundation3);
     candidate10.set_related_address(rel_address_stun);
 
     // relay
     int port_relay = 3456;
     rtc::SocketAddress address_relay("74.125.224.39", port_relay++);
-    cricket::Candidate candidate11(
-        "", cricket::ICE_CANDIDATE_COMPONENT_RTCP,
-        "udp", address_relay, kCandidatePriority,
-        "", "",
-        cricket::RELAY_PORT_TYPE, "",
-        kCandidateGeneration, kCandidateFoundation4);
+    cricket::Candidate candidate11("", cricket::ICE_CANDIDATE_COMPONENT_RTCP,
+                                   "udp", address_relay, kCandidatePriority, "",
+                                   "", cricket::RELAY_PORT_TYPE,
+                                   kCandidateGeneration, kCandidateFoundation4);
     address_relay.SetPort(port_relay++);
-    cricket::Candidate candidate12(
-        "", cricket::ICE_CANDIDATE_COMPONENT_RTP,
-        "udp", address_relay, kCandidatePriority,
-        "", "",
-        RELAY_PORT_TYPE, "",
-        kCandidateGeneration, kCandidateFoundation4);
+    cricket::Candidate candidate12("", cricket::ICE_CANDIDATE_COMPONENT_RTP,
+                                   "udp", address_relay, kCandidatePriority, "",
+                                   "", RELAY_PORT_TYPE, kCandidateGeneration,
+                                   kCandidateFoundation4);
 
     // voice
     candidates_.push_back(candidate1);
@@ -1366,22 +1352,6 @@ void TestMismatch(const std::string& string1, const std::string& string2) {
                          << " 2: " << string2.substr(position, 20) << "\n";
 }
 
-std::string GetLine(const std::string& message,
-                    const std::string& session_description_name) {
-  size_t start = message.find(session_description_name);
-  if (std::string::npos == start) {
-    return "";
-  }
-  size_t stop = message.find("\r\n", start);
-  if (std::string::npos == stop) {
-    return "";
-  }
-  if (stop <= start) {
-    return "";
-  }
-  return message.substr(start, stop - start);
-}
-
 TEST_F(WebRtcSdpTest, SerializeSessionDescription) {
   // SessionDescription with desc and candidates.
   std::string message = webrtc::SdpSerialize(jdesc_);
@@ -1642,11 +1612,10 @@ TEST_F(WebRtcSdpTest, SerializeCandidates) {
 // TODO(mallinath) : Enable this test once WebRTCSdp capable of parsing
 // RFC 6544.
 TEST_F(WebRtcSdpTest, SerializeTcpCandidates) {
-  Candidate candidate(
-      "", ICE_CANDIDATE_COMPONENT_RTP, "tcp",
-      rtc::SocketAddress("192.168.1.5", 9), kCandidatePriority,
-      "", "", LOCAL_PORT_TYPE,
-      "", kCandidateGeneration, kCandidateFoundation1);
+  Candidate candidate("", ICE_CANDIDATE_COMPONENT_RTP, "tcp",
+                      rtc::SocketAddress("192.168.1.5", 9), kCandidatePriority,
+                      "", "", LOCAL_PORT_TYPE, kCandidateGeneration,
+                      kCandidateFoundation1);
   candidate.set_tcptype(cricket::TCPTYPE_ACTIVE_STR);
   rtc::scoped_ptr<IceCandidateInterface> jcandidate(
     new JsepIceCandidate(std::string("audio_content_name"), 0, candidate));
@@ -1936,11 +1905,10 @@ TEST_F(WebRtcSdpTest, DeserializeCandidate) {
   sdp = kSdpTcpActiveCandidate;
   EXPECT_TRUE(SdpDeserializeCandidate(sdp, &jcandidate));
   // Make a cricket::Candidate equivalent to kSdpTcpCandidate string.
-  Candidate candidate(
-      "", ICE_CANDIDATE_COMPONENT_RTP, "tcp",
-      rtc::SocketAddress("192.168.1.5", 9), kCandidatePriority,
-      "", "", LOCAL_PORT_TYPE,
-      "", kCandidateGeneration, kCandidateFoundation1);
+  Candidate candidate("", ICE_CANDIDATE_COMPONENT_RTP, "tcp",
+                      rtc::SocketAddress("192.168.1.5", 9), kCandidatePriority,
+                      "", "", LOCAL_PORT_TYPE, kCandidateGeneration,
+                      kCandidateFoundation1);
   rtc::scoped_ptr<IceCandidateInterface> jcandidate_template(
     new JsepIceCandidate(std::string("audio_content_name"), 0, candidate));
   EXPECT_TRUE(jcandidate.candidate().IsEquivalent(
@@ -2220,20 +2188,21 @@ TEST_F(WebRtcSdpTest, DeserializeSdpWithConferenceFlag) {
 
 TEST_F(WebRtcSdpTest, DeserializeBrokenSdp) {
   const char kSdpDestroyer[] = "!@#$%^&";
-  const char kSdpInvalidLine1[] = " =candidate";
-  const char kSdpInvalidLine2[] = "a+candidate";
-  const char kSdpInvalidLine3[] = "a= candidate";
-  // Broken fingerprint.
-  const char kSdpInvalidLine4[] = "a=fingerprint:sha-1 "
+  const char kSdpEmptyType[] = " =candidate";
+  const char kSdpEqualAsPlus[] = "a+candidate";
+  const char kSdpSpaceAfterEqual[] = "a= candidate";
+  const char kSdpUpperType[] = "A=candidate";
+  const char kSdpEmptyLine[] = "";
+  const char kSdpMissingValue[] = "a=";
+
+  const char kSdpBrokenFingerprint[] = "a=fingerprint:sha-1 "
       "4AAD:B9:B1:3F:82:18:3B:54:02:12:DF:3E:5D:49:6B:19:E5:7C:AB";
-  // Extra field.
-  const char kSdpInvalidLine5[] = "a=fingerprint:sha-1 "
+  const char kSdpExtraField[] = "a=fingerprint:sha-1 "
       "4A:AD:B9:B1:3F:82:18:3B:54:02:12:DF:3E:5D:49:6B:19:E5:7C:AB XXX";
-  // Missing space.
-  const char kSdpInvalidLine6[] = "a=fingerprint:sha-1"
+  const char kSdpMissingSpace[] = "a=fingerprint:sha-1"
       "4A:AD:B9:B1:3F:82:18:3B:54:02:12:DF:3E:5D:49:6B:19:E5:7C:AB";
   // MD5 is not allowed in fingerprints.
-  const char kSdpInvalidLine7[] = "a=fingerprint:md5 "
+  const char kSdpMd5[] = "a=fingerprint:md5 "
       "4A:AD:B9:B1:3F:82:18:3B:54:02:12:DF:3E:5D:49:6B";
 
   // Broken session description
@@ -2248,17 +2217,22 @@ TEST_F(WebRtcSdpTest, DeserializeBrokenSdp) {
   ExpectParseFailure("m=video", kSdpDestroyer);
 
   // Invalid lines
-  ExpectParseFailure("a=candidate", kSdpInvalidLine1);
-  ExpectParseFailure("a=candidate", kSdpInvalidLine2);
-  ExpectParseFailure("a=candidate", kSdpInvalidLine3);
+  ExpectParseFailure("a=candidate", kSdpEmptyType);
+  ExpectParseFailure("a=candidate", kSdpEqualAsPlus);
+  ExpectParseFailure("a=candidate", kSdpSpaceAfterEqual);
+  ExpectParseFailure("a=candidate", kSdpUpperType);
 
   // Bogus fingerprint replacing a=sendrev. We selected this attribute
   // because it's orthogonal to what we are replacing and hence
   // safe.
-  ExpectParseFailure("a=sendrecv", kSdpInvalidLine4);
-  ExpectParseFailure("a=sendrecv", kSdpInvalidLine5);
-  ExpectParseFailure("a=sendrecv", kSdpInvalidLine6);
-  ExpectParseFailure("a=sendrecv", kSdpInvalidLine7);
+  ExpectParseFailure("a=sendrecv", kSdpBrokenFingerprint);
+  ExpectParseFailure("a=sendrecv", kSdpExtraField);
+  ExpectParseFailure("a=sendrecv", kSdpMissingSpace);
+  ExpectParseFailure("a=sendrecv", kSdpMd5);
+
+  // Empty Line
+  ExpectParseFailure("a=rtcp:2347 IN IP4 74.125.127.126", kSdpEmptyLine);
+  ExpectParseFailure("a=rtcp:2347 IN IP4 74.125.127.126", kSdpMissingValue);
 }
 
 TEST_F(WebRtcSdpTest, DeserializeSdpWithInvalidAttributeValue) {

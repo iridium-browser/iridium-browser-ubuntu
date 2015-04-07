@@ -27,7 +27,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 #include "url/gurl.h"
 
 using base::Time;
@@ -53,7 +53,6 @@ class DummyPrerenderContents : public PrerenderContents {
   ~DummyPrerenderContents() override;
 
   void StartPrerendering(
-      int creator_child_id,
       const gfx::Size& size,
       content::SessionStorageNamespace* session_storage_namespace,
       net::URLRequestContextGetter* request_context) override;
@@ -294,7 +293,6 @@ DummyPrerenderContents::~DummyPrerenderContents() {
 }
 
 void DummyPrerenderContents::StartPrerendering(
-    int creator_child_id,
     const gfx::Size& size,
     content::SessionStorageNamespace* session_storage_namespace,
     net::URLRequestContextGetter* request_context) {
@@ -323,7 +321,7 @@ class PrerenderTest : public testing::Test {
                     last_prerender_id_(0),
                     field_trial_list_(NULL) {
     // Enable omnibox prerendering.
-    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
         switches::kPrerenderFromOmnibox,
         switches::kPrerenderFromOmniboxSwitchValueEnabled);
   }

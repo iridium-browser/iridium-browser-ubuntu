@@ -153,17 +153,38 @@ class TabAndroid : public CoreTabHelperDelegate,
                                 jint page_transition,
                                 jstring j_referrer_url,
                                 jint referrer_policy,
-                                jboolean is_renderer_initiated);
+                                jboolean is_renderer_initiated,
+                                jlong intent_received_timestamp);
   void SetActiveNavigationEntryTitleForUrl(JNIEnv* env,
                                            jobject obj,
                                            jstring jurl,
                                            jstring jtitle);
   bool Print(JNIEnv* env, jobject obj);
+
+  // Sets the tab as content to be printed through JNI.
+  void SetPendingPrint();
+
   // Called to get default favicon of current tab, return null if no
   // favicon is avaliable for current tab.
   base::android::ScopedJavaLocalRef<jobject> GetFavicon(JNIEnv* env,
                                                         jobject obj);
-  jboolean IsFaviconValid(JNIEnv* env, jobject jobj);
+
+  void CreateHistoricalTab(JNIEnv* env, jobject obj);
+
+  static void CreateHistoricalTabFromContents(
+      content::WebContents* web_contents);
+
+  void UpdateTopControlsState(JNIEnv* env,
+                              jobject obj,
+                              jint constraints,
+                              jint current,
+                              jboolean animate);
+
+  void SearchByImageInNewTabAsync(JNIEnv* env, jobject obj);
+
+  void SetInterceptNavigationDelegate(JNIEnv* env,
+                                      jobject obj,
+                                      jobject delegate);
 
   // Register the Tab's native methods through JNI.
   static bool RegisterTabAndroid(JNIEnv* env);

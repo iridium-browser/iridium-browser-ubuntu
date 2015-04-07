@@ -16,10 +16,8 @@ namespace gpu {
 class GLInProcessContext;
 }
 
-namespace webkit {
-namespace gpu {
+namespace gpu_blink {
 class WebGraphicsContext3DInProcessCommandBufferImpl;
-}
 }
 
 namespace content {
@@ -38,13 +36,15 @@ class SynchronousCompositorFactoryImpl : public SynchronousCompositorFactory {
       scoped_refptr<content::FrameSwapMessageQueue> frame_swap_message_queue)
       override;
   virtual InputHandlerManagerClient* GetInputHandlerManagerClient() override;
+  virtual scoped_ptr<cc::BeginFrameSource> CreateExternalBeginFrameSource(
+      int routing_id) override;
   virtual scoped_refptr<webkit::gpu::ContextProviderWebContext>
       CreateOffscreenContextProvider(
           const blink::WebGraphicsContext3D::Attributes& attributes,
           const std::string& debug_name) override;
   virtual scoped_refptr<StreamTextureFactory> CreateStreamTextureFactory(
       int view_id) override;
-  virtual webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl*
+  virtual gpu_blink::WebGraphicsContext3DInProcessCommandBufferImpl*
       CreateOffscreenGraphicsContext3D(
           const blink::WebGraphicsContext3D::Attributes& attributes) override;
 

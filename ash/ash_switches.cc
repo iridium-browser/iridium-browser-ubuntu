@@ -29,14 +29,9 @@ const char kAshCopyHostBackgroundAtBoot[] = "ash-copy-host-background-at-boot";
 // Enable keyboard shortcuts useful for debugging.
 const char kAshDebugShortcuts[] = "ash-debug-shortcuts";
 
-// Indicates that the wallpaper images specified by
-// kAshDefaultWallpaper{Large,Small} are OEM-specific (i.e. they are not
-// downloadable from Google).
-const char kAshDefaultWallpaperIsOem[] = "ash-default-wallpaper-is-oem";
-
-// Default wallpaper to use (as paths to trusted, non-user-writable JPEG files).
-const char kAshDefaultWallpaperLarge[] = "ash-default-wallpaper-large";
-const char kAshDefaultWallpaperSmall[] = "ash-default-wallpaper-small";
+// Enables text filtering with the keyboard in Overview Mode.
+const char kAshDisableTextFilteringInOverviewMode[] =
+    "ash-disable-text-filtering-in-overview-mode";
 
 // Disables LockLayoutManager used for LockScreenContainer, return back to
 // WorkspaceLayoutManager.
@@ -49,14 +44,16 @@ const char kAshDisableTouchExplorationMode[] =
     "ash-disable-touch-exploration-mode";
 
 #if defined(OS_CHROMEOS)
+// Enables fullscreen app list if Ash is in maximize mode.
+const char kAshEnableFullscreenAppList[] = "ash-enable-fullscreen-app-list";
+
 // Enables key bindings to scroll magnified screen.
 const char kAshEnableMagnifierKeyScroller[] =
     "ash-enable-magnifier-key-scroller";
 #endif
 
-// Enables text filtering with the keyboard in Overview Mode.
-const char kAshDisableTextFilteringInOverviewMode[] =
-    "ash-disable-text-filtering-in-overview-mode";
+// Enables mirrored screen.
+const char kAshEnableMirroredScreen[] = "ash-enable-mirrored-screen";
 
 // Enables quick, non-cancellable locking of the screen when in maximize mode.
 const char kAshEnablePowerButtonQuickLock[] =
@@ -76,11 +73,6 @@ const char kAshEnableSystemSounds[] = "ash-enable-system-sounds";
 
 // Enables showing the tray bubble by dragging on the shelf.
 const char kAshEnableTrayDragging[] = "ash-enable-tray-dragging";
-
-// Wallpaper to use in guest mode (as paths to trusted, non-user-writable JPEG
-// files).
-const char kAshGuestWallpaperLarge[] = "ash-guest-wallpaper-large";
-const char kAshGuestWallpaperSmall[] = "ash-guest-wallpaper-small";
 
 // Hides notifications that are irrelevant to Chrome OS device factory testing,
 // such as battery level updates.

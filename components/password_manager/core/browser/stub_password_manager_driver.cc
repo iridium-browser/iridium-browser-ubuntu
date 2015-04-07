@@ -16,20 +16,16 @@ void StubPasswordManagerDriver::FillPasswordForm(
     const autofill::PasswordFormFillData& form_data) {
 }
 
-bool StubPasswordManagerDriver::DidLastPageLoadEncounterSSLErrors() {
-  return false;
-}
-
-bool StubPasswordManagerDriver::IsOffTheRecord() {
-  return false;
-}
-
 void StubPasswordManagerDriver::AllowPasswordGenerationForForm(
     const autofill::PasswordForm& form) {
 }
 
 void StubPasswordManagerDriver::AccountCreationFormsFound(
     const std::vector<autofill::FormData>& forms) {
+}
+
+void StubPasswordManagerDriver::GeneratedPasswordAccepted(
+    const base::string16& password) {
 }
 
 void StubPasswordManagerDriver::FillSuggestion(const base::string16& username,
@@ -55,10 +51,6 @@ PasswordManager* StubPasswordManagerDriver::GetPasswordManager() {
 
 PasswordAutofillManager*
 StubPasswordManagerDriver::GetPasswordAutofillManager() {
-  return NULL;
-}
-
-autofill::AutofillManager* StubPasswordManagerDriver::GetAutofillManager() {
   return NULL;
 }
 

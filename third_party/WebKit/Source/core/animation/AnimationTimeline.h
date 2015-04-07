@@ -65,6 +65,7 @@ public:
     ~AnimationTimeline();
 
     void serviceAnimations(TimingUpdateReason);
+    void scheduleNextService();
 
     // Creates a player attached to this timeline, but without a start time.
     AnimationPlayer* createAnimationPlayer(AnimationNode*);
@@ -85,11 +86,17 @@ public:
     double currentTime();
     double currentTimeInternal(bool& isNull);
     double currentTimeInternal();
+    void setCurrentTime(double);
+    void setCurrentTimeInternal(double);
     double effectiveTime();
     void pauseAnimationsForTesting(double);
 
     void setOutdatedAnimationPlayer(AnimationPlayer*);
     bool hasOutdatedAnimationPlayer() const;
+    bool needsAnimationTimingUpdate();
+
+    void setPlaybackRate(double);
+    double playbackRate() const;
 
     Document* document() { return m_document.get(); }
 #if !ENABLE(OILPAN)
@@ -110,10 +117,15 @@ private:
     WillBeHeapHashSet<RefPtrWillBeMember<AnimationPlayer>> m_playersNeedingUpdate;
     WillBeHeapHashSet<RawPtrWillBeWeakMember<AnimationPlayer>> m_players;
 
+    double m_documentCurrentTimeSnapshot;
+    double m_zeroTimeOffset;
+    double m_playbackRate;
+
     friend class SMILTimeContainer;
     static const double s_minimumDelay;
 
     OwnPtrWillBeMember<PlatformTiming> m_timing;
+    double m_lastCurrentTimeInternal;
 
     class AnimationTimelineTiming final : public PlatformTiming {
     public:

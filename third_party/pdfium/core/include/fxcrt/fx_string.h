@@ -15,9 +15,13 @@ class CFX_BinaryBuf;
 typedef int FX_STRSIZE;
 class CFX_ByteStringL;
 class CFX_WideStringL;
+
+// An immutable string with caller-provided storage which must outlive the
+// string itself.
 class CFX_ByteStringC : public CFX_Object
 {
 public:
+    typedef FX_CHAR value_type;
 
     CFX_ByteStringC()
     {
@@ -37,6 +41,13 @@ public:
         m_Length = ptr ? (FX_STRSIZE)FXSYS_strlen(ptr) : 0;
     }
 
+    // |ch| must be an lvalue that outlives the the CFX_ByteStringC. However,
+    // the use of char rvalues are not caught at compile time.  They are
+    // implicitly promoted to CFX_ByteString (see below) and then the
+    // CFX_ByteStringC is constructed from the CFX_ByteString via the alternate
+    // constructor below. The CFX_ByteString then typically goes out of scope
+    // and |m_Ptr| may be left pointing to invalid memory. Beware.
+    // TODO(tsepez): Mark single-argument string constructors as explicit.
     CFX_ByteStringC(FX_CHAR& ch)
     {
         m_Ptr = (FX_LPCBYTE)&ch;
@@ -64,7 +75,7 @@ public:
     CFX_ByteStringC& operator = (FX_LPCSTR src)
     {
         m_Ptr = (FX_LPCBYTE)src;
-        m_Length = (FX_STRSIZE)FXSYS_strlen(src);
+        m_Length = m_Ptr ? (FX_STRSIZE)FXSYS_strlen(src) : 0;
         return *this;
     }
 
@@ -160,6 +171,7 @@ struct CFX_StringData {
 class CFX_ByteString : public CFX_Object
 {
 public:
+    typedef FX_CHAR value_type;
 
     CFX_ByteString()
     {
@@ -184,6 +196,13 @@ public:
 
     static CFX_ByteString	FromUnicode(const CFX_WideString& str);
 
+    // Explicit conversion to raw string
+    FX_LPCSTR c_str() const
+    {
+        return m_pData ? m_pData->m_String : "";
+    }
+
+    // Implicit conversion to C-style string -- deprecated
     operator				FX_LPCSTR() const
     {
         return m_pData ? m_pData->m_String : "";
@@ -466,6 +485,7 @@ typedef CFX_StringBufTemplate<256> CFX_StringBuf256;
 class CFX_WideStringC : public CFX_Object
 {
 public:
+    typedef FX_WCHAR value_type;
 
     CFX_WideStringC()
     {
@@ -597,7 +617,7 @@ private:
     }
 };
 typedef const CFX_WideStringC&	FX_WSTR;
-#define FX_WSTRC(wstr) CFX_WideStringC((FX_LPCWSTR)wstr, sizeof(wstr) / sizeof(FX_WCHAR) - 1)
+#define FX_WSTRC(wstr) CFX_WideStringC(wstr, FX_ArraySize(wstr) - 1)
 struct CFX_StringDataW {
 
     long		m_nRefs;
@@ -611,6 +631,7 @@ struct CFX_StringDataW {
 class CFX_WideString : public CFX_Object
 {
 public:
+    typedef FX_WCHAR value_type;
 
     CFX_WideString()
     {
@@ -640,9 +661,16 @@ public:
 
     static FX_STRSIZE       WStringLength(const unsigned short* str);
 
+    // Explicit conversion to raw string
+    FX_LPCWSTR c_str() const
+    {
+        return m_pData ? m_pData->m_String : L"";
+    }
+
+    // Implicit conversion to C-style wide string -- deprecated
     operator FX_LPCWSTR() const
     {
-        return m_pData ? m_pData->m_String : (FX_WCHAR*)L"";
+        return m_pData ? m_pData->m_String : L"";
     }
 
     void					Empty();
@@ -762,12 +790,12 @@ protected:
 };
 inline CFX_WideStringC::CFX_WideStringC(const CFX_WideString& src)
 {
-    m_Ptr = (FX_LPCWSTR)src;
+    m_Ptr = src.c_str();
     m_Length = src.GetLength();
 }
 inline CFX_WideStringC& CFX_WideStringC::operator = (const CFX_WideString& src)
 {
-    m_Ptr = (FX_LPCWSTR)src;
+    m_Ptr = src.c_str();
     m_Length = src.GetLength();
     return *this;
 }
@@ -841,6 +869,6 @@ inline CFX_ByteString	FX_UTF8Encode(FX_WSTR wsStr)
 }
 inline CFX_ByteString	FX_UTF8Encode(const CFX_WideString &wsStr)
 {
-    return FX_UTF8Encode((FX_LPCWSTR)wsStr, wsStr.GetLength());
+    return FX_UTF8Encode(wsStr.c_str(), wsStr.GetLength());
 }
 #endif

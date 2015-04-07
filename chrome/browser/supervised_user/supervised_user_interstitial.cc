@@ -8,6 +8,7 @@
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/infobars/infobar_service.h"
@@ -23,6 +24,8 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "content/public/browser/web_ui.h"
@@ -32,8 +35,11 @@
 #include "ui/base/webui/jstemplate_builder.h"
 #include "ui/base/webui/web_ui_util.h"
 
-#if !defined(OS_ANDROID)
+#if defined(OS_ANDROID)
+#include "chrome/browser/supervised_user/child_accounts/child_account_feedback_reporter_android.h"
+#else
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #endif
 
@@ -96,9 +102,10 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(TabCloser);
 void SupervisedUserInterstitial::Show(
     WebContents* web_contents,
     const GURL& url,
+    SupervisedUserURLFilter::FilteringBehaviorReason reason,
     const base::Callback<void(bool)>& callback) {
   SupervisedUserInterstitial* interstitial =
-      new SupervisedUserInterstitial(web_contents, url, callback);
+      new SupervisedUserInterstitial(web_contents, url, reason, callback);
 
   // If Init() does not complete fully, immediately delete the interstitial.
   if (!interstitial->Init())
@@ -109,11 +116,13 @@ void SupervisedUserInterstitial::Show(
 SupervisedUserInterstitial::SupervisedUserInterstitial(
     WebContents* web_contents,
     const GURL& url,
+    SupervisedUserURLFilter::FilteringBehaviorReason reason,
     const base::Callback<void(bool)>& callback)
     : web_contents_(web_contents),
       profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
       interstitial_page_(NULL),
       url_(url),
+      reason_(reason),
       callback_(callback),
       weak_ptr_factory_(this) {}
 
@@ -192,25 +201,71 @@ std::string SupervisedUserInterstitial::GetHTMLContents() {
   strings.SetString("secondAvatarURL2x", BuildAvatarImageUrl(profile_image_url2,
                                                              kAvatarSize2x));
 
+  bool is_child_account = profile_->IsChild();
+
   base::string16 custodian =
       base::UTF8ToUTF16(supervised_user_service->GetCustodianName());
-  strings.SetString(
-      "blockPageMessage",
-      allow_access_requests
-          ? l10n_util::GetStringFUTF16(IDS_BLOCK_INTERSTITIAL_MESSAGE,
-                                       custodian)
-          : l10n_util::GetStringUTF16(
-                IDS_BLOCK_INTERSTITIAL_MESSAGE_ACCESS_REQUESTS_DISABLED));
+  base::string16 second_custodian =
+      base::UTF8ToUTF16(supervised_user_service->GetSecondCustodianName());
+
+  base::string16 block_message;
+  if (allow_access_requests) {
+    if (is_child_account) {
+      block_message = l10n_util::GetStringUTF16(
+          second_custodian.empty()
+              ? IDS_CHILD_BLOCK_INTERSTITIAL_MESSAGE_SINGLE_PARENT
+              : IDS_CHILD_BLOCK_INTERSTITIAL_MESSAGE_MULTI_PARENT);
+    } else {
+      block_message = l10n_util::GetStringFUTF16(
+          IDS_BLOCK_INTERSTITIAL_MESSAGE, custodian);
+    }
+  } else {
+    block_message = l10n_util::GetStringUTF16(
+        IDS_BLOCK_INTERSTITIAL_MESSAGE_ACCESS_REQUESTS_DISABLED);
+  }
+  strings.SetString("blockPageMessage", block_message);
+  strings.SetString("blockReasonMessage", is_child_account
+      ? l10n_util::GetStringUTF16(
+          SupervisedUserURLFilter::GetBlockMessageID(reason_))
+      : base::string16());
+
+  bool show_feedback = false;
+#if defined(GOOGLE_CHROME_BUILD)
+  show_feedback = is_child_account &&
+                  SupervisedUserURLFilter::ReasonIsAutomatic(reason_);
+#endif
+  strings.SetBoolean("showFeedbackLink", show_feedback);
+  strings.SetString("feedbackLink",
+      l10n_util::GetStringUTF16(IDS_BLOCK_INTERSTITIAL_SEND_FEEDBACK));
 
   strings.SetString("backButton", l10n_util::GetStringUTF16(IDS_BACK_BUTTON));
-  strings.SetString(
-      "requestAccessButton",
-      l10n_util::GetStringUTF16(IDS_BLOCK_INTERSTITIAL_REQUEST_ACCESS_BUTTON));
+  strings.SetString("requestAccessButton", l10n_util::GetStringUTF16(
+      is_child_account
+          ? IDS_CHILD_BLOCK_INTERSTITIAL_REQUEST_ACCESS_BUTTON
+          : IDS_BLOCK_INTERSTITIAL_REQUEST_ACCESS_BUTTON));
 
-  strings.SetString(
-      "requestSentMessage",
-      l10n_util::GetStringFUTF16(IDS_BLOCK_INTERSTITIAL_REQUEST_SENT_MESSAGE,
-                                 custodian));
+  base::string16 request_sent_message;
+  base::string16 request_failed_message;
+  if (is_child_account) {
+    if (second_custodian.empty()) {
+      request_sent_message = l10n_util::GetStringUTF16(
+          IDS_CHILD_BLOCK_INTERSTITIAL_REQUEST_SENT_MESSAGE_SINGLE_PARENT);
+      request_failed_message = l10n_util::GetStringUTF16(
+          IDS_CHILD_BLOCK_INTERSTITIAL_REQUEST_FAILED_MESSAGE_SINGLE_PARENT);
+    } else {
+      request_sent_message = l10n_util::GetStringUTF16(
+          IDS_CHILD_BLOCK_INTERSTITIAL_REQUEST_SENT_MESSAGE_MULTI_PARENT);
+      request_failed_message = l10n_util::GetStringUTF16(
+          IDS_CHILD_BLOCK_INTERSTITIAL_REQUEST_FAILED_MESSAGE_MULTI_PARENT);
+    }
+  } else {
+    request_sent_message = l10n_util::GetStringFUTF16(
+        IDS_BLOCK_INTERSTITIAL_REQUEST_SENT_MESSAGE, custodian);
+    request_failed_message = l10n_util::GetStringFUTF16(
+        IDS_BLOCK_INTERSTITIAL_REQUEST_FAILED_MESSAGE, custodian);
+  }
+  strings.SetString("requestSentMessage", request_sent_message);
+  strings.SetString("requestFailedMessage", request_failed_message);
 
   webui::SetFontAndTextDirection(&strings);
 
@@ -257,6 +312,24 @@ void SupervisedUserInterstitial::CommandReceived(const std::string& command) {
     return;
   }
 
+  if (command == "\"feedback\"") {
+#if defined(OS_ANDROID)
+    ReportChildAccountFeedback(web_contents_, url_);
+#else
+    std::string bucket;
+#if defined(OS_CHROMEOS)
+    bucket = "UnicornCrOS";
+#else
+    bucket = "UnicornDesktop";
+#endif
+    chrome::ShowFeedbackPage(
+        chrome::FindBrowserWithWebContents(web_contents_),
+        l10n_util::GetStringUTF8(IDS_BLOCK_INTERSTITIAL_DEFAULT_FEEDBACK_TEXT),
+        bucket);
+#endif
+    return;
+  }
+
   NOTREACHED();
 }
 
@@ -274,11 +347,12 @@ void SupervisedUserInterstitial::OnURLFilterChanged() {
 }
 
 void SupervisedUserInterstitial::OnAccessRequestAdded(bool success) {
-  // TODO(akuegel): Figure out how to show the result of issuing the permission
-  // request in the UI. Currently, we assume the permission request was created
-  // successfully.
   VLOG(1) << "Sent access request for " << url_.spec()
           << (success ? " successfully" : " unsuccessfully");
+  std::string jsFunc =
+      base::StringPrintf("setRequestStatus(%s);", success ? "true" : "false");
+  interstitial_page_->GetMainFrame()->ExecuteJavaScript(
+      base::ASCIIToUTF16(jsFunc));
 }
 
 bool SupervisedUserInterstitial::ShouldProceed() {

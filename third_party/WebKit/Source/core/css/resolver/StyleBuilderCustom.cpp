@@ -51,6 +51,7 @@
 #include "core/css/CSSHelper.h"
 #include "core/css/CSSImageSetValue.h"
 #include "core/css/CSSLineBoxContainValue.h"
+#include "core/css/CSSPathValue.h"
 #include "core/css/CSSPrimitiveValueMappings.h"
 #include "core/css/CSSPropertyMetadata.h"
 #include "core/css/Counter.h"
@@ -65,6 +66,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/rendering/style/CounterContent.h"
+#include "core/rendering/style/PathStyleMotionPath.h"
 #include "core/rendering/style/QuotesData.h"
 #include "core/rendering/style/RenderStyle.h"
 #include "core/rendering/style/RenderStyleConstants.h"
@@ -119,8 +121,15 @@ void StyleBuilder::applyProperty(CSSPropertyID id, StyleResolverState& state, CS
         return;
     }
 
-    if (isInherit && !state.parentStyle()->hasExplicitlyInheritedProperties() && !CSSPropertyMetadata::isInheritedProperty(id))
+    if (isInherit && !state.parentStyle()->hasExplicitlyInheritedProperties() && !CSSPropertyMetadata::isInheritedProperty(id)) {
         state.parentStyle()->setHasExplicitlyInheritedProperties();
+    } else if (value->isUnsetValue()) {
+        ASSERT(!isInherit && !isInitial);
+        if (CSSPropertyMetadata::isInheritedProperty(id))
+            isInherit = true;
+        else
+            isInitial = true;
+    }
 
     StyleBuilder::applyProperty(id, state, value, isInitial, isInherit);
 }
@@ -252,9 +261,6 @@ void StyleBuilderFunctions::applyValueCSSPropertyCursor(StyleResolverState& stat
 void StyleBuilderFunctions::applyValueCSSPropertyDirection(StyleResolverState& state, CSSValue* value)
 {
     state.style()->setDirection(*toCSSPrimitiveValue(value));
-    Element* element = state.element();
-    if (element && element == element->document().documentElement())
-        element->document().setDirectionSetOnDocumentElement(true);
 }
 
 void StyleBuilderFunctions::applyValueCSSPropertyGlyphOrientationVertical(StyleResolverState& state, CSSValue* value)
@@ -290,8 +296,10 @@ void StyleBuilderFunctions::applyValueCSSPropertyGridTemplateAreas(StyleResolver
     CSSGridTemplateAreasValue* gridTemplateAreasValue = toCSSGridTemplateAreasValue(value);
     const NamedGridAreaMap& newNamedGridAreas = gridTemplateAreasValue->gridAreaMap();
 
-    NamedGridLinesMap namedGridColumnLines = state.style()->namedGridColumnLines();
-    NamedGridLinesMap namedGridRowLines = state.style()->namedGridRowLines();
+    NamedGridLinesMap namedGridColumnLines;
+    NamedGridLinesMap namedGridRowLines;
+    StyleBuilderConverter::convertOrderedNamedGridLinesMapToNamedGridLinesMap(state.style()->orderedNamedGridColumnLines(), namedGridColumnLines);
+    StyleBuilderConverter::convertOrderedNamedGridLinesMapToNamedGridLinesMap(state.style()->orderedNamedGridRowLines(), namedGridRowLines);
     StyleBuilderConverter::createImplicitNamedGridLinesFromGridArea(newNamedGridAreas, namedGridColumnLines, ForColumns);
     StyleBuilderConverter::createImplicitNamedGridLinesFromGridArea(newNamedGridAreas, namedGridRowLines, ForRows);
     state.style()->setNamedGridColumnLines(namedGridColumnLines);
@@ -300,34 +308,6 @@ void StyleBuilderFunctions::applyValueCSSPropertyGridTemplateAreas(StyleResolver
     state.style()->setNamedGridArea(newNamedGridAreas);
     state.style()->setNamedGridAreaRowCount(gridTemplateAreasValue->rowCount());
     state.style()->setNamedGridAreaColumnCount(gridTemplateAreasValue->columnCount());
-}
-
-void StyleBuilderFunctions::applyValueCSSPropertyLineHeight(StyleResolverState& state, CSSValue* value)
-{
-    CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(value);
-    Length lineHeight;
-
-    if (primitiveValue->getValueID() == CSSValueNormal) {
-        lineHeight = RenderStyle::initialLineHeight();
-    } else if (primitiveValue->isLength()) {
-        float multiplier = state.style()->effectiveZoom();
-        if (LocalFrame* frame = state.document().frame())
-            multiplier *= frame->textZoomFactor();
-        lineHeight = primitiveValue->computeLength<Length>(state.cssToLengthConversionData().copyWithAdjustedZoom(multiplier));
-    } else if (primitiveValue->isPercentage()) {
-        lineHeight = Length((state.style()->computedFontSize() * primitiveValue->getIntValue()) / 100.0, Fixed);
-    } else if (primitiveValue->isNumber()) {
-        lineHeight = Length(primitiveValue->getDoubleValue() * 100.0, Percent);
-    } else if (primitiveValue->isCalculated()) {
-        double multiplier = state.style()->effectiveZoom();
-        if (LocalFrame* frame = state.document().frame())
-            multiplier *= frame->textZoomFactor();
-        Length zoomedLength = Length(primitiveValue->cssCalcValue()->toCalcValue(state.cssToLengthConversionData().copyWithAdjustedZoom(multiplier)));
-        lineHeight = Length(valueForLength(zoomedLength, state.style()->fontSize()), Fixed);
-    } else {
-        return;
-    }
-    state.style()->setLineHeight(lineHeight);
 }
 
 void StyleBuilderFunctions::applyValueCSSPropertyListStyleImage(StyleResolverState& state, CSSValue* value)
@@ -577,6 +557,69 @@ void StyleBuilderFunctions::applyValueCSSPropertyTransform(StyleResolverState& s
     state.style()->setTransform(operations);
 }
 
+void StyleBuilderFunctions::applyInheritCSSPropertyMotionPath(StyleResolverState& state)
+{
+    if (state.parentStyle()->motionPath())
+        state.style()->setMotionPath(state.parentStyle()->motionPath());
+    else
+        state.style()->resetMotionPath();
+}
+
+void StyleBuilderFunctions::applyValueCSSPropertyMotionPath(StyleResolverState& state, CSSValue* value)
+{
+    if (value->isPathValue()) {
+        const String& pathString = toCSSPathValue(value)->pathString();
+        state.style()->setMotionPath(PathStyleMotionPath::create(pathString));
+        return;
+    }
+
+    ASSERT(value->isPrimitiveValue() && toCSSPrimitiveValue(value)->getValueID() == CSSValueNone);
+    state.style()->resetMotionPath();
+}
+
+void StyleBuilderFunctions::applyInitialCSSPropertyMotionPath(StyleResolverState& state)
+{
+    state.style()->resetMotionPath();
+}
+
+void StyleBuilderFunctions::applyInheritCSSPropertyMotionRotation(StyleResolverState& state)
+{
+    state.style()->setMotionRotation(state.parentStyle()->motionRotation());
+    state.style()->setMotionRotationType(state.parentStyle()->motionRotationType());
+}
+
+void StyleBuilderFunctions::applyInitialCSSPropertyMotionRotation(StyleResolverState& state)
+{
+    state.style()->setMotionRotation(RenderStyle::initialMotionRotation());
+    state.style()->setMotionRotationType(RenderStyle::initialMotionRotationType());
+}
+
+void StyleBuilderFunctions::applyValueCSSPropertyMotionRotation(StyleResolverState& state, CSSValue* value)
+{
+    float rotation = 0;
+    MotionRotationType rotationType = MotionRotationFixed;
+
+    ASSERT(value->isValueList());
+    CSSValueList* list = toCSSValueList(value);
+    int len = list->length();
+    for (int i = 0; i < len; i++) {
+        CSSValue* item = list->item(i);
+        ASSERT(item->isPrimitiveValue());
+        CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(item);
+        if (primitiveValue->getValueID() == CSSValueAuto) {
+            rotationType = MotionRotationAuto;
+        } else if (primitiveValue->getValueID() == CSSValueReverse) {
+            rotationType = MotionRotationAuto;
+            rotation += 180;
+        } else {
+            rotation += primitiveValue->computeDegrees();
+        }
+    }
+
+    state.style()->setMotionRotation(rotation);
+    state.style()->setMotionRotationType(rotationType);
+}
+
 void StyleBuilderFunctions::applyInheritCSSPropertyVerticalAlign(StyleResolverState& state)
 {
     EVerticalAlign verticalAlign = state.parentStyle()->verticalAlign();
@@ -647,7 +690,7 @@ void StyleBuilderFunctions::applyValueCSSPropertyZoom(StyleResolverState& state,
 void StyleBuilderFunctions::applyValueCSSPropertyWebkitBorderImage(StyleResolverState& state, CSSValue* value)
 {
     NinePieceImage image;
-    state.styleMap().mapNinePieceImage(state.style(), CSSPropertyWebkitBorderImage, value, image);
+    CSSToStyleMap::mapNinePieceImage(state, CSSPropertyWebkitBorderImage, value, image);
     state.style()->setBorderImage(image);
 }
 
@@ -795,10 +838,7 @@ void StyleBuilderFunctions::applyValueCSSPropertyContent(StyleResolverState& sta
     for (CSSValueListIterator i = value; i.hasMore(); i.advance()) {
         CSSValue* item = i.value();
         if (item->isImageGeneratorValue()) {
-            if (item->isGradientValue())
-                state.style()->setContent(StyleGeneratedImage::create(toCSSGradientValue(item)->gradientWithStylesResolved(state.document().textLinkColors(), state.style()->color()).get()), didSet);
-            else
-                state.style()->setContent(StyleGeneratedImage::create(toCSSImageGeneratorValue(item)), didSet);
+            state.style()->setContent(StyleGeneratedImage::create(toCSSImageGeneratorValue(item)), didSet);
             didSet = true;
         } else if (item->isImageSetValue()) {
             state.style()->setContent(state.elementStyleResources().setOrPendingFromValue(CSSPropertyContent, toCSSImageSetValue(item)), didSet);
@@ -829,8 +869,6 @@ void StyleBuilderFunctions::applyValueCSSPropertyContent(StyleResolverState& sta
             const AtomicString& value = state.element()->getAttribute(attr);
             state.style()->setContent(value.isNull() ? emptyString() : value.string(), didSet);
             didSet = true;
-            // register the fact that the attribute value affects the style
-            state.contentAttrValues().append(attr.localName());
         } else if (contentValue->isCounter()) {
             Counter* counterValue = contentValue->getCounterValue();
             EListStyleType listStyleType = NoneListStyle;
@@ -901,16 +939,8 @@ void StyleBuilderFunctions::applyValueCSSPropertyWebkitAppRegion(StyleResolverSt
 
 void StyleBuilderFunctions::applyValueCSSPropertyWebkitWritingMode(StyleResolverState& state, CSSValue* value)
 {
-    if (value->isPrimitiveValue()) {
-        WritingMode writingMode = *toCSSPrimitiveValue(value);
-        state.setWritingMode(writingMode);
-        if (writingMode != TopToBottomWritingMode)
-            state.document().setContainsAnyRareWritingMode(true);
-    }
-
-    // FIXME: It is not ok to modify document state while applying style.
-    if (state.element() && state.element() == state.document().documentElement())
-        state.document().setWritingModeSetOnDocumentElement(true);
+    if (value->isPrimitiveValue())
+        state.setWritingMode(*toCSSPrimitiveValue(value));
 }
 
 void StyleBuilderFunctions::applyValueCSSPropertyWebkitTextOrientation(StyleResolverState& state, CSSValue* value)

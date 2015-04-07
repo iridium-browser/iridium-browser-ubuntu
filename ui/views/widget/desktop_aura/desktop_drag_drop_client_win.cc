@@ -4,6 +4,7 @@
 
 #include "ui/views/widget/desktop_aura/desktop_drag_drop_client_win.h"
 
+#include "base/tracked_objects.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/drag_source_win.h"
 #include "ui/base/dragdrop/drop_target_event.h"
@@ -17,11 +18,14 @@ DesktopDragDropClientWin::DesktopDragDropClientWin(
     aura::Window* root_window,
     HWND window)
     : drag_drop_in_progress_(false),
-      drag_operation_(0) {
+      drag_operation_(0),
+      weak_factory_(this) {
   drop_target_ = new DesktopDropTargetWin(root_window, window);
 }
 
 DesktopDragDropClientWin::~DesktopDragDropClientWin() {
+  if (drag_drop_in_progress_)
+    DragCancel();
 }
 
 int DesktopDragDropClientWin::StartDragAndDrop(
@@ -34,15 +38,23 @@ int DesktopDragDropClientWin::StartDragAndDrop(
   drag_drop_in_progress_ = true;
   drag_operation_ = operation;
 
-  drag_source_ = new ui::DragSourceWin;
-  DWORD effect;
-  HRESULT result = DoDragDrop(
-      ui::OSExchangeDataProviderWin::GetIDataObject(data),
-      drag_source_,
-      ui::DragDropTypes::DragOperationToDropEffect(operation),
-      &effect);
+  base::WeakPtr<DesktopDragDropClientWin> alive(weak_factory_.GetWeakPtr());
 
-  drag_drop_in_progress_ = false;
+  drag_source_ = new ui::DragSourceWin;
+  scoped_refptr<ui::DragSourceWin> drag_source_copy = drag_source_;
+
+  DWORD effect;
+
+  // Use task stopwatch to exclude the drag-drop time current task, if any.
+  tracked_objects::TaskStopwatch stopwatch;
+  stopwatch.Start();
+  HRESULT result = DoDragDrop(
+      ui::OSExchangeDataProviderWin::GetIDataObject(data), drag_source_.get(),
+      ui::DragDropTypes::DragOperationToDropEffect(operation), &effect);
+  stopwatch.Stop();
+
+  if (alive)
+    drag_drop_in_progress_ = false;
 
   if (result != DRAGDROP_S_DROP)
     effect = DROPEFFECT_NONE;

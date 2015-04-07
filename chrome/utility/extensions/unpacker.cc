@@ -17,23 +17,23 @@
 #include "base/threading/thread.h"
 #include "base/values.h"
 #include "chrome/common/chrome_utility_messages.h"
-#include "chrome/common/extensions/api/i18n/default_locale_handler.h"
-#include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/child/image_decoder_utils.h"
 #include "content/public/common/common_param_traits.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_l10n_util.h"
+#include "extensions/common/extensions_client.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/manifest_handlers/default_locale_handler.h"
 #include "ipc/ipc_message_utils.h"
 #include "net/base/file_stream.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/zlib/google/zip.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace extensions {
 
@@ -210,7 +210,7 @@ bool Unpacker::Run() {
 
   // Decode any images that the browser needs to display.
   std::set<base::FilePath> image_paths =
-      extension_file_util::GetBrowserImagePaths(extension.get());
+      ExtensionsClient::Get()->GetBrowserImagePaths(extension.get());
   for (std::set<base::FilePath>::iterator it = image_paths.begin();
        it != image_paths.end();
        ++it) {

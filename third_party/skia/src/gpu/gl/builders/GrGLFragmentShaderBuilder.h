@@ -100,8 +100,6 @@ private:
     void enableSecondaryOutput();
     const char* getPrimaryColorOutputName() const;
     const char* getSecondaryColorOutputName() const;
-    void enableSecondaryOutput(const GrGLSLExpr4& inputColor, const GrGLSLExpr4& inputCoverage);
-    void combineColorAndCoverage(const GrGLSLExpr4& inputColor, const GrGLSLExpr4& inputCoverage);
     bool compileAndAttachShaders(GrGLuint programId, SkTDArray<GrGLuint>* shaderIds) const;
     void bindFragmentShaderLocations(GrGLuint programID);
 
@@ -117,7 +115,7 @@ private:
     /*
      * An internal call for GrGLProgramBuilder to use to add varyings to the vertex shader
      */
-    void addVarying(GrGLVarying*, GrGLShaderVar::Precision);
+    void addVarying(GrGLVarying*, GrSLPrecision);
 
     /**
      * Features that should only be enabled by GrGLFragmentShaderBuilder itself.

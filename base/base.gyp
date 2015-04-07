@@ -377,6 +377,18 @@
       ],
     },
     {
+      # TODO(pasko): Remove this target when crbug.com/424562 is fixed.
+      # GN: //base:protect_file_posix
+      'target_name': 'protect_file_posix',
+      'type': 'static_library',
+      'dependencies': [
+        'base',
+      ],
+      'sources': [
+        'files/protect_file_posix.cc',
+      ],
+    },
+    {
       'target_name': 'base_prefs_test_support',
       'type': 'static_library',
       'dependencies': [
@@ -435,6 +447,7 @@
       'type': '<(gtest_target_type)',
       'sources': [
         'android/application_status_listener_unittest.cc',
+        'android/content_uri_utils_unittest.cc',
         'android/jni_android_unittest.cc',
         'android/jni_array_unittest.cc',
         'android/jni_string_unittest.cc',
@@ -457,6 +470,7 @@
         'callback_unittest.cc',
         'callback_unittest.nc',
         'cancelable_callback_unittest.cc',
+        'chromeos/memory_pressure_observer_chromeos_unittest.cc',
         'command_line_unittest.cc',
         'containers/adapters_unittest.cc',
         'containers/hash_tables_unittest.cc',
@@ -466,6 +480,7 @@
         'containers/stack_container_unittest.cc',
         'cpu_unittest.cc',
         'debug/crash_logging_unittest.cc',
+        'debug/debugger_unittest.cc',
         'debug/leak_tracker_unittest.cc',
         'debug/proc_maps_linux_unittest.cc',
         'debug/stack_trace_unittest.cc',
@@ -505,6 +520,7 @@
         'i18n/time_formatting_unittest.cc',
         'i18n/timezone_unittest.cc',
         'ios/device_util_unittest.mm',
+        'ios/weak_nsobject_unittest.mm',
         'json/json_parser_unittest.cc',
         'json/json_reader_unittest.cc',
         'json/json_value_converter_unittest.cc',
@@ -899,6 +915,8 @@
         'test/expectations/expectation.h',
         'test/expectations/parser.cc',
         'test/expectations/parser.h',
+        'test/gtest_util.cc',
+        'test/gtest_util.h',
         'test/gtest_xml_util.cc',
         'test/gtest_xml_util.h',
         'test/launcher/test_launcher.cc',

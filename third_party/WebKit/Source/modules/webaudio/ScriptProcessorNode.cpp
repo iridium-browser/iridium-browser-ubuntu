@@ -30,6 +30,7 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/CrossThreadTask.h"
+#include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "modules/webaudio/AudioBuffer.h"
 #include "modules/webaudio/AudioContext.h"
@@ -37,7 +38,6 @@
 #include "modules/webaudio/AudioNodeOutput.h"
 #include "modules/webaudio/AudioProcessingEvent.h"
 #include "public/platform/Platform.h"
-#include "wtf/Float32Array.h"
 
 namespace blink {
 
@@ -89,7 +89,7 @@ ScriptProcessorNode* ScriptProcessorNode::create(AudioContext* context, float sa
 }
 
 ScriptProcessorNode::ScriptProcessorNode(AudioContext* context, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels)
-    : AudioNode(context, sampleRate)
+    : AudioNode(NodeTypeJavaScript, context, sampleRate)
     , m_doubleBufferIndex(0)
     , m_doubleBufferIndexForEvent(0)
     , m_bufferSize(bufferSize)
@@ -107,7 +107,6 @@ ScriptProcessorNode::ScriptProcessorNode(AudioContext* context, float sampleRate
     addInput();
     addOutput(AudioNodeOutput::create(this, numberOfOutputChannels));
 
-    setNodeType(NodeTypeJavaScript);
     m_channelCount = numberOfInputChannels;
     m_channelCountMode = Explicit;
 
@@ -259,7 +258,7 @@ void ScriptProcessorNode::fireProcessEvent()
 
         // Calculate a playbackTime with the buffersize which needs to be processed each time onaudioprocess is called.
         // The outputBuffer being passed to JS will be played after exhuasting previous outputBuffer by double-buffering.
-        double playbackTime = (context()->currentSampleFrame() + m_bufferSize) / static_cast<double>(context()->sampleRate());
+        double playbackTime = (context()->cachedSampleFrame() + m_bufferSize) / static_cast<double>(context()->sampleRate());
 
         // Call the JavaScript event handler which will do the audio processing.
         dispatchEvent(AudioProcessingEvent::create(inputBuffer, outputBuffer, playbackTime));

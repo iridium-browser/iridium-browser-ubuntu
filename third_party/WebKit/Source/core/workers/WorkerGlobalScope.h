@@ -47,11 +47,9 @@
 
 namespace blink {
 
-class Blob;
 class ConsoleMessage;
 class ConsoleMessageStorage;
 class ExceptionState;
-class ScheduledAction;
 class WorkerClients;
 class WorkerConsole;
 class WorkerInspectorController;
@@ -59,7 +57,7 @@ class WorkerLocation;
 class WorkerNavigator;
 class WorkerThread;
 
-class WorkerGlobalScope : public RefCountedWillBeGarbageCollectedFinalized<WorkerGlobalScope>, public SecurityContext, public ExecutionContext, public WillBeHeapSupplementable<WorkerGlobalScope>, public EventTargetWithInlineData, public DOMWindowBase64 {
+class WorkerGlobalScope : public EventTargetWithInlineData, public RefCountedWillBeNoBase<WorkerGlobalScope>, public SecurityContext, public ExecutionContext, public WillBeHeapSupplementable<WorkerGlobalScope>, public DOMWindowBase64 {
     DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(WorkerGlobalScope);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(WorkerGlobalScope);
@@ -115,8 +113,6 @@ public:
 
     bool isClosing() { return m_closing; }
 
-    virtual void stopFetch() { }
-
     bool idleNotification();
 
     double timeOrigin() const { return m_timeOrigin; }
@@ -128,6 +124,8 @@ public:
 
     virtual void addConsoleMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>) override final;
     ConsoleMessageStorage* messageStorage();
+
+    void exceptionHandled(int exceptionId, bool isHandled);
 
     virtual void trace(Visitor*) override;
 
@@ -172,6 +170,9 @@ private:
     double m_timeOrigin;
 
     OwnPtrWillBeMember<ConsoleMessageStorage> m_messageStorage;
+
+    unsigned long m_workerExceptionUniqueIdentifier;
+    WillBeHeapHashMap<unsigned long, RefPtrWillBeMember<ConsoleMessage>> m_pendingMessages;
 };
 
 DEFINE_TYPE_CASTS(WorkerGlobalScope, ExecutionContext, context, context->isWorkerGlobalScope(), context.isWorkerGlobalScope());

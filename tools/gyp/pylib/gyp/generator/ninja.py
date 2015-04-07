@@ -108,7 +108,7 @@ def AddArch(output, arch):
   return '%s.%s%s' % (output, arch, extension)
 
 
-class Target:
+class Target(object):
   """Target represents the paths used within a single gyp target.
 
   Conceptually, building a single target A is a series of steps:
@@ -212,7 +212,7 @@ class Target:
 #   an output file; the result can be namespaced such that it is unique
 #   to the input file name as well as the output target name.
 
-class NinjaWriter:
+class NinjaWriter(object):
   def __init__(self, hash_for_rules, target_outputs, base_dir, build_dir,
                output_file, toplevel_build, output_file_name, flavor,
                toplevel_dir=None):
@@ -652,10 +652,11 @@ class NinjaWriter:
       needed_variables = set(['source'])
       for argument in args:
         for var in special_locals:
-          if ('${%s}' % var) in argument:
+          if '${%s}' % var in argument:
             needed_variables.add(var)
 
       def cygwin_munge(path):
+        # pylint: disable=cell-var-from-loop
         if is_cygwin:
           return path.replace('\\', '/')
         return path
@@ -1056,9 +1057,19 @@ class NinjaWriter:
                                       arch=arch)
                 for arch in self.archs]
       extra_bindings = []
+      build_output = output
       if not self.is_mac_bundle:
         self.AppendPostbuildVariable(extra_bindings, spec, output, output)
-      self.ninja.build(output, 'lipo', inputs, variables=extra_bindings)
+
+      # TODO(yyanagisawa): more work needed to fix:
+      # https://code.google.com/p/gyp/issues/detail?id=411
+      if (spec['type'] in ('shared_library', 'loadable_module') and
+          not self.is_mac_bundle):
+        extra_bindings.append(('lib', output))
+        self.ninja.build([output, output + '.TOC'], 'solipo', inputs,
+            variables=extra_bindings)
+      else:
+        self.ninja.build(build_output, 'lipo', inputs, variables=extra_bindings)
       return output
 
   def WriteLinkForArch(self, ninja_file, spec, config_name, config,
@@ -1151,7 +1162,7 @@ class NinjaWriter:
         rpath = 'lib/'
         if self.toolset != 'target':
           rpath += self.toolset
-        ldflags.append('-Wl,-rpath=\$$ORIGIN/%s' % rpath)
+        ldflags.append(r'-Wl,-rpath=\$$ORIGIN/%s' % rpath)
         ldflags.append('-Wl,-rpath-link=%s' % rpath)
     self.WriteVariableList(ninja_file, 'ldflags',
                            gyp.common.uniquer(map(self.ExpandSpecial, ldflags)))
@@ -2097,6 +2108,16 @@ def GenerateOutputForConfig(target_list, target_dicts, data, params,
       'lipo',
       description='LIPO $out, POSTBUILDS',
       command='rm -f $out && lipo -create $in -output $out$postbuilds')
+    master_ninja.rule(
+      'solipo',
+      description='SOLIPO $out, POSTBUILDS',
+      command=(
+          'rm -f $lib $lib.TOC && lipo -create $in -output $lib$postbuilds &&'
+          '%(extract_toc)s > $lib.TOC'
+          % { 'extract_toc':
+                '{ otool -l $lib | grep LC_ID_DYLIB -A 5; '
+                'nm -gP $lib | cut -f1-2 -d\' \' | grep -v U$$; true; }'}))
+
 
     # Record the public interface of $lib in $lib.TOC. See the corresponding
     # comment in the posix section above for details.

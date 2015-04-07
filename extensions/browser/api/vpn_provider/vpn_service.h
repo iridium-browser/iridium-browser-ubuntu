@@ -1,0 +1,217 @@
+// Copyright 2014 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#ifndef CHROME_BROWSER_CHROMEOS_VPN_VPN_SERVICE_H_
+#define CHROME_BROWSER_CHROMEOS_VPN_VPN_SERVICE_H_
+
+#include <map>
+#include <string>
+
+#include "base/callback.h"
+#include "base/macros.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "chromeos/network/network_configuration_observer.h"
+#include "chromeos/network/network_state_handler_observer.h"
+#include "components/keyed_service/core/keyed_service.h"
+#include "extensions/browser/extension_registry_observer.h"
+#include "extensions/common/api/vpn_provider.h"
+
+namespace base {
+
+class DictionaryValue;
+class ListValue;
+
+}  // namespace base
+
+namespace content {
+
+class BrowserContext;
+
+}  // namespace content
+
+namespace extensions {
+
+class EventRouter;
+class ExtensionRegistry;
+
+}  // namespace extensions
+
+namespace chromeos {
+
+class NetworkConfigurationHandler;
+class NetworkProfileHandler;
+class NetworkStateHandler;
+class ShillThirdPartyVpnDriverClient;
+
+// The class manages the VPN configurations.
+class VpnService : public KeyedService,
+                   public NetworkConfigurationObserver,
+                   public NetworkStateHandlerObserver,
+                   public extensions::ExtensionRegistryObserver {
+ public:
+  using SuccessCallback = base::Closure;
+  using FailureCallback =
+      base::Callback<void(const std::string& error_name,
+                          const std::string& error_message)>;
+
+  VpnService(content::BrowserContext* browser_context,
+             const std::string& userid_hash,
+             extensions::ExtensionRegistry* extension_registry,
+             extensions::EventRouter* event_router,
+             ShillThirdPartyVpnDriverClient* shill_client,
+             NetworkConfigurationHandler* network_configuration_handler,
+             NetworkProfileHandler* network_profile_handler,
+             NetworkStateHandler* network_state_handler);
+  ~VpnService() override;
+
+  // NetworkConfigurationObserver:
+  void OnConfigurationCreated(const std::string& service_path,
+                              const std::string& profile_path,
+                              const base::DictionaryValue& properties,
+                              Source source) override;
+  void OnConfigurationRemoved(const std::string& service_path,
+                              const std::string& guid,
+                              Source source) override;
+  void OnPropertiesSet(const std::string& service_path,
+                       const std::string& guid,
+                       const base::DictionaryValue& set_properties,
+                       Source source) override;
+  void OnConfigurationProfileChanged(const std::string& service_path,
+                                     const std::string& profile_path,
+                                     Source source) override;
+
+  // NetworkStateHandlerObserver:
+  void NetworkListChanged() override;
+
+  // ExtensionRegistryObserver:
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const extensions::Extension* extension,
+                              extensions::UninstallReason reason) override;
+
+  // Creates a new VPN configuration with |configuration_name| as the name and
+  // attaches it to the extension with id |extension_id|.
+  // Calls |success| or |failure| based on the outcome.
+  void CreateConfiguration(const std::string& extension_id,
+                           const std::string& extension_name,
+                           const std::string& configuration_name,
+                           const SuccessCallback& success,
+                           const FailureCallback& failure);
+
+  // Destroys the VPN configuration with the name |configuration_name| after
+  // verifying that it belongs to the extension with id |extension_id|.
+  // Calls |success| or |failure| based on the outcome.
+  void DestroyConfiguration(const std::string& extension_id,
+                            const std::string& configuration_name,
+                            const SuccessCallback& success,
+                            const FailureCallback& failure);
+
+  // Set |parameters| for the active VPN configuration after verifying that it
+  // belongs to the extension with id |extension_id|.
+  // Calls |success| or |failure| based on the outcome.
+  void SetParameters(const std::string& extension_id,
+                     const base::DictionaryValue& parameters,
+                     const SuccessCallback& success,
+                     const FailureCallback& failure);
+
+  // Sends an IP packet contained in |data| to the active VPN configuration
+  // after verifying that it belongs to the extension with id |extension_id|.
+  // Calls |success| or |failure| based on the outcome.
+  void SendPacket(const std::string& extension_id,
+                  const std::string& data,
+                  const SuccessCallback& success,
+                  const FailureCallback& failure);
+
+  // Notifies connection state |state| to the active VPN configuration after
+  // verifying that it belongs to the extension with id |extension_id|.
+  // Calls |success| or |failure| based on the outcome.
+  void NotifyConnectionStateChanged(
+      const std::string& extension_id,
+      extensions::core_api::vpn_provider::VpnConnectionState state,
+      const SuccessCallback& success,
+      const FailureCallback& failure);
+
+ private:
+  class VpnConfiguration;
+
+  using StringToConfigurationMap = std::map<std::string, VpnConfiguration*>;
+
+  // Callback used to indicate that configuration was successfully created.
+  void OnCreateConfigurationSuccess(const SuccessCallback& callback,
+                                    VpnConfiguration* configuration,
+                                    const std::string& service_path);
+
+  // Callback used to indicate that configuration creation failed.
+  void OnCreateConfigurationFailure(
+      const FailureCallback& callback,
+      VpnConfiguration* configuration,
+      const std::string& error_name,
+      scoped_ptr<base::DictionaryValue> error_data);
+
+  // Callback used to indicate that removing a configuration succeeded.
+  void OnRemoveConfigurationSuccess(const SuccessCallback& callback);
+
+  // Callback used to indicate that removing a configuration failed.
+  void OnRemoveConfigurationFailure(
+      const FailureCallback& callback,
+      const std::string& error_name,
+      scoped_ptr<base::DictionaryValue> error_data);
+
+  // Callback used to indicate that GetProperties was successful.
+  void OnGetPropertiesSuccess(const std::string& service_path,
+                              const base::DictionaryValue& dictionary);
+
+  // Callback used to indicate that GetProperties failed.
+  void OnGetPropertiesFailure(const std::string& error_name,
+                              scoped_ptr<base::DictionaryValue> error_data);
+
+  // Creates and adds the configuration to the internal store.
+  VpnConfiguration* CreateConfigurationInternal(
+      const std::string& extension_id,
+      const std::string& configuration_name,
+      const std::string& key);
+
+  // Removes configuration from the internal store and destroys it.
+  void DestroyConfigurationInternal(VpnConfiguration* configuration);
+
+  // Verifies if |active_configuration_| exists and if the extension with id
+  // |extension_id| is authorized to access it.
+  bool DoesActiveConfigurationExistAndIsAccessAuthorized(
+      const std::string& extension_id);
+
+  // Send an event with name |event_name| and arguments |event_args| to the
+  // extension with id |extension_id|.
+  void SendSignalToExtension(const std::string& extension_id,
+                             const std::string& event_name,
+                             scoped_ptr<base::ListValue> event_args);
+
+  // Set the active configuration.
+  void SetActiveConfiguration(VpnConfiguration* configuration);
+
+  content::BrowserContext* browser_context_;
+  std::string userid_hash_;
+
+  extensions::ExtensionRegistry* extension_registry_;
+  extensions::EventRouter* event_router_;
+  ShillThirdPartyVpnDriverClient* shill_client_;
+  NetworkConfigurationHandler* network_configuration_handler_;
+  NetworkProfileHandler* network_profile_handler_;
+  NetworkStateHandler* network_state_handler_;
+
+  VpnConfiguration* active_configuration_;
+
+  // Key map owns the VpnConfigurations.
+  StringToConfigurationMap key_to_configuration_map_;
+
+  // Service path does not own the VpnConfigurations.
+  StringToConfigurationMap service_path_to_configuration_map_;
+
+  base::WeakPtrFactory<VpnService> weak_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(VpnService);
+};
+
+}  // namespace chromeos
+
+#endif  // CHROME_BROWSER_CHROMEOS_VPN_VPN_SERVICE_H_

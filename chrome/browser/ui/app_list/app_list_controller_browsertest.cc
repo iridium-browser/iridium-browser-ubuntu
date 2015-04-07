@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
@@ -16,6 +17,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "ui/app_list/app_list_model.h"
+#include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/search_box_model.h"
 #include "ui/app_list/search_result.h"
 #include "ui/app_list/search_result_observer.h"
@@ -96,7 +98,6 @@ class AppListControllerSearchResultsBrowserTest
  public:
   AppListControllerSearchResultsBrowserTest()
       : observed_result_(NULL),
-        item_uninstall_count_(0),
         observed_results_list_(NULL) {}
 
   void WatchResultsLookingForItem(
@@ -139,10 +140,6 @@ class AppListControllerSearchResultsBrowserTest
   void OnIsInstallingChanged() override {}
   void OnPercentDownloadedChanged() override {}
   void OnItemInstalled() override {}
-  void OnItemUninstalled() override {
-    ++item_uninstall_count_;
-    EXPECT_TRUE(observed_result_);
-  }
 
   // Overridden from ui::ListModelObserver:
   void ListItemsAdded(size_t start, size_t count) override {
@@ -155,7 +152,6 @@ class AppListControllerSearchResultsBrowserTest
   void ListItemsChanged(size_t start, size_t count) override {}
 
   app_list::SearchResult* observed_result_;
-  int item_uninstall_count_;
 
  private:
   base::string16 item_to_observe_;
@@ -174,6 +170,12 @@ class AppListControllerSearchResultsBrowserTest
 // Test showing search results, and uninstalling one of them while displayed.
 IN_PROC_BROWSER_TEST_F(AppListControllerSearchResultsBrowserTest,
                        MAYBE_UninstallSearchResult) {
+  // TODO(calamity): This test fails in the experimental app list
+  // (http://crbug.com/438119). For now, force the test to run in the classic
+  // app list.
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      app_list::switches::kDisableExperimentalAppList);
+
   base::FilePath test_extension_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_extension_path));
   test_extension_path = test_extension_path.AppendASCII("extensions")
@@ -201,14 +203,11 @@ IN_PROC_BROWSER_TEST_F(AppListControllerSearchResultsBrowserTest,
   base::RunLoop().RunUntilIdle();
 
   // Now uninstall and ensure this browser test observes it.
-  EXPECT_EQ(0, item_uninstall_count_);
   UninstallExtension(extension->id());
-  EXPECT_EQ(1, item_uninstall_count_);
 
-  // Results should not be immediately refreshed. When they are, the item should
-  // be removed from the model.
-  EXPECT_TRUE(observed_result_);
+  // Allow async AppSearchProvider::UpdateResults to run.
   base::RunLoop().RunUntilIdle();
+
   EXPECT_FALSE(observed_result_);
   StopWatchingResults();
   service->DismissAppList();

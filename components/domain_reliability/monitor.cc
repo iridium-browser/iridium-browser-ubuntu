@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task_runner.h"
 #include "base/time/time.h"
@@ -74,6 +75,11 @@ void DomainReliabilityMonitor::MoveToNetworkThread() {
 
 void DomainReliabilityMonitor::InitURLRequestContext(
     net::URLRequestContext* url_request_context) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 DomainReliabilityMonitor::InitURLRequestContext"));
+
   DCHECK(OnNetworkThread());
   DCHECK(moved_to_network_thread_);
 
@@ -93,10 +99,16 @@ void DomainReliabilityMonitor::InitURLRequestContext(
   DCHECK(url_request_context_getter->GetNetworkTaskRunner()->
          RunsTasksOnCurrentThread());
 
-  uploader_ = DomainReliabilityUploader::Create(url_request_context_getter);
+  uploader_ = DomainReliabilityUploader::Create(time_.get(),
+                                                url_request_context_getter);
 }
 
 void DomainReliabilityMonitor::AddBakedInConfigs() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 DomainReliabilityMonitor::AddBakedInConfigs"));
+
   DCHECK(OnNetworkThread());
   DCHECK(moved_to_network_thread_);
 
@@ -284,10 +296,15 @@ void DomainReliabilityMonitor::OnRequestLegComplete(
   DomainReliabilityBeacon beacon;
   beacon.status = beacon_status;
   beacon.chrome_error = error_code;
-  if (!request.response_info.was_fetched_via_proxy)
+  // If the response was cached, the socket address was the address that the
+  // response was originally received from, so it shouldn't be copied into the
+  // beacon.
+  //
+  // TODO(ttuttle): Wire up a way to get the real socket address in that case.
+  if (!request.response_info.was_cached &&
+      !request.response_info.was_fetched_via_proxy) {
     beacon.server_ip = request.response_info.socket_address.host();
-  else
-    beacon.server_ip.clear();
+  }
   beacon.protocol = GetDomainReliabilityProtocol(
       request.response_info.connection_info,
       request.response_info.ssl_info.is_valid());

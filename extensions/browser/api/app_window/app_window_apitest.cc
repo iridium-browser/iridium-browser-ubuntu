@@ -13,7 +13,7 @@
 #include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "ui/base/base_window.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 #if defined(OS_WIN)
 #include "ui/base/win/shell.h"
@@ -112,8 +112,15 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiGet) {
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiSetShape) {
-  EXPECT_TRUE(RunPlatformAppTest("platform_apps/windows_api_shape"))
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiSetShapeHasPerm) {
+  EXPECT_TRUE(
+      RunPlatformAppTest("platform_apps/windows_api_shape/has_permission"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiSetShapeNoPerm) {
+  EXPECT_TRUE(
+      RunPlatformAppTest("platform_apps/windows_api_shape/no_permission"))
       << message_;
 }
 

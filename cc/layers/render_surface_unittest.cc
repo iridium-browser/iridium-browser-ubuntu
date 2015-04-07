@@ -41,7 +41,7 @@ TEST(RenderSurfaceTest, VerifySurfaceChangesAreTrackedProperly) {
   FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager);
   scoped_ptr<LayerImpl> owning_layer =
       LayerImpl::Create(host_impl.active_tree(), 1);
-  owning_layer->CreateRenderSurface();
+  owning_layer->SetHasRenderSurface(true);
   ASSERT_TRUE(owning_layer->render_surface());
   RenderSurfaceImpl* render_surface = owning_layer->render_surface();
   gfx::Rect test_rect(3, 4, 5, 6);
@@ -89,9 +89,12 @@ TEST(RenderSurfaceTest, SanityCheckSurfaceCreatesCorrectSharedQuadState) {
 
   scoped_ptr<LayerImpl> owning_layer =
       LayerImpl::Create(host_impl.active_tree(), 2);
-  owning_layer->CreateRenderSurface();
+  owning_layer->SetHasRenderSurface(true);
   ASSERT_TRUE(owning_layer->render_surface());
   owning_layer->draw_properties().render_target = owning_layer.get();
+
+  SkXfermode::Mode blend_mode = SkXfermode::kSoftLight_Mode;
+  owning_layer->SetBlendMode(blend_mode);
   RenderSurfaceImpl* render_surface = owning_layer->render_surface();
 
   root_layer->AddChild(owning_layer.Pass());
@@ -128,9 +131,9 @@ TEST(RenderSurfaceTest, SanityCheckSurfaceCreatesCorrectSharedQuadState) {
   EXPECT_EQ(
       40.0,
       shared_quad_state->content_to_target_transform.matrix().getDouble(1, 3));
-  EXPECT_RECT_EQ(content_rect,
-                 gfx::Rect(shared_quad_state->visible_content_rect));
+  EXPECT_EQ(content_rect, gfx::Rect(shared_quad_state->visible_content_rect));
   EXPECT_EQ(1.f, shared_quad_state->opacity);
+  EXPECT_EQ(blend_mode, shared_quad_state->blend_mode);
 }
 
 class TestRenderPassSink : public RenderPassSink {
@@ -156,7 +159,7 @@ TEST(RenderSurfaceTest, SanityCheckSurfaceCreatesCorrectRenderPass) {
 
   scoped_ptr<LayerImpl> owning_layer =
       LayerImpl::Create(host_impl.active_tree(), 2);
-  owning_layer->CreateRenderSurface();
+  owning_layer->SetHasRenderSurface(true);
   ASSERT_TRUE(owning_layer->render_surface());
   owning_layer->draw_properties().render_target = owning_layer.get();
   RenderSurfaceImpl* render_surface = owning_layer->render_surface();
@@ -178,7 +181,7 @@ TEST(RenderSurfaceTest, SanityCheckSurfaceCreatesCorrectRenderPass) {
   RenderPass* pass = pass_sink.RenderPasses()[0];
 
   EXPECT_EQ(RenderPassId(2, 0), pass->id);
-  EXPECT_RECT_EQ(content_rect, pass->output_rect);
+  EXPECT_EQ(content_rect, pass->output_rect);
   EXPECT_EQ(origin, pass->transform_to_root_target);
 }
 

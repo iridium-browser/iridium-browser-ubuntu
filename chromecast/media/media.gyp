@@ -36,6 +36,19 @@
       ],
     },
     {
+      'target_name': 'media_cdm',
+      'type': '<(component)',
+      'dependencies': [
+        'media_base',
+        '../../base/base.gyp:base',
+        '../../media/media.gyp:media',
+      ],
+      'sources': [
+        'cdm/browser_cdm_cast.cc',
+        'cdm/browser_cdm_cast.h',
+      ],
+    },
+    {
       'target_name': 'cma_base',
       'type': '<(component)',
       'dependencies': [
@@ -51,6 +64,8 @@
         'cma/base/balanced_media_task_runner_factory.h',
         'cma/base/buffering_controller.cc',
         'cma/base/buffering_controller.h',
+        'cma/base/buffering_defs.cc',
+        'cma/base/buffering_defs.h',
         'cma/base/buffering_frame_provider.cc',
         'cma/base/buffering_frame_provider.h',
         'cma/base/buffering_state.cc',
@@ -93,6 +108,10 @@
         'cma/backend/media_pipeline_device_params.h',
         'cma/backend/video_pipeline_device.cc',
         'cma/backend/video_pipeline_device.h',
+        'cma/backend/video_plane.cc',
+        'cma/backend/video_plane.h',
+        'cma/backend/video_plane_fake.cc',
+        'cma/backend/video_plane_fake.h',
       ],
       'conditions': [
         ['chromecast_branding=="Chrome"', {
@@ -102,6 +121,7 @@
         }, {
           'sources': [
             'cma/backend/media_pipeline_device_fake_factory.cc',
+            'cma/backend/video_plane_fake_factory.cc',
           ],
         }],
       ],
@@ -145,6 +165,54 @@
       ],
     },
     {
+      'target_name': 'cma_pipeline',
+      'type': '<(component)',
+      'dependencies': [
+        'cma_backend',
+        'cma_base',
+        'media_base',
+        'media_cdm',
+        '../../base/base.gyp:base',
+        '../../crypto/crypto.gyp:crypto',
+        '../../media/media.gyp:media',
+      ],
+      'conditions': [
+        ['chromecast_branding=="Chrome"', {
+          'dependencies': [
+            '../internal/cast_system.gyp:openssl',
+          ],
+        }, {
+          'dependencies': [
+            '../../third_party/boringssl/boringssl.gyp:boringssl',
+          ],
+        }],
+      ],
+      'sources': [
+        'cma/pipeline/audio_pipeline.cc',
+        'cma/pipeline/audio_pipeline.h',
+        'cma/pipeline/audio_pipeline_impl.cc',
+        'cma/pipeline/audio_pipeline_impl.h',
+        'cma/pipeline/av_pipeline_client.cc',
+        'cma/pipeline/av_pipeline_client.h',
+        'cma/pipeline/av_pipeline_impl.cc',
+        'cma/pipeline/av_pipeline_impl.h',
+        'cma/pipeline/decrypt_util.cc',
+        'cma/pipeline/decrypt_util.h',
+        'cma/pipeline/load_type.h',
+        'cma/pipeline/media_pipeline.h',
+        'cma/pipeline/media_pipeline_client.cc',
+        'cma/pipeline/media_pipeline_client.h',
+        'cma/pipeline/media_pipeline_impl.cc',
+        'cma/pipeline/media_pipeline_impl.h',
+        'cma/pipeline/video_pipeline.cc',
+        'cma/pipeline/video_pipeline.h',
+        'cma/pipeline/video_pipeline_client.cc',
+        'cma/pipeline/video_pipeline_client.h',
+        'cma/pipeline/video_pipeline_impl.cc',
+        'cma/pipeline/video_pipeline_impl.h',
+      ],
+    },
+    {
       'target_name': 'cma_filters',
       'type': '<(component)',
       'dependencies': [
@@ -153,6 +221,8 @@
         'cma_base',
       ],
       'sources': [
+        'cma/filters/cma_renderer.cc',
+        'cma/filters/cma_renderer.h',
         'cma/filters/demuxer_stream_adapter.cc',
         'cma/filters/demuxer_stream_adapter.h',
       ],
@@ -166,6 +236,8 @@
         'cma_filters',
         'cma_ipc',
         'cma_ipc_streamer',
+        'cma_pipeline',
+        'media_cdm',
       ],
     },
     {
@@ -191,6 +263,7 @@
         'cma/ipc/media_message_fifo_unittest.cc',
         'cma/ipc/media_message_unittest.cc',
         'cma/ipc_streamer/av_streamer_unittest.cc',
+        'cma/pipeline/audio_video_pipeline_impl_unittest.cc',
         'cma/test/frame_generator_for_test.cc',
         'cma/test/frame_generator_for_test.h',
         'cma/test/frame_segmenter_for_test.cc',

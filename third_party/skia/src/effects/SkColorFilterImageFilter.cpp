@@ -84,13 +84,6 @@ SkColorFilterImageFilter::SkColorFilterImageFilter(SkColorFilter* cf,
     : INHERITED(1, &input, cropRect, uniqueID), fColorFilter(SkRef(cf)) {
 }
 
-#ifdef SK_SUPPORT_LEGACY_DEEPFLATTENING
-SkColorFilterImageFilter::SkColorFilterImageFilter(SkReadBuffer& buffer)
-  : INHERITED(1, buffer) {
-    fColorFilter = buffer.readColorFilter();
-}
-#endif
-
 SkFlattenable* SkColorFilterImageFilter::CreateProc(SkReadBuffer& buffer) {
     SK_IMAGEFILTER_UNFLATTEN_COMMON(common, 1);
     SkAutoTUnref<SkColorFilter> cf(buffer.readColorFilter());
@@ -148,3 +141,20 @@ bool SkColorFilterImageFilter::asColorFilter(SkColorFilter** filter) const {
     }
     return false;
 }
+
+#ifndef SK_IGNORE_TO_STRING
+void SkColorFilterImageFilter::toString(SkString* str) const {
+    str->appendf("SkColorFilterImageFilter: (");
+
+    str->appendf("input: (");
+
+    if (this->getInput(0)) {
+        this->getInput(0)->toString(str);
+    }
+
+    str->appendf(") color filter: ");
+    fColorFilter->toString(str);
+
+    str->append(")");
+}
+#endif

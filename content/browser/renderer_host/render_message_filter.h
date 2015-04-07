@@ -212,8 +212,6 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
                      const Referrer& referrer,
                      const base::string16& suggested_name);
   void OnSaveImageFromDataURL(int render_view_id, const std::string& url_str);
-  void OnCheckNotificationPermission(const GURL& source_origin,
-                                     int* permission_level);
 
   void OnGetAudioHardwareConfig(media::AudioParameters* input_params,
                                 media::AudioParameters* output_params);
@@ -245,11 +243,6 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
       uint32 size,
       base::SharedMemoryHandle* handle);
 
-  // Browser side transport DIB allocation
-  void OnAllocTransportDIB(uint32 size,
-                           bool cache_in_browser,
-                           TransportDIB::Handle* result);
-  void OnFreeTransportDIB(TransportDIB::Id dib_id);
   void OnCacheableMetadataAvailable(const GURL& url,
                                     double expected_response_time,
                                     const std::vector<char>& data);

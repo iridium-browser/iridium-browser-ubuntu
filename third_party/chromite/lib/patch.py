@@ -4,6 +4,8 @@
 
 """Module that handles the processing of patches to the source tree."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import calendar
@@ -245,7 +247,7 @@ class DependencyError(PatchException):
 
   def ShortExplanation(self):
     link = self.error.patch.PatchLink()
-    return ('depends on %s, which %s' % (link, self.error.ShortExplanation()))
+    return 'depends on %s, which %s' % (link, self.error.ShortExplanation())
 
 
 class BrokenCQDepends(PatchException):
@@ -472,7 +474,7 @@ def ParsePatchDep(text, no_change_id=False, no_sha1=False,
 
 def GetPaladinDeps(commit_message):
   """Get the paladin dependencies for the given |commit_message|."""
-  PALADIN_DEPENDENCY_RE = re.compile(r'^(CQ.?DEPEND.)(.*)$',
+  PALADIN_DEPENDENCY_RE = re.compile(r'^([ \t]*CQ.?DEPEND.)(.*)$',
                                      re.MULTILINE | re.IGNORECASE)
   PATCH_RE = re.compile('[^, ]+')
   EXPECTED_PREFIX = 'CQ-DEPEND='
@@ -657,7 +659,7 @@ class GitRepoPatch(PatchQuery):
     """
     super(GitRepoPatch, self).__init__(remote, project=project,
                                        tracking_branch=tracking_branch,
-                                       change_id = change_id,
+                                       change_id=change_id,
                                        sha1=sha1, gerrit_number=None)
     self.project_url = project_url
     self.commit_message = None
@@ -920,9 +922,10 @@ class GitRepoPatch(PatchQuery):
     return []
 
   def _EnsureId(self, commit_message):
-    """Ensure we have a usable Change-Id.  This will parse the Change-Id out
-    of the given commit message- if it cannot find one, it logs a warning
-    and creates a fake ID.
+    """Ensure we have a usable Change-Id.
+
+    This will parse the Change-Id out of the given commit message;
+    if it cannot find one, it logs a warning and creates a fake ID.
 
     By its nature, that fake ID is useless- it's created to simplify
     API usage for patch consumers. If CQ were to see and try operating
@@ -1089,6 +1092,26 @@ class GitRepoPatch(PatchQuery):
     if self._subject_line:
       s += ' "%s"' % (self._subject_line,)
     return s
+
+  def GetLocalSHA1(self, git_repo, revision):
+    """Get the local SHA1 for this patch in the given |manifest|.
+
+    Args:
+      git_repo: The path to the repo.
+      revision: The tracking branch.
+
+    Returns:
+      The local SHA1 for this patch, if it is present in the given |manifest|.
+      If this patch is not present, returns None.
+    """
+    match = '\n'.join(x for x in self.commit_message.split('\n') if x)
+    cmd = ['log', '-F', '--all-match', '--grep', match,
+           '--format=%H', '%s..HEAD' % revision]
+    output = git.RunGit(git_repo, cmd).output.split()
+    if len(output) == 1:
+      return output[0]
+    elif len(output) > 1:
+      raise BrokenChangeID(self, 'Duplicate change ID')
 
 
 class LocalPatch(GitRepoPatch):
@@ -1464,6 +1487,14 @@ class GerritPatch(GerritFetchOnlyPatch):
     """Returns whether the patch has already been merged in Gerrit."""
     return self.status == 'MERGED'
 
+  def IsBeingMerged(self):
+    """Whether the patch is merged or in the progress of being merged."""
+    return self.status in ('SUBMITTED', 'MERGED')
+
+  def IsDraft(self):
+    """Return true if the latest patchset is a draft."""
+    return self.patch_dict['currentPatchSet']['draft']
+
   def HasApproval(self, field, value):
     """Return whether the current patchset has the specified approval.
 
@@ -1471,8 +1502,8 @@ class GerritPatch(GerritFetchOnlyPatch):
       field: Which field to check.
         'VRIF': Whether patch was verified.
         'CRVW': Whether patch was approved.
-        'COMR': Whether patch was marked ready.
-        'TBVF': Whether patch was verified by trybot.
+        'COMR': Whether patch was marked commit ready.
+        'TRY':  Whether patch was marked ready for trybot.
       value: The expected value of the specified field (as string, or as list
              of accepted strings).
     """
@@ -1483,6 +1514,33 @@ class GerritPatch(GerritFetchOnlyPatch):
       return bool(set(value) & set(type_approvals))
     else:
       return value in type_approvals
+
+  def HasApprovals(self, flags):
+    """Return whether the current patchset has the specified approval.
+
+    Args:
+      flags: A dictionary of flag -> value mappings in
+        GerritPatch.HasApproval format.
+        ex: { 'CRVW': '2', 'VRIF': '1', 'COMR': ('1', '2') }
+
+    returns boolean telling if all flag requirements are met.
+    """
+    return all(self.HasApproval(field, value)
+               for field, value in flags.iteritems())
+
+  def WasVetoed(self):
+    """Return whether this CL was vetoed with VRIF=-1 or CRVW=-2."""
+    return self.HasApproval('VRIF', '-1') or self.HasApproval('CRVW', '-2')
+
+  def IsMergeable(self):
+    """Return true if all Gerrit approvals required for submission are set."""
+    return (self.status == 'NEW' and not self.WasVetoed() and
+            not self.IsDraft() and
+            self.HasApprovals({'CRVW': '2', 'VRIF': '1', 'COMR': ('1', '2')}))
+
+  def HasReadyFlag(self):
+    """Return true if the trybot-ready or commit-ready flag is set."""
+    return self.HasApproval('COMR', ('1', '2')) or self.HasApproval('TRY', '1')
 
   def GetLatestApproval(self, field):
     """Return most recent value of specific field on the current patchset.
@@ -1609,3 +1667,16 @@ def PrepareRemotePatches(patches):
                                          os.path.basename(ref), remote))
 
   return patch_info
+
+
+def GetChangesAsString(changes, prefix='CL:', delimiter=' '):
+  """Gets a human readable string listing |changes| in CL:1234 form.
+
+  Args:
+    changes: A list of GerritPatch objects.
+    prefix: Prefix to use. Defaults to 'CL:'
+    delimiter: Delimiter to use. Defaults to a space.
+  """
+  formatted_changes = ['%s%s' % (prefix, AddPrefix(x, x.gerrit_number))
+                       for x in changes]
+  return delimiter.join(sorted(formatted_changes))

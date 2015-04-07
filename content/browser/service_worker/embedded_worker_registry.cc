@@ -182,13 +182,18 @@ void EmbeddedWorkerRegistry::OnReportConsoleMessage(
 }
 
 void EmbeddedWorkerRegistry::AddChildProcessSender(
-    int process_id, IPC::Sender* sender) {
+    int process_id,
+    IPC::Sender* sender,
+    MessagePortMessageFilter* message_port_message_filter) {
   process_sender_map_[process_id] = sender;
+  process_message_port_message_filter_map_[process_id] =
+      message_port_message_filter;
   DCHECK(!ContainsKey(worker_process_map_, process_id));
 }
 
 void EmbeddedWorkerRegistry::RemoveChildProcessSender(int process_id) {
   process_sender_map_.erase(process_id);
+  process_message_port_message_filter_map_.erase(process_id);
   std::map<int, std::set<int> >::iterator found =
       worker_process_map_.find(process_id);
   if (found != worker_process_map_.end()) {
@@ -220,6 +225,11 @@ bool EmbeddedWorkerRegistry::CanHandle(int embedded_worker_id) const {
   return true;
 }
 
+MessagePortMessageFilter*
+EmbeddedWorkerRegistry::MessagePortMessageFilterForProcess(int process_id) {
+  return process_message_port_message_filter_map_[process_id];
+}
+
 EmbeddedWorkerRegistry::EmbeddedWorkerRegistry(
     const base::WeakPtr<ServiceWorkerContextCore>& context,
     int initial_embedded_worker_id)
@@ -235,6 +245,9 @@ EmbeddedWorkerRegistry::~EmbeddedWorkerRegistry() {
 ServiceWorkerStatusCode EmbeddedWorkerRegistry::SendStartWorker(
     scoped_ptr<EmbeddedWorkerMsg_StartWorker_Params> params,
     int process_id) {
+  if (!context_)
+    return SERVICE_WORKER_ERROR_ABORT;
+
   // The ServiceWorkerDispatcherHost is supposed to be created when the process
   // is created, and keep an entry in process_sender_map_ for its whole
   // lifetime.

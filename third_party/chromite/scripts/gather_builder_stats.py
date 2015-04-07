@@ -18,6 +18,8 @@ import sys
 from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import metadata_lib
 from chromite.cbuildbot import constants
+from chromite.lib import cidb
+from chromite.lib import clactions
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 from chromite.lib import gdata_lib
@@ -28,7 +30,8 @@ from chromite.lib import table
 
 # Useful config targets.
 CQ_MASTER = constants.CQ_MASTER
-PFQ_MASTER = 'x86-generic-chromium-pfq'
+PFQ_MASTER = constants.PFQ_MASTER
+CANARY_MASTER = constants.CANARY_MASTER
 
 # Useful google storage locations.
 PRE_CQ_GROUP_GS_LOCATION = constants.PRE_CQ_GROUP_GS_LOCATION
@@ -37,6 +40,7 @@ PRE_CQ_GROUP_GS_LOCATION = constants.PRE_CQ_GROUP_GS_LOCATION
 CQ = constants.CQ
 PRE_CQ = constants.PRE_CQ
 PFQ = constants.PFQ_TYPE
+CANARY = constants.CANARY_TYPE
 
 # Number of parallel processes used when uploading/downloading GS files.
 MAX_PARALLEL = 40
@@ -53,7 +57,7 @@ NICE_DATETIME_FORMAT = metadata_lib.NICE_DATETIME_FORMAT
 # CQ master and slaves both use the same spreadsheet
 CQ_SS_KEY = '0AsXDKtaHikmcdElQWVFuT21aMlFXVTN5bVhfQ2ptVFE'
 PFQ_SS_KEY = '0AhFPeDq6pmwxdDdrYXk3cnJJV05jN3Zja0s5VjFfNlE'
-
+CANARY_SS_KEY = '0AhFPeDq6pmwxdDBWM0t3YnYyeVFoM3VaRXNianc1VVE'
 
 # These are the preferred base URLs we use to canonicalize bugs/CLs.
 BUGANIZER_BASE_URL = 'b/'
@@ -113,6 +117,27 @@ def _GetSlavesOfMaster(master_target):
   return sorted(slave_config.name for slave_config in slave_configs)
 
 
+def _RemoveBuildsWithNoBuildId(builds, description):
+  """Remove builds without a build_id.
+
+  They happen during some failure modes, but we can't process them, and
+  they don't affect the stats. We do log a warning message if any were
+  filtered.
+
+  Args:
+    builds: List of metadata_lib.BuildData objects.
+    description: A string describing the source of missing build_ids.
+  """
+  result = [b for b in builds if 'build_id' in b.metadata_dict]
+  filtered = len(builds) - len(result)
+
+  if filtered:
+    logging.warn('Found %d %s builds without a build_id.',
+                 filtered, description)
+
+  return result
+
+
 class StatsTable(table.Table):
   """Stats table for any specific target on a waterfall."""
 
@@ -161,16 +186,16 @@ class SpreadsheetMasterTable(StatsTable):
   ID_COL = COL_BUILD_NUMBER
 
   COLUMNS = (
-     COL_BUILD_NUMBER,
-     COL_BUILD_LINK,
-     COL_STATUS,
-     COL_START_DATETIME,
-     COL_RUNTIME_MINUTES,
-     COL_WEEKDAY,
-     COL_CHROMEOS_VERSION,
-     COL_CHROME_VERSION,
-     COL_FAILED_STAGES,
-     COL_FAILURE_MESSAGE,
+      COL_BUILD_NUMBER,
+      COL_BUILD_LINK,
+      COL_STATUS,
+      COL_START_DATETIME,
+      COL_RUNTIME_MINUTES,
+      COL_WEEKDAY,
+      COL_CHROMEOS_VERSION,
+      COL_CHROME_VERSION,
+      COL_FAILED_STAGES,
+      COL_FAILURE_MESSAGE,
   )
 
   def __init__(self, target, waterfall, columns=None):
@@ -226,7 +251,7 @@ class SpreadsheetMasterTable(StatsTable):
     """Fetch a row dictionary from |build_data|
 
     Returns:
-      A dictionary of the form {column_name : value}
+      A dictionary of the form {column_name: value}
     """
     build_number = build_data.build_number
     build_link = self.GetBuildSSLink(build_number)
@@ -289,7 +314,7 @@ class SpreadsheetMasterTable(StatsTable):
 
 
 class PFQMasterTable(SpreadsheetMasterTable):
-  """Stats table for the CQ Master."""
+  """Stats table for the PFQ Master."""
   SS_KEY = PFQ_SS_KEY
 
   WATERFALL = 'chromeos'
@@ -310,6 +335,31 @@ class PFQMasterTable(SpreadsheetMasterTable):
     super(PFQMasterTable, self).__init__(PFQMasterTable.TARGET,
                                          PFQMasterTable.WATERFALL,
                                          list(PFQMasterTable.COLUMNS))
+
+
+class CanaryMasterTable(SpreadsheetMasterTable):
+  """Stats table for the Canary Master."""
+  SS_KEY = PFQ_SS_KEY
+
+  WATERFALL = 'chromeos'
+  # Must match up with name in waterfall.
+  TARGET = 'Canary master'
+
+  WORKSHEET_NAME = 'CanaryMasterData'
+
+  # Bump this number whenever this class adds new data columns, or changes
+  # the values of existing data columns.
+  SHEETS_VERSION = SpreadsheetMasterTable.SHEETS_VERSION
+
+  # These columns are in addition to those inherited from
+  # SpreadsheetMasterTable
+  COLUMNS = ()
+
+  def __init__(self):
+    super(CanaryMasterTable, self).__init__(CanaryMasterTable.TARGET,
+                                            CanaryMasterTable.WATERFALL,
+                                            list(CanaryMasterTable.COLUMNS))
+
 
 
 class CQMasterTable(SpreadsheetMasterTable):
@@ -344,7 +394,7 @@ class CQMasterTable(SpreadsheetMasterTable):
     """Fetch a row dictionary from |build_data|
 
     Returns:
-      A dictionary of the form {column_name : value}
+      A dictionary of the form {column_name: value}
     """
     row = super(CQMasterTable, self)._GetBuildRow(build_data)
     row[self.COL_CL_COUNT] = str(build_data.count_changes)
@@ -363,10 +413,11 @@ class CQMasterTable(SpreadsheetMasterTable):
 class SSUploader(object):
   """Uploads data from table object to Google spreadsheet."""
 
-  __slots__ = ('_creds',          # gdata_lib.Creds object
-               '_scomm',          # gdata_lib.SpreadsheetComm object
-               'ss_key',          # Spreadsheet key string
-               )
+  __slots__ = (
+      '_creds',          # gdata_lib.Creds object
+      '_scomm',          # gdata_lib.SpreadsheetComm object
+      'ss_key',          # Spreadsheet key string
+  )
 
   SOURCE = 'Gathered from builder metadata'
   HYPERLINK_RE = re.compile(r'=HYPERLINK\("[^"]+", "([^"]+)"\)')
@@ -570,31 +621,35 @@ class StatsManager(object):
   # This is needed if you are writing data to the Google Sheets spreadsheet.
   GET_SHEETS_VERSION = True
 
-  def __init__(self, config_target, ss_key=None,
+  def __init__(self, config_target, db=None, ss_key=None,
                no_sheets_version_filter=False):
     self.builds = []
     self.gs_ctx = gs.GSContext()
     self.config_target = config_target
+    self.db = db
     self.ss_key = ss_key
     self.no_sheets_version_filter = no_sheets_version_filter
     self.summary = {}
+    self.actions = None
 
 
-  #pylint: disable-msg=W0613
-  def Gather(self, start_date, sort_by_build_number=True,
+  # pylint: disable=W0613
+  def Gather(self, start_date, end_date, sort_by_build_number=True,
              starting_build_number=0, creds=None):
     """Fetches build data into self.builds.
 
     Args:
       start_date: A datetime.date instance for the earliest build to
                   examine.
+      end_date: A datetime.date instance for the latest build to
+                examine.
       sort_by_build_number: Optional boolean. If True, builds will be
                             sorted by build number.
       starting_build_number: The lowest build number to include in
                              self.builds.
       creds: Login credentials as returned by _PrepareCreds. (optional)
     """
-    self.builds = self._FetchBuildData(start_date, self.config_target,
+    self.builds = self._FetchBuildData(start_date, end_date, self.config_target,
                                        self.gs_ctx)
 
     if sort_by_build_number:
@@ -605,25 +660,8 @@ class StatsManager(object):
     if starting_build_number:
       cros_build_lib.Info('Filtering to include builds after %s (inclusive).',
                           starting_build_number)
-      self.builds = filter(lambda b: b.build_number >= starting_build_number,
-                           self.builds)
-
-  def CollectActions(self):
-    """Collects the CL actions from the set of gathered builds.
-
-    Returns a list of CLActionWithBuildTuple for all the actions in the
-    gathered builds.
-    """
-    actions = []
-    for b in self.builds:
-      if not 'cl_actions' in b.metadata_dict:
-        logging.warn('No cl_actions for metadata at %s.', b.metadata_url)
-        continue
-      for a in b.metadata_dict['cl_actions']:
-        actions.append(metadata_lib.CLActionWithBuildTuple(*a,
-            bot_type=self.BOT_TYPE, build=b))
-
-    return actions
+      self.builds = [b for b in self.builds
+                     if b.build_number >= starting_build_number]
 
   def CollateActions(self, actions):
     """Collates a list of actions into per-patch and per-cl actions.
@@ -635,10 +673,10 @@ class StatsManager(object):
     per_patch_actions = {}
     per_cl_actions = {}
     for a in actions:
-      change_dict = a.change.copy()
-      change_with_patch = metadata_lib.GerritPatchTuple(**change_dict)
-      change_dict.pop('patch_number')
-      change_no_patch = metadata_lib.GerritChangeTuple(**change_dict)
+      change_with_patch = a.patch
+      change_no_patch = metadata_lib.GerritChangeTuple(
+          a.change_number, change_with_patch.internal
+      )
 
       per_patch_actions.setdefault(change_with_patch, []).append(a)
       per_cl_actions.setdefault(change_no_patch, []).append(a)
@@ -650,21 +688,24 @@ class StatsManager(object):
     return (per_patch_actions, per_cl_actions)
 
   @classmethod
-  def _FetchBuildData(cls, start_date, config_target, gs_ctx):
+  def _FetchBuildData(cls, start_date, end_date, config_target, gs_ctx):
     """Fetches BuildData for builds of |config_target| since |start_date|.
 
     Args:
       start_date: A datetime.date instance.
+      end_date: A datetime.date instance for the latest build to
+                examine.
       config_target: String config name to fetch metadata for.
       gs_ctx: A gs.GSContext instance.
 
     Returns:
       A list of of metadata_lib.BuildData objects that were fetched.
     """
-    cros_build_lib.Info('Gathering data for %s since %s', config_target,
-                        start_date)
+    cros_build_lib.Info('Gathering data for %s from %s until %s',
+                        config_target, start_date, end_date)
     urls = metadata_lib.GetMetadataURLsSince(config_target,
-                                                   start_date)
+                                             start_date,
+                                             end_date)
     cros_build_lib.Info('Found %d metadata.json URLs to process.\n'
                         '  From: %s\n  To  : %s', len(urls), urls[0], urls[-1])
 
@@ -689,6 +730,16 @@ class StatsManager(object):
       total_passed = len([b for b in self.builds if b.Passed()])
       cros_build_lib.Info('%d of %d runs passed.', total_passed,
                           len(self.builds))
+
+      # TODO(yjhong): Remove this once there is sufficent data to
+      # compare Board-Aware Submission with the baseline. This count
+      # may not be entirely accurate because the to-be-submitted
+      # changes may fail to submit due to other reasons (e.g., patch
+      # modified during the CQ run).
+      count = sum(x.get('bs_submission_diff_count', 0) for x in self.builds)
+      cros_build_lib.Info(
+          'BAS submitted %d more changes than the baseline in the %s failed '
+          'builds.', count, len(self.builds) - total_passed)
     else:
       cros_build_lib.Info('No runs included.')
     return {}
@@ -789,7 +840,7 @@ class CQSlaveStats(StatsManager):
   GET_SHEETS_VERSION = True
 
   def __init__(self, slave_target, **kwargs):
-    super(CQSlaveStats, self).__init__(slave_target, kwargs)
+    super(CQSlaveStats, self).__init__(slave_target, **kwargs)
 
   # TODO(mtennant): This is totally untested, but is a refactoring of the
   # graphite code that was in place before for CQ slaves.
@@ -801,8 +852,8 @@ class CQSlaveStats(StatsManager):
 
     _SendToCarbon(builds, (
         _GetGraphName,
-        lambda b : b.runtime_seconds,
-        lambda b : b.epoch_time_seconds,
+        lambda b: b.runtime_seconds,
+        lambda b: b.epoch_time_seconds,
     ))
 
 
@@ -819,16 +870,16 @@ class CQMasterStats(StatsManager):
   def _SendToCarbonV0(self, builds):
     # Send runtime data.
     _SendToCarbon(builds, (
-        lambda b : 'buildbot.cq.run_time_seconds',
-        lambda b : b.runtime_seconds,
-        lambda b : b.epoch_time_seconds,
+        lambda b: 'buildbot.cq.run_time_seconds',
+        lambda b: b.runtime_seconds,
+        lambda b: b.epoch_time_seconds,
     ))
 
     # Send CLs per run data.
     _SendToCarbon(builds, (
-        lambda b : 'buildbot.cq.cls_per_run',
-        lambda b : b.count_changes,
-        lambda b : b.epoch_time_seconds,
+        lambda b: 'buildbot.cq.cls_per_run',
+        lambda b: b.count_changes,
+        lambda b: b.epoch_time_seconds,
     ))
 
   # Organized by by increasing graphite version numbers, starting at 0.
@@ -846,6 +897,17 @@ class PFQMasterStats(StatsManager):
 
   def __init__(self, **kwargs):
     super(PFQMasterStats, self).__init__(PFQ_MASTER, **kwargs)
+
+
+class CanaryMasterStats(StatsManager):
+  """Manager stats gathering for the Canary Master."""
+  TABLE_CLASS = CanaryMasterTable
+  UPLOAD_ROW_PER_BUILD = True
+  BOT_TYPE = CANARY
+  GET_SHEETS_VERSION = True
+
+  def __init__(self, **kwargs):
+    super(CanaryMasterStats, self).__init__(CANARY_MASTER, **kwargs)
 
 
 # TODO(mtennant): Add Sheets support for PreCQ by creating a PreCQTable
@@ -866,7 +928,7 @@ class CLStats(StatsManager):
   """Manager for stats about CL actions taken by the Commit Queue."""
   PATCH_HANDLING_TIME_SUMMARY_KEY = 'patch_handling_time'
   SUMMARY_SPREADSHEET_COLUMNS = {
-      PATCH_HANDLING_TIME_SUMMARY_KEY : ('PatchHistogram', 1)}
+      PATCH_HANDLING_TIME_SUMMARY_KEY: ('PatchHistogram', 1)}
   COL_FAILURE_CATEGORY = 'failure category'
   COL_FAILURE_BLAME = 'bug or bad CL'
   REASON_BAD_CL = 'Bad CL'
@@ -882,7 +944,9 @@ class CLStats(StatsManager):
     self.reasons = {}
     self.blames = {}
     self.summary = {}
-    self.pre_cq_stats = PreCQStats()
+    self.builds_by_number = {}
+    self.build_numbers_by_build_id = {}
+    self.pre_cq_stats = PreCQStats(db=self.db)
 
   def GatherFailureReasons(self, creds):
     """Gather the reasons why our builds failed and the blamed bugs or CLs.
@@ -925,12 +989,12 @@ class CLStats(StatsManager):
     # followed by optional slash and optional comma.
     general_regex = r'^.*(%s).*?([0-9]+)/?,?$'
 
-    crbug = general_regex % 'crbug.com|code.google.com'
-    internal_review = (general_regex %
-        'chrome-internal-review.googlesource.com|crosreview.com/i')
-    external_review = (general_regex %
-        'crosreview.com|chromium-review.googlesource.com')
-    guts = (general_regex % 't/|gutsv\d.corp.google.com/#ticket/')
+    crbug = general_regex % r'crbug.com|code.google.com'
+    internal_review = general_regex % (
+        r'chrome-internal-review.googlesource.com|crosreview.com/i')
+    external_review = general_regex % (
+        r'crosreview.com|chromium-review.googlesource.com')
+    guts = general_regex % r't/|gutsv\d.corp.google.com/#ticket/'
 
     # Buganizer regex is different, as buganizer urls do not end with the bug
     # number.
@@ -959,13 +1023,15 @@ class CLStats(StatsManager):
 
     return urls
 
-  def Gather(self, start_date, sort_by_build_number=True,
+  def Gather(self, start_date, end_date, sort_by_build_number=True,
              starting_build_number=0, creds=None):
     """Fetches build data and failure reasons.
 
     Args:
       start_date: A datetime.date instance for the earliest build to
                   examine.
+      end_date: A datetime.date instance for the latest build to
+                examine.
       sort_by_build_number: Optional boolean. If True, builds will be
                             sorted by build number.
       starting_build_number: The lowest build number from the CQ to include in
@@ -975,15 +1041,32 @@ class CLStats(StatsManager):
     if not creds:
       creds = _PrepareCreds(self.email)
     super(CLStats, self).Gather(start_date,
+                                end_date,
                                 sort_by_build_number=sort_by_build_number,
                                 starting_build_number=starting_build_number)
+    self.actions = self.db.GetActionHistory(start_date, end_date)
     self.GatherFailureReasons(creds)
 
     # Gather the pre-cq stats as well. The build number won't apply here since
     # the pre-cq has different build numbers. We intentionally represent the
     # Pre-CQ stats in a different object to help keep things simple.
     self.pre_cq_stats.Gather(start_date,
+                             end_date,
                              sort_by_build_number=sort_by_build_number)
+
+    self.builds_by_number = {(CQ, b.build_number): b for b in self.builds}
+    self.builds_by_number.update({(PRE_CQ, b.build_number): b
+                                  for b in self.pre_cq_stats.builds})
+
+    # Remove PreCQ builds without a build_id.
+    self.pre_cq_stats.builds = _RemoveBuildsWithNoBuildId(
+        self.pre_cq_stats.builds, 'PreCQ')
+    self.builds = _RemoveBuildsWithNoBuildId(self.builds, 'CQ')
+
+    self.build_numbers_by_build_id.update(
+        {b['build_id'] : b.build_number for b in self.builds})
+    self.build_numbers_by_build_id.update(
+        {b['build_id'] : b.build_number for b in self.pre_cq_stats.builds})
 
   def GetSubmittedPatchNumber(self, actions):
     """Get the patch number of the final patchset submitted.
@@ -996,7 +1079,7 @@ class CLStats(StatsManager):
     submit = [a for a in actions if a.action == constants.CL_ACTION_SUBMITTED]
     assert len(submit) == 1, \
         'Expected change to be submitted exactly once, got %r' % submit
-    return submit[-1].change['patch_number']
+    return submit[-1].patch_number
 
   def ClassifyRejections(self, submitted_changes):
     """Categorize rejected CLs, deciding whether the rejection was incorrect.
@@ -1020,14 +1103,16 @@ class CLStats(StatsManager):
     for change, actions in submitted_changes.iteritems():
       submitted_patch_number = self.GetSubmittedPatchNumber(actions)
       for a in actions:
-        # If the patch wasn't included in the run, this means that it "failed
-        # to apply" rather than "failed to validate". Ignore it.
-        patch = metadata_lib.GerritPatchTuple(**a.change)
-        if (a.action == constants.CL_ACTION_KICKED_OUT and
-            patch in a.build.patches):
-          # Check whether the patch was updated after submission.
-          falsely_rejected = a.change['patch_number'] == submitted_patch_number
-          yield change, actions, a, falsely_rejected
+        if a.action == constants.CL_ACTION_KICKED_OUT:
+          # If the patch wasn't picked up in the run, this means that it "failed
+          # to apply" rather than "failed to validate". Ignore it.
+          picked_up = [x for x in actions if x.build_id == a.build_id and
+                       x.patch == a.patch and
+                       x.action == constants.CL_ACTION_PICKED_UP]
+          falsely_rejected = a.patch_number == submitted_patch_number
+          if picked_up:
+            # Check whether the patch was updated after submission.
+            yield change, actions, a, falsely_rejected
 
   def _PrintCounts(self, reasons, fmt):
     """Print a sorted list of reasons in descending order of frequency.
@@ -1042,6 +1127,14 @@ class CLStats(StatsManager):
       logging.info(fmt, dict(cnt=cnt, reason=reason))
     if not d:
       logging.info('  None')
+
+  def BotType(self, action):
+    """Return whether |action| applies to the CQ or PRE_CQ."""
+    build_config = action.build_config
+    if build_config.endswith('-%s' % cbuildbot_config.CONFIG_TYPE_PALADIN):
+      return CQ
+    else:
+      return PRE_CQ
 
   def CalculateStageFailures(self, reject_actions, submitted_changes,
                              good_patch_rejections):
@@ -1066,30 +1159,39 @@ class CLStats(StatsManager):
     # These are used to ensure that we don't treat real failures as being flaky.
     bad_cl_builds = set()
     for a in reject_actions:
-      if a.bot_type == CQ:
-        reason = self.reasons.get(a.build.build_number)
-        if reason == self.REASON_BAD_CL:
-          bad_cl_builds.add((a.build.bot_id, a.build.build_number))
+      if self.BotType(a) == CQ:
+        build_number = self.build_numbers_by_build_id.get(a.build_id)
+        if build_number:
+          reason = self.reasons.get(build_number)
+          if reason == self.REASON_BAD_CL:
+            bad_cl_builds.add(a.build_id)
 
     # Keep track of the stages that correctly detected a bad CL. We assume
     # here that all of the stages that are broken were broken by the bad CL.
     correctly_rejected_by_stage = {}
     for _, _, a, falsely_rejected in self.ClassifyRejections(submitted_changes):
       if not falsely_rejected:
-        good = correctly_rejected_by_stage.setdefault(a.bot_type, {})
-        for stage_name in a.build.GetFailedStages():
-          good[stage_name] = good.get(stage_name, 0) + 1
+        good = correctly_rejected_by_stage.setdefault(self.BotType(a), {})
+        build_number = self.build_numbers_by_build_id.get(a.build_id)
+        if build_number:
+          build = self.builds_by_number.get((self.BotType(a), build_number))
+          if build:
+            for stage_name in build.GetFailedStages():
+              good[stage_name] = good.get(stage_name, 0) + 1
 
     # Keep track of the stages that failed flakily.
     incorrectly_rejected_by_stage = {}
     for rejections in good_patch_rejections.values():
       for a in rejections:
         # A stage only failed flakily if it wasn't broken by another CL.
-        build_tuple = (a.build.bot_id, a.build.build_number)
-        if build_tuple not in bad_cl_builds:
-          bad = incorrectly_rejected_by_stage.setdefault(a.bot_type, {})
-          for stage_name in a.build.GetFailedStages():
-            bad[stage_name] = bad.get(stage_name, 0) + 1
+        if a.build_id not in bad_cl_builds:
+          bad = incorrectly_rejected_by_stage.setdefault(self.BotType(a), {})
+          build_number = self.build_numbers_by_build_id.get(a.build_id)
+          if build_number:
+            build = self.builds_by_number.get((self.BotType(a), build_number))
+            if build:
+              for stage_name in build.GetFailedStages():
+                bad[stage_name] = bad.get(stage_name, 0) + 1
 
     return correctly_rejected_by_stage, incorrectly_rejected_by_stage
 
@@ -1109,11 +1211,10 @@ class CLStats(StatsManager):
     falsely_rejected_changes = {}
     bad_cl_builds = set()
     for x in self.ClassifyRejections(submitted_changes):
-      change, actions, a, falsely_rejected = x
-      patch = metadata_lib.GerritPatchTuple(**a.change)
+      _, actions, a, falsely_rejected = x
       if falsely_rejected:
-        falsely_rejected_changes[change] = actions
-      elif a.bot_type == PRE_CQ:
+        falsely_rejected_changes[a.patch] = actions
+      elif self.BotType(a) == PRE_CQ:
         # If a developer writes a bad patch and it fails the Pre-CQ, it
         # may cause many other patches from the same developer to be
         # rejected. This is expected and correct behavior. Treat all of
@@ -1127,7 +1228,7 @@ class CLStats(StatsManager):
         # NOTE: We intentionally only apply this logic to the Pre-CQ here.
         # The CQ is different because it may have many innocent patches in
         # a single run which should not be treated as bad.
-        bad_cl_builds.add((a.build.bot_id, a.build.build_number))
+        bad_cl_builds.add(a.build_id)
 
     # Make a list of candidate patches that got incorrectly rejected. We track
     # them in a dict, setting good_patch_rejections[patch] = rejections for
@@ -1136,9 +1237,8 @@ class CLStats(StatsManager):
     for v in falsely_rejected_changes.itervalues():
       for a in v:
         if (a.action == constants.CL_ACTION_KICKED_OUT and
-            (a.build.bot_id, a.build.build_number) not in bad_cl_builds):
-          patch = metadata_lib.GerritPatchTuple(**a.change)
-          good_patch_rejections[patch].append(a)
+            a.build_id not in bad_cl_builds):
+          good_patch_rejections[a.patch].append(a)
 
     return good_patch_rejections
 
@@ -1179,9 +1279,6 @@ class CLStats(StatsManager):
     """
     super_summary = super(CLStats, self).Summarize()
 
-    self.actions = (self.CollectActions() +
-                    self.pre_cq_stats.CollectActions())
-
     (self.per_patch_actions,
      self.per_cl_actions) = self.CollateActions(self.actions)
 
@@ -1204,15 +1301,29 @@ class CLStats(StatsManager):
     unique_cl_blames = {blame for blame in unique_blames if
                         EXTERNAL_CL_BASE_URL in blame}
 
-    submitted_changes = {k : v for k, v, in self.per_cl_actions.iteritems()
-                         if any(a.action==constants.CL_ACTION_SUBMITTED
+    submitted_changes = {k: v for k, v, in self.per_cl_actions.iteritems()
+                         if any(a.action == constants.CL_ACTION_SUBMITTED
                                 for a in v)}
-    submitted_patches = {k : v for k, v, in self.per_patch_actions.iteritems()
-                         if any(a.action==constants.CL_ACTION_SUBMITTED
-                                for a in v)}
+    submitted_patches = {
+        k: v for k, v, in self.per_patch_actions.iteritems()
+        if any(a.action == constants.CL_ACTION_SUBMITTED and
+               a.build_config == constants.CQ_MASTER for a in v)}
 
-    patch_handle_times =  [v[-1].timestamp - v[0].timestamp
-                           for v in submitted_patches.values()]
+    patch_handle_times = [
+        clactions.GetCLHandlingTime(patch, actions) for
+        (patch, actions) in submitted_patches.iteritems()]
+
+    pre_cq_handle_times = [
+        clactions.GetPreCQTime(patch, actions) for
+        (patch, actions) in submitted_patches.iteritems()]
+
+    cq_wait_times = [
+        clactions.GetCQWaitTime(patch, actions) for
+        (patch, actions) in submitted_patches.iteritems()]
+
+    cq_handle_times = [
+        clactions.GetCQRunTime(patch, actions) for
+        (patch, actions) in submitted_patches.iteritems()]
 
     # Count CLs that were rejected, then a subsequent patch was submitted.
     # These are good candidates for bad CLs. We track them in a dict, setting
@@ -1221,15 +1332,15 @@ class CLStats(StatsManager):
     for x in self.ClassifyRejections(submitted_changes):
       change, actions, a, falsely_rejected = x
       if not falsely_rejected:
-        d = submitted_after_new_patch.setdefault(a.bot_type, {})
+        d = submitted_after_new_patch.setdefault(self.BotType(a), {})
         d[change] = actions
 
     # Sort the candidate bad CLs in order of submit time.
     bad_cl_candidates = {}
     for bot_type, patch_actions in submitted_after_new_patch.items():
       bad_cl_candidates[bot_type] = [
-        k for k, _ in sorted(patch_actions.items(),
-                             key=lambda x: x[1][-1].timestamp)]
+          k for k, _ in sorted(patch_actions.items(),
+                               key=lambda x: x[1][-1].timestamp)]
 
     # Calculate how many good patches were falsely rejected and why.
     # good_patch_rejections maps patches to the rejection actions.
@@ -1241,9 +1352,10 @@ class CLStats(StatsManager):
     for k, v in good_patch_rejections.iteritems():
       for a in v:
         if a.action == constants.CL_ACTION_KICKED_OUT:
-          if a.bot_type == CQ:
-            reason = self.reasons[a.build.build_number]
-            blames = self.blames[a.build.build_number]
+          build_number = self.build_numbers_by_build_id.get(a.build_id)
+          if self.BotType(a) == CQ and build_number:
+            reason = self.reasons.get(build_number, 'None')
+            blames = self.blames.get(build_number, ['None'])
             patch_reason_counts[reason] = patch_reason_counts.get(reason, 0) + 1
             for blame in blames:
               patch_blame_counts[blame] = patch_blame_counts.get(blame, 0) + 1
@@ -1255,7 +1367,7 @@ class CLStats(StatsManager):
     good_patch_rejection_count = collections.defaultdict(int)
     for k, v in good_patch_rejections.iteritems():
       for a in v:
-        good_patch_rejection_count[a.bot_type] += 1
+        good_patch_rejection_count[self.BotType(a)] += 1
     false_rejection_rate = self.FalseRejectionRate(good_patch_count,
                                                    good_patch_rejection_count)
 
@@ -1273,28 +1385,25 @@ class CLStats(StatsManager):
         self.CalculateStageFailures(reject_actions, submitted_changes,
                                     good_patch_rejections)
 
-    summary = {'total_cl_actions'      : len(self.actions),
-               'unique_cls'            : len(self.per_cl_actions),
-               'unique_patches'        : len(self.per_patch_actions),
-               'submitted_patches'     : len(submit_actions),
-               'rejections'            : len(reject_actions),
-               'submit_fails'          : len(sbfail_actions),
-               'good_patch_rejections' : sum(rejection_counts),
-               'mean_good_patch_rejections' :
-                   numpy.mean(rejection_counts),
-               'good_patch_rejection_breakdown' :
-                   good_patch_rejection_breakdown,
-               'good_patch_rejection_count' :
-                   dict(good_patch_rejection_count),
-               'false_rejection_rate' :
-                   false_rejection_rate,
-               'median_handling_time' : numpy.median(patch_handle_times),
-               self.PATCH_HANDLING_TIME_SUMMARY_KEY : patch_handle_times,
-               'bad_cl_candidates' : bad_cl_candidates,
-               'correctly_rejected_by_stage' : correctly_rejected_by_stage,
-               'incorrectly_rejected_by_stage' : incorrectly_rejected_by_stage,
-               'unique_blames_change_count' : len(unique_cl_blames),
-               }
+    summary = {
+        'total_cl_actions': len(self.actions),
+        'unique_cls': len(self.per_cl_actions),
+        'unique_patches': len(self.per_patch_actions),
+        'submitted_patches': len(submit_actions),
+        'rejections': len(reject_actions),
+        'submit_fails': len(sbfail_actions),
+        'good_patch_rejections': sum(rejection_counts),
+        'mean_good_patch_rejections': numpy.mean(rejection_counts),
+        'good_patch_rejection_breakdown': good_patch_rejection_breakdown,
+        'good_patch_rejection_count': dict(good_patch_rejection_count),
+        'false_rejection_rate': false_rejection_rate,
+        'median_handling_time': numpy.median(patch_handle_times),
+        self.PATCH_HANDLING_TIME_SUMMARY_KEY: patch_handle_times,
+        'bad_cl_candidates': bad_cl_candidates,
+        'correctly_rejected_by_stage': correctly_rejected_by_stage,
+        'incorrectly_rejected_by_stage': incorrectly_rejected_by_stage,
+        'unique_blames_change_count': len(unique_cl_blames),
+    }
 
     logging.info('CQ committed %s changes', summary['submitted_patches'])
     logging.info('CQ correctly rejected %s unique changes',
@@ -1326,9 +1435,55 @@ class CLStats(StatsManager):
 
     for x, p in summary['good_patch_rejection_breakdown']:
       logging.info('%d good patches were rejected %d times.', p, x)
-    logging.info('     Median good patch')
-    logging.info('         handling time: %.2f hours',
-                 summary['median_handling_time']/3600.0)
+    logging.info('')
+    logging.info('Good patch handling time:')
+    logging.info('  10th percentile: %.2f hours',
+                 numpy.percentile(patch_handle_times, 10) / 3600.0)
+    logging.info('  25th percentile: %.2f hours',
+                 numpy.percentile(patch_handle_times, 25) / 3600.0)
+    logging.info('  50th percentile: %.2f hours',
+                 summary['median_handling_time'] / 3600.0)
+    logging.info('  75th percentile: %.2f hours',
+                 numpy.percentile(patch_handle_times, 75) / 3600.0)
+    logging.info('  90th percentile: %.2f hours',
+                 numpy.percentile(patch_handle_times, 90) / 3600.0)
+    logging.info('')
+    logging.info('Time spent in Pre-CQ:')
+    logging.info('  10th percentile: %.2f hours',
+                 numpy.percentile(pre_cq_handle_times, 10) / 3600.0)
+    logging.info('  25th percentile: %.2f hours',
+                 numpy.percentile(pre_cq_handle_times, 25) / 3600.0)
+    logging.info('  50th percentile: %.2f hours',
+                 numpy.percentile(pre_cq_handle_times, 50) / 3600.0)
+    logging.info('  75th percentile: %.2f hours',
+                 numpy.percentile(pre_cq_handle_times, 75) / 3600.0)
+    logging.info('  90th percentile: %.2f hours',
+                 numpy.percentile(pre_cq_handle_times, 90) / 3600.0)
+    logging.info('')
+    logging.info('Time spent waiting for CQ:')
+    logging.info('  10th percentile: %.2f hours',
+                 numpy.percentile(cq_wait_times, 10) / 3600.0)
+    logging.info('  25th percentile: %.2f hours',
+                 numpy.percentile(cq_wait_times, 25) / 3600.0)
+    logging.info('  50th percentile: %.2f hours',
+                 numpy.percentile(cq_wait_times, 50) / 3600.0)
+    logging.info('  75th percentile: %.2f hours',
+                 numpy.percentile(cq_wait_times, 75) / 3600.0)
+    logging.info('  90th percentile: %.2f hours',
+                 numpy.percentile(cq_wait_times, 90) / 3600.0)
+    logging.info('')
+    logging.info('Time spent in CQ:')
+    logging.info('  10th percentile: %.2f hours',
+                 numpy.percentile(cq_handle_times, 10) / 3600.0)
+    logging.info('  25th percentile: %.2f hours',
+                 numpy.percentile(cq_handle_times, 25) / 3600.0)
+    logging.info('  50th percentile: %.2f hours',
+                 numpy.percentile(cq_handle_times, 50) / 3600.0)
+    logging.info('  75th percentile: %.2f hours',
+                 numpy.percentile(cq_handle_times, 75) / 3600.0)
+    logging.info('  90th percentile: %.2f hours',
+                 numpy.percentile(cq_handle_times, 90) / 3600.0)
+    logging.info('')
 
     for bot_type, patches in summary['bad_cl_candidates'].items():
       logging.info('%d bad patch candidates were rejected by the %s',
@@ -1411,6 +1566,8 @@ def GetParser():
                     help='Gather stats for the CQ master.')
   mode.add_argument('--pfq-master', action='store_true', default=False,
                     help='Gather stats for the PFQ master.')
+  mode.add_argument('--canary-master', action='store_true', default=False,
+                    help='Gather stats for the Canary master.')
   mode.add_argument('--pre-cq', action='store_true', default=False,
                     help='Gather stats for the Pre-CQ.')
   mode.add_argument('--cq-slaves', action='store_true', default=False,
@@ -1432,7 +1589,8 @@ def GetParser():
 
   parser.add_argument('--starting-build', action='store', type=int, default=0,
                       help='Filter to builds after given number (inclusive).')
-
+  parser.add_argument('--end-date', action='store', type='date', default=None,
+                      help='Limit scope to an end date in the past.')
   parser.add_argument('--save', action='store_true', default=False,
                       help='Save results to DB, if applicable.')
   parser.add_argument('--email', action='store', type=str, default=None,
@@ -1455,6 +1613,11 @@ def GetParser():
   mode.add_argument('--override-ss-key', action='store', default=None,
                     dest='ss_key',
                     help='Override spreadsheet key.')
+  parser.add_argument('--cred-dir', action='store', required=True,
+                      metavar='CIDB_CREDENTIALS_DIR',
+                      help='Database credentials directory with certificates '
+                           'and other connection information. Obtain your '
+                           'credentials at go/cros-cidb-admin .')
 
   return parser
 
@@ -1463,21 +1626,27 @@ def main(argv):
   parser = GetParser()
   options = parser.parse_args(argv)
 
-  if not (_CheckOptions(options)):
+  if not _CheckOptions(options):
     sys.exit(1)
+
+  db = cidb.CIDBConnection(options.cred_dir)
+
+  if options.end_date:
+    end_date = options.end_date
+  else:
+    end_date = datetime.datetime.now().date()
 
   # Determine the start date to use, which is required.
   if options.start_date:
     start_date = options.start_date
   else:
     assert options.past_month or options.past_week or options.past_day
-    now = datetime.datetime.now()
     if options.past_month:
-      start_date = (now - datetime.timedelta(days=30)).date()
+      start_date = end_date - datetime.timedelta(days=30)
     elif options.past_week:
-      start_date = (now - datetime.timedelta(days=7)).date()
+      start_date = end_date - datetime.timedelta(days=7)
     else:
-      start_date = (now - datetime.timedelta(days=1)).date()
+      start_date = end_date - datetime.timedelta(days=1)
 
   # Prepare the rounds of stats gathering to do.
   stats_managers = []
@@ -1485,6 +1654,7 @@ def main(argv):
   if options.cq_master:
     stats_managers.append(
         CQMasterStats(
+            db=db,
             ss_key=options.ss_key or CQ_SS_KEY,
             no_sheets_version_filter=options.no_sheets_version_filter))
 
@@ -1493,24 +1663,33 @@ def main(argv):
     stats_managers.append(
         CLStats(
             options.email,
+            db=db,
             ss_key=options.ss_key or CQ_SS_KEY,
             no_sheets_version_filter=options.no_sheets_version_filter))
 
   if options.pfq_master:
     stats_managers.append(
         PFQMasterStats(
+            db=db,
             ss_key=options.ss_key or PFQ_SS_KEY,
+            no_sheets_version_filter=options.no_sheets_version_filter))
+
+  if options.canary_master:
+    stats_managers.append(
+        CanaryMasterStats(
+            db=db,
+            ss_key=options.ss_key or CANARY_SS_KEY,
             no_sheets_version_filter=options.no_sheets_version_filter))
 
   if options.pre_cq:
     # TODO(mtennant): Add spreadsheet and/or graphite support for pre-cq.
-    stats_managers.append(PreCQStats())
+    stats_managers.append(PreCQStats(db=db))
 
   if options.cq_slaves:
     targets = _GetSlavesOfMaster(CQ_MASTER)
     for target in targets:
       # TODO(mtennant): Add spreadsheet and/or graphite support for cq-slaves.
-      stats_managers.append(CQSlaveStats(target))
+      stats_managers.append(CQSlaveStats(target, db=db))
 
   # If options.save is set and any of the instructions include a table class,
   # or specify summary columns for upload, prepare spreadsheet creds object
@@ -1526,7 +1705,8 @@ def main(argv):
 
   # Now run through all the stats gathering that is requested.
   for stats_mgr in stats_managers:
-    stats_mgr.Gather(start_date, starting_build_number=options.starting_build,
+    stats_mgr.Gather(start_date, end_date,
+                     starting_build_number=options.starting_build,
                      creds=creds)
     stats_mgr.Summarize()
 
@@ -1551,12 +1731,13 @@ def main(argv):
 # place, in a very different form, before the migration to
 # gather_builder_stats.  It is simplified here, but entirely untested and
 # not plumbed into gather_builder_stats anywhere.
-def GraphiteTryJobInfoUpToNow(internal, start_date):
+def GraphiteTryJobInfoUpToNow(internal, start_date, end_date):
   """Find the amount of tryjobs that finished on a particular day.
 
   Args:
     internal: If true report for internal, if false report external.
     start_date: datetime.date object for date to start on.
+    end_date: datetime.date object for date to end on.
   """
   carbon_lines = []
 
@@ -1575,11 +1756,10 @@ def GraphiteTryJobInfoUpToNow(internal, start_date):
   cros_build_lib.RunCommand(['git', 'pull'], cwd=repo_path)
 
   # Now get a list of datetime objects, in hourly deltas.
-  now = datetime.datetime.now()
   start = datetime.datetime(start_date.year, start_date.month, start_date.day)
   hour_delta = datetime.timedelta(hours=1)
   end = start + hour_delta
-  while end < now:
+  while end < end_date:
     git_cmd = ['git', 'log', '--since="%s"' % start,
                '--until="%s"' % end, '--name-only', '--pretty=format:']
     result = cros_build_lib.RunCommand(git_cmd, cwd=repo_path)
