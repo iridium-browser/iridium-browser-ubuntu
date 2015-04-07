@@ -33,6 +33,7 @@
 .gdbinit
 .landmines
 .metadata
+.pc
 .project
 .pydevproject
 # Settings directory for eclipse
