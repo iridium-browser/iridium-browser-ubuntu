@@ -1,3 +1,10 @@
+iridium-browser (41.0.2272.118-0iridium41.2+1) precise; urgency=low
+
+  * Updated iridium-browser patch to 41.2
+  * Removed certfix.diff, now part of iridium-browser.diff.
+
+ -- Joachim Bauch <bauch@struktur.de>  Mon, 13 Apr 2015 10:23:52 +0200
+
 iridium-browser (41.0.2272.118-0iridium41.1+1) precise; urgency=low
 
   * Imported Upstream version 41.0.2272.118
