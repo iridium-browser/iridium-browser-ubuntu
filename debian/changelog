@@ -1,3 +1,10 @@
+iridium-browser (41.0.2272.118-0iridium41.2+2) precise; urgency=low
+
+  * Renamed app to "Iridium Browser" in dock (fixes #5).
+  * Use correct "StartupWMClass" (fixes dock integration for #6).
+
+ -- Joachim Bauch <bauch@struktur.de>  Thu, 30 Apr 2015 17:14:18 +0200
+
 iridium-browser (41.0.2272.118-0iridium41.2+1) precise; urgency=low
 
   * Updated iridium-browser patch to 41.2
